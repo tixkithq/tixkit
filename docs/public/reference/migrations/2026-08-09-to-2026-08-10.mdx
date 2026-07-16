@@ -1,0 +1,24 @@
+---
+title: API migration from 2026-08-09 to 2026-08-10
+description: Add privacy-minimized buyer Web Vital submission.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-09
+related:
+  - /reference/api-versions
+  - /reference/performance
+---
+
+API version `2026-08-10` adds `POST /v1/public/rum` for the Tixkit buyer surfaces. Existing integrations do not need to call it.
+
+The strict request contains exactly four fields: schema version `tixkit-rum-v1`, surface `checkout` or `event-page`, metric `LCP`, `INP`, or `CLS`, and a finite bounded numeric value. LCP and INP are measured in seconds; CLS is a unitless score. Identifiers, URLs, referrers, user-agent values, arbitrary labels, cookies, and extra fields are not accepted. A valid sample returns `202` and is observed only in bounded Prometheus histograms.
+
+The endpoint is rate- and body-limited. Browser delivery omits credentials, is non-blocking, and does not retry. Public submissions are untrusted diagnostic input: the contract does not establish representative production data, abuse resistance, privacy approval, or SLO attainment.
+
+This additive contract change requires no database migration. Immutable `2026-08-09` artifacts remain unchanged.

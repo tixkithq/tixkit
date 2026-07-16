@@ -224,6 +224,11 @@ observability:
     enabled: false
     apiErrorRateThreshold: 0.05
     apiP95LatencySeconds: 2
+    rumWindow: 15m
+    rumMinimumSamples: 100
+    rumLcpP75Seconds: 2.5
+    rumInpP75Seconds: 0.2
+    rumClsP75Score: 0.1
     migrationProgressAgeSeconds: 900
     workerPushFreshnessSeconds: 120
     runbookUrl: https://docs.tixkit.com/operations/incidents

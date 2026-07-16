@@ -52,6 +52,21 @@
 {{- if le (float64 .Values.observability.alerts.apiP95LatencySeconds) 0.0 -}}
 {{- fail "observability apiP95LatencySeconds must be positive" -}}
 {{- end -}}
+{{- if not (has .Values.observability.alerts.rumWindow (list "5m" "10m" "15m" "30m" "1h")) -}}
+{{- fail "observability rumWindow must be one of 5m, 10m, 15m, 30m, or 1h" -}}
+{{- end -}}
+{{- if or (lt (int .Values.observability.alerts.rumMinimumSamples) 1) (gt (int .Values.observability.alerts.rumMinimumSamples) 100000) -}}
+{{- fail "observability rumMinimumSamples must be between 1 and 100000" -}}
+{{- end -}}
+{{- if or (le (float64 .Values.observability.alerts.rumLcpP75Seconds) 0.0) (gt (float64 .Values.observability.alerts.rumLcpP75Seconds) 60.0) -}}
+{{- fail "observability rumLcpP75Seconds must be greater than 0 and at most 60" -}}
+{{- end -}}
+{{- if or (le (float64 .Values.observability.alerts.rumInpP75Seconds) 0.0) (gt (float64 .Values.observability.alerts.rumInpP75Seconds) 10.0) -}}
+{{- fail "observability rumInpP75Seconds must be greater than 0 and at most 10" -}}
+{{- end -}}
+{{- if or (le (float64 .Values.observability.alerts.rumClsP75Score) 0.0) (gt (float64 .Values.observability.alerts.rumClsP75Score) 1.0) -}}
+{{- fail "observability rumClsP75Score must be greater than 0 and at most 1" -}}
+{{- end -}}
 {{- if le (int .Values.observability.alerts.migrationProgressAgeSeconds) 0 -}}
 {{- fail "observability migrationProgressAgeSeconds must be positive" -}}
 {{- end -}}

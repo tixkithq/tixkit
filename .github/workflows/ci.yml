@@ -34,6 +34,16 @@ jobs:
       - run: bunx turbo run build
       - run: bun run check:performance-budgets
 
+  trust-evidence:
+    name: Trust Claim & Local Evidence Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - run: bun run validate:trust-program
+      - run: bun run validate:trust-evidence
+
   oss-export:
     name: OSS Export
     runs-on: ubuntu-latest

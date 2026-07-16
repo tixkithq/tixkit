@@ -3,6 +3,7 @@ import {
   createTixkitMetrics,
   createTelemetryResource,
   observeMigrationOperation,
+  observeRumWebVital,
   parseOtlpHeaders,
   redactObject,
   redactString,
@@ -180,5 +181,43 @@ describe('Tixkit Prometheus metrics', () => {
     expect(output).toContain('tixkit_temporal_activity_events_total');
     expect(output).toContain('tixkit_migration_events_total');
     expect(output).toContain('error_code="rollback_refused"');
+  });
+
+  it('records only bounded, identifier-free RUM metric families', async () => {
+    const metrics = createTixkitMetrics('test-rum');
+
+    observeRumWebVital(metrics, { surface: 'checkout', metric: 'LCP', value: 2.5 });
+    observeRumWebVital(metrics, { surface: 'event-page', metric: 'INP', value: 0.2 });
+    observeRumWebVital(metrics, { surface: 'checkout', metric: 'CLS', value: 0.1 });
+
+    const output = await metrics.registry.metrics();
+    expect(output).toContain('tixkit_rum_lcp_seconds_bucket');
+    expect(output).toContain('tixkit_rum_inp_seconds_bucket');
+    expect(output).toContain('tixkit_rum_cls_score_bucket');
+    expect(output).toContain('surface="checkout"');
+    expect(output).toContain('surface="event-page"');
+    const rumLines = output
+      .split('\n')
+      .filter((line) => line.startsWith('tixkit_rum_'))
+      .join('\n');
+    expect(rumLines).not.toMatch(/event_id|tenant|user|session|route|url|referrer|host=/iu);
+
+    expect(() =>
+      observeRumWebVital(metrics, { surface: 'checkout', metric: 'LCP', value: Infinity }),
+    ).toThrow(/bounded public contract/u);
+    expect(() =>
+      observeRumWebVital(metrics, {
+        surface: 'checkout',
+        metric: 'CLS',
+        value: 10.01,
+      }),
+    ).toThrow(/bounded public contract/u);
+    expect(() =>
+      observeRumWebVital(metrics, {
+        surface: 'buyer-123' as never,
+        metric: 'LCP',
+        value: 1,
+      }),
+    ).toThrow(/bounded public contract/u);
   });
 });

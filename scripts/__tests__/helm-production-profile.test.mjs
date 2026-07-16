@@ -131,12 +131,33 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   const alerts = rendered.find((resource) => resource.kind === 'PrometheusRule');
   assert.deepEqual(
     alerts.spec.groups[0].rules.map((rule) => rule.alert),
-    ['TixkitApiHighErrorRate', 'TixkitApiHighP95Latency', 'TixkitMigrationProgressStalled'],
+    [
+      'TixkitApiHighErrorRate',
+      'TixkitApiHighP95Latency',
+      'TixkitRumLcpP75BudgetExceeded',
+      'TixkitRumInpP75BudgetExceeded',
+      'TixkitRumClsP75BudgetExceeded',
+      'TixkitMigrationProgressStalled',
+    ],
   );
   const errorRateExpression = alerts.spec.groups[0].rules[0].expr;
   assert.doesNotMatch(errorRateExpression, /clamp_min/);
   assert.match(errorRateExpression, /and \(sum\(rate\(.+\)\) > 0\)/);
-  const migrationStallExpression = alerts.spec.groups[0].rules[2].expr;
+  const rumRules = alerts.spec.groups[0].rules.slice(2, 5);
+  for (const [rule, metric, threshold] of [
+    [rumRules[0], 'tixkit_rum_lcp_seconds', 2.5],
+    [rumRules[1], 'tixkit_rum_inp_seconds', 0.2],
+    [rumRules[2], 'tixkit_rum_cls_score', 0.1],
+  ]) {
+    assert.match(rule.expr, /histogram_quantile\(0\.75,/u);
+    assert.match(rule.expr, new RegExp(`${metric}_bucket\\{service="tixkit-api"\\}\\[15m\\]`, 'u'));
+    assert.match(rule.expr, new RegExp(`> ${threshold}\\)`, 'u'));
+    assert.match(rule.expr, /and on\(surface\)/u);
+    assert.match(rule.expr, new RegExp(`${metric}_count\\{service="tixkit-api"\\}\\[15m\\]`, 'u'));
+    assert.match(rule.expr, />= 100\)/u);
+    assert.doesNotMatch(rule.expr, /tenant|event_id|session|user|route|url/iu);
+  }
+  const migrationStallExpression = alerts.spec.groups[0].rules[5].expr;
   assert.match(migrationStallExpression, /push_time_seconds\{job="tixkit-worker"\}/);
   assert.match(migrationStallExpression, /< 120/);
   const metricsIngress = rendered.find(
@@ -529,6 +550,16 @@ test('Production rejects observability thresholds that disable meaningful alerts
     ['observability.alerts.apiErrorRateThreshold=0', 'apiErrorRateThreshold'],
     ['observability.alerts.apiErrorRateThreshold=1', 'apiErrorRateThreshold'],
     ['observability.alerts.apiP95LatencySeconds=0', 'apiP95LatencySeconds'],
+    ['observability.alerts.rumWindow=0m', 'rumWindow'],
+    ['observability.alerts.rumWindow=15m]', 'rumWindow'],
+    ['observability.alerts.rumMinimumSamples=0', 'rumMinimumSamples'],
+    ['observability.alerts.rumMinimumSamples=100001', 'rumMinimumSamples'],
+    ['observability.alerts.rumLcpP75Seconds=0', 'rumLcpP75Seconds'],
+    ['observability.alerts.rumLcpP75Seconds=60.1', 'rumLcpP75Seconds'],
+    ['observability.alerts.rumInpP75Seconds=0', 'rumInpP75Seconds'],
+    ['observability.alerts.rumInpP75Seconds=10.1', 'rumInpP75Seconds'],
+    ['observability.alerts.rumClsP75Score=0', 'rumClsP75Score'],
+    ['observability.alerts.rumClsP75Score=1.1', 'rumClsP75Score'],
     ['observability.alerts.migrationProgressAgeSeconds=0', 'migrationProgressAgeSeconds'],
     ['observability.alerts.workerPushFreshnessSeconds=60', 'workerPushFreshnessSeconds'],
   ]) {

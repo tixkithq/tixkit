@@ -20,7 +20,7 @@ Maintainers will triage the report, determine affected surfaces, and coordinate 
 
 ## Supported code
 
-Security fixes target the current mainline and actively supported published releases. Historical commits, local modifications, unsupported forks, and end-of-life dependency combinations may require upgrading before a fix can be applied.
+Security fixes target the current mainline. No product-wide supported-version or end-of-life window is approved or published. Until maintainers publish an approved lifecycle policy, do not infer support for an older release from its availability, documentation, or release history. Historical commits, local modifications, unsupported forks, and dependency combinations may require upgrading before a fix can be applied.
 
 ## Security invariants
 

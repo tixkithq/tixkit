@@ -21,6 +21,7 @@ import { privacyRoutes } from './modules/privacy.js';
 import { publicRoutes } from './modules/public.js';
 import { questionRoutes } from './modules/questions.js';
 import { readinessRoutes } from './modules/readiness.js';
+import { rumRoutes } from './modules/rum.js';
 import { reportingRoutes } from './modules/reporting.js';
 import { shortLinkRedirectRoutes, shortLinkRoutes } from './modules/short-links.js';
 import { clerkWebhookRoutes } from './modules/clerk-webhooks.js';
@@ -47,6 +48,7 @@ export const signedWebhookRouteModules: readonly RouteModuleRegistration[] = [
 ];
 
 export const publicRouteModules: readonly RouteModuleRegistration[] = [
+  { plugin: rumRoutes, prefix: '/v1' },
   { plugin: publicRoutes, prefix: '/v1' },
   { plugin: checkoutRoutes, prefix: '/v1' },
   { plugin: publicUploadRoutes, prefix: '/v1' },

@@ -1,4 +1,10 @@
-import { ALL_PERMISSIONS } from '@tixkit/domain';
+import {
+  ALL_PERMISSIONS,
+  RUM_MAXIMUM_VALUES,
+  RUM_SCHEMA_VERSION,
+  RUM_SURFACES,
+  type RumWebVital,
+} from '@tixkit/domain';
 import agentPlanProtocolSchema from '@tixkit/agent-protocol/schemas/agent-plan/2026-07-27' with { type: 'json' };
 
 export type OpenApiReference = { $ref: string };
@@ -616,11 +622,25 @@ const agentPlanComponentSchemas = Object.fromEntries(
   ]),
 );
 
+function rumSampleSchema(metric: RumWebVital) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      schemaVersion: { type: 'string', enum: [RUM_SCHEMA_VERSION] },
+      surface: { type: 'string', enum: [...RUM_SURFACES] },
+      metric: { type: 'string', enum: [metric] },
+      value: { type: 'number', minimum: 0, maximum: RUM_MAXIMUM_VALUES[metric] },
+    },
+    required: ['schemaVersion', 'surface', 'metric', 'value'],
+  } as const;
+}
+
 const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-09',
+    version: '2026-08-10',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -2731,8 +2751,8 @@ const rawOpenApiSpec = {
           organizationId: 'org_example',
           brandId: 'brd_example',
           evaluationVersion: 1,
-          generatedAt: '2026-08-09T12:00:00.000Z',
-          expiresAt: '2026-08-09T12:05:00.000Z',
+          generatedAt: '2026-08-10T12:00:00.000Z',
+          expiresAt: '2026-08-10T12:05:00.000Z',
           nextCursor: null,
           actions: [
             {
@@ -2763,9 +2783,9 @@ const rawOpenApiSpec = {
               staleness: {
                 state: 'current',
                 consistency: 'repeatable_read',
-                evaluatedAt: '2026-08-09T12:00:00.000Z',
-                expiresAt: '2026-08-09T12:05:00.000Z',
-                sourceUpdatedAt: '2026-08-09T11:45:00.000Z',
+                evaluatedAt: '2026-08-10T12:00:00.000Z',
+                expiresAt: '2026-08-10T12:05:00.000Z',
+                sourceUpdatedAt: '2026-08-10T11:45:00.000Z',
                 sourceVersion: 1,
                 evidenceRevision:
                   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -5701,7 +5721,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-09, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-10, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5748,7 +5768,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-09, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-10, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5855,7 +5875,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-09 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-10 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5892,7 +5912,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-09 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-10 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8178,7 +8198,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-09 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-10 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8235,7 +8255,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-09 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-10 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -11030,6 +11050,57 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },
               },
+            },
+          },
+        },
+      },
+    },
+    '/public/rum': {
+      post: {
+        operationId: 'submitRumWebVital',
+        summary: 'Submit a privacy-minimized buyer Web Vital sample',
+        description:
+          'Accepts one bounded LCP, INP, or CLS sample without identifiers, URLs, arbitrary labels, or persistence. Public samples are untrusted diagnostic signals and do not establish an SLO.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                oneOf: [rumSampleSchema('LCP'), rumSampleSchema('INP'), rumSampleSchema('CLS')],
+              },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Sample accepted into the bounded in-memory metrics registry',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: { accepted: { type: 'boolean', enum: [true] } },
+                  required: ['accepted'],
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid or privacy-unsafe sample',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '413': {
+            description: 'Request body exceeds the bounded RUM payload limit',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '429': {
+            description: 'Public RUM submission rate exceeded',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
             },
           },
         },

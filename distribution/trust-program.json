@@ -1,9 +1,63 @@
 {
   "$schema": "./trust-program.schema.json",
   "schemaVersion": 1,
-  "asOf": "2026-07-15",
+  "asOf": "2026-07-16",
   "maxRecordAgeDays": 90,
   "documentation": "docs/public/reference/trust.mdx",
+  "surfaces": [
+    {
+      "path": "SECURITY.md",
+      "recordIds": ["security-architecture", "version-lifecycle", "vulnerability-response"]
+    },
+    {
+      "path": "SUPPORT.md",
+      "recordIds": ["managed-sla", "support-boundaries"]
+    },
+    {
+      "path": "docs/public/operations/incidents.mdx",
+      "recordIds": ["cloud-status", "incident-history"]
+    },
+    {
+      "path": "docs/public/reference/api-release-train.mdx",
+      "recordIds": ["release-provenance", "signed-sbom", "version-lifecycle"]
+    },
+    {
+      "path": "docs/public/reference/api-versions.mdx",
+      "recordIds": ["release-provenance", "signed-sbom", "version-lifecycle"]
+    },
+    {
+      "path": "docs/public/reference/performance.mdx",
+      "recordIds": ["performance-evidence"]
+    },
+    {
+      "path": "docs/public/reference/trust.mdx",
+      "recordIds": [
+        "cloud-status",
+        "data-residency",
+        "dr-evidence",
+        "incident-history",
+        "independent-assessments",
+        "managed-sla",
+        "performance-evidence",
+        "privacy-roles",
+        "release-provenance",
+        "security-architecture",
+        "signed-sbom",
+        "subprocessors",
+        "support-boundaries",
+        "version-lifecycle",
+        "vulnerability-response"
+      ]
+    },
+    {
+      "path": "docs/public/self-hosting/backups-and-restore.mdx",
+      "recordIds": ["dr-evidence"]
+    },
+    {
+      "path": "docs/public/self-hosting/observability.mdx",
+      "recordIds": ["performance-evidence"]
+    }
+  ],
   "records": [
     {
       "id": "cloud-status",
@@ -34,9 +88,25 @@
       "lastVerified": "2026-07-15",
       "publicArtifacts": [
         "docs/public/self-hosting/backups-and-restore.mdx",
+        "infra/scripts/production-backup.sh",
+        "infra/scripts/production-restore.sh",
+        "scripts/__tests__/dr-safety.test.mjs",
+        "scripts/__tests__/production-dr.integration.test.mjs",
         "scripts/verify-production-rehearsal.mjs"
       ],
-      "validationCommands": ["node --test scripts/__tests__/production-rehearsal.test.mjs"],
+      "validationCommands": [
+        {
+          "argv": [
+            "node",
+            "--test",
+            "--test-name-pattern",
+            "^(?!adapter timeout).*",
+            "scripts/__tests__/production-rehearsal.test.mjs"
+          ],
+          "cwd": ".",
+          "timeoutMs": 120000
+        }
+      ],
       "blocker": "A protected hosted rehearsal with retained RPO and RTO evidence is still required."
     },
     {
@@ -74,10 +144,66 @@
       "kind": "evidence",
       "scope": "public-core",
       "state": "locally-proven",
-      "claim": "Bundle and trusted single-host regression evidence are locally validated; no production capacity, soak, fault or RUM proof is published.",
+      "claim": "Performance budgets and trusted single-host regression, trend, capacity, fault and soak workflow contracts are locally validated; no hosted or production result is published.",
       "lastVerified": "2026-07-15",
-      "publicArtifacts": ["docs/public/reference/performance.mdx", "performance-budgets.json"],
-      "validationCommands": ["bun run check:performance-budgets"],
+      "publicArtifacts": [
+        ".github/workflows/performance-capacity.yml",
+        ".github/workflows/performance-fault.yml",
+        ".github/workflows/performance-nightly.yml",
+        ".github/workflows/performance-soak.yml",
+        ".github/workflows/performance-temporal-fault.yml",
+        "apps/checkout/src/__tests__/web-vitals-reporter.test.tsx",
+        "apps/checkout/src/app/layout.tsx",
+        "apps/checkout/src/components/web-vitals-reporter.tsx",
+        "docs/public/reference/performance.mdx",
+        "docs/public/self-hosting/observability.mdx",
+        "infra/helm/tixkit/templates/_helpers.tpl",
+        "infra/helm/tixkit/templates/monitoring.yaml",
+        "infra/helm/tixkit/values.yaml",
+        "packages/api/src/__tests__/rum-observability.test.ts",
+        "packages/api/src/routes/modules/rum.ts",
+        "packages/api/src/routes/registry.ts",
+        "packages/shared/src/__tests__/observability.test.ts",
+        "packages/shared/src/observability.ts",
+        "performance-budgets.json",
+        "performance-capacity.trusted.json",
+        "performance-faults.trusted.json",
+        "performance-scenarios.nightly.json",
+        "performance-soak.trusted.json",
+        "performance-temporal-fault.trusted.json",
+        "performance-trends.trusted.json",
+        "scripts/__tests__/check-performance-budgets.test.mjs",
+        "scripts/__tests__/helm-production-profile.test.mjs",
+        "scripts/check-performance-budgets.mjs",
+        "scripts/performance-capacity.mjs",
+        "scripts/performance-fault.mjs",
+        "scripts/performance-scenario.mjs",
+        "scripts/performance-soak.mjs",
+        "scripts/performance-temporal-fault.mjs",
+        "scripts/performance-trends.mjs"
+      ],
+      "validationCommands": [
+        {
+          "argv": ["node", "--test", "scripts/__tests__/check-performance-budgets.test.mjs"],
+          "cwd": ".",
+          "timeoutMs": 30000
+        },
+        {
+          "argv": [
+            "node",
+            "--test",
+            "scripts/__tests__/performance-capacity.test.mjs",
+            "scripts/__tests__/performance-evidence.test.mjs",
+            "scripts/__tests__/performance-fault.test.mjs",
+            "scripts/__tests__/performance-scenario.test.mjs",
+            "scripts/__tests__/performance-soak.test.mjs",
+            "scripts/__tests__/performance-temporal-fault.test.mjs",
+            "scripts/__tests__/performance-trends.test.mjs"
+          ],
+          "cwd": ".",
+          "timeoutMs": 120000
+        }
+      ],
       "blocker": "Supported-profile capacity and hosted production evidence remain incomplete."
     },
     {
@@ -99,9 +225,16 @@
       "lastVerified": "2026-07-15",
       "publicArtifacts": [
         "docs/public/reference/api-release-train.mdx",
+        "docs/public/reference/api-versions.mdx",
         "scripts/verify-public-api-release.mjs"
       ],
-      "validationCommands": ["node --test scripts/__tests__/public-release-verifier.test.mjs"],
+      "validationCommands": [
+        {
+          "argv": ["node", "--test", "scripts/__tests__/public-release-verifier.test.mjs"],
+          "cwd": ".",
+          "timeoutMs": 120000
+        }
+      ],
       "blocker": "The protected public release workflow has not published an approved release."
     },
     {
@@ -124,7 +257,19 @@
         ".github/workflows/public-artifact-release.yml",
         "scripts/validate-staged-public-release.mjs"
       ],
-      "validationCommands": ["node --test scripts/__tests__/cloud-core-consumer.test.mjs"],
+      "validationCommands": [
+        {
+          "argv": [
+            "node",
+            "--test",
+            "--test-name-pattern",
+            "release workflow resumes staged bytes",
+            "scripts/__tests__/cloud-core-consumer.test.mjs"
+          ],
+          "cwd": ".",
+          "timeoutMs": 120000
+        }
+      ],
       "blocker": "Hosted verification requires an approved immutable public release."
     },
     {

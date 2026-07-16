@@ -26,6 +26,12 @@ bun run check:lighthouse-budgets
 
 The docs architecture budgets compressed search bootstrap and shards, search-open interaction, initial JavaScript, layout stability, content paint, and API-reference loading. The OpenAPI JSON is downloadable but is not loaded on ordinary guide pages; the local search index loads only after search intent.
 
+## Real-user monitoring contract
+
+Checkout and hosted event pages send only LCP, INP and CLS to `POST /v1/public/rum`. The strict, versioned application payload contains a bounded surface name, a bounded metric name and a finite bounded value; URL, path, referrer, host, event, tenant, user, session, visitor, request and arbitrary-label fields are rejected. Delivery omits credentials, runs asynchronously without retry and cannot block checkout. The API limits the body to 512 bytes, applies a tighter public rate limit, writes no database or object record and exposes only fixed-cardinality Prometheus histograms. Network services can still observe transport metadata, so operators must apply their privacy and retention policy to proxy and application access logs.
+
+Production-profile alert definitions evaluate 15-minute p75 values after at least 100 samples: LCP ≤ 2.5 seconds, INP ≤ 0.2 seconds and CLS ≤ 0.1. These public samples are untrusted operational signals, not product analytics or release evidence. The repository proves the local collector, browser adapter, metric contract and rendered alert expressions; it does not claim representative production traffic, abuse resistance, privacy or retention approval, a routed alert, budget attainment, or an SLA/SLO.
+
 Trusted database regression jobs retain three fresh-process samples and a deterministic aggregate for PostgreSQL and MySQL. The aggregate binds the commit, runner label, pinned database image, workload, complete metric set, and checksums, and reports per-metric min, median, p95, and max. Every individual sample must remain inside the absolute budget.
 
 These checksums provide integrity detection, not a producer signature or independent authenticity proof. Authenticity depends on the trusted workflow and retained-artifact controls.

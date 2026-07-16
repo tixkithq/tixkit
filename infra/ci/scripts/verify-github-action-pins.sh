@@ -37,7 +37,9 @@ while IFS=: read -r path line raw_line; do
     continue
   fi
 
-  if [[ ! "${image}" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+  pinned_image='^[^[:space:]@]+@sha256:[0-9a-f]{64}$'
+  pinned_binary_choice="^\\$\\{\\{[[:space:]].+[[:space:]]&&[[:space:]]'[^[:space:]@]+@sha256:[0-9a-f]{64}'[[:space:]]\\|\\|[[:space:]]'[^[:space:]@]+@sha256:[0-9a-f]{64}'[[:space:]]\\}\\}$"
+  if [[ ! "${image}" =~ ${pinned_image} && ! "${image}" =~ ${pinned_binary_choice} ]]; then
     printf '%s:%s uses mutable or malformed service image: %s\n' "${path}" "${line}" "${image}" >&2
     failures=1
   fi

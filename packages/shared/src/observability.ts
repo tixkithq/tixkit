@@ -17,6 +17,22 @@ import {
   Pushgateway,
   Registry,
 } from 'prom-client';
+import {
+  RUM_MAXIMUM_VALUES,
+  RUM_SURFACES,
+  RUM_WEB_VITALS,
+  type RumSurface,
+  type RumWebVital,
+} from '@tixkit/domain';
+
+export {
+  RUM_MAXIMUM_VALUES,
+  RUM_SCHEMA_VERSION,
+  RUM_SURFACES,
+  RUM_WEB_VITALS,
+  type RumSurface,
+  type RumWebVital,
+} from '@tixkit/domain';
 
 const REDACTED = '[REDACTED]';
 const SENSITIVE_KEY_PATTERN =
@@ -285,6 +301,30 @@ export function createTixkitMetrics(serviceName: string) {
     registers: [registry],
   });
 
+  const rumLcp = new Histogram({
+    name: 'tixkit_rum_lcp_seconds',
+    help: 'Privacy-safe Largest Contentful Paint samples by bounded buyer surface.',
+    labelNames: ['surface'],
+    buckets: [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 10, 30, 60],
+    registers: [registry],
+  });
+
+  const rumInp = new Histogram({
+    name: 'tixkit_rum_inp_seconds',
+    help: 'Privacy-safe Interaction to Next Paint samples by bounded buyer surface.',
+    labelNames: ['surface'],
+    buckets: [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1, 2, 5, 10],
+    registers: [registry],
+  });
+
+  const rumCls = new Histogram({
+    name: 'tixkit_rum_cls_score',
+    help: 'Privacy-safe Cumulative Layout Shift samples by bounded buyer surface.',
+    labelNames: ['surface'],
+    buckets: [0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1, 2, 5, 10],
+    registers: [registry],
+  });
+
   const inventoryActiveHolds = new Gauge({
     name: 'tixkit_inventory_active_holds',
     help: 'Active, non-expired checkout inventory holds.',
@@ -335,6 +375,9 @@ export function createTixkitMetrics(serviceName: string) {
       scanEvents,
       onboardingEvents,
       onboardingMilestoneDuration,
+      rumLcp,
+      rumInp,
+      rumCls,
       inventoryActiveHolds,
       temporalActivityDuration,
       temporalActivityEvents,
@@ -342,6 +385,26 @@ export function createTixkitMetrics(serviceName: string) {
       migrationProgressAge,
     },
   };
+}
+
+export function observeRumWebVital(
+  metrics: TixkitMetrics,
+  input: { surface: RumSurface; metric: RumWebVital; value: number },
+): void {
+  if (!RUM_SURFACES.includes(input.surface) || !RUM_WEB_VITALS.includes(input.metric)) {
+    throw new TypeError('RUM surface and metric must use the bounded public contract');
+  }
+  if (
+    !Number.isFinite(input.value) ||
+    input.value < 0 ||
+    input.value > RUM_MAXIMUM_VALUES[input.metric]
+  ) {
+    throw new TypeError('RUM value is outside the bounded public contract');
+  }
+  const labels = { surface: input.surface };
+  if (input.metric === 'LCP') metrics.metrics.rumLcp.observe(labels, input.value);
+  else if (input.metric === 'INP') metrics.metrics.rumInp.observe(labels, input.value);
+  else metrics.metrics.rumCls.observe(labels, input.value);
 }
 
 const MIGRATION_PHASES = new Set(['prepare', 'commit', 'reconcile', 'rollback']);

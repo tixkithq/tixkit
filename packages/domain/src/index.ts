@@ -15,3 +15,4 @@ export * from './messaging/index.js';
 export * from './reporting/index.js';
 export * from './developer/index.js';
 export * from './i18n/index.js';
+export * from './observability/index.js';

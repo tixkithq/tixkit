@@ -79,6 +79,30 @@ spec:
           annotations:
             summary: Tixkit API p95 latency exceeds its production threshold
             runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+        - alert: TixkitRumLcpP75BudgetExceeded
+          expr: (histogram_quantile(0.75, sum by (le, surface) (rate(tixkit_rum_lcp_seconds_bucket{service="tixkit-api"}[{{ .Values.observability.alerts.rumWindow }}]))) > {{ .Values.observability.alerts.rumLcpP75Seconds }}) and on(surface) (sum by (surface) (increase(tixkit_rum_lcp_seconds_count{service="tixkit-api"}[{{ .Values.observability.alerts.rumWindow }}])) >= {{ .Values.observability.alerts.rumMinimumSamples }})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Buyer LCP p75 exceeds the real-user budget
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+        - alert: TixkitRumInpP75BudgetExceeded
+          expr: (histogram_quantile(0.75, sum by (le, surface) (rate(tixkit_rum_inp_seconds_bucket{service="tixkit-api"}[{{ .Values.observability.alerts.rumWindow }}]))) > {{ .Values.observability.alerts.rumInpP75Seconds }}) and on(surface) (sum by (surface) (increase(tixkit_rum_inp_seconds_count{service="tixkit-api"}[{{ .Values.observability.alerts.rumWindow }}])) >= {{ .Values.observability.alerts.rumMinimumSamples }})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Buyer INP p75 exceeds the real-user budget
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+        - alert: TixkitRumClsP75BudgetExceeded
+          expr: (histogram_quantile(0.75, sum by (le, surface) (rate(tixkit_rum_cls_score_bucket{service="tixkit-api"}[{{ .Values.observability.alerts.rumWindow }}]))) > {{ .Values.observability.alerts.rumClsP75Score }}) and on(surface) (sum by (surface) (increase(tixkit_rum_cls_score_count{service="tixkit-api"}[{{ .Values.observability.alerts.rumWindow }}])) >= {{ .Values.observability.alerts.rumMinimumSamples }})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Buyer CLS p75 exceeds the real-user budget
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
         - alert: TixkitMigrationProgressStalled
           expr: max(tixkit_migration_progress_age_seconds{service="tixkit-worker"} and on(job, instance) (time() - push_time_seconds{job="tixkit-worker"} < {{ .Values.observability.alerts.workerPushFreshnessSeconds }})) > {{ .Values.observability.alerts.migrationProgressAgeSeconds }}
           for: 5m

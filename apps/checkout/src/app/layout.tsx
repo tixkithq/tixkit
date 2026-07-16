@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { headers } from 'next/headers';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
+import { WebVitalsReporter } from '@/components/web-vitals-reporter';
 import '@tixkit/content-event-page-react/styles.css';
 import './globals.css';
 
@@ -33,6 +34,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           }}
         />
         <ThemeProvider nonce={nonce}>
+          <WebVitalsReporter />
           {children}
           <Toaster position="bottom-right" />
         </ThemeProvider>

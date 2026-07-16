@@ -1,7 +1,13 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { OpenApiParameter } from '../index.js';
 import { generateOpenApiTypes, openApiSpec } from '../index.js';
-import { ALL_PERMISSIONS } from '@tixkit/domain';
+import {
+  ALL_PERMISSIONS,
+  RUM_MAXIMUM_VALUES,
+  RUM_SCHEMA_VERSION,
+  RUM_SURFACES,
+  RUM_WEB_VITALS,
+} from '@tixkit/domain';
 
 function exampleMatchesSchema(example: unknown, schema: any): boolean {
   if (schema === false) return false;
@@ -122,7 +128,37 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-09');
+    expect(openApiSpec.info.version).toBe('2026-08-10');
+  });
+
+  it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
+    const operation = openApiSpec.paths['/public/rum'].post;
+    expect(operation.operationId).toBe('submitRumWebVital');
+    expect(operation.security).toEqual([]);
+    expect(Object.keys(operation.responses).sort()).toEqual(['202', '400', '413', '429']);
+    const branches = operation.requestBody.content['application/json'].schema.oneOf;
+    expect(branches).toHaveLength(RUM_WEB_VITALS.length);
+    for (const metric of RUM_WEB_VITALS) {
+      const branch = branches.find(
+        (candidate: { properties: { metric: { enum: readonly string[] } } }) =>
+          candidate.properties.metric.enum[0] === metric,
+      );
+      expect(branch).toMatchObject({
+        additionalProperties: false,
+        required: ['schemaVersion', 'surface', 'metric', 'value'],
+        properties: {
+          schemaVersion: { enum: [RUM_SCHEMA_VERSION] },
+          surface: { enum: [...RUM_SURFACES] },
+          metric: { enum: [metric] },
+          value: { minimum: 0, maximum: RUM_MAXIMUM_VALUES[metric] },
+        },
+      });
+    }
+    expect(operation.responses['202'].content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['accepted'],
+      properties: { accepted: { enum: [true] } },
+    });
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {

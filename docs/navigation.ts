@@ -206,6 +206,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-09 replay-safe Stripe Connect',
         routeId: 'apiMigration20260808To20260809',
       },
+      {
+        label: 'Adopt 2026-08-10 privacy-minimized RUM',
+        routeId: 'apiMigration20260809To20260810',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

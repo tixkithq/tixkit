@@ -6,7 +6,7 @@ product_area: api
 content_type: reference
 status: beta
 owner: developer-platform
-last_verified: 2026-08-09
+last_verified: 2026-07-16
 prerequisites: [A sandbox API credential]
 related: [/reference/api, /reference/api-versions, /sdks/javascript]
 ---
@@ -15,14 +15,16 @@ related: [/reference/api, /reference/api-versions, /sdks/javascript]
 
 Every contract release is stored under `artifacts/api/<API version>` and exposed by the documentation site at `/contracts/<API version>/`. A release contains OpenAPI JSON and YAML, generated TypeScript declarations, the webhook catalog, sanitized examples, an API diff, a changelog, a manifest, and SHA-256 checksums.
 
-The API version uses a date. Additive operations and optional fields may ship within the current version. Removing an operation or named schema is detected as breaking and fails the release build. A breaking contract requires a new API version, migration guidance, SDK compatibility updates, and explicit release approval. The current and immediately previous versions remain supported during the documented deprecation window.
+The API version uses a date. Additive operations and optional fields may ship within the current version. Removing an operation or named schema is detected as breaking and fails the release build. A breaking contract requires a new API version, migration guidance, SDK compatibility updates, and explicit release approval. No product-wide supported-version or deprecation window is approved or published. A release manifest records immutable contract versions, but its existence does not establish a support duration.
+
+The generation and consumer-verification paths are locally tested workflow contracts; no approved public release receipt exists until a protected publication and verification run succeeds.
 
 Before release, run:
 
 ```bash
 bun scripts/build-api-release.ts
-(cd artifacts/api/2026-08-09 && sha256sum --check CHECKSUMS.sha256)
-bunx tsc --noEmit --skipLibCheck artifacts/api/2026-08-09/openapi.d.ts
+(cd artifacts/api/2026-08-10 && sha256sum --check CHECKSUMS.sha256)
+bunx tsc --noEmit --skipLibCheck artifacts/api/2026-08-10/openapi.d.ts
 node scripts/sdk-parity-matrix.mjs
 node scripts/test-contract-test-consumers.mjs
 ```

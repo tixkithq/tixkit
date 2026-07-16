@@ -42,8 +42,12 @@ The chart fixes the supported transport to `http/protobuf`, uses parent-based ra
 When `observability.metrics.mode=service-monitor`, the cluster must already have the Prometheus Operator CRDs. The chart creates:
 
 - an API `ServiceMonitor` for `/metrics` using `METRICS_BEARER_TOKEN` from the runtime Secret;
-- alert rules for sustained API 5xx rate, API p95 latency, and stalled durable migration progress;
+- alert rules for sustained API 5xx rate, API p95 latency, buyer-surface RUM p75 budgets with minimum sample guards, and stalled durable migration progress;
 - worker metric delivery through `PROMETHEUS_PUSHGATEWAY_URL`.
+
+The buyer RUM endpoint accepts only the versioned LCP, INP and CLS contract for `checkout` or `event-page`. It rejects unknown and identifying application-payload fields, oversized bodies, non-finite or out-of-range values, and excess requests. It does not persist samples or use them as customer analytics. Browser delivery omits credentials and never retries. The three histogram families contain only the `service` and bounded `surface` labels. Default alerts use a 15-minute p75 after at least 100 samples: 2.5 seconds for LCP, 0.2 seconds for INP and 0.1 for CLS. Proxies and application servers can still observe transport metadata; configure access-log redaction and retention accordingly.
+
+Public RUM submissions are untrusted. Treat them as a diagnostic signal, validate volume and abuse behavior, and do not claim abuse resistance, an SLO or representative user experience from a rendered rule or a small sample. Complete the applicable privacy and retention review before enabling production collection; the minimized application payload does not remove transport-layer privacy obligations.
 
 Workers publish under a per-pod Pushgateway grouping, delete that grouping on graceful shutdown, and bound migration-stall alerts by the grouping's `push_time_seconds`. This prevents a hard-lost pod's last gauge from alerting forever; monitor Pushgateway storage separately and retain its own stale-series cleanup policy.
 

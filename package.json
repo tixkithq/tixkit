@@ -67,6 +67,7 @@
     "validate:public-distribution": "node scripts/validate-public-distribution.mjs",
     "validate:provider-client-boundary": "node scripts/validate-provider-client-boundary.mjs",
     "validate:trust-program": "node scripts/validate-trust-program.mjs",
+    "validate:trust-evidence": "node scripts/validate-trust-program.mjs --execute-local-evidence",
     "validate:public-repository": "node scripts/rehearse-public-repository.mjs",
     "rehearse:repository-cutover": "node scripts/rehearse-repository-cutover.mjs",
     "rehearse:repository-history-cutover": "node scripts/rehearse-repository-history-cutover.mjs",
