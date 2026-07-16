@@ -623,6 +623,37 @@ describe('notification activity deliverability gating', () => {
     expect(dbState.renderArtifacts).toHaveLength(0);
   });
 
+  it('returns a terminal normalized failure for a Resend route with no credential', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    dbState.emailRoutes = [
+      activeEmailRoute({ provider_type: 'resend', credentials_ref: 'secret://missing' }),
+    ];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      verified: true,
+    };
+
+    const result = await sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_SEND_FAILED',
+      message: 'resend.send-email failed: validation',
+      retryable: false,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(dbState.emailDeliveries).toHaveLength(0);
+  });
+
   it('returns a safe terminal result for a permanent provider rejection', async () => {
     vi.stubEnv('RESEND_API_KEY', 're_test_secret');
     vi.stubGlobal(

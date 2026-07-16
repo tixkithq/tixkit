@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import Stripe from 'stripe';
 import {
@@ -379,7 +380,9 @@ function normalizeStripeError(
   const raw = isRecord(record.raw) ? record.raw : {};
   const type = stringValue(record.type) ?? stringValue(raw.type) ?? stringValue(record.name);
   const status = integerValue(record.statusCode) ?? integerValue(raw.statusCode);
-  const code = stringValue(record.code) ?? stringValue(raw.code) ?? stringValue(raw.decline_code);
+  const code = safeStripeCode(
+    stringValue(record.code) ?? stringValue(raw.code) ?? stringValue(raw.decline_code),
+  );
   const headers = headerRecord(record.headers) ?? headerRecord(raw.headers);
   const requestId =
     safeRequestId(stringValue(record.requestId)) ??
@@ -537,7 +540,11 @@ function headerRecord(value: unknown): Record<string, string> | undefined {
 }
 
 function safeRequestId(value: string | undefined): string | undefined {
-  return value && /^[A-Za-z0-9._:/-]{1,200}$/u.test(value) ? value : undefined;
+  return value ? `sha256:${createHash('sha256').update(value).digest('hex')}` : undefined;
+}
+
+function safeStripeCode(value: string | undefined): string | undefined {
+  return value ? `sha256:${createHash('sha256').update(value).digest('hex')}` : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

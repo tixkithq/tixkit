@@ -402,19 +402,16 @@ export class SmtpEmailTransport implements EmailTransport {
  */
 export class ResendEmailTransport implements EmailTransport {
   providerName = 'resend';
-  private apiKey: string;
   private client: ResendMessagingClient;
 
   constructor(credentialsRef = 'RESEND_API_KEY', baseUrl?: string) {
-    this.apiKey = credentialValue(credentialsRef, 'RESEND_API_KEY');
-    this.client = new ResendMessagingClient({ apiKey: this.apiKey, baseUrl });
+    this.client = new ResendMessagingClient({
+      apiKey: credentialValue(credentialsRef, 'RESEND_API_KEY'),
+      baseUrl,
+    });
   }
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
-    if (!this.apiKey) {
-      throw new Error('Resend API key is not configured');
-    }
-
     const from = input.from.name ? `${input.from.name} <${input.from.email}>` : input.from.email;
     const replyTo = input.replyTo
       ? input.replyTo.name

@@ -69,6 +69,29 @@ export class ProviderOperationError extends Error {
   }
 
   forRetry(): ProviderOperationError {
+    const safeDetails = {
+      ...(this.details.status !== undefined &&
+      Number.isSafeInteger(this.details.status) &&
+      this.details.status >= 100 &&
+      this.details.status <= 599
+        ? { status: this.details.status }
+        : {}),
+      ...(this.details.providerCode &&
+      (/^sha256:[a-f0-9]{64}$/u.test(this.details.providerCode) ||
+        /^[0-9]{1,3}$/u.test(this.details.providerCode))
+        ? { providerCode: this.details.providerCode }
+        : {}),
+      ...(this.details.providerRequestId &&
+      /^sha256:[a-f0-9]{64}$/u.test(this.details.providerRequestId)
+        ? { providerRequestId: this.details.providerRequestId }
+        : {}),
+      ...(this.details.retryAfterMs !== undefined &&
+      Number.isSafeInteger(this.details.retryAfterMs) &&
+      this.details.retryAfterMs >= 0 &&
+      this.details.retryAfterMs <= 86_400_000
+        ? { retryAfterMs: this.details.retryAfterMs }
+        : {}),
+    };
     return new ProviderOperationError(
       this.message,
       this.dependency,
@@ -77,6 +100,7 @@ export class ProviderOperationError extends Error {
       this.retryable,
       this.deliveryState,
       false,
+      safeDetails,
     );
   }
 }
@@ -172,12 +196,12 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
     let rawBody: string;
     try {
       rawBody = await readBoundedBody(response, maxResponseBytes);
-    } catch (cause) {
+    } catch {
       if (timedOut) {
         throw operationError(request, 'timeout', !sideEffecting, 'unknown', false, {});
       }
       if (request.signal?.aborted) {
-        throw operationError(request, 'cancelled', false, 'unknown', false, {}, cause);
+        throw operationError(request, 'cancelled', false, 'unknown', false, {});
       }
       throw operationError(
         request,
@@ -186,7 +210,6 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
         response.ok ? 'accepted' : 'unknown',
         false,
         { status: response.status, providerRequestId },
-        cause,
       );
     }
     const bodyPreview = sanitizeBodyPreview(
@@ -226,16 +249,12 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
     let data: T;
     try {
       data = request.parse ? request.parse(parsed) : ((expectsJson ? parsed : rawBody) as T);
-    } catch (cause) {
-      throw operationError(
-        request,
-        'malformed-response',
-        false,
-        'accepted',
-        false,
-        { status: response.status, providerRequestId, bodyPreview },
-        cause,
-      );
+    } catch {
+      throw operationError(request, 'malformed-response', false, 'accepted', false, {
+        status: response.status,
+        providerRequestId,
+        bodyPreview,
+      });
     }
     const durationMs = elapsed(startedAt);
     recordSuccess(span, response.status, durationMs);
@@ -516,7 +535,12 @@ export class TelnyxMessagingClient {
       dependency: 'telnyx',
       operation: 'send-sms',
       method: 'POST',
-      url: `${trimBaseUrl(this.config.baseUrl ?? 'https://api.telnyx.com/v2')}/messages`,
+      url: `${providerBaseUrl(
+        this.config.baseUrl ?? 'https://api.telnyx.com/v2',
+        'api.telnyx.com',
+        'telnyx',
+        'send-sms',
+      )}/messages`,
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,
         'Content-Type': 'application/json',
@@ -555,7 +579,12 @@ export class TwilioMessagingClient {
     requireCredential(this.config.authToken, 'twilio', 'send-sms');
     const form = new URLSearchParams({ From: input.from, To: input.to, Body: input.body });
     if (input.webhookUrl) form.set('StatusCallback', input.webhookUrl);
-    const baseUrl = trimBaseUrl(this.config.baseUrl ?? 'https://api.twilio.com/2010-04-01');
+    const baseUrl = providerBaseUrl(
+      this.config.baseUrl ?? 'https://api.twilio.com/2010-04-01',
+      'api.twilio.com',
+      'twilio',
+      'send-sms',
+    );
     const result = await executeProviderHttp({
       ...this.runtime,
       dependency: 'twilio',
@@ -599,7 +628,12 @@ export class VonageMessagingClient {
       dependency: 'vonage',
       operation: 'send-sms',
       method: 'POST',
-      url: `${trimBaseUrl(this.config.baseUrl ?? 'https://rest.nexmo.com')}/sms/json`,
+      url: `${providerBaseUrl(
+        this.config.baseUrl ?? 'https://rest.nexmo.com',
+        'rest.nexmo.com',
+        'vonage',
+        'send-sms',
+      )}/sms/json`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       idempotency: { key: input.idempotencyKey, header: 'X-Tixkit-Idempotency-Key' },
       body: form,
@@ -611,17 +645,18 @@ export class VonageMessagingClient {
       throw malformedProviderPayload('vonage', 'send-sms');
     }
     const message = first as Record<string, unknown>;
-    if (message.status !== '0') {
-      const providerCode =
-        typeof message.status === 'string' || typeof message.status === 'number'
-          ? String(message.status)
-          : undefined;
+    const providerCode = message.status;
+    if (typeof providerCode !== 'string' || !/^\d{1,3}$/u.test(providerCode)) {
+      throw malformedProviderPayload('vonage', 'send-sms');
+    }
+    if (providerCode !== '0') {
+      const semantic = vonageSemanticFailure(providerCode);
       throw new ProviderOperationError(
-        'vonage.send-sms failed: validation',
+        `vonage.send-sms failed: ${semantic.kind}`,
         'vonage',
         'send-sms',
-        'validation',
-        false,
+        semantic.kind,
+        semantic.retryable,
         'rejected',
         true,
         { providerCode },
@@ -645,7 +680,12 @@ export class PlivoMessagingClient {
   async sendSms(input: SmsMessageInput): Promise<ProviderMessageResult> {
     requireCredential(this.config.authId, 'plivo', 'send-sms');
     requireCredential(this.config.authToken, 'plivo', 'send-sms');
-    const baseUrl = trimBaseUrl(this.config.baseUrl ?? 'https://api.plivo.com/v1');
+    const baseUrl = providerBaseUrl(
+      this.config.baseUrl ?? 'https://api.plivo.com/v1',
+      'api.plivo.com',
+      'plivo',
+      'send-sms',
+    );
     const result = await executeProviderHttp({
       ...this.runtime,
       dependency: 'plivo',
@@ -721,7 +761,12 @@ export class ResendMessagingClient {
       dependency: 'resend',
       operation: 'send-email',
       method: 'POST',
-      url: `${trimBaseUrl(this.config.baseUrl ?? 'https://api.resend.com')}/emails`,
+      url: `${providerBaseUrl(
+        this.config.baseUrl ?? 'https://api.resend.com',
+        'api.resend.com',
+        'resend',
+        'send-email',
+      )}/emails`,
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,
         'Content-Type': 'application/json',
@@ -754,8 +799,65 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-function trimBaseUrl(value: string): string {
-  return value.replace(/\/+$/u, '');
+function providerBaseUrl(
+  value: string,
+  expectedHostname: string,
+  dependency: string,
+  operation: string,
+): string {
+  if (
+    !value ||
+    value.length > 2_048 ||
+    value !== value.trim() ||
+    value.includes('\\') ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 32 || codePoint === 127;
+    })
+  ) {
+    throw providerConfigurationError(dependency, operation);
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw providerConfigurationError(dependency, operation);
+  }
+  const testSafeInjection = parsed.hostname.endsWith('.test') && process.env.NODE_ENV === 'test';
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.port !== '' && !testSafeInjection) ||
+    (parsed.hostname !== expectedHostname && !testSafeInjection)
+  ) {
+    throw providerConfigurationError(dependency, operation);
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/u, '')}`;
+}
+
+function providerConfigurationError(dependency: string, operation: string): ProviderOperationError {
+  return new ProviderOperationError(
+    `${dependency}.${operation} failed: validation`,
+    dependency,
+    operation,
+    'validation',
+    false,
+    'not-sent',
+    false,
+    { providerCode: 'configuration_invalid' },
+  );
+}
+
+function vonageSemanticFailure(status: string | undefined): {
+  kind: ProviderFailureKind;
+  retryable: boolean;
+} {
+  if (status === '1') return { kind: 'rate-limit', retryable: true };
+  if (status === '5') return { kind: 'server', retryable: true };
+  return { kind: 'validation', retryable: false };
 }
 
 function malformedProviderPayload(dependency: string, operation: string): ProviderOperationError {

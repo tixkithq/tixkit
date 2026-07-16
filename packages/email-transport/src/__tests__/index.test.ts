@@ -274,6 +274,21 @@ describe('ResendEmailTransport', () => {
     await expect(failure).rejects.not.toThrow('Invalid from address');
   });
 
+  it('normalizes an explicitly routed missing Resend credential before dispatch', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const transport = new ResendEmailTransport('secret://missing');
+
+    await expect(transport.send(baseInput())).rejects.toMatchObject({
+      kind: 'validation',
+      retryable: false,
+      deliveryState: 'not-sent',
+      safeToFailover: false,
+      details: { providerCode: 'configuration_missing' },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('does not fail over after an ambiguous provider timeout', async () => {
     const fallback = new MockEmailTransport('fallback');
     const primary = {

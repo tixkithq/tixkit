@@ -385,19 +385,47 @@ describe('StripeSdkGateway', () => {
       expect(JSON.stringify(error)).not.toContain('buyer@example.com');
       expect(JSON.stringify(error)).not.toContain('sk_live_secret');
       if (expected.kind === 'rate-limit') {
-        expect(error.details).toMatchObject({
-          providerCode: 'rate_limit',
-          providerRequestId: 'req_rate_1',
-          retryAfterMs: 2_500,
-        });
+        expect(error.details.providerCode).toMatch(/^sha256:[a-f0-9]{64}$/u);
+        expect(error.details.providerCode).not.toContain('rate_limit');
+        expect(error.details.providerRequestId).toMatch(/^sha256:[a-f0-9]{64}$/u);
+        expect(error.details.providerRequestId).not.toContain('req_rate_1');
+        expect(error.details.retryAfterMs).toBe(2_500);
       }
       const retryError = error.forRetry();
-      expect(retryError.details).toEqual({});
+      expect(retryError.details).toEqual(error.details);
+      expect(retryError.safeToFailover).toBe(false);
       expect(retryError.cause).toBeUndefined();
       expect(telemetry).toEqual([expect.objectContaining({ serviceOutcome })]);
       expect(Object.isFrozen(telemetry[0])).toBe(true);
     },
   );
+
+  it('omits unsafe Stripe codes and hashes hostile request identifiers', async () => {
+    const { factory } = stripeFixture({
+      paymentIntentCreate: vi.fn(async () =>
+        Promise.reject({
+          type: 'StripeInvalidRequestError',
+          statusCode: 400,
+          code: 'sk_live_SUPERSECRET123',
+          requestId: 'req buyer@example.com sk_live_request_secret',
+        }),
+      ),
+    });
+    const gateway = new StripeSdkGateway('sk_test_boundary', { sdkFactory: factory });
+    const error = await operationError(
+      gateway.createPaymentIntent({
+        amount: 1_000,
+        currency: 'USD',
+        metadata: {},
+        idempotencyKey: 'checkout_hostile_diagnostics',
+      }),
+    );
+    expect(error.details.providerCode).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(error.details.providerRequestId).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(`${error.message}${JSON.stringify(error)}`).not.toMatch(
+      /buyer@example\.com|sk_live_secret|sk_live_request_secret/u,
+    );
+  });
 
   it('treats an unrecognized side-effect failure as ambiguous instead of rejected', async () => {
     const { factory } = stripeFixture({
