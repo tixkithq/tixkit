@@ -79,6 +79,7 @@ fi
   productionValues.migrations.imageDigest =
     'sha256:456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123';
   productionValues.migrations.strategy = 'manual';
+  productionValues.uploads.malwareScanner.host = 'clamav.security.svc.cluster.local';
   productionValues.networkPolicy.externalEgressCidrs = ['192.0.2.0/24'];
   productionValues.networkPolicy.databaseEgressCidrs = ['198.51.100.0/24'];
   productionValues.secrets = {
@@ -114,6 +115,7 @@ function externalSecretKeysForValues() {
     'TEMPORAL_ADDRESS',
     'STRIPE_SECRET_KEY',
     'STRIPE_WEBHOOK_SECRET',
+    'STRIPE_PUBLISHABLE_KEY',
     'METRICS_BEARER_TOKEN',
     'DASHBOARD_CURSOR_SIGNING_KEY',
     'CLERK_SECRET_KEY',
