@@ -490,6 +490,10 @@ const manifest = {
   sourceRelease: process.env.DR_SOURCE_RELEASE,
   encryption: process.env.DR_BACKUP_ENCRYPTION || 'provider-managed',
   destinationClass: process.env.DR_BACKUP_DESTINATION_CLASS || 'independent',
+  ...(process.env.DR_REHEARSAL_ID ? {
+    rehearsalId: process.env.DR_REHEARSAL_ID,
+    rehearsalNonce: process.env.DR_REHEARSAL_NONCE,
+  } : {}),
 };
 const value = createHmac('sha256', process.env.DR_MANIFEST_SIGNING_KEY)
   .update(JSON.stringify(manifest))
@@ -753,12 +757,20 @@ const payload = {
   verifierSha256: process.env.VERIFIER_SHA256,
   recoveryPointAt: manifest.recoveryPointAt,
   incidentAt: new Date(incident).toISOString(),
-  restoreStartedAt: new Date(Number(process.env.STARTED_EPOCH) * 1000).toISOString(),
+  restoreStartedAt: process.env.DR_RESTORE_PHASE_STARTED_AT
+    ? new Date(process.env.DR_RESTORE_PHASE_STARTED_AT).toISOString()
+    : new Date(Number(process.env.STARTED_EPOCH) * 1000).toISOString(),
   restoreCompletedAt: completed.toISOString(),
   measuredRpoSeconds: Math.floor((incident - recoveryPoint) / 1000),
   restoreDurationSeconds: Math.max(0, Math.ceil(completed.getTime() / 1000 - Number(process.env.STARTED_EPOCH))),
   measuredRtoSeconds: Math.max(0, Math.ceil((completed.getTime() - incident) / 1000)),
   verification: 'command-completed',
+  ...(process.env.DR_REHEARSAL_ID ? {
+    rehearsalId: process.env.DR_REHEARSAL_ID,
+    rehearsalNonce: process.env.DR_REHEARSAL_NONCE,
+    rehearsalPhase: process.env.DR_REHEARSAL_PHASE,
+    predecessorSha256: process.env.DR_REHEARSAL_PREDECESSOR_SHA256 || null,
+  } : {}),
   componentEvidenceSha256,
   adapterSha256,
   adapterEvidenceSha256,

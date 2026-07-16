@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/migration-rehearsal-proof.schema.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "kind",
+    "rehearsalId",
+    "runNonce",
+    "driver",
+    "mode",
+    "oldRelease",
+    "newRelease",
+    "targets",
+    "artifacts",
+    "databaseIdentities",
+    "steps",
+    "timing",
+    "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "tixkit-migration-rehearsal-proof-v1" },
+    "status": { "const": "passed" },
+    "kind": { "const": "restore-based-migration-rollback" },
+    "rehearsalId": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[-a-z0-9]{0,62})$"
+    },
+    "runNonce": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "driver": { "enum": ["postgres", "mysql"] },
+    "mode": { "enum": ["forward-success", "forward-failure-injected"] },
+    "oldRelease": { "$ref": "#/$defs/release" },
+    "newRelease": { "$ref": "#/$defs/release" },
+    "targets": {
+      "type": "object",
+      "required": ["forward", "rollback"],
+      "properties": {
+        "forward": { "$ref": "#/$defs/identifier" },
+        "rollback": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "backupSha256",
+        "backupManifestSha256",
+        "migrationCommandSha256",
+        "migrationArtifactSha256",
+        "databaseIdentityCommandSha256",
+        "oldReleaseManifestSha256",
+        "newReleaseManifestSha256"
+      ],
+      "properties": {
+        "backupSha256": { "$ref": "#/$defs/sha256" },
+        "backupManifestSha256": { "$ref": "#/$defs/sha256" },
+        "migrationCommandSha256": { "$ref": "#/$defs/sha256" },
+        "migrationArtifactSha256": { "$ref": "#/$defs/sha256" },
+        "databaseIdentityCommandSha256": { "$ref": "#/$defs/sha256" },
+        "oldReleaseManifestSha256": { "$ref": "#/$defs/sha256" },
+        "newReleaseManifestSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "databaseIdentities": {
+      "type": "object",
+      "required": ["source", "forward", "rollback"],
+      "properties": {
+        "source": { "$ref": "#/$defs/databaseIdentity" },
+        "forward": { "$ref": "#/$defs/databaseIdentity" },
+        "rollback": { "$ref": "#/$defs/databaseIdentity" }
+      },
+      "additionalProperties": false
+    },
+    "steps": {
+      "type": "object",
+      "required": ["forwardRestore", "migration", "newVersionVerification", "rollbackRestore"],
+      "properties": {
+        "forwardRestore": { "$ref": "#/$defs/restoreStep" },
+        "migration": { "$ref": "#/$defs/executionStep" },
+        "newVersionVerification": { "$ref": "#/$defs/verificationStep" },
+        "rollbackRestore": { "$ref": "#/$defs/restoreStep" }
+      },
+      "additionalProperties": false
+    },
+    "timing": {
+      "type": "object",
+      "required": [
+        "recoveryPointAt",
+        "incidentAt",
+        "startedAt",
+        "completedAt",
+        "measuredRpoSeconds",
+        "measuredRtoSeconds",
+        "durationMilliseconds"
+      ],
+      "properties": {
+        "recoveryPointAt": { "type": "string", "format": "date-time" },
+        "incidentAt": { "type": "string", "format": "date-time" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "measuredRpoSeconds": { "type": "integer", "minimum": 0 },
+        "measuredRtoSeconds": { "type": "integer", "minimum": 0 },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "signature": {
+      "type": "object",
+      "required": ["algorithm", "keyId", "value"],
+      "properties": {
+        "algorithm": { "const": "hmac-sha256" },
+        "keyId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "value": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+    },
+    "release": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,191}@sha256:[a-f0-9]{64}$"
+    },
+    "databaseIdentity": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "driver",
+        "role",
+        "physicalId",
+        "database",
+        "nonEmpty",
+        "stateDigest",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "driver": { "enum": ["postgres", "mysql"] },
+        "role": { "enum": ["source", "forward", "rollback"] },
+        "physicalId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"
+        },
+        "database": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_$.-]{0,127}$"
+        },
+        "nonEmpty": { "const": true },
+        "stateDigest": { "$ref": "#/$defs/sha256" },
+        "evidenceSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "restoreStep": {
+      "type": "object",
+      "required": ["targetId", "receiptSha256", "verifierSha256", "result"],
+      "properties": {
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "receiptSha256": { "$ref": "#/$defs/sha256" },
+        "verifierSha256": { "$ref": "#/$defs/sha256" },
+        "result": { "const": "passed" }
+      },
+      "additionalProperties": false
+    },
+    "executionStep": {
+      "type": "object",
+      "required": [
+        "exitCode",
+        "expectedOutcome",
+        "result",
+        "durationMilliseconds",
+        "stdoutSha256",
+        "stderrSha256",
+        "injection",
+        "startedAt",
+        "completedAt"
+      ],
+      "properties": {
+        "exitCode": { "type": "integer", "minimum": 0, "maximum": 123 },
+        "expectedOutcome": { "enum": ["success", "failure"] },
+        "result": { "enum": ["passed", "failed-as-injected"] },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "stdoutSha256": { "$ref": "#/$defs/sha256" },
+        "stderrSha256": { "$ref": "#/$defs/sha256" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "injection": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": [
+                "id",
+                "type",
+                "manifestSha256",
+                "challenge",
+                "challengeSha256",
+                "result"
+              ],
+              "properties": {
+                "id": { "$ref": "#/$defs/identifier" },
+                "type": { "$ref": "#/$defs/identifier" },
+                "manifestSha256": { "$ref": "#/$defs/sha256" },
+                "challenge": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "challengeSha256": { "$ref": "#/$defs/sha256" },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "type",
+                    "challenge",
+                    "observedPoint",
+                    "exitCode"
+                  ],
+                  "properties": {
+                    "schemaVersion": { "const": 1 },
+                    "id": { "$ref": "#/$defs/identifier" },
+                    "type": { "$ref": "#/$defs/identifier" },
+                    "challenge": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "observedPoint": { "$ref": "#/$defs/identifier" },
+                    "exitCode": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 123
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "verificationStep": {
+      "type": "object",
+      "required": [
+        "verifierSha256",
+        "exitCode",
+        "result",
+        "durationMilliseconds",
+        "stdoutSha256",
+        "stderrSha256",
+        "startedAt",
+        "completedAt"
+      ],
+      "properties": {
+        "verifierSha256": { "$ref": "#/$defs/sha256" },
+        "exitCode": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 255
+        },
+        "result": { "enum": ["passed", "not-run-expected-failure"] },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "stdoutSha256": { "$ref": "#/$defs/sha256" },
+        "stderrSha256": { "$ref": "#/$defs/sha256" },
+        "startedAt": { "type": ["string", "null"], "format": "date-time" },
+        "completedAt": { "type": ["string", "null"], "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
