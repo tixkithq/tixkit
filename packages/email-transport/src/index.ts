@@ -1,5 +1,13 @@
 import type { EmailTransport, SendEmailInput, SendEmailResult } from '@tixkit/domain';
 import type { SmsTransport, SendSmsInput, SendSmsResult } from '@tixkit/domain/messaging';
+import {
+  PlivoMessagingClient,
+  ProviderOperationError,
+  ResendMessagingClient,
+  TelnyxMessagingClient,
+  TwilioMessagingClient,
+  VonageMessagingClient,
+} from '@tixkit/provider-clients';
 import { ulid } from 'ulid';
 
 export class UnsupportedProviderRouteError extends Error {
@@ -92,7 +100,15 @@ export class MockEmailTransport implements EmailTransport {
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
     if (this.shouldFail) {
-      throw new Error(`Mock transport ${this.providerName} configured to fail`);
+      throw new ProviderOperationError(
+        `Mock transport ${this.providerName} configured to fail`,
+        this.providerName,
+        'send-email',
+        'validation',
+        false,
+        'rejected',
+        true,
+      );
     }
     return {
       deliveryId: input.deliveryId,
@@ -121,14 +137,17 @@ export class FallbackEmailTransport implements EmailTransport {
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
     const attempted: string[] = [];
+    let lastFailure: ProviderOperationError | undefined;
 
     try {
       const result = await this.primary.send(input);
       attempted.push(result.provider);
       return { ...result, attemptedFallbackProviders: attempted };
-    } catch {
+    } catch (error) {
       const name = (this.primary as { providerName?: string }).providerName ?? 'primary';
       attempted.push(name);
+      if (!(error instanceof ProviderOperationError) || !error.safeToFailover) throw error;
+      lastFailure = error;
     }
 
     for (const fallback of this.fallbacks) {
@@ -137,19 +156,15 @@ export class FallbackEmailTransport implements EmailTransport {
         const result = await fallback.send(input);
         attempted.push(result.provider);
         return { ...result, attemptedFallbackProviders: attempted };
-      } catch {
+      } catch (error) {
         const name = fallback.providerName ?? `fallback_${attempted.length}`;
         attempted.push(name);
+        if (!(error instanceof ProviderOperationError) || !error.safeToFailover) throw error;
+        lastFailure = error;
       }
     }
-
-    return {
-      deliveryId: input.deliveryId,
-      provider: 'none',
-      status: 'failed',
-      attemptedFallbackProviders: attempted,
-      sentAt: new Date().toISOString(),
-    };
+    if (lastFailure) throw lastFailure;
+    throw new Error('Email fallback routing exhausted without a provider attempt');
   }
 }
 
@@ -161,14 +176,17 @@ export class FallbackSmsTransport implements SmsTransport {
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
     const attempted: string[] = [];
+    let lastFailure: ProviderOperationError | undefined;
 
     try {
       const result = await this.primary.send(input);
       attempted.push(result.provider);
       return { ...result, attemptedFallbackProviders: attempted };
-    } catch {
+    } catch (error) {
       const name = (this.primary as { providerName?: string }).providerName ?? 'primary';
       attempted.push(name);
+      if (!(error instanceof ProviderOperationError) || !error.safeToFailover) throw error;
+      lastFailure = error;
     }
 
     for (const fallback of this.fallbacks) {
@@ -177,29 +195,17 @@ export class FallbackSmsTransport implements SmsTransport {
         const result = await fallback.send(input);
         attempted.push(result.provider);
         return { ...result, attemptedFallbackProviders: attempted };
-      } catch {
+      } catch (error) {
         const name = fallback.providerName ?? `fallback_${attempted.length}`;
         attempted.push(name);
+        if (!(error instanceof ProviderOperationError) || !error.safeToFailover) throw error;
+        lastFailure = error;
       }
     }
-
-    return {
-      deliveryId: input.deliveryId,
-      provider: 'none',
-      status: 'failed',
-      attemptedFallbackProviders: attempted,
-      sentAt: new Date().toISOString(),
-    };
+    if (lastFailure) throw lastFailure;
+    throw new Error('SMS fallback routing exhausted without a provider attempt');
   }
 }
-
-type SmsHttpConfig = {
-  apiKey: string;
-  apiSecret?: string;
-  accountSid?: string;
-  authToken?: string;
-  baseUrl?: string;
-};
 
 function sanitizeEnvCredential(value: string | undefined): string {
   if (!value) return '';
@@ -218,53 +224,31 @@ function credentialValue(credentialsRef: string, fallbackEnvName: string): strin
   if (fromRef) return fromRef;
   const fromFallback = sanitizeEnvCredential(process.env[fallbackEnvName]);
   if (fromFallback) return fromFallback;
-  // credentialsRef may itself be a raw key in tests/dev.
-  return sanitizeEnvCredential(credentialsRef) || credentialsRef;
-}
-
-async function parseJsonResponse(response: Response): Promise<Record<string, unknown>> {
-  const json = await response.json().catch(() => ({}));
-  return typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {};
+  // Unit tests may pass a raw sentinel to inspect the wire contract. Runtime
+  // routes must resolve a named environment reference and never transmit a
+  // misspelled reference name as though it were a credential.
+  return process.env.NODE_ENV === 'test' && !credentialsRef.startsWith('secret://')
+    ? sanitizeEnvCredential(credentialsRef)
+    : '';
 }
 
 export class TelnyxSmsTransport implements SmsTransport {
   providerName = 'telnyx';
-  private config: Required<Pick<SmsHttpConfig, 'apiKey' | 'baseUrl'>>;
+  private client: TelnyxMessagingClient;
 
-  constructor(credentialsRef = 'TELNYX_API_KEY', baseUrl = 'https://api.telnyx.com/v2') {
-    this.config = {
+  constructor(credentialsRef = 'TELNYX_API_KEY', baseUrl?: string) {
+    this.client = new TelnyxMessagingClient({
       apiKey: credentialValue(credentialsRef, 'TELNYX_API_KEY'),
       baseUrl,
-    };
+    });
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const response = await fetch(`${this.config.baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-        'Idempotency-Key': input.idempotencyKey,
-      },
-      body: JSON.stringify({
-        from: { phone_number: input.from },
-        to: [{ phone_number: input.to }],
-        text: input.body,
-        type: 'SMS',
-        webhook_url: input.webhookUrl,
-        use_profile_webhooks: !input.webhookUrl,
-      }),
-    });
-
-    const body = await parseJsonResponse(response);
-    if (!response.ok) {
-      throw new Error(`Telnyx SMS send failed with status ${response.status}`);
-    }
-
+    const result = await this.client.sendSms(input);
     return {
       deliveryId: input.deliveryId,
       provider: 'telnyx',
-      providerMessageId: typeof body.id === 'string' ? body.id : undefined,
+      providerMessageId: result.providerMessageId,
       status: 'queued',
       attemptedFallbackProviders: [],
       sentAt: new Date().toISOString(),
@@ -274,40 +258,26 @@ export class TelnyxSmsTransport implements SmsTransport {
 
 export class TwilioSmsTransport implements SmsTransport {
   providerName = 'twilio';
-  private accountSid: string;
-  private authToken: string;
+  private client: TwilioMessagingClient;
 
-  constructor(accountSidRef = 'TWILIO_ACCOUNT_SID', authTokenRef = 'TWILIO_AUTH_TOKEN') {
-    this.accountSid = credentialValue(accountSidRef, 'TWILIO_ACCOUNT_SID');
-    this.authToken = credentialValue(authTokenRef, 'TWILIO_AUTH_TOKEN');
+  constructor(
+    accountSidRef = 'TWILIO_ACCOUNT_SID',
+    authTokenRef = 'TWILIO_AUTH_TOKEN',
+    baseUrl?: string,
+  ) {
+    this.client = new TwilioMessagingClient({
+      accountSid: credentialValue(accountSidRef, 'TWILIO_ACCOUNT_SID'),
+      authToken: credentialValue(authTokenRef, 'TWILIO_AUTH_TOKEN'),
+      baseUrl,
+    });
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const form = new URLSearchParams({
-      From: input.from,
-      To: input.to,
-      Body: input.body,
-    });
-    if (input.webhookUrl) form.set('StatusCallback', input.webhookUrl);
-
-    const response = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}/Messages.json`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${this.accountSid}:${this.authToken}`).toString('base64')}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Idempotency-Key': input.idempotencyKey,
-        },
-        body: form,
-      },
-    );
-    const body = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(`Twilio SMS send failed with status ${response.status}`);
+    const result = await this.client.sendSms(input);
     return {
       deliveryId: input.deliveryId,
       provider: 'twilio',
-      providerMessageId: typeof body.sid === 'string' ? body.sid : undefined,
+      providerMessageId: result.providerMessageId,
       status: 'queued',
       attemptedFallbackProviders: [],
       sentAt: new Date().toISOString(),
@@ -317,37 +287,23 @@ export class TwilioSmsTransport implements SmsTransport {
 
 export class VonageSmsTransport implements SmsTransport {
   providerName = 'vonage';
-  private apiKey: string;
-  private apiSecret: string;
+  private client: VonageMessagingClient;
 
-  constructor(apiKeyRef = 'VONAGE_API_KEY', apiSecretRef = 'VONAGE_API_SECRET') {
-    this.apiKey = credentialValue(apiKeyRef, 'VONAGE_API_KEY');
-    this.apiSecret = credentialValue(apiSecretRef, 'VONAGE_API_SECRET');
+  constructor(apiKeyRef = 'VONAGE_API_KEY', apiSecretRef = 'VONAGE_API_SECRET', baseUrl?: string) {
+    this.client = new VonageMessagingClient({
+      apiKey: credentialValue(apiKeyRef, 'VONAGE_API_KEY'),
+      apiSecret: credentialValue(apiSecretRef, 'VONAGE_API_SECRET'),
+      baseUrl,
+    });
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const response = await fetch('https://rest.nexmo.com/sms/json', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        api_key: this.apiKey,
-        api_secret: this.apiSecret,
-        from: input.from,
-        to: input.to,
-        text: input.body,
-        client_ref: input.idempotencyKey,
-      }),
-    });
-    const body = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(`Vonage SMS send failed with status ${response.status}`);
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-    const first = messages[0] as Record<string, unknown> | undefined;
+    const result = await this.client.sendSms(input);
     return {
       deliveryId: input.deliveryId,
       provider: 'vonage',
-      providerMessageId:
-        typeof first?.['message-id'] === 'string' ? first['message-id'] : undefined,
-      status: first?.status === '0' ? 'queued' : 'failed',
+      providerMessageId: result.providerMessageId,
+      status: 'queued',
       attemptedFallbackProviders: [],
       sentAt: new Date().toISOString(),
     };
@@ -356,35 +312,22 @@ export class VonageSmsTransport implements SmsTransport {
 
 export class PlivoSmsTransport implements SmsTransport {
   providerName = 'plivo';
-  private authId: string;
-  private authToken: string;
+  private client: PlivoMessagingClient;
 
-  constructor(authIdRef = 'PLIVO_AUTH_ID', authTokenRef = 'PLIVO_AUTH_TOKEN') {
-    this.authId = credentialValue(authIdRef, 'PLIVO_AUTH_ID');
-    this.authToken = credentialValue(authTokenRef, 'PLIVO_AUTH_TOKEN');
+  constructor(authIdRef = 'PLIVO_AUTH_ID', authTokenRef = 'PLIVO_AUTH_TOKEN', baseUrl?: string) {
+    this.client = new PlivoMessagingClient({
+      authId: credentialValue(authIdRef, 'PLIVO_AUTH_ID'),
+      authToken: credentialValue(authTokenRef, 'PLIVO_AUTH_TOKEN'),
+      baseUrl,
+    });
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const response = await fetch(`https://api.plivo.com/v1/Account/${this.authId}/Message/`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${this.authId}:${this.authToken}`).toString('base64')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        src: input.from,
-        dst: input.to,
-        text: input.body,
-        url: input.webhookUrl,
-      }),
-    });
-    const body = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(`Plivo SMS send failed with status ${response.status}`);
-    const messageUuid = Array.isArray(body.message_uuid) ? body.message_uuid[0] : body.message_uuid;
+    const result = await this.client.sendSms(input);
     return {
       deliveryId: input.deliveryId,
       provider: 'plivo',
-      providerMessageId: typeof messageUuid === 'string' ? messageUuid : undefined,
+      providerMessageId: result.providerMessageId,
       status: 'queued',
       attemptedFallbackProviders: [],
       sentAt: new Date().toISOString(),
@@ -429,17 +372,17 @@ export class SmtpEmailTransport implements EmailTransport {
 }
 
 /**
- * Resend HTTP transport. Sends through https://api.resend.com/emails.
+ * Resend transport backed by the centralized outbound provider client.
  * credentialsRef may be an env var name (default RESEND_API_KEY) or a raw API key.
  */
 export class ResendEmailTransport implements EmailTransport {
   providerName = 'resend';
   private apiKey: string;
-  private baseUrl: string;
+  private client: ResendMessagingClient;
 
-  constructor(credentialsRef = 'RESEND_API_KEY', baseUrl = 'https://api.resend.com') {
+  constructor(credentialsRef = 'RESEND_API_KEY', baseUrl?: string) {
     this.apiKey = credentialValue(credentialsRef, 'RESEND_API_KEY');
-    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.client = new ResendMessagingClient({ apiKey: this.apiKey, baseUrl });
   }
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
@@ -454,61 +397,29 @@ export class ResendEmailTransport implements EmailTransport {
         : input.replyTo.email
       : undefined;
 
-    const payload: Record<string, unknown> = {
+    const result = await this.client.sendEmail({
       from,
       to: input.to.map((recipient) =>
         recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email,
       ),
       subject: input.subject,
       html: input.html,
-    };
-    if (input.text) payload.text = input.text;
-    if (replyTo) payload.reply_to = replyTo;
-    if (input.headers && Object.keys(input.headers).length > 0) {
-      payload.headers = input.headers;
-    }
-    if (input.tags && input.tags.length > 0) {
-      payload.tags = input.tags.map((tag) => ({ name: tag.name, value: tag.value }));
-    }
-    if (input.attachments && input.attachments.length > 0) {
-      payload.attachments = input.attachments.map((attachment) => ({
+      idempotencyKey: input.idempotencyKey,
+      text: input.text,
+      replyTo,
+      headers: input.headers,
+      tags: input.tags,
+      attachments: input.attachments?.map((attachment) => ({
         filename: attachment.filename,
         content: attachmentContentBase64(attachment.content, attachment.contentEncoding),
-        content_type: attachment.contentType,
-      }));
-    }
-
-    const response = await fetch(`${this.baseUrl}/emails`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        'Idempotency-Key': input.idempotencyKey,
-      },
-      body: JSON.stringify(payload),
+        contentType: attachment.contentType,
+      })),
     });
-    const body = await parseJsonResponse(response);
-    if (!response.ok) {
-      const message =
-        typeof body.message === 'string'
-          ? body.message
-          : typeof body.name === 'string'
-            ? body.name
-            : `Resend send failed with status ${response.status}`;
-      throw new Error(message);
-    }
-
-    const providerMessageId =
-      typeof body.id === 'string'
-        ? body.id
-        : typeof (body.data as { id?: unknown } | undefined)?.id === 'string'
-          ? (body.data as { id: string }).id
-          : undefined;
 
     return {
       deliveryId: input.deliveryId,
       provider: 'resend',
-      providerMessageId,
+      providerMessageId: result.providerMessageId,
       status: 'accepted',
       attemptedFallbackProviders: [],
       sentAt: new Date().toISOString(),

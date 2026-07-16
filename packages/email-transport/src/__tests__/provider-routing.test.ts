@@ -109,13 +109,14 @@ describe('FallbackEmailTransport', () => {
     expect(result.attemptedFallbackProviders).toContain('primary');
   });
 
-  it('returns failed status when all providers fail', async () => {
+  it('preserves the normalized terminal failure when all providers reject', async () => {
     const primary = new MockEmailTransport('primary', true);
     const fallback = new MockEmailTransport('fallback', true);
     const transport = new FallbackEmailTransport(primary, [fallback]);
-    const result = await transport.send(baseInput());
-    expect(result.status).toBe('failed');
-    expect(result.attemptedFallbackProviders).toHaveLength(2);
+    await expect(transport.send(baseInput())).rejects.toMatchObject({
+      kind: 'validation',
+      retryable: false,
+    });
   });
 });
 

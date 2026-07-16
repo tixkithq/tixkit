@@ -98,6 +98,7 @@
       "packages/migration-core",
       "packages/openapi",
       "packages/portability",
+      "packages/provider-clients",
       "packages/sdk-android",
       "packages/sdk-astro",
       "packages/sdk-flutter",

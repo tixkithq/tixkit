@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CaptureSmsTransport, FallbackSmsTransport, TelnyxSmsTransport } from './index.js';
+import { ProviderOperationError } from '@tixkit/provider-clients';
+import { CaptureSmsTransport, FallbackSmsTransport, TelnyxSmsTransport } from '../index.js';
 import type { SendSmsInput, SendSmsResult, SmsTransport } from '@tixkit/domain/messaging';
 
 const smsInput: SendSmsInput = {
@@ -20,7 +21,15 @@ class FailingSmsTransport implements SmsTransport {
   providerName = 'failing';
 
   async send(): Promise<SendSmsResult> {
-    throw new Error('failed');
+    throw new ProviderOperationError(
+      'failing.send-sms failed: validation',
+      'failing',
+      'send-sms',
+      'validation',
+      false,
+      'rejected',
+      true,
+    );
   }
 }
 
@@ -69,6 +78,28 @@ describe('SMS transports', () => {
 
     expect(result.provider).toBe('operator-extension');
     expect(result.attemptedFallbackProviders).toEqual(['failing', 'operator-extension']);
+  });
+
+  it('does not invoke a fallback after ambiguous delivery', async () => {
+    const fallback = new CaptureSmsTransport();
+    const ambiguous: SmsTransport & { providerName: string } = {
+      providerName: 'ambiguous',
+      async send(): Promise<never> {
+        throw new ProviderOperationError(
+          'ambiguous.send-sms failed: transport',
+          'ambiguous',
+          'send-sms',
+          'transport',
+          true,
+          'unknown',
+          false,
+        );
+      },
+    };
+    const transport = new FallbackSmsTransport(ambiguous, [fallback]);
+
+    await expect(transport.send(smsInput)).rejects.toMatchObject({ kind: 'transport' });
+    expect(fallback.sent).toHaveLength(0);
   });
 
   it('builds a Telnyx send request using the Messages API shape', async () => {

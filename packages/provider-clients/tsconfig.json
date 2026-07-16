@@ -7,13 +7,5 @@
     "incremental": true,
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
-  "include": ["src/**/*"],
-  "references": [
-    {
-      "path": "../domain"
-    },
-    {
-      "path": "../provider-clients"
-    }
-  ]
+  "include": ["src/**/*"]
 }

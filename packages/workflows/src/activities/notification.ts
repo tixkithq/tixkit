@@ -25,6 +25,7 @@ import {
   UnsupportedProviderRouteError,
   validateProviderFields,
 } from '@tixkit/email-transport';
+import { ProviderOperationError } from '@tixkit/provider-clients';
 import {
   createDefaultEmailTemplateForKey,
   normalizeEmailTemplateDocument,
@@ -640,11 +641,11 @@ export async function sendEmailActivity(input: {
     if (err instanceof UnsupportedProviderRouteError) {
       return errResult('EMAIL_PROVIDER_UNSUPPORTED', err.message, false);
     }
-    return errResult(
-      'EMAIL_SEND_FAILED',
-      err instanceof Error ? err.message : 'Unknown error',
-      true,
-    );
+    if (err instanceof ProviderOperationError) {
+      if (err.retryable) throw err.forRetry();
+      return errResult('EMAIL_SEND_FAILED', err.message, false);
+    }
+    return errResult('EMAIL_SEND_FAILED', 'Unexpected email transport failure', true);
   }
 }
 
@@ -805,6 +806,10 @@ export async function sendSmsActivity(input: {
     if (err instanceof UnsupportedProviderRouteError) {
       return errResult('SMS_PROVIDER_UNSUPPORTED', err.message, false);
     }
-    return errResult('SMS_SEND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
+    if (err instanceof ProviderOperationError) {
+      if (err.retryable) throw err.forRetry();
+      return errResult('SMS_SEND_FAILED', err.message, false);
+    }
+    return errResult('SMS_SEND_FAILED', 'Unexpected SMS transport failure', true);
   }
 }

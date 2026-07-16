@@ -34,6 +34,7 @@ const publicPackageDirectories = [
   'packages/domain',
   'packages/email-transport',
   'packages/openapi',
+  'packages/provider-clients',
   'packages/sdk-android',
   'packages/sdk-astro',
   'packages/sdk-flutter',

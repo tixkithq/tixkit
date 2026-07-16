@@ -375,7 +375,7 @@
       "name": "@tixkit/content-core",
       "version": "0.1.0",
       "dependencies": {
-        "@tixkit/domain": "workspace:*",
+        "@tixkit/domain": "0.1.0",
       },
       "devDependencies": {
         "typescript": "7.0.2",
@@ -412,8 +412,8 @@
         "@react-email/components": "^1.0.12",
         "@react-email/editor": "^1.5.10",
         "@react-email/render": "^2.0.9",
-        "@tixkit/content-core": "workspace:*",
-        "@tixkit/domain": "workspace:*",
+        "@tixkit/content-core": "0.1.0",
+        "@tixkit/domain": "0.1.0",
         "react": "^19.2.0",
       },
       "devDependencies": {
@@ -426,8 +426,8 @@
       "name": "@tixkit/content-event-page",
       "version": "0.1.0",
       "dependencies": {
-        "@tixkit/content-core": "workspace:*",
-        "@tixkit/domain": "workspace:*",
+        "@tixkit/content-core": "0.1.0",
+        "@tixkit/domain": "0.1.0",
       },
       "devDependencies": {
         "typescript": "7.0.2",
@@ -484,10 +484,10 @@
       "name": "@tixkit/db",
       "version": "0.1.0",
       "dependencies": {
-        "@tixkit/admin-table-core": "workspace:*",
-        "@tixkit/agent-protocol": "workspace:*",
-        "@tixkit/content-core": "workspace:*",
-        "@tixkit/domain": "workspace:*",
+        "@tixkit/admin-table-core": "0.1.0",
+        "@tixkit/agent-protocol": "0.1.0",
+        "@tixkit/content-core": "0.1.0",
+        "@tixkit/domain": "0.1.0",
         "kysely": "^0.29.0",
         "mysql2": "^3.22.0",
         "pg": "^8.22.0",
@@ -529,6 +529,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@tixkit/domain": "workspace:*",
+        "@tixkit/provider-clients": "workspace:*",
         "ulid": "^2.3.0",
       },
       "devDependencies": {
@@ -548,7 +549,7 @@
       "name": "@tixkit/migration-core",
       "version": "0.1.0",
       "dependencies": {
-        "@tixkit/portability": "workspace:*",
+        "@tixkit/portability": "0.1.0",
       },
       "devDependencies": {
         "typescript": "7.0.2",
@@ -571,13 +572,24 @@
       "name": "@tixkit/portability",
       "version": "0.1.0",
       "dependencies": {
-        "@tixkit/content-event-page": "workspace:*",
+        "@tixkit/content-event-page": "0.1.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
       },
       "devDependencies": {
         "typescript": "7.0.2",
         "vitest": "^4.1.0",
+      },
+    },
+    "packages/provider-clients": {
+      "name": "@tixkit/provider-clients",
+      "version": "0.1.0",
+      "dependencies": {
+        "@opentelemetry/api": "1.9.1",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
+        "vitest": "^4.1.10",
       },
     },
     "packages/sdk-astro": {
@@ -691,7 +703,7 @@
     },
     "packages/widget": {
       "name": "@tixkit/widget",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@tixkit/embed-core": "1.0.0",
       },
@@ -724,6 +736,7 @@
         "@tixkit/email-transport": "workspace:*",
         "@tixkit/migration-core": "workspace:*",
         "@tixkit/portability": "workspace:*",
+        "@tixkit/provider-clients": "workspace:*",
         "@tixkit/shared": "workspace:*",
         "ioredis": "^5.11.0",
         "passkit-generator": "^3.5.6",
@@ -2472,6 +2485,8 @@
     "@tixkit/openapi": ["@tixkit/openapi@workspace:packages/openapi"],
 
     "@tixkit/portability": ["@tixkit/portability@workspace:packages/portability"],
+
+    "@tixkit/provider-clients": ["@tixkit/provider-clients@workspace:packages/provider-clients"],
 
     "@tixkit/react-native": ["@tixkit/react-native@workspace:packages/sdk-react-native"],
 

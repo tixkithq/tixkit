@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ProviderOperationError } from '@tixkit/provider-clients';
 import {
   CaptureEmailTransport,
   MockEmailTransport,
@@ -114,9 +115,10 @@ describe('FallbackEmailTransport', () => {
     const fallback = new MockEmailTransport('fallback', true);
     const transport = new FallbackEmailTransport(primary, [fallback]);
 
-    const result = await transport.send(baseInput());
-    expect(result.status).toBe('failed');
-    expect(result.attemptedFallbackProviders).toEqual(['primary', 'fallback']);
+    await expect(transport.send(baseInput())).rejects.toMatchObject({
+      kind: 'validation',
+      retryable: false,
+    });
   });
 
   it('should try multiple fallbacks in order', async () => {
@@ -232,11 +234,10 @@ describe('ResendEmailTransport', () => {
     const [url, init] = call;
     expect(url).toBe('https://api.resend.com/emails');
     expect(init.method).toBe('POST');
-    expect(init.headers).toMatchObject({
-      Authorization: 'Bearer re_test_key',
-      'Content-Type': 'application/json',
-      'Idempotency-Key': 'idem_1',
-    });
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer re_test_key');
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('idempotency-key')).toBe('idem_1');
     expect(JSON.parse(String(init.body))).toMatchObject({
       from: 'Tixkit <onboarding@resend.dev>',
       to: ['buyer@example.com'],
@@ -262,7 +263,36 @@ describe('ResendEmailTransport', () => {
     ) as unknown as typeof fetch;
 
     const transport = new ResendEmailTransport('RESEND_API_KEY');
-    await expect(transport.send(baseInput())).rejects.toThrow('Invalid from address');
+    const failure = transport.send(baseInput());
+    await expect(failure).rejects.toMatchObject({
+      kind: 'validation',
+      retryable: false,
+      deliveryState: 'rejected',
+      safeToFailover: true,
+      details: { status: 422, providerCode: 'validation_error' },
+    });
+    await expect(failure).rejects.not.toThrow('Invalid from address');
+  });
+
+  it('does not fail over after an ambiguous provider timeout', async () => {
+    const fallback = new MockEmailTransport('fallback');
+    const primary = {
+      providerName: 'primary',
+      async send(): Promise<never> {
+        throw new ProviderOperationError(
+          'primary.send-email failed: timeout',
+          'primary',
+          'send-email',
+          'timeout',
+          true,
+          'unknown',
+          false,
+        );
+      },
+    };
+    const transport = new FallbackEmailTransport(primary, [fallback]);
+
+    await expect(transport.send(baseInput())).rejects.toMatchObject({ kind: 'timeout' });
   });
 });
 

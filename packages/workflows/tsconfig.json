@@ -30,6 +30,9 @@
       "path": "../email-transport"
     },
     {
+      "path": "../provider-clients"
+    },
+    {
       "path": "../shared"
     }
   ]

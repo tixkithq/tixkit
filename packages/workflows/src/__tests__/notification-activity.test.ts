@@ -241,6 +241,7 @@ function activeSmsRoute(overrides: Record<string, unknown> = {}) {
 describe('notification activity deliverability gating', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   beforeEach(() => {
@@ -616,6 +617,163 @@ describe('notification activity deliverability gating', () => {
     });
     expect(dbState.emailDeliveries).toHaveLength(0);
     expect(dbState.renderArtifacts).toHaveLength(0);
+  });
+
+  it('returns a safe terminal result for a permanent provider rejection', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_secret');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          { name: 'validation_error', message: 'buyer@example.com is invalid' },
+          { status: 422 },
+        ),
+      ),
+    );
+    dbState.emailRoutes = [activeEmailRoute({ provider_type: 'resend' })];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      verified: true,
+    };
+
+    const result = await sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_SEND_FAILED',
+      message: 'resend.send-email failed: validation (HTTP 422)',
+      retryable: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('buyer@example.com is invalid');
+    expect(dbState.emailDeliveries).toHaveLength(0);
+  });
+
+  it('throws a safe retryable failure so Temporal owns provider retries', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_secret');
+    const fetchMock = vi.fn(async () =>
+      Response.json({ message: 'buyer@example.com upstream failure' }, { status: 503 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    dbState.emailRoutes = [activeEmailRoute({ provider_type: 'resend' })];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      verified: true,
+    };
+
+    const failure = sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    await expect(failure).rejects.toMatchObject({
+      kind: 'server',
+      retryable: true,
+      safeToFailover: false,
+      details: {},
+    });
+    await expect(failure).rejects.not.toThrow('buyer@example.com upstream failure');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(dbState.emailDeliveries).toHaveLength(0);
+  });
+
+  it('keeps exhausted permanent fallback rejections terminal', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_secret');
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        { code: 'invalid_recipient', diagnostic: 'private-provider-text' },
+        { status: 422 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    dbState.emailRoutes = [
+      activeEmailRoute({ provider_type: 'resend' }),
+      activeEmailRoute({
+        id: 'epr_fallback',
+        provider_type: 'resend',
+        is_fallback: true,
+        priority: 2,
+      }),
+    ];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      verified: true,
+    };
+
+    const result = await sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_SEND_FAILED',
+      retryable: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('private-provider-text');
+    expect(dbState.emailDeliveries).toHaveLength(0);
+  });
+
+  it('keeps exhausted rate limits in Temporal activity retry semantics', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_secret');
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        { code: 'rate_limited', diagnostic: 'private-provider-text' },
+        { status: 429, headers: { 'retry-after': '10' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    dbState.emailRoutes = [
+      activeEmailRoute({ provider_type: 'resend' }),
+      activeEmailRoute({
+        id: 'epr_fallback',
+        provider_type: 'resend',
+        is_fallback: true,
+        priority: 2,
+      }),
+    ];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      verified: true,
+    };
+
+    const failure = sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    await expect(failure).rejects.toMatchObject({
+      kind: 'rate-limit',
+      retryable: true,
+      safeToFailover: false,
+      details: {},
+    });
+    await expect(failure).rejects.not.toThrow('private-provider-text');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(dbState.emailDeliveries).toHaveLength(0);
   });
 
   it('fails closed when SMS provider routes have no verified sender identity', async () => {

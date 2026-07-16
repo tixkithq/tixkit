@@ -30,7 +30,7 @@ TypeScript ES modules on server runtimes.
 
 ## Configuration
 
-No provider environment variables are read directly; callers construct configured provider transports.
+Provider routes resolve named environment references. Unresolved references fail closed; they are never transmitted as credentials.
 
 ## Security
 
