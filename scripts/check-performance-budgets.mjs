@@ -187,6 +187,7 @@ function readLighthouseAuditNumericValue(report, auditId) {
 
 export function evaluateBudgets(config, { root = repoRoot } = {}) {
   const results = [];
+  const nextRouteIdentities = new Set();
   for (const budget of config.files ?? []) {
     const filePath = path.join(root, budget.path);
     if (!existsSync(filePath)) {
@@ -197,6 +198,20 @@ export function evaluateBudgets(config, { root = repoRoot } = {}) {
   }
 
   for (const budget of config.nextRoutes ?? []) {
+    const normalizedAppDir = path
+      .normalize(budget.appDir)
+      .split(path.sep)
+      .join('/')
+      .replace(/\/+$/u, '');
+    const identity = `${normalizedAppDir}:${normalizeRoute(budget.route)}`;
+    if (nextRouteIdentities.has(identity)) {
+      results.push({
+        ok: false,
+        line: `FAIL ${budget.label}: duplicate Next.js route budget ${identity}`,
+      });
+      continue;
+    }
+    nextRouteIdentities.add(identity);
     try {
       const { bytes, files, source } = sizeNextRoute(root, budget.appDir, budget.route);
       const result = checkBudget(budget.label, bytes, budget.maxBytes);

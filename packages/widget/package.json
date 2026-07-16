@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/widget",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tixkit Embed Contract v1 custom elements for hosted checkout",
   "license": "UNLICENSED",
   "repository": {
@@ -11,8 +11,11 @@
   "homepage": "https://github.com/tixkit/tixkit#readme",
   "bugs": "https://github.com/tixkit/tixkit/issues",
   "type": "module",
-  "sideEffects": false,
-  "main": "./dist/tixkit-widget.js",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/tixkit-widget.js"
+  ],
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
@@ -25,6 +28,10 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
       "import": "./dist/tixkit-widget.js"
     },
     "./package.json": "./package.json"
@@ -37,9 +44,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -b && esbuild src/index.ts --bundle --minify --format=esm --sourcemap=external --outfile=dist/tixkit-widget.js",
+    "build": "rm -rf dist && tsc -b && esbuild src/browser.ts --bundle --minify --format=esm --sourcemap=external --outfile=dist/tixkit-widget.js",
     "build:release": "node ../../scripts/build-widget-release.mjs",
-    "dev": "esbuild src/index.ts --bundle --format=esm --outfile=dist/tixkit-widget.js --watch",
+    "dev": "esbuild src/browser.ts --bundle --format=esm --outfile=dist/tixkit-widget.js --watch",
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test:unit": "vitest run",

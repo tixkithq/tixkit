@@ -30,6 +30,29 @@ describe('docs site configuration', () => {
 });
 
 describe('adoption-path information architecture', () => {
+  it('keeps expanded navigation data outside the client bundle', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../../..');
+    const navigation = readFileSync(
+      resolve(repositoryRoot, 'apps/docs/src/components/docs-navigation.tsx'),
+      'utf8',
+    );
+    const link = readFileSync(
+      resolve(repositoryRoot, 'apps/docs/src/components/docs-navigation-link.tsx'),
+      'utf8',
+    );
+    const mobile = readFileSync(
+      resolve(repositoryRoot, 'apps/docs/src/components/mobile-docs-navigation.tsx'),
+      'utf8',
+    );
+
+    expect(navigation).not.toContain("'use client'");
+    expect(link).toContain("'use client'");
+    expect(link).toContain("aria-current={pathname === href ? 'page' : undefined}");
+    expect(mobile).not.toContain('documentationNavigation');
+    expect(mobile).not.toContain('docRoutes');
+    expect(mobile).toContain("addEventListener('click', handleNavigationClick)");
+  });
+
   it('presents exactly the three accepted paths from the homepage', () => {
     expect(adoptionPaths.map(({ title, href }) => ({ title, href }))).toEqual([
       { title: 'Sell tickets with Tixkit', href: '/sell' },

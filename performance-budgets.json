@@ -27,13 +27,7 @@
       "maxBytes": 900000
     },
     {
-      "label": "documentation guide first-load JS",
-      "appDir": "apps/docs",
-      "route": "/[...slug]",
-      "maxBytes": 550000
-    },
-    {
-      "label": "generated API reference first-load JS",
+      "label": "documentation catch-all shell first-load JS",
       "appDir": "apps/docs",
       "route": "/[...slug]",
       "maxBytes": 550000

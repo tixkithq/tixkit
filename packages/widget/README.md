@@ -22,7 +22,9 @@ Public browser package; its custom-element and lifecycle contract is stable with
 
 ## Public exports
 
-`TixkitWidget`, `TixkitButton`, and all `@tixkit/embed-core` contract exports; package metadata subpath.
+The package root exports `TixkitWidget`, `TixkitButton`, and all runtime and type exports from
+`@tixkit/embed-core`. The lean `@tixkit/widget/browser` entry exports the widget classes and version
+at runtime plus the embed contract types; it is the entry used for the immutable CDN artifact.
 
 ## Runtime
 

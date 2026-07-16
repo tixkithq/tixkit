@@ -1,13 +1,13 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef } from 'react';
-import { DocsNavigation } from './docs-navigation';
+import { type ReactNode, useEffect, useRef } from 'react';
 
-export function MobileDocsNavigation() {
+export function MobileDocsNavigation({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
+  const navigationRef = useRef<HTMLElement>(null);
   const previousPathname = useRef(pathname);
 
   const close = () => {
@@ -34,11 +34,20 @@ export function MobileDocsNavigation() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, []);
 
+  useEffect(() => {
+    const navigation = navigationRef.current;
+    const handleNavigationClick = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest('a[href]')) close();
+    };
+    navigation?.addEventListener('click', handleNavigationClick);
+    return () => navigation?.removeEventListener('click', handleNavigationClick);
+  }, []);
+
   return (
     <details ref={detailsRef} className="mobile-navigation">
       <summary ref={summaryRef}>Menu</summary>
-      <nav aria-label="Mobile documentation">
-        <DocsNavigation onNavigate={close} />
+      <nav ref={navigationRef} aria-label="Mobile documentation">
+        {children}
       </nav>
     </details>
   );

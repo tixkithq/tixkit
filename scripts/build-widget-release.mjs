@@ -8,6 +8,7 @@ import {
   writeFileSync,
   mkdirSync,
   copyFileSync,
+  existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -102,7 +103,7 @@ function build(directory) {
   execFileSync(
     join(root, 'node_modules/.bin/esbuild'),
     [
-      'packages/widget/src/index.ts',
+      'packages/widget/src/browser.ts',
       '--bundle',
       '--minify',
       '--format=esm',
@@ -129,14 +130,10 @@ try {
   if (!firstBytes.equals(secondBytes) || !firstMap.equals(secondMap)) {
     throw new Error('Widget release build is not reproducible.');
   }
-  if (firstBytes.length > 50 * 1024) throw new Error('Widget bundle exceeds the 50 KiB budget.');
+  if (firstBytes.length > 45_000)
+    throw new Error('Widget browser bundle exceeds the 45,000 byte performance budget.');
   if (firstMap.length > 150 * 1024)
     throw new Error('Widget source map exceeds the 150 KiB budget.');
-
-  rmSync(outputDirectory, { recursive: true, force: true });
-  mkdirSync(outputDirectory, { recursive: true });
-  copyFileSync(first.output, join(outputDirectory, first.file));
-  copyFileSync(first.map, join(outputDirectory, `${first.file}.map`));
 
   const sha256 = hash(firstBytes, 'sha256');
   const sha384 = hash(firstBytes, 'sha384');
@@ -171,12 +168,39 @@ try {
       },
     },
   };
-  writeFileSync(join(outputDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  writeFileSync(
-    join(outputDirectory, 'checksums.txt'),
-    `${Buffer.from(sha256, 'base64').toString('hex')}  ${first.file}\n${Buffer.from(mapSha256, 'base64').toString('hex')}  ${first.file}.map\n`,
-  );
-  process.stdout.write(`Built reproducible widget ${version} in ${outputDirectory}\n`);
+  const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+  const checksumBytes = `${Buffer.from(sha256, 'base64').toString('hex')}  ${first.file}\n${Buffer.from(mapSha256, 'base64').toString('hex')}  ${first.file}.map\n`;
+  const existingManifestPath = join(outputDirectory, 'manifest.json');
+  const existingManifest = existsSync(existingManifestPath)
+    ? JSON.parse(readFileSync(existingManifestPath, 'utf8'))
+    : undefined;
+  if (existingManifest?.immutable === true && existingManifest.widgetVersion === version) {
+    const existingWidget = join(outputDirectory, first.file);
+    const existingMap = join(outputDirectory, `${first.file}.map`);
+    const existingChecksums = join(outputDirectory, 'checksums.txt');
+    const identical =
+      readFileSync(existingManifestPath, 'utf8') === manifestBytes &&
+      existsSync(existingWidget) &&
+      existsSync(existingMap) &&
+      existsSync(existingChecksums) &&
+      readFileSync(existingWidget).equals(firstBytes) &&
+      readFileSync(existingMap).equals(firstMap) &&
+      readFileSync(existingChecksums, 'utf8') === checksumBytes;
+    if (!identical) {
+      throw new Error(
+        `Immutable widget release collision for ${version}: use a new package version instead of replacing published bytes or provenance.`,
+      );
+    }
+    process.stdout.write(`Verified existing immutable widget ${version} in ${outputDirectory}\n`);
+  } else {
+    rmSync(outputDirectory, { recursive: true, force: true });
+    mkdirSync(outputDirectory, { recursive: true });
+    copyFileSync(first.output, join(outputDirectory, first.file));
+    copyFileSync(first.map, join(outputDirectory, `${first.file}.map`));
+    writeFileSync(existingManifestPath, manifestBytes);
+    writeFileSync(join(outputDirectory, 'checksums.txt'), checksumBytes);
+    process.stdout.write(`Built reproducible widget ${version} in ${outputDirectory}\n`);
+  }
 } finally {
   rmSync(proofA, { recursive: true, force: true });
   rmSync(proofB, { recursive: true, force: true });

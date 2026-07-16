@@ -1,50 +1,27 @@
-'use client';
-
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { docRoutes } from '@tixkit/docs-core';
 import {
   documentationNavigation,
   type DocumentationNavigationItem,
 } from '../../../../docs/navigation';
+import { DocsNavigationLink } from './docs-navigation-link';
 
-function NavigationItems({
-  items,
-  pathname,
-  onNavigate,
-}: {
-  items: readonly DocumentationNavigationItem[];
-  pathname: string;
-  onNavigate?: () => void;
-}) {
+function NavigationItems({ items }: { items: readonly DocumentationNavigationItem[] }) {
   return (
     <ul>
       {items.map((item) => (
         <li key={`${item.label}-${item.routeId ?? 'group'}`}>
           {item.routeId ? (
-            <Link
-              href={docRoutes[item.routeId]}
-              prefetch={false}
-              aria-current={pathname === docRoutes[item.routeId] ? 'page' : undefined}
-              onClick={onNavigate}
-            >
-              {item.label}
-            </Link>
+            <DocsNavigationLink href={docRoutes[item.routeId]} label={item.label} />
           ) : (
             <span>{item.label}</span>
           )}
-          {item.children ? (
-            <NavigationItems items={item.children} pathname={pathname} onNavigate={onNavigate} />
-          ) : null}
+          {item.children ? <NavigationItems items={item.children} /> : null}
         </li>
       ))}
     </ul>
   );
 }
 
-export function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
-  const pathname = usePathname();
-  return (
-    <NavigationItems items={documentationNavigation} pathname={pathname} onNavigate={onNavigate} />
-  );
+export function DocsNavigation() {
+  return <NavigationItems items={documentationNavigation} />;
 }

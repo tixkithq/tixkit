@@ -292,10 +292,21 @@ test('mobile navigation remains operable without horizontal page overflow', asyn
   if (!testInfo.project.name.startsWith('mobile-')) return;
   await page.goto('/operators/events');
   const menu = page.locator('details.mobile-navigation');
-  await menu.getByText('Menu').click();
+  const summary = menu.getByText('Menu');
+  await summary.click();
   await expect(menu.getByRole('navigation', { name: 'Mobile documentation' })).toBeVisible();
   const current = menu.getByRole('link', { name: 'Events', exact: true });
   await expect(current).toHaveAttribute('aria-current', 'page');
+  await expect(menu.locator('[aria-current="page"]')).toHaveCount(1);
+  await current.click();
+  await expect(menu).not.toHaveAttribute('open', '');
+
+  await summary.click();
+  await page.keyboard.press('Escape');
+  await expect(menu).not.toHaveAttribute('open', '');
+  await expect(summary).toBeFocused();
+
+  await summary.click();
   await menu.getByRole('link', { name: 'Create the first event', exact: true }).click();
   await expect(
     page.getByRole('heading', {

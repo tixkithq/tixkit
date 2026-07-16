@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { DocsNavigation } from './docs-navigation';
 import { MobileDocsNavigation } from './mobile-docs-navigation';
 import { SearchDialog } from './search-dialog';
 import { ThemeToggle } from './theme-toggle';
@@ -18,7 +19,9 @@ export function DocsHeader({ repositoryUrl, version }: { repositoryUrl: string; 
         <a href={repositoryUrl} rel="noreferrer">
           Repository
         </a>
-        <MobileDocsNavigation />
+        <MobileDocsNavigation>
+          <DocsNavigation />
+        </MobileDocsNavigation>
       </div>
     </header>
   );
