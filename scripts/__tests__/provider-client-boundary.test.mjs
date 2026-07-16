@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { providerClientBoundaryViolations } from '../lib/provider-client-boundary.mjs';
+import { providerClientBoundaryViolations as inspectProviderClientBoundary } from '../lib/provider-client-boundary.mjs';
+import { loadProviderIntegrationRegistry } from '../lib/provider-integration-registry.mjs';
+
+const repositoryRoot = resolve(import.meta.dirname, '../..');
+const registry = loadProviderIntegrationRegistry(repositoryRoot);
+
+function providerClientBoundaryViolations(root, options = {}) {
+  return inspectProviderClientBoundary(root, { registry, ...options });
+}
 
 function fixture(files) {
   const root = mkdtempSync(resolve(tmpdir(), 'tixkit-provider-boundary-'));
@@ -26,6 +34,37 @@ test('accepts provider-owned clients with webhook verification behind the bounda
   });
   try {
     assert.deepEqual(providerClientBoundaryViolations(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects unclassified provider hosts and registry-owned hosts outside their owner', () => {
+  const root = fixture({
+    'packages/api/src/services/mystery-alias-join.ts':
+      "const parts = ['https://api.', 'mystery-alias-join.invalid/v1/messages']; fetch(parts.join(''));\n",
+    'packages/api/src/services/mystery-alias-object.ts':
+      "const endpoint = String('https://api.mystery-alias-object.invalid/v1/messages'); const options = { url: endpoint, method: 'POST' }; client.request(options);\n",
+    'packages/api/src/services/mystery-join.ts':
+      "fetch(['https://api.', 'mystery-join.invalid/v1/messages'].join(''));\n",
+    'packages/api/src/services/mystery-object.ts':
+      "client.request({ url: 'https://api.mystery-object.invalid/v1/messages', method: 'POST' });\n",
+    'packages/api/src/services/mystery-string.ts':
+      "fetch(String('https://api.mystery-string.invalid/v1/messages'));\n",
+    'packages/api/src/services/mystery.ts':
+      "fetch('https://api.mystery-provider.invalid/v1/messages');\n",
+    'packages/api/src/services/resend.ts': "fetch('https://api.resend.com/emails');\n",
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      'packages/api/src/services/mystery-alias-join.ts: outbound host is not classified in the provider registry: api.mystery-alias-join.invalid',
+      'packages/api/src/services/mystery-alias-object.ts: outbound host is not classified in the provider registry: api.mystery-alias-object.invalid',
+      'packages/api/src/services/mystery-join.ts: outbound host is not classified in the provider registry: api.mystery-join.invalid',
+      'packages/api/src/services/mystery-object.ts: outbound host is not classified in the provider registry: api.mystery-object.invalid',
+      'packages/api/src/services/mystery-string.ts: outbound host is not classified in the provider registry: api.mystery-string.invalid',
+      'packages/api/src/services/mystery.ts: outbound host is not classified in the provider registry: api.mystery-provider.invalid',
+      'packages/api/src/services/resend.ts: migrated messaging provider endpoints must be owned by @tixkit/provider-clients',
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -104,6 +143,27 @@ test('permits the browser Stripe CSP origin without permitting server-side REST 
   }
 });
 
+test('drives non-executing host allowances from registry metadata', () => {
+  const path = 'apps/checkout/src/lib/checkout-security-headers.ts';
+  const root = fixture({
+    [path]:
+      'export function checkoutContentSecurityPolicy() { return ["connect-src https://api.stripe.com https://r.stripe.com"]; }\n',
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), []);
+    const deniedRegistry = structuredClone(registry);
+    for (const integration of deniedRegistry.integrations) {
+      integration.allowedNonExecutionHostPaths = [];
+    }
+    assert.deepEqual(providerClientBoundaryViolations(root, { registry: deniedRegistry }), [
+      `${path}: r.stripe.com execution must cross its registry owner (stripe-browser-runtime)`,
+      `${path}: server-side Stripe REST execution must cross @tixkit/provider-clients`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('permits the Stripe.js browser SDK only in the checkout application', () => {
   const root = fixture({
     'apps/checkout/src/lib/stripe.ts':
@@ -166,7 +226,13 @@ test('rejects provider endpoints through aliases, request objects, assignments, 
       "const vendor = 'twi' + 'lio.com'; fetch('https://api.' + vendor + '/v1/messages');\n",
   });
   try {
-    assert.deepEqual(providerClientBoundaryViolations(root), [
+    const fixtureRegistry = structuredClone(registry);
+    fixtureRegistry.nonProviderHostAllowances.push({
+      host: 'safe.example',
+      allowedExecutionPaths: ['packages/api/src/routes/reassigned.ts'],
+      rationale: 'Synthetic non-provider control host used by this hostile fixture.',
+    });
+    assert.deepEqual(providerClientBoundaryViolations(root, { registry: fixtureRegistry }), [
       'packages/api/src/routes/aliases.ts: server-side Stripe REST execution must cross @tixkit/provider-clients',
       'packages/api/src/routes/arbitrary-split.ts: server-side Stripe REST execution must cross @tixkit/provider-clients',
       'packages/api/src/routes/arbitrary-split.ts: server-side Stripe SDK execution must cross @tixkit/provider-clients',

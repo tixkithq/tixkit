@@ -1,21 +1,18 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { parseSync } from 'oxc-parser';
+import {
+  loadProviderIntegrationRegistry,
+  pathMatchesPolicy,
+  registryHostPolicies,
+  registryImportPolicies,
+  registryNonProviderHostPolicies,
+} from './provider-integration-registry.mjs';
 
 const sourceExtension = /\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx)$/u;
 const ignoredSegment =
   /(?:^|\/)(?:\.dart_tool|\.expo|\.next|\.output|\.turbo|__tests__|build|coverage|dist|fixtures|generated|node_modules|out|test-results)(?:\/|$)/u;
 const testFile = /(?:^|\/)[^/]+\.(?:integration\.)?(?:spec|test)\.[^.]+$/u;
-const migratedProviderHosts = new Set([
-  'api.resend.com',
-  'api.telnyx.com',
-  'api.twilio.com',
-  'rest.nexmo.com',
-  'api.vonage.com',
-  'api.plivo.com',
-]);
-const providerBoundaryAnchor =
-  /(?:stripe|resend|telnyx|twilio|vonage|plivo|nexmo|['"]str['"]\s*\+\s*['"]ipe['"])/iu;
 const networkMethodNames = new Set(['delete', 'fetch', 'get', 'patch', 'post', 'put', 'request']);
 
 function walk(directory) {
@@ -59,14 +56,6 @@ function isRuntimeSource(path) {
     !ignoredSegment.test(path) &&
     !testFile.test(path)
   );
-}
-
-function stripeSdkAllowed(path) {
-  return path.startsWith('packages/provider-clients/');
-}
-
-function migratedEndpointAllowed(path) {
-  return path.startsWith('packages/provider-clients/');
 }
 
 function staticStrings(node, bindings, seen = new Set()) {
@@ -123,6 +112,45 @@ function staticStrings(node, bindings, seen = new Set()) {
     return staticStrings(node.arguments?.[0], bindings, seen);
   }
   if (
+    node.type === 'CallExpression' &&
+    node.callee?.type === 'Identifier' &&
+    node.callee.name === 'String'
+  ) {
+    return staticStrings(node.arguments?.[0], bindings, seen);
+  }
+  if (
+    node.type === 'CallExpression' &&
+    node.callee?.type === 'MemberExpression' &&
+    ((!node.callee.computed && node.callee.property?.name === 'join') ||
+      (node.callee.computed &&
+        staticStrings(node.callee.property, bindings, seen).includes('join'))) &&
+    node.callee.object
+  ) {
+    const separatorValues =
+      node.arguments.length === 0 ? [','] : staticStrings(node.arguments[0], bindings, seen);
+    if (separatorValues.length === 0) return [];
+    const arrays = staticBoundNodes(node.callee.object, bindings, seen).filter(
+      (candidate) => candidate.type === 'ArrayExpression',
+    );
+    const joined = [];
+    for (const array of arrays) {
+      const elementValues = array.elements.map((element) => staticStrings(element, bindings, seen));
+      if (elementValues.some((values) => values.length === 0)) continue;
+      let combinations = [[]];
+      for (const values of elementValues) {
+        combinations = combinations
+          .flatMap((combination) => values.map((value) => [...combination, value]))
+          .slice(0, 64);
+      }
+      joined.push(
+        ...combinations.flatMap((combination) =>
+          separatorValues.map((separator) => combination.join(separator)),
+        ),
+      );
+    }
+    return joined.slice(0, 64);
+  }
+  if (
     node.type === 'MemberExpression' &&
     ((!node.computed && node.property?.name === 'href') ||
       (node.computed && staticStrings(node.property, bindings, seen).includes('href')))
@@ -130,6 +158,41 @@ function staticStrings(node, bindings, seen = new Set()) {
     return staticStrings(node.object, bindings, seen);
   }
   return [];
+}
+
+function staticBoundNodes(node, bindings, seen = new Set()) {
+  if (!node) return [];
+  if (
+    node.type === 'ParenthesizedExpression' ||
+    node.type === 'TSAsExpression' ||
+    node.type === 'TSSatisfiesExpression' ||
+    node.type === 'TSNonNullExpression' ||
+    node.type === 'TypeCastExpression'
+  ) {
+    return staticBoundNodes(node.expression, bindings, seen);
+  }
+  if (node.type !== 'Identifier') return [node];
+  if (seen.has(node.name)) return [];
+  const nextSeen = new Set([...seen, node.name]);
+  return (bindings.get(node.name) ?? []).flatMap((initializer) =>
+    staticBoundNodes(initializer, bindings, nextSeen),
+  );
+}
+
+function staticNetworkArgumentStrings(node, bindings) {
+  const direct = staticStrings(node, bindings);
+  if (direct.length > 0) return direct;
+  return staticBoundNodes(node, bindings).flatMap((candidate) => {
+    if (candidate.type !== 'ObjectExpression') return [];
+    return candidate.properties.flatMap((property) => {
+      if (property.type !== 'Property') return [];
+      const keys = property.computed
+        ? staticStrings(property.key, bindings)
+        : [property.key?.name ?? property.key?.value].filter(Boolean);
+      if (!keys.some((key) => ['endpoint', 'href', 'uri', 'url'].includes(key))) return [];
+      return staticStrings(property.value, bindings);
+    });
+  });
 }
 
 function calleeNames(expression, bindings, seen = new Set()) {
@@ -164,25 +227,26 @@ function providerHosts(value) {
   return hosts;
 }
 
-function sourceMayContainProviderBoundary(source) {
+function sourceMayContainProviderBoundary(source, hostPolicies, importPolicies) {
   const decoded = source
     .replace(/\\x([0-9a-f]{2})/giu, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/\\u([0-9a-f]{4})/giu, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/\\u\{([0-9a-f]{1,6})\}/giu, (_match, hex) =>
       String.fromCodePoint(Number.parseInt(hex, 16)),
     );
-  const compact = decoded.replace(/[\s'"`+\\]/gu, '').toLowerCase();
+  const compact = decoded.replace(/[^a-z0-9]/giu, '').toLowerCase();
   return (
-    providerBoundaryAnchor.test(decoded) ||
-    [...migratedProviderHosts, 'api.stripe.com'].some((host) => compact.includes(host)) ||
-    compact.includes('stripe') ||
+    [...hostPolicies.keys()].some((host) => compact.includes(host)) ||
+    [...importPolicies.keys()].some((packageName) =>
+      compact.includes(packageName.replace(/[^a-z0-9]/giu, '').toLowerCase()),
+    ) ||
     /(?:\bfetch\b|\brequire\b|\bimport\s*\(|\.request\s*\()/u.test(decoded) ||
     ((decoded.includes('fromCharCode') || decoded.includes('fromCodePoint')) &&
       /(?:fetch|import|require|request)/u.test(decoded))
   );
 }
 
-function syntaxContainsStripeTaint(node, values = []) {
+function syntaxContainsDependencyTaint(node, packageName, values = []) {
   if (!node || typeof node !== 'object') return false;
   if (
     (node.type === 'Literal' || node.type === 'StringLiteral') &&
@@ -196,16 +260,21 @@ function syntaxContainsStripeTaint(node, values = []) {
   for (const [key, value] of Object.entries(node)) {
     if (key === 'parent' || key === 'scope') continue;
     if (Array.isArray(value)) {
-      for (const entry of value) syntaxContainsStripeTaint(entry, values);
+      for (const entry of value) syntaxContainsDependencyTaint(entry, packageName, values);
     } else {
-      syntaxContainsStripeTaint(value, values);
+      syntaxContainsDependencyTaint(value, packageName, values);
     }
   }
-  return values.join('').replace(/[^a-z0-9]/giu, '').toLowerCase().includes('stripe');
+  const normalized = values
+    .join('')
+    .replace(/[^a-z0-9]/giu, '')
+    .toLowerCase();
+  const normalizedPackage = packageName.replace(/[^a-z0-9]/giu, '').toLowerCase();
+  return normalized.includes(normalizedPackage);
 }
 
-function isAllowedCheckoutCspLiteral(path, node, parents) {
-  if (path !== 'apps/checkout/src/lib/checkout-security-headers.ts') return false;
+function isAllowedNonExecutionHostLiteral(path, node, parents, allowedPaths) {
+  if (!allowedPaths.some((pattern) => pathMatchesPolicy(path, pattern))) return false;
   let current = node;
   let returned = false;
   while ((current = parents.get(current))) {
@@ -220,28 +289,28 @@ function isAllowedCheckoutCspLiteral(path, node, parents) {
     )
       return false;
     if (
-      current.type === 'FunctionDeclaration' &&
-      current.id?.name === 'checkoutContentSecurityPolicy'
-    ) {
-      return returned;
-    }
-    if (
       current.type === 'FunctionDeclaration' ||
       current.type === 'FunctionExpression' ||
       current.type === 'ArrowFunctionExpression'
     ) {
-      return false;
+      return returned;
     }
   }
   return false;
 }
 
-function sourceBoundaryFindings(path, source) {
-  if (!sourceMayContainProviderBoundary(source)) {
+export function providerSourceBoundaryFindings(
+  path,
+  source,
+  hostPolicies,
+  importPolicies,
+  nonProviderHostPolicies,
+) {
+  if (!sourceMayContainProviderBoundary(source, hostPolicies, importPolicies)) {
     return {
-      migratedEndpoint: false,
-      stripeEndpoint: false,
-      stripeSdk: false,
+      hosts: [],
+      sdkPackages: [],
+      unknownHosts: [],
     };
   }
   const parsed = parseSync(path, source, { preserveParens: true });
@@ -252,10 +321,11 @@ function sourceBoundaryFindings(path, source) {
   const bindings = new Map();
   const parents = new WeakMap();
   const findings = {
-    migratedEndpoint: false,
-    stripeEndpoint: false,
-    stripeSdk: false,
+    hosts: new Set(),
+    sdkPackages: new Set(),
+    unknownHosts: new Set(),
   };
+  const nonExecutionHostsSeen = new Set();
 
   const walk = (node, visitor, parent, seen = new WeakSet()) => {
     if (!node || typeof node !== 'object' || seen.has(node)) return;
@@ -276,7 +346,6 @@ function sourceBoundaryFindings(path, source) {
     values.push(value);
     bindings.set(name, values);
   };
-  const outsideProviderBoundary = !stripeSdkAllowed(path);
   const createRequireFactories = new Set(['createRequire']);
   const moduleNamespaces = new Set();
   const dynamicRequireLoaders = new Set(['require']);
@@ -332,11 +401,7 @@ function sourceBoundaryFindings(path, source) {
   });
   const createsRequireLoader = (expression) => {
     if (expression?.type !== 'CallExpression') return false;
-    if (
-      calleeNames(expression.callee, bindings).some((name) =>
-        createRequireFactories.has(name),
-      )
-    ) {
+    if (calleeNames(expression.callee, bindings).some((name) => createRequireFactories.has(name))) {
       return true;
     }
     return (
@@ -354,10 +419,7 @@ function sourceBoundaryFindings(path, source) {
     for (const [name, expression] of loaderAssignments) {
       const aliasesLoader =
         expression?.type === 'Identifier' && dynamicRequireLoaders.has(expression.name);
-      if (
-        !dynamicRequireLoaders.has(name) &&
-        (aliasesLoader || createsRequireLoader(expression))
-      ) {
+      if (!dynamicRequireLoaders.has(name) && (aliasesLoader || createsRequireLoader(expression))) {
         dynamicRequireLoaders.add(name);
         loaderAdded = true;
       }
@@ -381,90 +443,130 @@ function sourceBoundaryFindings(path, source) {
               : [];
     for (const value of values) {
       const hosts = providerHosts(value);
-      if (hosts.includes('api.stripe.com') && !isAllowedCheckoutCspLiteral(path, node, parents)) {
-        findings.stripeEndpoint = true;
-      }
-      if (hosts.some((host) => migratedProviderHosts.has(host))) {
-        findings.migratedEndpoint = true;
+      for (const host of hosts) {
+        const hostPolicy = hostPolicies.get(host);
+        if (hostPolicy) {
+          const allowedAsNonExecution = isAllowedNonExecutionHostLiteral(
+            path,
+            node,
+            parents,
+            hostPolicy.allowedNonExecutionHostPaths,
+          );
+          if (allowedAsNonExecution) nonExecutionHostsSeen.add(host);
+          else findings.hosts.add(host);
+        }
+        if (
+          path.startsWith('packages/provider-clients/') &&
+          !hostPolicies.has(host) &&
+          !nonProviderHostPolicies
+            .get(host)
+            ?.allowedExecutionPaths.some((pattern) => pathMatchesPolicy(path, pattern))
+        ) {
+          findings.unknownHosts.add(host);
+        }
       }
     }
     if (
       (node.type === 'ImportDeclaration' ||
         node.type === 'ExportNamedDeclaration' ||
         node.type === 'ExportAllDeclaration') &&
-      staticStrings(node.source, bindings).some(
-        (source) =>
-          source === 'stripe' ||
-          (source === '@stripe/stripe-js' && !path.startsWith('apps/checkout/')),
-      )
+      staticStrings(node.source, bindings).some((source) => importPolicies.has(source))
     ) {
-      findings.stripeSdk = true;
+      for (const source of staticStrings(node.source, bindings)) {
+        if (importPolicies.has(source)) findings.sdkPackages.add(source);
+      }
     }
-    if (
-      node.type === 'ImportExpression' &&
-      ((outsideProviderBoundary &&
-        syntaxContainsStripeTaint(node.source) &&
-        !(
-          path.startsWith('apps/checkout/') &&
-          staticStrings(node.source, bindings).length > 0 &&
-          staticStrings(node.source, bindings).every((value) => value === '@stripe/stripe-js')
-        )) ||
-        staticStrings(node.source, bindings).includes('stripe'))
-    ) {
-      findings.stripeSdk = true;
+    if (node.type === 'ImportExpression') {
+      const resolvedSources = staticStrings(node.source, bindings);
+      const exactPackages = resolvedSources.filter((source) => importPolicies.has(source));
+      if (exactPackages.length > 0) {
+        exactPackages.forEach((packageName) => findings.sdkPackages.add(packageName));
+      } else if (resolvedSources.length === 0) {
+        for (const packageName of importPolicies.keys()) {
+          if (syntaxContainsDependencyTaint(node.source, packageName)) {
+            findings.sdkPackages.add(packageName);
+          }
+        }
+      }
     }
     if (node.type === 'CallExpression') {
       const names = calleeNames(node.callee, bindings);
-      if (
-        names.includes('require') &&
-        staticStrings(node.arguments[0], bindings).includes('stripe')
-      ) {
-        findings.stripeSdk = true;
+      const isNetworkExecution = names.some((name) => networkMethodNames.has(name));
+      const isDynamicLoaderExecution = names.some(
+        (name) => name === 'eval' || name === 'Function' || dynamicRequireLoaders.has(name),
+      );
+      if (isNetworkExecution) {
+        for (const host of nonExecutionHostsSeen) findings.hosts.add(host);
       }
-      if (
-        outsideProviderBoundary &&
-        syntaxContainsStripeTaint({ type: 'Arguments', values: node.arguments }) &&
-        (names.some((name) => name === 'eval' || name === 'Function') ||
-          names.some((name) => dynamicRequireLoaders.has(name)))
-      ) {
-        findings.stripeSdk = true;
+      for (const packageName of importPolicies.keys()) {
+        if (
+          staticStrings(node.arguments?.[0], bindings).includes(packageName) &&
+          names.some((name) => dynamicRequireLoaders.has(name))
+        ) {
+          findings.sdkPackages.add(packageName);
+        }
+        if (
+          isDynamicLoaderExecution &&
+          syntaxContainsDependencyTaint({ type: 'Arguments', values: node.arguments }, packageName)
+        ) {
+          findings.sdkPackages.add(packageName);
+        }
       }
-      if (
-        path === 'apps/checkout/src/lib/checkout-security-headers.ts' &&
-        names.some((name) => networkMethodNames.has(name))
-      ) {
-        findings.stripeEndpoint = true;
+      if (isNetworkExecution) {
+        for (const argument of node.arguments ?? []) {
+          for (const value of staticNetworkArgumentStrings(argument, bindings)) {
+            for (const host of providerHosts(value)) {
+              if (
+                !hostPolicies.has(host) &&
+                !nonProviderHostPolicies
+                  .get(host)
+                  ?.allowedExecutionPaths.some((pattern) => pathMatchesPolicy(path, pattern))
+              ) {
+                findings.unknownHosts.add(host);
+              }
+            }
+          }
+        }
       }
     }
-    if (
-      node.type === 'TSImportEqualsDeclaration' &&
-      staticStrings(node.moduleReference?.expression, bindings).includes('stripe')
-    )
-      findings.stripeSdk = true;
-    if (
-      outsideProviderBoundary &&
-      node.type === 'NewExpression' &&
-      calleeNames(node.callee, bindings).some((name) => name === 'Function') &&
-      syntaxContainsStripeTaint({ type: 'Arguments', values: node.arguments })
-    ) {
-      findings.stripeSdk = true;
+    if (node.type === 'TSImportEqualsDeclaration') {
+      for (const source of staticStrings(node.moduleReference?.expression, bindings)) {
+        if (importPolicies.has(source)) findings.sdkPackages.add(source);
+      }
     }
-    if (
-      node.type === 'NewExpression' &&
-      node.callee?.type === 'Identifier' &&
-      node.callee.name === 'Stripe'
-    ) {
-      findings.stripeSdk = true;
+    if (node.type === 'NewExpression') {
+      if (calleeNames(node.callee, bindings).some((name) => name === 'Function')) {
+        for (const packageName of importPolicies.keys()) {
+          if (
+            syntaxContainsDependencyTaint(
+              { type: 'Arguments', values: node.arguments },
+              packageName,
+            )
+          ) {
+            findings.sdkPackages.add(packageName);
+          }
+        }
+      }
+      if (node.callee?.type === 'Identifier' && node.callee.name === 'Stripe') {
+        findings.sdkPackages.add('stripe');
+      }
     }
   });
-  return findings;
+  return {
+    hosts: [...findings.hosts],
+    sdkPackages: [...findings.sdkPackages],
+    unknownHosts: [...findings.unknownHosts],
+  };
 }
 
 export function providerClientBoundaryViolations(
   root,
-  { sourceRoots = ['apps', 'packages'] } = {},
+  { sourceRoots = ['apps', 'packages'], registry = loadProviderIntegrationRegistry(root) } = {},
 ) {
   const repositoryRoot = resolve(root);
+  const hostPolicies = registryHostPolicies(registry);
+  const importPolicies = registryImportPolicies(registry);
+  const nonProviderHostPolicies = registryNonProviderHostPolicies(registry);
   const violations = [];
   for (const sourceRoot of sourceRoots) {
     const absoluteRoot = resolve(repositoryRoot, sourceRoot);
@@ -479,20 +581,39 @@ export function providerClientBoundaryViolations(
       const path = normalizedRelative(repositoryRoot, absolutePath);
       if (!isRuntimeSource(path)) continue;
       const source = readFileSync(absolutePath, 'utf8');
-      const findings = sourceBoundaryFindings(path, source);
-      if (!stripeSdkAllowed(path) && findings.stripeSdk) {
-        violations.push(
-          `${path}: server-side Stripe SDK execution must cross @tixkit/provider-clients`,
-        );
+      const findings = providerSourceBoundaryFindings(
+        path,
+        source,
+        hostPolicies,
+        importPolicies,
+        nonProviderHostPolicies,
+      );
+      for (const packageName of findings.sdkPackages) {
+        const policy = importPolicies.get(packageName);
+        if (!policy?.paths.some((pattern) => pathMatchesPolicy(path, pattern))) {
+          violations.push(
+            packageName === 'stripe' || packageName === '@stripe/stripe-js'
+              ? `${path}: server-side Stripe SDK execution must cross @tixkit/provider-clients`
+              : `${path}: ${packageName} execution is outside its provider-registry boundary`,
+          );
+        }
       }
-      if (!migratedEndpointAllowed(path) && findings.migratedEndpoint) {
-        violations.push(
-          `${path}: migrated messaging provider endpoints must be owned by @tixkit/provider-clients`,
-        );
+      for (const host of findings.hosts) {
+        const policy = hostPolicies.get(host);
+        if (!policy?.allowedHostPaths.some((pattern) => pathMatchesPolicy(path, pattern))) {
+          const integration = registry.integrations.find(({ id }) => id === policy?.integrationId);
+          violations.push(
+            integration?.id === 'stripe-server-gateway'
+              ? `${path}: server-side Stripe REST execution must cross @tixkit/provider-clients`
+              : integration?.classification === 'direct-http'
+                ? `${path}: migrated messaging provider endpoints must be owned by @tixkit/provider-clients`
+                : `${path}: ${host} execution must cross its registry owner (${policy?.integrationId})`,
+          );
+        }
       }
-      if (!migratedEndpointAllowed(path) && findings.stripeEndpoint) {
+      for (const host of findings.unknownHosts) {
         violations.push(
-          `${path}: server-side Stripe REST execution must cross @tixkit/provider-clients`,
+          `${path}: outbound host is not classified in the provider registry: ${host}`,
         );
       }
     }

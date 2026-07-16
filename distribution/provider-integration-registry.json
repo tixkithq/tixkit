@@ -1,0 +1,614 @@
+{
+  "$schema": "./provider-integration-registry.schema.json",
+  "schemaVersion": 1,
+  "dependencyAuditPackages": [
+    "apps/admin-dashboard/package.json",
+    "apps/checkout/package.json",
+    "apps/docs/package.json",
+    "apps/sdk-astro-demo/package.json",
+    "apps/sdk-next-demo/package.json",
+    "apps/sdk-nuxt-demo/package.json",
+    "apps/sdk-react-native-demo/package.json",
+    "apps/sdk-remix-demo/package.json",
+    "apps/sdk-sveltekit-demo/package.json",
+    "packages/admin-table-core/package.json",
+    "packages/agent-protocol/package.json",
+    "packages/api/package.json",
+    "packages/checkout-headless/package.json",
+    "packages/cli/package.json",
+    "packages/content-core/package.json",
+    "packages/content-editor-shell/package.json",
+    "packages/content-email/package.json",
+    "packages/content-event-page-react/package.json",
+    "packages/content-event-page/package.json",
+    "packages/content-message/package.json",
+    "packages/contract-tests/package.json",
+    "packages/db/package.json",
+    "packages/docs-core/package.json",
+    "packages/domain/package.json",
+    "packages/email-transport/package.json",
+    "packages/embed-core/package.json",
+    "packages/migration-core/package.json",
+    "packages/openapi/package.json",
+    "packages/portability/package.json",
+    "packages/provider-clients/package.json",
+    "packages/sdk-astro/package.json",
+    "packages/sdk-js/package.json",
+    "packages/sdk-next/package.json",
+    "packages/sdk-react-native/package.json",
+    "packages/sdk-remix/package.json",
+    "packages/sdk-sveltekit/package.json",
+    "packages/sdk-vue/package.json",
+    "packages/shared/package.json",
+    "packages/widget/package.json",
+    "packages/workflows/package.json"
+  ],
+  "nonProviderDependencies": [
+    "@astrojs/check",
+    "@astrojs/node",
+    "@fastify/compress",
+    "@fastify/cors",
+    "@fastify/helmet",
+    "@fastify/rate-limit",
+    "@hookform/resolvers",
+    "@mdx-js/loader",
+    "@mdx-js/react",
+    "@next/mdx",
+    "@puckeditor/core",
+    "@puckeditor/plugin-heading-analyzer",
+    "@radix-ui/react-alert-dialog",
+    "@radix-ui/react-avatar",
+    "@radix-ui/react-checkbox",
+    "@radix-ui/react-collapsible",
+    "@radix-ui/react-dialog",
+    "@radix-ui/react-direction",
+    "@radix-ui/react-dropdown-menu",
+    "@radix-ui/react-label",
+    "@radix-ui/react-popover",
+    "@radix-ui/react-radio-group",
+    "@radix-ui/react-scroll-area",
+    "@radix-ui/react-select",
+    "@radix-ui/react-separator",
+    "@radix-ui/react-slot",
+    "@radix-ui/react-switch",
+    "@radix-ui/react-tabs",
+    "@radix-ui/react-tooltip",
+    "@react-email/components",
+    "@react-email/editor",
+    "@react-email/render",
+    "@remix-run/dev",
+    "@remix-run/node",
+    "@remix-run/react",
+    "@remix-run/serve",
+    "@sveltejs/adapter-node",
+    "@sveltejs/kit",
+    "@tailwindcss/postcss",
+    "@tanstack/react-query",
+    "@tanstack/react-table",
+    "@testing-library/jest-dom",
+    "@testing-library/react",
+    "@tiptap/core",
+    "@tiptap/extension-heading",
+    "@tiptap/extension-image",
+    "@tiptap/extension-link",
+    "@tiptap/pm",
+    "@tiptap/react",
+    "@tiptap/starter-kit",
+    "@types/jsdom",
+    "@types/mdx",
+    "@types/node",
+    "@types/pg",
+    "@types/qrcode",
+    "@types/react",
+    "@types/react-dom",
+    "@vitejs/plugin-react",
+    "@vue/compiler-sfc",
+    "@zxing/browser",
+    "@zxing/library",
+    "ajv",
+    "ajv-formats",
+    "astro",
+    "class-variance-authority",
+    "clsx",
+    "cmdk",
+    "date-fns",
+    "esbuild",
+    "expo",
+    "fastify",
+    "input-otp",
+    "ioredis",
+    "isbot",
+    "jose",
+    "jsdom",
+    "kysely",
+    "lucide-react",
+    "mysql2",
+    "next",
+    "next-themes",
+    "nuxt",
+    "oxc-parser",
+    "oxlint",
+    "passkit-generator",
+    "pdf-lib",
+    "pg",
+    "pino-pretty",
+    "prom-client",
+    "qrcode",
+    "react",
+    "react-day-picker",
+    "react-dom",
+    "react-hook-form",
+    "react-native",
+    "recharts",
+    "remark-frontmatter",
+    "remark-gfm",
+    "remark-mdx-frontmatter",
+    "sharp",
+    "sonner",
+    "svelte",
+    "tailwind-merge",
+    "tailwindcss",
+    "tarn",
+    "tedious",
+    "tsx",
+    "tw-animate-css",
+    "typescript",
+    "ulid",
+    "vite",
+    "vitest",
+    "vue",
+    "zod",
+    "zustand"
+  ],
+  "nonProviderHostAllowances": [],
+  "integrations": [
+    {
+      "id": "clerk-identity-runtime",
+      "provider": "Clerk",
+      "classification": "runtime-boundary",
+      "ownerPackages": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "providerHosts": [],
+      "allowedHostPaths": [],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [
+        { "package": "@clerk/backend", "paths": ["packages/api/src/**"] },
+        { "package": "@clerk/nextjs", "paths": ["apps/admin-dashboard/src/**"] }
+      ],
+      "allowedDependencies": [
+        {
+          "package": "@clerk/nextjs",
+          "packagePath": "apps/admin-dashboard/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@clerk/backend",
+          "packagePath": "packages/api/package.json",
+          "dependencyClass": "dependencies"
+        }
+      ],
+      "rationale": "Clerk owns identity token verification and framework authentication integration.",
+      "retryOwner": "provider-runtime",
+      "diagnosticPolicy": {
+        "correlation": "runtime-owned",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "runtime-owned"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "opentelemetry-runtime",
+      "provider": "OpenTelemetry",
+      "classification": "runtime-boundary",
+      "ownerPackages": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "providerHosts": [],
+      "allowedHostPaths": [],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [
+        {
+          "package": "@opentelemetry/api",
+          "paths": [
+            "packages/api/src/**",
+            "packages/provider-clients/src/**",
+            "packages/shared/src/**",
+            "packages/workflows/src/**"
+          ]
+        },
+        { "package": "@opentelemetry/core", "paths": ["packages/workflows/src/**"] },
+        {
+          "package": "@opentelemetry/exporter-trace-otlp-http",
+          "paths": ["packages/shared/src/**"]
+        },
+        {
+          "package": "@opentelemetry/resources",
+          "paths": ["packages/shared/src/**", "packages/workflows/src/**"]
+        },
+        { "package": "@opentelemetry/sdk-node", "paths": ["packages/shared/src/**"] },
+        {
+          "package": "@opentelemetry/sdk-trace-base",
+          "paths": ["packages/shared/src/**", "packages/workflows/src/**"]
+        }
+      ],
+      "allowedDependencies": [
+        {
+          "package": "@opentelemetry/api",
+          "packagePath": "packages/api/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/api",
+          "packagePath": "packages/provider-clients/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/api",
+          "packagePath": "packages/shared/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/api",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/core",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/exporter-trace-otlp-http",
+          "packagePath": "packages/shared/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/resources",
+          "packagePath": "packages/shared/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/resources",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/sdk-node",
+          "packagePath": "packages/shared/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/sdk-trace-base",
+          "packagePath": "packages/shared/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@opentelemetry/sdk-trace-base",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        }
+      ],
+      "rationale": "OpenTelemetry owns instrumentation context, span processing, and exporter runtime behavior.",
+      "retryOwner": "provider-runtime",
+      "diagnosticPolicy": {
+        "correlation": "runtime-owned",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "runtime-owned"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "plivo-messaging",
+      "provider": "Plivo",
+      "classification": "direct-http",
+      "ownerPackages": ["packages/provider-clients/package.json"],
+      "providerHosts": ["api.plivo.com"],
+      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [],
+      "allowedDependencies": [],
+      "rationale": "Plivo messaging uses a small ordinary HTTP surface with explicit Tixkit retry semantics.",
+      "retryOwner": "caller-or-workflow",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "resend-messaging",
+      "provider": "Resend",
+      "classification": "direct-http",
+      "ownerPackages": ["packages/provider-clients/package.json"],
+      "providerHosts": ["api.resend.com"],
+      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [],
+      "allowedDependencies": [],
+      "rationale": "Resend messaging uses a small ordinary HTTP surface with explicit Tixkit retry semantics.",
+      "retryOwner": "caller-or-workflow",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "s3-runtime",
+      "provider": "Amazon S3-compatible storage",
+      "classification": "runtime-boundary",
+      "ownerPackages": ["packages/api/package.json", "packages/workflows/package.json"],
+      "providerHosts": [],
+      "allowedHostPaths": [],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [
+        {
+          "package": "@aws-sdk/client-s3",
+          "paths": ["packages/api/src/**", "packages/workflows/src/**"]
+        },
+        { "package": "@aws-sdk/s3-request-presigner", "paths": ["packages/api/src/**"] }
+      ],
+      "allowedDependencies": [
+        {
+          "package": "@aws-sdk/client-s3",
+          "packagePath": "packages/api/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@aws-sdk/client-s3",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@aws-sdk/s3-request-presigner",
+          "packagePath": "packages/api/package.json",
+          "dependencyClass": "dependencies"
+        }
+      ],
+      "rationale": "AWS SDK owns SigV4, presigning, credential resolution, and S3 protocol compatibility.",
+      "retryOwner": "provider-runtime",
+      "diagnosticPolicy": {
+        "correlation": "runtime-owned",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "runtime-owned"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "stripe-browser-runtime",
+      "provider": "Stripe.js",
+      "classification": "runtime-boundary",
+      "ownerPackages": ["apps/checkout/package.json"],
+      "providerHosts": ["r.stripe.com"],
+      "allowedHostPaths": [],
+      "allowedNonExecutionHostPaths": ["apps/checkout/src/lib/checkout-security-headers.ts"],
+      "allowedImports": [{ "package": "@stripe/stripe-js", "paths": ["apps/checkout/src/**"] }],
+      "allowedDependencies": [
+        {
+          "package": "@stripe/stripe-js",
+          "packagePath": "apps/checkout/package.json",
+          "dependencyClass": "dependencies"
+        }
+      ],
+      "rationale": "Stripe.js owns Elements, redirects, confirmation, and the browser PCI-sensitive boundary.",
+      "retryOwner": "provider-runtime",
+      "diagnosticPolicy": {
+        "correlation": "runtime-owned",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "runtime-owned"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "stripe-server-gateway",
+      "provider": "Stripe",
+      "classification": "contained-sdk",
+      "ownerPackages": ["packages/provider-clients/package.json"],
+      "providerHosts": ["api.stripe.com"],
+      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedNonExecutionHostPaths": ["apps/checkout/src/lib/checkout-security-headers.ts"],
+      "allowedImports": [
+        {
+          "package": "stripe",
+          "paths": [
+            "packages/provider-clients/src/stripe.ts",
+            "packages/api/src/__tests__/integration/stripe-connect-provider.integration.test.ts",
+            "packages/workflows/src/__tests__/stripe-provider.integration.test.ts"
+          ]
+        }
+      ],
+      "allowedDependencies": [
+        {
+          "package": "stripe",
+          "packagePath": "packages/api/package.json",
+          "dependencyClass": "devDependencies"
+        },
+        {
+          "package": "stripe",
+          "packagePath": "packages/provider-clients/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "stripe",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "devDependencies"
+        }
+      ],
+      "rationale": "The contained Stripe SDK owns server-side payment protocol and API-version compatibility.",
+      "retryOwner": "caller-or-workflow",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "stripe-webhook-verification",
+      "provider": "Stripe",
+      "classification": "runtime-boundary",
+      "ownerPackages": ["packages/provider-clients/package.json"],
+      "providerHosts": [],
+      "allowedHostPaths": [],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [
+        { "package": "stripe", "paths": ["packages/provider-clients/src/stripe.ts"] }
+      ],
+      "allowedDependencies": [
+        {
+          "package": "stripe",
+          "packagePath": "packages/provider-clients/package.json",
+          "dependencyClass": "dependencies"
+        }
+      ],
+      "rationale": "Stripe webhook verification owns signature parsing and authenticity checks at the inbound security boundary.",
+      "retryOwner": "not-applicable",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "telnyx-messaging",
+      "provider": "Telnyx",
+      "classification": "direct-http",
+      "ownerPackages": ["packages/provider-clients/package.json"],
+      "providerHosts": ["api.telnyx.com"],
+      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [],
+      "allowedDependencies": [],
+      "rationale": "Telnyx messaging uses a small ordinary HTTP surface with explicit Tixkit retry semantics.",
+      "retryOwner": "caller-or-workflow",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "temporal-runtime",
+      "provider": "Temporal",
+      "classification": "runtime-boundary",
+      "ownerPackages": ["packages/api/package.json", "packages/workflows/package.json"],
+      "providerHosts": [],
+      "allowedHostPaths": [],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [
+        { "package": "@temporalio/activity", "paths": ["packages/workflows/src/**"] },
+        {
+          "package": "@temporalio/client",
+          "paths": ["packages/api/src/**", "packages/workflows/src/**"]
+        },
+        { "package": "@temporalio/common", "paths": ["packages/workflows/src/**"] },
+        {
+          "package": "@temporalio/interceptors-opentelemetry",
+          "paths": ["packages/api/src/**", "packages/workflows/src/**"]
+        },
+        { "package": "@temporalio/testing", "paths": ["packages/workflows/src/__tests__/**"] },
+        { "package": "@temporalio/worker", "paths": ["packages/workflows/src/**"] },
+        { "package": "@temporalio/workflow", "paths": ["packages/workflows/src/**"] }
+      ],
+      "allowedDependencies": [
+        {
+          "package": "@temporalio/client",
+          "packagePath": "packages/api/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@temporalio/interceptors-opentelemetry",
+          "packagePath": "packages/api/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@temporalio/activity",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@temporalio/client",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@temporalio/common",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@temporalio/interceptors-opentelemetry",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@temporalio/testing",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "devDependencies"
+        },
+        {
+          "package": "@temporalio/worker",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        },
+        {
+          "package": "@temporalio/workflow",
+          "packagePath": "packages/workflows/package.json",
+          "dependencyClass": "dependencies"
+        }
+      ],
+      "rationale": "Temporal SDKs are the durable workflow, activity, worker, and client runtime boundary.",
+      "retryOwner": "provider-runtime",
+      "diagnosticPolicy": {
+        "correlation": "runtime-owned",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "runtime-owned"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "twilio-messaging",
+      "provider": "Twilio",
+      "classification": "direct-http",
+      "ownerPackages": ["packages/provider-clients/package.json"],
+      "providerHosts": ["api.twilio.com"],
+      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [],
+      "allowedDependencies": [],
+      "rationale": "Twilio messaging uses a small ordinary HTTP surface with explicit Tixkit retry semantics.",
+      "retryOwner": "caller-or-workflow",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "vonage-messaging",
+      "provider": "Vonage",
+      "classification": "direct-http",
+      "ownerPackages": ["packages/provider-clients/package.json"],
+      "providerHosts": ["api.vonage.com", "rest.nexmo.com"],
+      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [],
+      "allowedDependencies": [],
+      "rationale": "Vonage messaging uses a small ordinary HTTP surface with explicit Tixkit retry semantics.",
+      "retryOwner": "caller-or-workflow",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-16"
+    }
+  ]
+}
