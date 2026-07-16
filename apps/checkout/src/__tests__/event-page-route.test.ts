@@ -15,7 +15,7 @@ describe('event page route bundle boundaries', () => {
   it('server-fetches hosted event page bootstrap data for the event-id route', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/app/e/[eventId]/page.tsx'), 'utf8');
 
-    expect(source).toContain('publicApi.getEventPageBootstrap');
+    expect(source).toContain('getServerEventPageBootstrap');
     expect(source).toContain('initialBootstrap={initialBootstrap}');
     expect(source).toContain('export const revalidate = 60');
   });
@@ -23,7 +23,7 @@ describe('event page route bundle boundaries', () => {
   it('server-fetches the same bootstrap payload for custom-domain slug routes', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/app/[eventSlug]/page.tsx'), 'utf8');
 
-    expect(source).toContain('publicApi.getEventPageBootstrapBySlug');
+    expect(source).toContain('getServerEventPageBootstrapBySlug');
     expect(source).toContain('initialBootstrap={initialBootstrap}');
   });
 

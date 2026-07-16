@@ -11,6 +11,7 @@ data:
   DB_DRIVER: {{ .Values.database.driver | quote }}
   AUTH_PROVIDER: {{ .Values.auth.provider | quote }}
   API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
+  INTERNAL_API_BASE_URL: {{ printf "http://%s-api:%v" (include "tixkit.fullname" .) .Values.api.port | quote }}
   TIXKIT_CHECKOUT_URL: {{ .Values.global.checkoutUrl | quote }}
   {{- with .Values.global.docsUrl }}
   TIXKIT_DOCS_URL: {{ . | quote }}
@@ -23,9 +24,6 @@ data:
   CORS_ALLOWED_ORIGINS: {{ join "," .Values.global.corsAllowedOrigins | quote }}
   CUSTOM_DOMAIN_CORS_ENABLED: {{ .Values.global.customDomainCorsEnabled | quote }}
   TRUST_PROXY: {{ .Values.api.trustProxy | quote }}
-  NEXT_PUBLIC_TIXKIT_API_BASE_URL: {{ printf "%s/v1" .Values.global.apiBaseUrl | quote }}
-  NEXT_PUBLIC_ADMIN_API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
-  NEXT_PUBLIC_CHECKOUT_URL: {{ .Values.global.checkoutUrl | quote }}
   TEMPORAL_NAMESPACE: {{ .Values.secrets.temporalNamespace | quote }}
   TEMPORAL_TASK_QUEUE: {{ .Values.secrets.temporalTaskQueue | quote }}
   TEMPORAL_TLS_ENABLED: {{ .Values.secrets.temporalTlsEnabled | default false | quote }}

@@ -4,6 +4,7 @@ import { useReportWebVitals } from 'next/web-vitals';
 import { RUM_MAXIMUM_VALUES, RUM_SCHEMA_VERSION, type RumWebVital } from '@tixkit/domain';
 import { apiBaseUrl } from '@/lib/api';
 import { isSharedCheckoutHost } from '@/lib/hosts';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 type WebVitalSample = {
   name: string;
@@ -29,6 +30,7 @@ const RESERVED_TOP_LEVEL_PATHS = new Set([
 export function classifyBuyerSurface(
   pathname: string,
   host: string,
+  checkoutUrl = 'https://checkout.tixkit.com',
 ): 'checkout' | 'event-page' | null {
   const normalized = pathname.length > 1 ? pathname.replace(/\/+$/u, '') : pathname;
   if (normalized === '/checkout' || normalized === '/checkout/confirmation') return 'checkout';
@@ -37,7 +39,7 @@ export function classifyBuyerSurface(
   const topLevel = normalized.match(/^\/([^/]+)$/u)?.[1];
   if (
     topLevel &&
-    !isSharedCheckoutHost(host) &&
+    !isSharedCheckoutHost(host, checkoutUrl) &&
     !RESERVED_TOP_LEVEL_PATHS.has(topLevel.toLowerCase()) &&
     /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(topLevel)
   ) {
@@ -50,12 +52,12 @@ function normalizedValue(metric: RumWebVital, value: number): number {
   return metric === 'CLS' ? value : value / 1_000;
 }
 
-export function reportBuyerWebVital(sample: WebVitalSample): void {
+export function reportBuyerWebVital(sample: WebVitalSample, checkoutUrl?: string): void {
   if (!Object.hasOwn(RUM_MAXIMUM_VALUES, sample.name)) return;
   const metric = sample.name as RumWebVital;
   const value = normalizedValue(metric, sample.value);
   if (!Number.isFinite(value) || value < 0 || value > RUM_MAXIMUM_VALUES[metric]) return;
-  const surface = classifyBuyerSurface(window.location.pathname, window.location.host);
+  const surface = classifyBuyerSurface(window.location.pathname, window.location.host, checkoutUrl);
   if (!surface) return;
 
   const body = {
@@ -78,6 +80,7 @@ export function reportBuyerWebVital(sample: WebVitalSample): void {
 }
 
 export function WebVitalsReporter() {
-  useReportWebVitals(reportBuyerWebVital);
+  const { checkoutUrl } = useRuntimeConfig();
+  useReportWebVitals((sample) => reportBuyerWebVital(sample, checkoutUrl));
   return null;
 }

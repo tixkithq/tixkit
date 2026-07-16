@@ -5,6 +5,7 @@ import type { Stripe, StripeElements, StripePaymentElementOptions } from '@strip
 import { ShieldCheckIcon, LoaderCircleIcon, AlertCircleIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 type Props = {
   clientSecret: string;
@@ -22,8 +23,10 @@ type Props = {
 // Stripe.js is loaded lazily and only when a payment is actually in flight.
 let stripePromise: Promise<Stripe | null> | null = null;
 let stripePromiseKey: string | null = null;
-async function getStripe(options?: { reset?: boolean }): Promise<Stripe | null> {
-  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+async function getStripe(
+  publishableKey: string | undefined,
+  options?: { reset?: boolean },
+): Promise<Stripe | null> {
   if (!publishableKey) {
     stripePromise = null;
     stripePromiseKey = null;
@@ -75,6 +78,7 @@ export function PaymentHandoff({
   billingDetails,
   onError,
 }: Props) {
+  const { stripePublishableKey } = useRuntimeConfig();
   const containerRef = useRef<HTMLDivElement>(null);
   const paymentElementRef = useRef<PaymentElementLike | null>(null);
   const elementsRef = useRef<StripeElements | null>(null);
@@ -103,7 +107,7 @@ export function PaymentHandoff({
       const container = containerRef.current;
       if (!container) return;
       try {
-        const stripe = await getStripe({ reset: mountAttempt > 0 });
+        const stripe = await getStripe(stripePublishableKey, { reset: mountAttempt > 0 });
         if (!stripe || cancelled) {
           if (!cancelled) {
             setMountError('Payment processor could not be loaded. Please try again.');
@@ -153,7 +157,7 @@ export function PaymentHandoff({
       paymentElementRef.current = null;
       elementsRef.current = null;
     };
-  }, [billingDetails, clientSecret, isLocalCapture, mountAttempt, onError]);
+  }, [billingDetails, clientSecret, isLocalCapture, mountAttempt, onError, stripePublishableKey]);
 
   function handleRetryMount() {
     setMountError(null);

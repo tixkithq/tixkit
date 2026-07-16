@@ -8,7 +8,7 @@ services:
     name: tixkit-api
     env: docker
     dockerfilePath: ./Dockerfile.api
-    healthCheckPath: /health
+    healthCheckPath: /ready
     envVars:
       - key: NODE_ENV
         value: production
@@ -92,15 +92,25 @@ services:
     name: tixkit-checkout
     env: docker
     dockerfilePath: ./Dockerfile.checkout
-    healthCheckPath: /health
+    healthCheckPath: /ready
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3000
-      - key: NEXT_PUBLIC_TIXKIT_API_BASE_URL
-        value: https://tixkit-api.onrender.com/v1
-      - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+      - key: TIXKIT_DEPLOYMENT_PROFILE
+        value: production
+      - key: API_BASE_URL
+        value: https://tixkit-api.onrender.com
+      - key: TIXKIT_CHECKOUT_URL
+        value: https://tixkit-checkout.onrender.com
+      - fromGroup: tixkit-public-storage
+      - key: ALLOW_INSECURE_LOCAL_ORIGINS
+        value: 0
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      # Set to the exact deployed Git commit or immutable release tag.
+      - key: TIXKIT_BUILD_REVISION
         sync: false
     plan: starter
 

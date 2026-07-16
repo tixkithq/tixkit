@@ -28,6 +28,7 @@ const externalSecretKeys = [
   'TEMPORAL_ADDRESS',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_PUBLISHABLE_KEY',
   'METRICS_BEARER_TOKEN',
   'DASHBOARD_CURSOR_SIGNING_KEY',
   'CLERK_SECRET_KEY',
@@ -132,6 +133,39 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   assert.equal(config.data.AUTH_PROVIDER, 'clerk');
   assert.equal(config.data.ALLOW_INSECURE_LOCAL_ORIGINS, '0');
   assert.equal(config.data.TIXKIT_BUILD_REVISION, 'release-2026.08.10');
+  const checkout = deployments.find(
+    (deployment) => deployment.metadata.labels['app.kubernetes.io/component'] === 'checkout',
+  );
+  assert.equal(checkout.spec.template.spec.containers[0].readinessProbe.httpGet.path, '/ready');
+  assert.equal(checkout.spec.template.spec.containers[0].livenessProbe.httpGet.path, '/health');
+  const checkoutContainer = checkout.spec.template.spec.containers[0];
+  assert.equal(checkoutContainer.envFrom, undefined);
+  assert.deepEqual(
+    checkoutContainer.env.map((entry) => entry.name),
+    [
+      'NODE_ENV',
+      'TIXKIT_DEPLOYMENT_PROFILE',
+      'API_BASE_URL',
+      'INTERNAL_API_BASE_URL',
+      'TIXKIT_CHECKOUT_URL',
+      'S3_PUBLIC_ENDPOINT',
+      'ALLOW_INSECURE_LOCAL_ORIGINS',
+      'TIXKIT_BUILD_REVISION',
+      'STRIPE_PUBLISHABLE_KEY',
+    ],
+  );
+  for (const privateKey of [
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'DATABASE_URL',
+    'QR_SIGNING_SECRET',
+    'OFFLINE_MANIFEST_SIGNING_KEY',
+  ]) {
+    assert.equal(
+      checkoutContainer.env.some((entry) => entry.name === privateKey),
+      false,
+    );
+  }
   const admin = deployments.find(
     (deployment) => deployment.metadata.labels['app.kubernetes.io/component'] === 'admin',
   );
@@ -542,6 +576,7 @@ test('External Secret inventory follows MySQL, workload identity, and Temporal C
     'TEMPORAL_API_KEY',
     'STRIPE_SECRET_KEY',
     'STRIPE_WEBHOOK_SECRET',
+    'STRIPE_PUBLISHABLE_KEY',
     'METRICS_BEARER_TOKEN',
     'DASHBOARD_CURSOR_SIGNING_KEY',
     'CLERK_SECRET_KEY',

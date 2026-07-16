@@ -2,7 +2,9 @@ import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import EventPageClient from '../e/[eventId]/event-page-client';
 import { isSharedCheckoutHost, publicHostHeader } from '@/lib/hosts';
-import { publicApi, type PublicEventPageBootstrap } from '@/lib/api';
+import type { PublicEventPageBootstrap } from '@/lib/api';
+import { getServerEventPageBootstrapBySlug } from '@/lib/api-server';
+import { parseCheckoutRuntimeConfig } from '@/lib/runtime-config-server';
 import { eventPageMetadataFromBootstrap } from '@/lib/event-page-metadata';
 import type { Metadata } from 'next';
 
@@ -21,12 +23,7 @@ async function loadInitialBootstrap(
   locale: string,
 ): Promise<PublicEventPageBootstrap | null> {
   try {
-    return await publicApi.getEventPageBootstrapBySlug(
-      eventSlug,
-      host,
-      undefined,
-      locale || undefined,
-    );
+    return await getServerEventPageBootstrapBySlug(eventSlug, host, locale || undefined);
   } catch {
     return null;
   }
@@ -35,9 +32,10 @@ async function loadInitialBootstrap(
 export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
   const { eventSlug } = await params;
   const query = await searchParams;
-  const host = publicHostHeader(await headers());
+  const runtimeConfig = parseCheckoutRuntimeConfig();
+  const host = publicHostHeader(await headers(), runtimeConfig.checkoutUrl);
 
-  if (isSharedCheckoutHost(host)) return {};
+  if (isSharedCheckoutHost(host, runtimeConfig.checkoutUrl)) return {};
   const bootstrap = await loadInitialBootstrap(eventSlug, host, firstParam(query.locale));
   return bootstrap ? eventPageMetadataFromBootstrap(bootstrap) : {};
 }
@@ -45,9 +43,10 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
 export default async function CustomDomainEventPage({ params, searchParams }: PageProps) {
   const { eventSlug } = await params;
   const query = await searchParams;
-  const host = publicHostHeader(await headers());
+  const runtimeConfig = parseCheckoutRuntimeConfig();
+  const host = publicHostHeader(await headers(), runtimeConfig.checkoutUrl);
 
-  if (isSharedCheckoutHost(host)) notFound();
+  if (isSharedCheckoutHost(host, runtimeConfig.checkoutUrl)) notFound();
   const locale = firstParam(query.locale);
   const initialBootstrap = await loadInitialBootstrap(eventSlug, host, locale);
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { resolveBrand, fetchBrand, type ResolvedBrand } from './brand';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 type BrandResolveInput = {
   brandId?: string;
@@ -18,17 +19,25 @@ type BrandResolveInput = {
  * resolves. This keeps the UI responsive while supporting real brand data.
  */
 export function useResolvedBrand(input: BrandResolveInput): ResolvedBrand {
-  const [brand, setBrand] = useState<ResolvedBrand>(() => resolveBrand(input));
+  const runtimeConfig = useRuntimeConfig();
+  const runtimeInput = {
+    ...input,
+    domainBrandMap: runtimeConfig.domainBrandMap,
+    allowUnverifiedFallback: ['development', 'test', 'compact'].includes(
+      runtimeConfig.deploymentProfile,
+    ),
+  };
+  const [brand, setBrand] = useState<ResolvedBrand>(() => resolveBrand(runtimeInput));
 
   useEffect(() => {
-    const initial = resolveBrand(input);
+    const initial = resolveBrand(runtimeInput);
     setBrand(initial);
 
     if (!input.brandId?.trim()) return;
     if (!initial.fallback) return;
 
     let cancelled = false;
-    void fetchBrand(input).then((resolved) => {
+    void fetchBrand(runtimeInput).then((resolved) => {
       if (cancelled) return;
       if (!resolved.fallback) {
         setBrand(resolved);
@@ -45,6 +54,8 @@ export function useResolvedBrand(input: BrandResolveInput): ResolvedBrand {
     input.termsUrl,
     input.privacyUrl,
     input.refundUrl,
+    runtimeConfig.domainBrandMap,
+    runtimeConfig.deploymentProfile,
   ]);
 
   return brand;

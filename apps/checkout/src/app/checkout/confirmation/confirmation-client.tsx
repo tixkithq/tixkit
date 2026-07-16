@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   CheckCircle2Icon,
@@ -85,7 +85,17 @@ export default function ConfirmationClient() {
   const orderId = params.get('orderId') ?? '';
   const orderNumber = params.get('orderNumber') ?? '';
   const redirectStatus = params.get('redirect_status') ?? '';
-  const paymentIntentClientSecret = params.get('payment_intent_client_secret') ?? undefined;
+  const paymentIntentClientSecretRef = useRef(
+    params.get('payment_intent_client_secret') ?? undefined,
+  );
+  const paymentIntentClientSecret = paymentIntentClientSecretRef.current;
+
+  useLayoutEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('payment_intent_client_secret')) return;
+    url.searchParams.delete('payment_intent_client_secret');
+    window.history.replaceState(window.history.state, '', url.toString());
+  }, []);
 
   const [session, setSession] = useState<CheckoutSession | null>(null);
   const [walletPasses, setWalletPasses] = useState<CheckoutWalletPassTicket[]>([]);

@@ -3,6 +3,10 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 import { RUM_MAXIMUM_VALUES, RUM_SCHEMA_VERSION, RUM_WEB_VITALS } from '@tixkit/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { classifyBuyerSurface, WebVitalsReporter } from '@/components/web-vitals-reporter';
+import {
+  initializeBrowserRuntimeConfig,
+  resetBrowserRuntimeConfigForTests,
+} from '@/lib/runtime-config-browser';
 
 let report: ((metric: { name: string; value: number }) => void) | undefined;
 
@@ -21,7 +25,16 @@ describe('privacy-safe web-vitals reporter', () => {
     report = undefined;
     fetchMock.mockClear();
     vi.stubGlobal('fetch', fetchMock);
-    vi.stubEnv('NEXT_PUBLIC_TIXKIT_API_BASE_URL', 'https://api.example.test/v1');
+    initializeBrowserRuntimeConfig({
+      schemaVersion: '1',
+      deploymentProfile: 'test',
+      apiBaseUrl: 'https://api.example.test',
+      platformApiBaseUrl: 'https://api.example.test/v1',
+      checkoutUrl: 'https://checkout.tixkit.com',
+      mediaOrigin: 'https://media.example.test',
+      buildRevision: 'test',
+      configFingerprint: `sha256:${'1'.repeat(64)}`,
+    });
     window.history.replaceState({}, '', '/checkout');
   });
 
@@ -29,6 +42,7 @@ describe('privacy-safe web-vitals reporter', () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    resetBrowserRuntimeConfigForTests();
   });
 
   it('reports only LCP, INP, and CLS with fixed-cardinality identifier-free payloads', async () => {

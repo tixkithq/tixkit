@@ -7,16 +7,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('next/headers', () => ({ headers: mocks.headers }));
-vi.mock('@/lib/api', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/lib/api')>();
-  return {
-    ...original,
-    publicApi: {
-      ...original.publicApi,
-      getEventPageBootstrapBySlug: mocks.getEventPageBootstrapBySlug,
-    },
-  };
-});
+vi.mock('@/lib/api-server', () => ({
+  getServerEventPageBootstrapBySlug: mocks.getEventPageBootstrapBySlug,
+}));
+vi.mock('@/lib/runtime-config-server', () => ({
+  parseCheckoutRuntimeConfig: () => ({ checkoutUrl: 'https://checkout.tixkit.com' }),
+}));
 
 import { generateMetadata } from './page';
 
@@ -81,7 +77,6 @@ describe('custom-domain event metadata', () => {
     expect(mocks.getEventPageBootstrapBySlug).toHaveBeenCalledWith(
       'all-access',
       'events.example.com',
-      undefined,
       'en',
     );
     expect(metadata).toMatchObject({

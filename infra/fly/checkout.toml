@@ -4,8 +4,10 @@ primary_region = "iad"
 [build]
 dockerfile = "Dockerfile.checkout"
 
-[build.args]
-NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https://tixkit-api.fly.dev/v1"
+# Required runtime secrets before deployment. The revision must identify the
+# selected immutable checkout image, and the publishable key is safe to expose
+# only through the validated browser snapshot:
+# fly secrets set STRIPE_PUBLISHABLE_KEY="$STRIPE_PUBLISHABLE_KEY" S3_PUBLIC_ENDPOINT="$S3_PUBLIC_ENDPOINT" TIXKIT_BUILD_REVISION="$TIXKIT_BUILD_REVISION"
 
 [http_service]
 internal_port = 3000
@@ -17,4 +19,13 @@ min_machines_running = 1
 [env]
 NODE_ENV = "production"
 PORT = "3000"
-NEXT_PUBLIC_TIXKIT_API_BASE_URL = "https://tixkit-api.fly.dev/v1"
+TIXKIT_DEPLOYMENT_PROFILE = "production"
+API_BASE_URL = "https://tixkit-api.fly.dev"
+TIXKIT_CHECKOUT_URL = "https://tixkit-checkout.fly.dev"
+ALLOW_INSECURE_LOCAL_ORIGINS = "0"
+
+[[http_service.checks]]
+method = "GET"
+path = "/ready"
+interval = "10s"
+timeout = "2s"

@@ -66,6 +66,7 @@ type BrandResolveInput = {
   host?: string;
   /** Optional domain mapping override for tests or embedded runtimes. */
   domainBrandMap?: string;
+  allowUnverifiedFallback?: boolean;
   brandName?: string;
   supportUrl?: string;
   termsUrl?: string;
@@ -75,10 +76,6 @@ type BrandResolveInput = {
 
 // In-memory brand cache keyed by brandId.
 const brandCache = new Map<string, ResolvedBrand>();
-
-function allowsUnverifiedBrandFallback(): boolean {
-  return process.env.NODE_ENV !== 'production';
-}
 
 /**
  * Map a backend BrandViewModel to a ResolvedBrand.
@@ -117,10 +114,6 @@ function sanitizeHrefUrl(value: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function configuredDomainBrandMap(): string | undefined {
-  return clean(process.env.NEXT_PUBLIC_TIXKIT_DOMAIN_BRANDS);
 }
 
 function normalizeHost(host: string | undefined): string | undefined {
@@ -194,10 +187,7 @@ function resolveBrandId(input: BrandResolveInput): string | undefined {
   const explicit = clean(input.explicitBrandId) ?? clean(input.brandId);
   if (explicit) return explicit;
 
-  const mapped = findMappedBrandId(
-    input.host ?? currentWindowHost(),
-    input.domainBrandMap ?? configuredDomainBrandMap(),
-  );
+  const mapped = findMappedBrandId(input.host ?? currentWindowHost(), input.domainBrandMap);
   if (mapped) return mapped;
 
   return clean(input.eventBrandId);
@@ -255,7 +245,7 @@ export async function fetchBrand(input: BrandResolveInput): Promise<ResolvedBran
     brandCache.set(id, resolved);
     return resolved;
   } catch {
-    if (allowsUnverifiedBrandFallback()) {
+    if (input.allowUnverifiedFallback ?? true) {
       return resolveBrand(input);
     }
     return { ...PLATFORM_DEFAULT };
@@ -284,10 +274,7 @@ export function resolveBrandFromHost(
       clean(params.get('brand') ?? undefined) ?? clean(params.get('x-tixkit-brand') ?? undefined);
     if (explicitBrand) return explicitBrand;
 
-    const mapped = findMappedBrandId(
-      input.host ?? currentWindowHost(),
-      input.domainBrandMap ?? configuredDomainBrandMap(),
-    );
+    const mapped = findMappedBrandId(input.host ?? currentWindowHost(), input.domainBrandMap);
     if (mapped) return mapped;
 
     return clean(input.eventBrandId);

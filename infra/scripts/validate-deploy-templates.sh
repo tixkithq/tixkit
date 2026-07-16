@@ -171,20 +171,15 @@ validate_runtime_image_context
 
 validate_frontend_public_api_build_config() {
   local expected_fly_api_origin='https://tixkit-api.fly.dev'
-  local expected_fly_api_base_url="${expected_fly_api_origin}/v1"
 
-  grep -Eq '^ARG NEXT_PUBLIC_TIXKIT_API_BASE_URL$' Dockerfile.checkout ||
-    fail 'Dockerfile.checkout must declare NEXT_PUBLIC_TIXKIT_API_BASE_URL as a build arg'
-  grep -Eq '^ENV NEXT_PUBLIC_TIXKIT_API_BASE_URL=\$\{NEXT_PUBLIC_TIXKIT_API_BASE_URL\}$' Dockerfile.checkout ||
-    fail 'Dockerfile.checkout must export NEXT_PUBLIC_TIXKIT_API_BASE_URL before build'
-  grep -Fq 'test -n "${NEXT_PUBLIC_TIXKIT_API_BASE_URL}"' Dockerfile.checkout ||
-    fail 'Dockerfile.checkout must reject missing NEXT_PUBLIC_TIXKIT_API_BASE_URL before build'
-  grep -Fq 'https://*) ;;' Dockerfile.checkout ||
-    fail 'Dockerfile.checkout must require an HTTPS public API origin before build'
-  grep -Fq 'http://localhost:*|http://127.0.0.1:*' Dockerfile.checkout ||
-    fail 'Dockerfile.checkout must constrain explicitly enabled local public API origins before build'
-  grep -Fq 'https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*' Dockerfile.checkout ||
-    fail 'Dockerfile.checkout must reject example.com placeholder public API origins before build'
+  for dockerfile in Dockerfile.checkout Dockerfile.admin; do
+    if grep -Eq '^(ARG|ENV)[[:space:]]+NEXT_PUBLIC_' "${dockerfile}"; then
+      fail "${dockerfile} must remain deployment-neutral and must not bake NEXT_PUBLIC_* configuration"
+    fi
+    if grep -Fq 'ALLOW_INSECURE_LOCAL_ORIGINS' "${dockerfile}"; then
+      fail "${dockerfile} must not accept a deployment-origin build escape"
+    fi
+  done
 
   if grep -Eq '^(ARG|ENV)[[:space:]]+NEXT_PUBLIC_' Dockerfile.admin; then
     fail 'Dockerfile.admin must remain deployment-neutral and must not bake NEXT_PUBLIC_* configuration'
@@ -201,32 +196,21 @@ validate_frontend_public_api_build_config() {
     fail 'public artifact release must not pass deployment-specific Docker build arguments'
   fi
 
-  awk -v expected_api_base_url="${expected_fly_api_base_url}" '
-    /^\[build\.args\]$/ {
-      in_build_args = 1
-      in_env = 0
-      next
-    }
-    /^\[env\]$/ {
-      in_build_args = 0
-      in_env = 1
-      next
-    }
-    /^\[/ {
-      in_build_args = 0
-      in_env = 0
-    }
-    in_build_args && $0 == "NEXT_PUBLIC_TIXKIT_API_BASE_URL = \"" expected_api_base_url "\"" {
-      build_arg = 1
-    }
-    in_env && $0 == "NEXT_PUBLIC_TIXKIT_API_BASE_URL = \"" expected_api_base_url "\"" {
-      runtime_env = 1
-    }
-    END {
-      exit build_arg && runtime_env ? 0 : 1
-    }
-  ' infra/fly/checkout.toml ||
-    fail 'infra/fly/checkout.toml must pass NEXT_PUBLIC_TIXKIT_API_BASE_URL as both a build arg and runtime env'
+  if grep -Eq '^\[build\.args\]$|NEXT_PUBLIC_' infra/fly/checkout.toml; then
+    fail 'infra/fly/checkout.toml must use the generic checkout image without build args or NEXT_PUBLIC configuration'
+  fi
+  for assignment in \
+    'TIXKIT_DEPLOYMENT_PROFILE = "production"' \
+    "API_BASE_URL = \"${expected_fly_api_origin}\"" \
+    'TIXKIT_CHECKOUT_URL = "https://tixkit-checkout.fly.dev"' \
+    'ALLOW_INSECURE_LOCAL_ORIGINS = "0"'; do
+    grep -Fqx "${assignment}" infra/fly/checkout.toml ||
+      fail "infra/fly/checkout.toml must set ${assignment}"
+  done
+  grep -Fq 'STRIPE_PUBLISHABLE_KEY="$STRIPE_PUBLISHABLE_KEY"' infra/fly/checkout.toml ||
+    fail 'infra/fly/checkout.toml must document the required Stripe publishable key secret'
+  grep -Fq 'path = "/ready"' infra/fly/checkout.toml ||
+    fail 'infra/fly/checkout.toml must gate traffic on checkout runtime readiness'
 
   if grep -Eq '^\[build\.args\]$|NEXT_PUBLIC_' infra/fly/admin.toml; then
     fail 'infra/fly/admin.toml must use the generic admin image without legacy build or NEXT_PUBLIC configuration'
@@ -624,7 +608,7 @@ done
 require_render_service_env_value tixkit-api AUTH_PROVIDER clerk
 require_render_service_env_value tixkit-api API_BASE_URL "${expected_render_api_origin}"
 require_render_service_env_value tixkit-api CUSTOM_DOMAIN_CORS_ENABLED true
-require_render_service_env_key tixkit-checkout NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+require_render_service_env_key tixkit-checkout STRIPE_PUBLISHABLE_KEY
 
 grep -Eq '^[[:space:]]*TRUST_PROXY[[:space:]]*=[[:space:]]*"1"[[:space:]]*$' infra/fly/api.toml ||
   fail 'infra/fly/api.toml must set API TRUST_PROXY to bounded hop count "1"'
@@ -893,7 +877,13 @@ awk '
 ' infra/render.yaml ||
   fail 'infra/render.yaml must use object-form Render datastore refs and declare tixkit-redis as a keyvalue service with ipAllowList'
 
-require_render_service_env_value tixkit-checkout NEXT_PUBLIC_TIXKIT_API_BASE_URL "${expected_render_checkout_api_base_url}"
+require_render_service_env_value tixkit-checkout TIXKIT_DEPLOYMENT_PROFILE production
+require_render_service_env_value tixkit-checkout API_BASE_URL "${expected_render_api_origin}"
+require_render_service_env_value tixkit-checkout TIXKIT_CHECKOUT_URL "${expected_render_checkout_origin}"
+require_render_service_env_value tixkit-checkout ALLOW_INSECURE_LOCAL_ORIGINS 0
+for operator_value in STRIPE_PUBLISHABLE_KEY TIXKIT_BUILD_REVISION; do
+  require_render_service_env_sync_false tixkit-checkout "${operator_value}"
+done
 require_render_service_env_value tixkit-admin TIXKIT_DEPLOYMENT_PROFILE production
 require_render_service_env_value tixkit-admin API_BASE_URL "${expected_render_api_origin}"
 require_render_service_env_value tixkit-admin TIXKIT_CHECKOUT_URL "${expected_render_checkout_origin}"
@@ -905,9 +895,19 @@ for operator_value in CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY TIXKIT_BUILD_REVISI
 done
 validate_render_public_storage_group
 require_render_service_env_group tixkit-api tixkit-public-storage
+require_render_service_env_group tixkit-checkout tixkit-public-storage
 require_render_service_env_group tixkit-admin tixkit-public-storage
 grep -Fq '# Set to the exact deployed Git commit or immutable release tag.' infra/render.yaml ||
   fail 'infra/render.yaml must bind TIXKIT_BUILD_REVISION to the selected immutable source or release'
+
+if awk '
+  /^  - type: / { in_checkout = 0 }
+  /^    name: tixkit-checkout$/ { in_checkout = 1; next }
+  in_checkout && /NEXT_PUBLIC_/ { found = 1 }
+  END { exit found ? 0 : 1 }
+' infra/render.yaml; then
+  fail 'infra/render.yaml tixkit-checkout must not declare legacy NEXT_PUBLIC_* runtime values'
+fi
 
 if awk '
   /^  - type: / { in_admin = 0 }
@@ -920,8 +920,8 @@ fi
 
 checkout_health_path="$(render_service_health_check_path tixkit-checkout)" ||
   fail 'infra/render.yaml must set tixkit-checkout healthCheckPath'
-test "${checkout_health_path}" = '/health' ||
-  fail 'infra/render.yaml must set tixkit-checkout healthCheckPath to /health'
+test "${checkout_health_path}" = '/ready' ||
+  fail 'infra/render.yaml must set tixkit-checkout healthCheckPath to /ready'
 checkout_health_route="$(next_app_route_file_for_path apps/checkout/src/app "${checkout_health_path}")" ||
   fail "infra/render.yaml tixkit-checkout healthCheckPath ${checkout_health_path} must map to a static Next app route"
 require_file "${checkout_health_route}"
@@ -943,7 +943,7 @@ grep -Eq '^[[:space:]]*temporalTaskQueue:[[:space:]]*tixkit-production[[:space:]
 grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*\{\{[[:space:]]*\.Values\.secrets\.temporalTaskQueue[[:space:]]*\|[[:space:]]*quote[[:space:]]*\}\}[[:space:]]*$' infra/helm/tixkit/templates/configmap.yaml ||
   fail 'infra/helm/tixkit/templates/configmap.yaml must render TEMPORAL_TASK_QUEUE from secrets.temporalTaskQueue'
 
-require_helm_frontend_probe_values checkout /health
+require_helm_frontend_probe_values checkout /ready /health
 require_helm_frontend_probe_values admin /ready /health
 
 awk -v api_origin="${expected_helm_api_origin}" \
@@ -1098,7 +1098,7 @@ if command -v helm >/dev/null 2>&1; then
   require_rendered_component_image_digest "${rendered_chart}" redis '^redis:7-alpine@sha256:[0-9a-f]{64}$'
   require_rendered_component_image_digest "${rendered_chart}" temporal-postgres '^postgres:16-alpine@sha256:[0-9a-f]{64}$'
   require_rendered_component_image_digest "${rendered_chart}" temporal '^temporalio/auto-setup:1\.24@sha256:[0-9a-f]{64}$'
-  require_rendered_frontend_probes "${rendered_chart}" checkout /health
+  require_rendered_frontend_probes "${rendered_chart}" checkout /ready /health
   require_rendered_frontend_probes "${rendered_chart}" admin /ready /health
 
   rendered_config="$(helm template tixkit infra/helm/tixkit --namespace tixkit --show-only templates/configmap.yaml)"
@@ -1118,12 +1118,11 @@ if command -v helm >/dev/null 2>&1; then
     fail "rendered Helm ConfigMap must set API CORS_ALLOWED_ORIGINS to ${expected_helm_cors_origins}"
   printf '%s\n' "${rendered_config}" | grep -Fq 'CUSTOM_DOMAIN_CORS_ENABLED: "true"' ||
     fail 'rendered Helm ConfigMap must enable CUSTOM_DOMAIN_CORS_ENABLED'
-  printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_TIXKIT_API_BASE_URL: \"${expected_helm_api_origin}/v1\"" ||
-    fail "rendered Helm ConfigMap must set NEXT_PUBLIC_TIXKIT_API_BASE_URL to ${expected_helm_api_origin}/v1"
-  printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_ADMIN_API_BASE_URL: \"${expected_helm_api_origin}\"" ||
-    fail "rendered Helm ConfigMap must set NEXT_PUBLIC_ADMIN_API_BASE_URL to ${expected_helm_api_origin}"
-  printf '%s\n' "${rendered_config}" | grep -Fq "NEXT_PUBLIC_CHECKOUT_URL: \"${expected_helm_checkout_origin}\"" ||
-    fail "rendered Helm ConfigMap must set NEXT_PUBLIC_CHECKOUT_URL to ${expected_helm_checkout_origin}"
+  printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*INTERNAL_API_BASE_URL:[[:space:]]*"http://tixkit-tixkit-api:4000"[[:space:]]*$' ||
+    fail 'rendered Helm ConfigMap must provide the in-cluster checkout API transport origin'
+  if printf '%s\n' "${rendered_config}" | grep -Fq 'NEXT_PUBLIC_'; then
+    fail 'rendered Helm ConfigMap must not carry legacy frontend build-time configuration'
+  fi
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*"tixkit-production"[[:space:]]*$' ||
     fail 'rendered Helm ConfigMap must set TEMPORAL_TASK_QUEUE to tixkit-production'
 fi

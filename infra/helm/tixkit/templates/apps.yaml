@@ -36,11 +36,19 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.checkout.port }}
-          envFrom:
-            - configMapRef:
-                name: {{ include "tixkit.fullname" . }}-config
-            - secretRef:
-                name: {{ .Values.secrets.name }}
+          env:
+            {{- range $key := list "NODE_ENV" "TIXKIT_DEPLOYMENT_PROFILE" "API_BASE_URL" "INTERNAL_API_BASE_URL" "TIXKIT_CHECKOUT_URL" "S3_PUBLIC_ENDPOINT" "ALLOW_INSECURE_LOCAL_ORIGINS" "TIXKIT_BUILD_REVISION" }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "tixkit.fullname" $ }}-config
+                  key: {{ $key }}
+            {{- end }}
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: STRIPE_PUBLISHABLE_KEY
           readinessProbe:
             httpGet:
               path: {{ .Values.checkout.probes.readiness.path | quote }}

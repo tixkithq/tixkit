@@ -194,7 +194,7 @@
 {{- $_ := set $provided .secretKey true -}}
 {{- end -}}
 {{- $databaseKey := ternary "DATABASE_URL_MYSQL" "DATABASE_URL" (eq .Values.database.driver "mysql") -}}
-{{- $required := list $databaseKey "REDIS_URL" "TEMPORAL_ADDRESS" "STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET" "METRICS_BEARER_TOKEN" "DASHBOARD_CURSOR_SIGNING_KEY" -}}
+{{- $required := list $databaseKey "REDIS_URL" "TEMPORAL_ADDRESS" "STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET" "STRIPE_PUBLISHABLE_KEY" "METRICS_BEARER_TOKEN" "DASHBOARD_CURSOR_SIGNING_KEY" -}}
 {{- if .Values.observability.enabled -}}
 {{- $required = concat $required (list "OTEL_EXPORTER_OTLP_ENDPOINT" "PROMETHEUS_PUSHGATEWAY_URL") -}}
 {{- end -}}

@@ -1,5 +1,6 @@
 import EventPageClient from './event-page-client';
-import { publicApi, type PublicEventPageBootstrap } from '@/lib/api';
+import type { PublicEventPageBootstrap } from '@/lib/api';
+import { getServerEventPageBootstrap } from '@/lib/api-server';
 import { eventPageMetadataFromBootstrap } from '@/lib/event-page-metadata';
 import type { Metadata } from 'next';
 
@@ -19,7 +20,7 @@ async function loadInitialBootstrap(
   locale: string,
 ): Promise<PublicEventPageBootstrap | null> {
   try {
-    return await publicApi.getEventPageBootstrap(eventId, undefined, locale || undefined);
+    return await getServerEventPageBootstrap(eventId, locale || undefined);
   } catch {
     return null;
   }

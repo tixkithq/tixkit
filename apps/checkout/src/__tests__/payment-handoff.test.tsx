@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { loadStripe } from '@stripe/stripe-js';
 import React from 'react';
 import { PaymentHandoff } from '@/components/checkout/payment-handoff';
+import { RuntimeConfigProvider } from '@/context/runtime-config-provider';
+import { resetBrowserRuntimeConfigForTests } from '@/lib/runtime-config-browser';
 
 vi.mock('@stripe/stripe-js', () => ({
   loadStripe: vi.fn(async () => null),
@@ -10,8 +12,31 @@ vi.mock('@stripe/stripe-js', () => ({
 
 afterEach(() => {
   vi.clearAllMocks();
-  delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  resetBrowserRuntimeConfigForTests();
 });
+
+function renderPayment(
+  key: string | undefined,
+  props: React.ComponentProps<typeof PaymentHandoff>,
+) {
+  return render(
+    <RuntimeConfigProvider
+      config={{
+        schemaVersion: '1',
+        deploymentProfile: 'test',
+        apiBaseUrl: 'http://localhost:4000',
+        platformApiBaseUrl: 'http://localhost:4000/v1',
+        checkoutUrl: 'http://localhost:3000',
+        mediaOrigin: 'http://localhost:9000',
+        ...(key ? { stripePublishableKey: key } : {}),
+        buildRevision: 'test',
+        configFingerprint: `sha256:${(key ?? 'none').padEnd(64, '0').slice(0, 64)}`,
+      }}
+    >
+      <PaymentHandoff {...props} />
+    </RuntimeConfigProvider>,
+  );
+}
 
 function createReadyStripe() {
   const paymentElement = {
@@ -35,17 +60,13 @@ function createReadyStripe() {
 
 describe('PaymentHandoff local capture mode', () => {
   it('does not load Stripe.js for synthetic local capture client secrets', async () => {
-    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = 'pk_test_present';
-
-    render(
-      React.createElement(PaymentHandoff, {
-        clientSecret: 'pi_capture_cs_1_secret',
-        currency: 'USD',
-        totalCents: 2500,
-        returnUrl: 'http://localhost:3000/checkout/complete',
-        onError: () => {},
-      }),
-    );
+    renderPayment('pk_test_present', {
+      clientSecret: 'pi_capture_cs_1_secret',
+      currency: 'USD',
+      totalCents: 2500,
+      returnUrl: 'http://localhost:3000/checkout/complete',
+      onError: () => {},
+    });
 
     await screen.findByText('Payment is ready for local capture');
     await waitFor(() => {
@@ -57,21 +78,18 @@ describe('PaymentHandoff local capture mode', () => {
 
 describe('PaymentHandoff Stripe mount recovery', () => {
   it('retries Stripe.js load failures without changing the client secret', async () => {
-    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = 'pk_test_retry_load';
     const { stripe, paymentElement } = createReadyStripe();
     vi.mocked(loadStripe)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(stripe as never);
 
-    render(
-      React.createElement(PaymentHandoff, {
-        clientSecret: 'pi_live_cs_retry_secret',
-        currency: 'USD',
-        totalCents: 2500,
-        returnUrl: 'http://localhost:3000/checkout/confirmation?sessionId=cs_retry',
-        onError: () => {},
-      }),
-    );
+    renderPayment('pk_test_retry_load', {
+      clientSecret: 'pi_live_cs_retry_secret',
+      currency: 'USD',
+      totalCents: 2500,
+      returnUrl: 'http://localhost:3000/checkout/confirmation?sessionId=cs_retry',
+      onError: () => {},
+    });
 
     await screen.findByText('Payment unavailable');
     expect(
@@ -91,7 +109,6 @@ describe('PaymentHandoff Stripe mount recovery', () => {
   });
 
   it('retries payment element mount failures in place', async () => {
-    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = 'pk_test_retry_mount';
     const throwingPaymentElement = {
       mount: vi.fn(() => {
         throw new Error('Stripe element failed to mount');
@@ -113,15 +130,13 @@ describe('PaymentHandoff Stripe mount recovery', () => {
       .mockResolvedValueOnce(throwingStripe as never)
       .mockResolvedValueOnce(stripe as never);
 
-    render(
-      React.createElement(PaymentHandoff, {
-        clientSecret: 'pi_live_cs_mount_secret',
-        currency: 'USD',
-        totalCents: 2500,
-        returnUrl: 'http://localhost:3000/checkout/confirmation?sessionId=cs_mount',
-        onError: () => {},
-      }),
-    );
+    renderPayment('pk_test_retry_mount', {
+      clientSecret: 'pi_live_cs_mount_secret',
+      currency: 'USD',
+      totalCents: 2500,
+      returnUrl: 'http://localhost:3000/checkout/confirmation?sessionId=cs_mount',
+      onError: () => {},
+    });
 
     await screen.findByText('Payment unavailable');
     expect(screen.getByText('Stripe element failed to mount')).toBeVisible();

@@ -760,14 +760,14 @@ portableCutoverTrustFromEnvironment(environment);`,
       assert.equal(releaseRendered.services[service].image, `tixkit/${service}:1.2.3`);
       assert.equal(releaseRendered.services[service].image.includes(releaseRendered.name), false);
     }
+    assert.equal(rendered.services.checkout.build.args, undefined);
+    assert.equal(secondRendered.services.checkout.build.args, undefined);
+    assert.equal(rendered.services.checkout.environment.API_BASE_URL, 'http://localhost:4000');
     assert.equal(
-      rendered.services.checkout.build.args.NEXT_PUBLIC_TIXKIT_API_BASE_URL,
-      'http://localhost:4000/v1',
+      secondRendered.services.checkout.environment.API_BASE_URL,
+      'http://localhost:4100',
     );
-    assert.equal(
-      secondRendered.services.checkout.build.args.NEXT_PUBLIC_TIXKIT_API_BASE_URL,
-      'http://localhost:4100/v1',
-    );
+    assert.equal(rendered.services.checkout.environment.INTERNAL_API_BASE_URL, 'http://api:4000');
     assert.equal(
       secondRendered.services.api.environment.S3_PUBLIC_ENDPOINT,
       'http://localhost:9100',
@@ -1100,11 +1100,25 @@ test('Compact injects admin deployment settings at runtime into a generic image'
   assert.doesNotMatch(releaseWorkflow, /docker build[^\n]*--build-arg/u);
 });
 
-test('Checkout-only insecure build escape stays limited to loopback URLs', () => {
+test('Checkout injects bounded loopback settings at runtime into a generic image', () => {
   const content = readFileSync(resolve(root, 'Dockerfile.checkout'), 'utf8');
-  assert.match(content, /ARG ALLOW_INSECURE_LOCAL_ORIGINS=0/u);
-  assert.match(content, /http:\/\/localhost:\*\|http:\/\/127\.0\.0\.1:\*/u);
-  assert.doesNotMatch(content, /http:\/\/0\.0\.0\.0/u);
+  const checkout = parse(readFileSync(resolve(root, 'infra/compact/compose.yml'), 'utf8')).services
+    .checkout;
+  assert.equal(checkout.build.args, undefined);
+  assert.equal(checkout.environment.TIXKIT_DEPLOYMENT_PROFILE, 'compact');
+  assert.match(checkout.environment.TIXKIT_BUILD_REVISION, /TIXKIT_VERSION.*local/u);
+  assert.match(checkout.environment.API_BASE_URL, /localhost.*API_PORT/u);
+  assert.equal(checkout.environment.INTERNAL_API_BASE_URL, 'http://api:4000');
+  assert.match(checkout.environment.TIXKIT_CHECKOUT_URL, /localhost.*CHECKOUT_PORT/u);
+  assert.equal(checkout.environment.ALLOW_INSECURE_LOCAL_ORIGINS, '1');
+  assert.equal(
+    Object.keys(checkout.environment).some((key) => key.startsWith('NEXT_PUBLIC_')),
+    false,
+  );
+  assert.match(checkout.healthcheck.test.at(-1), /localhost:3000\/ready/u);
+  assert.doesNotMatch(content, /^(?:ARG|ENV) NEXT_PUBLIC_/mu);
+  assert.doesNotMatch(content, /ALLOW_INSECURE_LOCAL_ORIGINS/u);
+  assert.doesNotMatch(content, /https?:\/\//u);
 });
 
 test('Compact application images install only their build dependency closures', () => {

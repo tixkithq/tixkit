@@ -129,6 +129,31 @@ describe('ConfirmationClient', () => {
     Object.defineProperty(document, 'referrer', { configurable: true, value: '' });
   });
 
+  it('captures then immediately removes the Stripe client secret from browser history', async () => {
+    window.sessionStorage.clear();
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&payment_intent_client_secret=pi_secret_sensitive&redirect_status=succeeded',
+    );
+    window.history.replaceState(
+      {},
+      '',
+      '/checkout/confirmation?sessionId=cs_1&payment_intent_client_secret=pi_secret_sensitive&redirect_status=succeeded',
+    );
+
+    render(<ConfirmationClient />);
+
+    expect(window.location.href).not.toContain('payment_intent_client_secret');
+    expect(window.location.href).not.toContain('pi_secret_sensitive');
+    await waitFor(() =>
+      expect(checkoutApiMock.getSession).toHaveBeenCalledWith(
+        'cs_1',
+        undefined,
+        'pi_secret_sensitive',
+      ),
+    );
+    expect(window.location.href).not.toContain('pi_secret_sensitive');
+  });
+
   it('associates invalid resale price errors with the price input and announces them', async () => {
     render(<ConfirmationClient />);
 

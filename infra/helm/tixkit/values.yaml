@@ -115,7 +115,7 @@ checkout:
   port: 3000
   probes:
     readiness:
-      path: /health
+      path: /ready
       initialDelaySeconds: 5
       periodSeconds: 10
       timeoutSeconds: 2

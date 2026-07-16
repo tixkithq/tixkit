@@ -16,6 +16,7 @@
  */
 
 import type { EventPagePuckData } from '@tixkit/content-event-page-react/puck';
+import { getBrowserRuntimeConfig } from './runtime-config-browser';
 
 export type PublicEvent = {
   id: string;
@@ -389,10 +390,8 @@ export class CheckoutApiError extends Error {
   }
 }
 
-const DEFAULT_API_BASE_URL = 'http://localhost:4000/v1';
-
 export function apiBaseUrl(): string {
-  return (process.env.NEXT_PUBLIC_TIXKIT_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
+  return getBrowserRuntimeConfig().platformApiBaseUrl;
 }
 
 function normalizePublicEvent(event: PublicEvent): PublicEvent {
@@ -471,10 +470,13 @@ async function apiRequest<T>(
 
   let response: Response;
   try {
+    const timeoutSignal = AbortSignal.timeout(15_000);
     response = await fetch(`${apiBaseUrl()}${path}`, {
       ...init,
       headers,
-      signal: init?.signal,
+      credentials: 'omit',
+      redirect: 'error',
+      signal: init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal,
     });
   } catch (err) {
     throw new CheckoutApiError(
