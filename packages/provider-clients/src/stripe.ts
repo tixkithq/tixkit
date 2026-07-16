@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import Stripe from 'stripe';
+import { validateExactProviderRequestId } from './incident-diagnostics.js';
 import {
   parseRetryAfter,
   ProviderOperationError,
   type ProviderClientRuntime,
   type ProviderDeliveryState,
+  type ProviderIncidentScope,
   type ProviderFailureKind,
   type ProviderServiceOutcome,
   type ProviderTelemetryEvent,
@@ -206,13 +208,18 @@ export type StripeSdkFactory = (
   configuration: Readonly<StripeSdkConfiguration>,
 ) => StripeSdkFacade;
 
-export interface StripeGatewayOptions extends Pick<ProviderClientRuntime, 'onTelemetry'> {
+export interface StripeGatewayOptions extends Pick<
+  ProviderClientRuntime,
+  'onTelemetry' | 'onExactRequestId'
+> {
   sdkFactory?: StripeSdkFactory;
+  incidentScope?: ProviderIncidentScope;
 }
 
 export class StripeSdkGateway implements StripeGateway {
   private readonly sdk: StripeSdkFacade;
   private readonly runtime: ProviderClientRuntime;
+  private readonly incidentScope?: ProviderIncidentScope;
 
   constructor(secretKey: string, options: StripeGatewayOptions = {}) {
     if (!secretKey.trim()) {
@@ -229,7 +236,11 @@ export class StripeSdkGateway implements StripeGateway {
       : (new Stripe(secretKey, configuration) as unknown as StripeSdkFacade);
     this.runtime = {
       onTelemetry: options.onTelemetry,
+      onExactRequestId: options.onExactRequestId,
     };
+    this.incidentScope = options.incidentScope
+      ? Object.freeze({ ...options.incidentScope })
+      : undefined;
   }
 
   async createPaymentIntent(input: CreateStripePaymentIntentInput): Promise<StripePaymentIntent> {
@@ -391,6 +402,7 @@ export class StripeSdkGateway implements StripeGateway {
       });
     try {
       const result = await invoke();
+      this.emitExactRequestId(operation, exactStripeRequestId(result));
       const parsed = parse(result, operation);
       const response = lastResponse(result);
       const durationMs = elapsed(startedAt);
@@ -413,6 +425,7 @@ export class StripeSdkGateway implements StripeGateway {
       });
       return parsed;
     } catch (cause) {
+      this.emitExactRequestId(operation, exactStripeRequestId(cause));
       const error = normalizeStripeError(operation, sideEffecting, cause);
       const serviceOutcome = stripeServiceOutcome(cause);
       const durationMs = elapsed(startedAt);
@@ -439,6 +452,30 @@ export class StripeSdkGateway implements StripeGateway {
     } finally {
       span.end();
     }
+  }
+
+  private emitExactRequestId(operation: string, exactRequestId: string | undefined): void {
+    const callback = this.runtime.onExactRequestId;
+    const scope = this.incidentScope;
+    if (!callback || !scope || exactRequestId === undefined) return;
+    const requestIdHash = safeRequestId(exactRequestId);
+    if (!requestIdHash) return;
+    queueMicrotask(() => {
+      try {
+        const result = callback(
+          Object.freeze({
+            dependency: 'stripe',
+            operation,
+            exactRequestId,
+            requestIdHash,
+            scope,
+          }),
+        );
+        if (result) void Promise.resolve(result).catch(() => undefined);
+      } catch {
+        // Privileged incident capture is best-effort and must not alter Stripe semantics.
+      }
+    });
   }
 }
 
@@ -645,6 +682,27 @@ function requireIdentifier(value: string, operation: string): void {
 function lastResponse(value: unknown): { statusCode?: number } {
   if (!isRecord(value) || !isRecord(value.lastResponse)) return {};
   return { statusCode: integerValue(value.lastResponse.statusCode) };
+}
+
+function exactStripeRequestId(value: unknown): string | undefined {
+  const record = isRecord(value) ? value : {};
+  const raw = isRecord(record.raw) ? record.raw : {};
+  const response = isRecord(record.lastResponse) ? record.lastResponse : {};
+  const headerRequestId = [record.headers, raw.headers, response.headers]
+    .map(headerRecord)
+    .map((headers) => headers?.['request-id'] ?? headers?.['stripe-request-id'])
+    .find((requestId) => requestId !== undefined);
+  const candidate =
+    stringValue(record.requestId) ??
+    stringValue(raw.requestId) ??
+    stringValue(response.requestId) ??
+    headerRequestId;
+  if (candidate === undefined) return undefined;
+  try {
+    return validateExactProviderRequestId(candidate);
+  } catch {
+    return undefined;
+  }
 }
 
 function headerRecord(value: unknown): Record<string, string> | undefined {

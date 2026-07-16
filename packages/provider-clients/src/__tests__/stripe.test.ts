@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ProviderOperationError,
@@ -116,9 +116,7 @@ async function operationError(promise: Promise<unknown>): Promise<ProviderOperat
 
 function signStripeWebhook(payload: string, secret: string): string {
   const timestamp = Math.floor(Date.now() / 1_000);
-  const signature = createHmac('sha256', secret)
-    .update(`${timestamp}.${payload}`)
-    .digest('hex');
+  const signature = createHmac('sha256', secret).update(`${timestamp}.${payload}`).digest('hex');
   return `t=${timestamp},v1=${signature}`;
 }
 
@@ -791,4 +789,192 @@ describe('StripeSdkGateway', () => {
 
     await expect(gateway.retrievePaymentIntent('pi_1')).resolves.toMatchObject({ id: 'pi_1' });
   });
+
+  it('exports a successful Stripe request ID only to the scoped privileged callback', async () => {
+    const exactRequestId = 'req_success_exact_1';
+    const onExactRequestId = vi.fn();
+    const { factory } = stripeFixture({
+      paymentIntentRetrieve: vi.fn(async () => ({
+        id: 'pi_1',
+        status: 'succeeded',
+        amount: 2_500,
+        amount_received: 2_500,
+        lastResponse: {
+          statusCode: 200,
+          requestId: exactRequestId,
+          headers: { 'stripe-request-id': 'req_lower_precedence' },
+        },
+      })),
+    });
+    const gateway = new StripeSdkGateway('sk_test_boundary', {
+      sdkFactory: factory,
+      incidentScope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+      onExactRequestId,
+    });
+
+    const result = await gateway.retrievePaymentIntent('pi_1');
+    await vi.waitFor(() => expect(onExactRequestId).toHaveBeenCalledOnce());
+
+    expect(result).toMatchObject({ id: 'pi_1', status: 'succeeded' });
+    expect(onExactRequestId).toHaveBeenCalledWith({
+      dependency: 'stripe',
+      operation: 'payment-intent.retrieve',
+      exactRequestId,
+      requestIdHash: `sha256:${createHash('sha256').update(exactRequestId).digest('hex')}`,
+      scope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+    });
+    const exported = onExactRequestId.mock.calls[0]?.[0];
+    expect(Object.isFrozen(exported)).toBe(true);
+    expect(Object.isFrozen(exported?.scope)).toBe(true);
+    expect(JSON.stringify(result)).not.toContain(exactRequestId);
+  });
+
+  it('exports an exact Stripe failure request ID while errors remain hash-only', async () => {
+    const exactRequestId = 'req_failure_exact_1';
+    const onExactRequestId = vi.fn();
+    const { factory } = stripeFixture({
+      paymentIntentCreate: vi.fn(async () =>
+        Promise.reject({
+          type: 'StripeAPIError',
+          statusCode: 503,
+          requestId: exactRequestId,
+          raw: { message: `provider failure ${exactRequestId}` },
+        }),
+      ),
+    });
+    const gateway = new StripeSdkGateway('sk_test_boundary', {
+      sdkFactory: factory,
+      incidentScope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+      onExactRequestId,
+    });
+
+    const error = await operationError(
+      gateway.createPaymentIntent({
+        amount: 1_000,
+        currency: 'USD',
+        metadata: {},
+        idempotencyKey: 'checkout_failure_request_id',
+      }),
+    );
+    await vi.waitFor(() => expect(onExactRequestId).toHaveBeenCalledOnce());
+
+    expect(error.details.providerRequestId).toBe(
+      `sha256:${createHash('sha256').update(exactRequestId).digest('hex')}`,
+    );
+    expect(`${error.message}${JSON.stringify(error)}`).not.toContain(exactRequestId);
+    expect(onExactRequestId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dependency: 'stripe',
+        operation: 'payment-intent.create',
+        exactRequestId,
+      }),
+    );
+  });
+
+  it('falls through empty higher-priority header objects for exact failure request IDs', async () => {
+    const exactRequestId = 'req_raw_header_fallback_1';
+    const onExactRequestId = vi.fn();
+    const { factory } = stripeFixture({
+      paymentIntentRetrieve: vi.fn(async () =>
+        Promise.reject({
+          type: 'StripeAPIError',
+          statusCode: 503,
+          headers: {},
+          raw: { headers: { 'request-id': exactRequestId } },
+        }),
+      ),
+    });
+    const gateway = new StripeSdkGateway('sk_test_boundary', {
+      sdkFactory: factory,
+      incidentScope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+      onExactRequestId,
+    });
+
+    await expect(gateway.retrievePaymentIntent('pi_1')).rejects.toBeInstanceOf(
+      ProviderOperationError,
+    );
+    await vi.waitFor(() => expect(onExactRequestId).toHaveBeenCalledOnce());
+    expect(onExactRequestId).toHaveBeenCalledWith(
+      expect.objectContaining({ exactRequestId, operation: 'payment-intent.retrieve' }),
+    );
+  });
+
+  it('does not export exact request IDs without an explicit incident scope', async () => {
+    const onExactRequestId = vi.fn();
+    const { factory } = stripeFixture({
+      paymentIntentRetrieve: vi.fn(async () => ({
+        id: 'pi_1',
+        status: 'succeeded',
+        amount: 2_500,
+        amount_received: 2_500,
+        lastResponse: { requestId: 'req_unscoped_exact_1' },
+      })),
+    });
+    const gateway = new StripeSdkGateway('sk_test_boundary', {
+      sdkFactory: factory,
+      onExactRequestId,
+    });
+
+    await expect(gateway.retrievePaymentIntent('pi_1')).resolves.toMatchObject({ id: 'pi_1' });
+    await Promise.resolve();
+    expect(onExactRequestId).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['whitespace', 'req unsafe'],
+    ['control byte', 'req_unsafe\nvalue'],
+    ['overlong', `req_${'x'.repeat(252)}`],
+  ])('drops %s exact request IDs before privileged export', async (_label, requestId) => {
+    const onExactRequestId = vi.fn();
+    const { factory } = stripeFixture({
+      paymentIntentRetrieve: vi.fn(async () => ({
+        id: 'pi_1',
+        status: 'succeeded',
+        amount: 2_500,
+        amount_received: 2_500,
+        lastResponse: { requestId },
+      })),
+    });
+    const gateway = new StripeSdkGateway('sk_test_boundary', {
+      sdkFactory: factory,
+      incidentScope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+      onExactRequestId,
+    });
+
+    await expect(gateway.retrievePaymentIntent('pi_1')).resolves.toMatchObject({ id: 'pi_1' });
+    await Promise.resolve();
+    expect(onExactRequestId).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new Error('incident sink unavailable');
+      },
+    ],
+    ['rejects', async () => Promise.reject(new Error('incident sink rejected'))],
+    ['never settles', () => new Promise<void>(() => undefined)],
+  ])(
+    'does not let a privileged callback that %s alter Stripe execution',
+    async (_label, callback) => {
+      const { factory } = stripeFixture({
+        paymentIntentRetrieve: vi.fn(async () => ({
+          id: 'pi_1',
+          status: 'succeeded',
+          amount: 2_500,
+          amount_received: 2_500,
+          lastResponse: { headers: { 'request-id': 'req_detached_exact_1' } },
+        })),
+      });
+      const gateway = new StripeSdkGateway('sk_test_boundary', {
+        sdkFactory: factory,
+        incidentScope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+        onExactRequestId: callback,
+      });
+
+      await expect(gateway.retrievePaymentIntent('pi_1')).resolves.toMatchObject({ id: 'pi_1' });
+      await Promise.resolve();
+    },
+  );
 });

@@ -1,0 +1,414 @@
+{
+  "schemaVersion": 1,
+  "decision": "retain-contained-sdk",
+  "bindings": {
+    "providerRegistrySha256": "165e21f35b1471a3b64b136162d1fdab2ef16073d8dc60c29fae7a90db8d6312",
+    "lockfileSha256": "724fc91e1d5b500a8f45b6a244d9fc93fad470db2c888fd4f8ef4e465c627c7c",
+    "stripeGatewaySourceSha256": "5dfa94799c2641c936cc614d17fdfb504cc3390939692c502bfe75780f70814e",
+    "providerManifestSha256": "925fb7a001276aae145d3337b9280e8d9028d3482f0c334dd06d175d9d9bf74d",
+    "evaluationImplementationSha256": "c40dce75e3238892b77dbe358e3f66945fc54ab6921803644d7a29c79785b959",
+    "localEvidenceSha256": "8f5fde9618b48811e119a1b523417cf1b4d0e3317cc4ff470b5c120f500a5cde",
+    "decisionInputsSha256": "855731d713c712d141935ccb5d734bd9cc8a2ed15c4ba44e22247c8275b7d06d"
+  },
+  "containedSdk": {
+    "package": "stripe",
+    "declaredRange": "^22.2.0",
+    "resolvedVersion": "22.3.0",
+    "lockIntegrity": "sha512-ypO6xjVrMWs9SmIMeHr8naCx3dAQ0clxMdUTxn7Ejd7hmY9meBGfE+N4pVHkf9sUNebAHp6uJo6mV3GxDIc2cA==",
+    "dependencyClass": "dependencies",
+    "runtimeImportPath": "packages/provider-clients/src/stripe.ts",
+    "testOnlyPlacements": [
+      {
+        "manifest": "packages/api/package.json",
+        "dependencyClass": "devDependencies",
+        "importPath": "packages/api/src/__tests__/integration/stripe-connect-provider.integration.test.ts"
+      },
+      {
+        "manifest": "packages/workflows/package.json",
+        "dependencyClass": "devDependencies",
+        "importPath": "packages/workflows/src/__tests__/stripe-provider.integration.test.ts"
+      }
+    ],
+    "logicalInstalledBytes": 15875598,
+    "logicalInstalledFiles": 1424,
+    "logicalContentSha256": "cf582e033d42abdf98101f4700e10516958692f366501ca4cb631ae20203251d",
+    "operations": [
+      {
+        "id": "account-link.create",
+        "method": "POST",
+        "path": "/v1/account_links",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "connect-account.create",
+        "method": "POST",
+        "path": "/v1/accounts",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "connect-account.delete",
+        "method": "DELETE",
+        "path": "/v1/accounts/{accountId}",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "connect-account.retrieve",
+        "method": "GET",
+        "path": "/v1/accounts/{accountId}",
+        "sideEffecting": false,
+        "idempotencyRequired": false,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "payment-intent.cancel",
+        "method": "POST",
+        "path": "/v1/payment_intents/{paymentIntentId}/cancel",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "payment-intent.create",
+        "method": "POST",
+        "path": "/v1/payment_intents",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "payment-intent.retrieve",
+        "method": "GET",
+        "path": "/v1/payment_intents/{paymentIntentId}",
+        "sideEffecting": false,
+        "idempotencyRequired": false,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "refund.create",
+        "method": "POST",
+        "path": "/v1/refunds",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      }
+    ],
+    "diagnostics": {
+      "status": true,
+      "statusText": false,
+      "contentType": false,
+      "responseSize": false,
+      "responseClassification": false,
+      "bodyDigest": false,
+      "retryAfter": true,
+      "hashedRequestId": true,
+      "exactRequestIdIncidentSink": true,
+      "providerBackedProof": false
+    },
+    "retainedRuntimeResponsibilities": [
+      "api-error-deserialization",
+      "api-version-compatibility",
+      "authentication-header-construction",
+      "form-encoding",
+      "http-transport",
+      "webhook-signature-verification"
+    ]
+  },
+  "directCandidate": {
+    "state": "bounded-wire-prototype-unproven",
+    "shippingRuntime": false,
+    "networkCallsPerformed": false,
+    "operations": [
+      {
+        "id": "account-link.create",
+        "method": "POST",
+        "path": "/v1/account_links",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "connect-account.create",
+        "method": "POST",
+        "path": "/v1/accounts",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "connect-account.delete",
+        "method": "DELETE",
+        "path": "/v1/accounts/{accountId}",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "connect-account.retrieve",
+        "method": "GET",
+        "path": "/v1/accounts/{accountId}",
+        "sideEffecting": false,
+        "idempotencyRequired": false,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "payment-intent.cancel",
+        "method": "POST",
+        "path": "/v1/payment_intents/{paymentIntentId}/cancel",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "payment-intent.create",
+        "method": "POST",
+        "path": "/v1/payment_intents",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "payment-intent.retrieve",
+        "method": "GET",
+        "path": "/v1/payment_intents/{paymentIntentId}",
+        "sideEffecting": false,
+        "idempotencyRequired": false,
+        "localRequestShapeProof": true
+      },
+      {
+        "id": "refund.create",
+        "method": "POST",
+        "path": "/v1/refunds",
+        "sideEffecting": true,
+        "idempotencyRequired": true,
+        "localRequestShapeProof": true
+      }
+    ],
+    "diagnostics": {
+      "status": false,
+      "statusText": false,
+      "contentType": false,
+      "responseSize": false,
+      "responseClassification": false,
+      "bodyDigest": false,
+      "retryAfter": false,
+      "hashedRequestId": false,
+      "exactRequestIdIncidentSink": false,
+      "providerBackedProof": false
+    },
+    "stripeRuntimeDependencyStillRequired": true,
+    "stripeRuntimeDependencyReason": "webhook-signature-verification-runtime-boundary"
+  },
+  "parityGates": [
+    {
+      "id": "api-version-header-local",
+      "required": true,
+      "status": "passed",
+      "evidence": "scripts/__tests__/stripe-sdk-evaluation.test.mjs"
+    },
+    {
+      "id": "api-version-upgrade-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "connect-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "connect-transfer-local",
+      "required": true,
+      "status": "passed",
+      "evidence": "scripts/__tests__/stripe-sdk-evaluation.test.mjs"
+    },
+    {
+      "id": "form-encoding-local",
+      "required": true,
+      "status": "passed",
+      "evidence": "scripts/__tests__/stripe-sdk-evaluation.test.mjs"
+    },
+    {
+      "id": "hosted-elements-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "idempotency-header-local",
+      "required": true,
+      "status": "passed",
+      "evidence": "scripts/__tests__/stripe-sdk-evaluation.test.mjs"
+    },
+    {
+      "id": "malformed-wire-diagnostics-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "orphan-compensation-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "payment-intent-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "refund-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "retry-replay-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    },
+    {
+      "id": "webhook-provider",
+      "required": true,
+      "status": "not-run",
+      "evidence": null
+    }
+  ],
+  "benefitThresholds": {
+    "minimumDependencyBytesRemoved": 1048576,
+    "minimumDependencyPercentRemoved": 25,
+    "minimumStartupMedianMsReduction": 10,
+    "minimumStartupPercentReduction": 20,
+    "minimumNewDiagnosticFields": 4
+  },
+  "benefitMeasurements": {
+    "dependencyBytesRemoved": 0,
+    "dependencyPercentRemoved": 0,
+    "startupMedianMsReduction": 0,
+    "startupPercentReduction": 0,
+    "newDiagnosticFields": 0,
+    "dependencyBenefitPass": false,
+    "startupBenefitPass": false,
+    "diagnosticBenefitPass": false,
+    "materialBenefitPass": false
+  },
+  "startupMeasurement": {
+    "runtime": "node@24.4.1 darwin-arm64",
+    "warmups": 5,
+    "samplesPerCase": 30,
+    "containedSdkMs": {
+      "samples": [
+        71.974,
+        73.721,
+        69.762,
+        66.562,
+        69.381,
+        70.324,
+        69.723,
+        65.114,
+        65.722,
+        62.883,
+        65.022,
+        65.286,
+        75.071,
+        71.568,
+        72.377,
+        70.402,
+        72.147,
+        67.697,
+        73.819,
+        70.978,
+        68.411,
+        65.067,
+        64.323,
+        67.733,
+        64.722,
+        63.35,
+        69.542,
+        63.899,
+        66.45,
+        66.852
+      ],
+      "median": 68.411,
+      "p95": 73.819,
+      "minimum": 62.883,
+      "maximum": 75.071
+    },
+    "directCandidateMs": {
+      "samples": [
+        27.517,
+        27.159,
+        27.682,
+        27.459,
+        25.137,
+        26.838,
+        27.588,
+        25.481,
+        26.491,
+        28.625,
+        28.342,
+        28.77,
+        37.996,
+        26.257,
+        25.484,
+        28.059,
+        28.494,
+        26.585,
+        29.658,
+        28.353,
+        35.929,
+        26.738,
+        27.286,
+        26.481,
+        25.666,
+        41.336,
+        28.025,
+        25.412,
+        25.406,
+        27.508
+      ],
+      "median": 27.508,
+      "p95": 37.996,
+      "minimum": 25.137,
+      "maximum": 41.336
+    }
+  },
+  "maintenanceSurface": {
+    "containedSdkOwnedResponsibilities": [
+      "gateway-input-validation",
+      "normalized-domain-response-mapping",
+      "redacted-error-normalization",
+      "workflow-retry-and-compensation-policy"
+    ],
+    "directCandidateOwnedResponsibilities": [
+      "api-error-deserialization",
+      "api-version-upgrade-compatibility",
+      "authentication-header-construction",
+      "connected-account-semantics",
+      "form-encoding",
+      "gateway-input-validation",
+      "http-transport-and-deadlines",
+      "normalized-domain-response-mapping",
+      "redacted-error-normalization",
+      "response-bounding-and-classification",
+      "retry-after-and-idempotency-semantics",
+      "workflow-retry-and-compensation-policy"
+    ]
+  },
+  "decisionReasons": [
+    "direct candidate is non-shipping and has no provider-backed parity evidence",
+    "Stripe remains a production dependency for webhook signature verification",
+    "direct candidate has no provider-backed diagnostic proof",
+    "no material dependency, startup, or diagnostic benefit is proven"
+  ]
+}

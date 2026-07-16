@@ -13,6 +13,7 @@ const dbState = {
 };
 
 const stripeMock = {
+  options: [] as Record<string, unknown>[],
   paymentIntentsCreate: vi.fn(
     async (_params: Record<string, unknown>, _options: Record<string, unknown>) => ({
       id: 'pi_provider_1',
@@ -47,6 +48,9 @@ const stripeMock = {
 vi.mock('@tixkit/provider-clients', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tixkit/provider-clients')>();
   class MockStripeSdkGateway {
+    constructor(_key: string, options?: Record<string, unknown>) {
+      stripeMock.options.push(options ?? {});
+    }
     async createPaymentIntent(input: Record<string, any>) {
       const created = await stripeMock.paymentIntentsCreate(
         {
@@ -416,6 +420,7 @@ describe('createPaymentIntentActivity capture mode', () => {
     stripeMock.paymentIntentsRetrieve.mockClear();
     stripeMock.paymentIntentsCancel.mockClear();
     stripeMock.refundsCreate.mockClear();
+    stripeMock.options = [];
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     delete process.env.STRIPE_SECRET_KEY;
     delete process.env.TIXKIT_RUNTIME_MODE;
@@ -579,6 +584,9 @@ describe('createPaymentIntentActivity capture mode', () => {
       },
     });
     expect(stripeMock.paymentIntentsCreate).toHaveBeenCalledTimes(1);
+    expect(stripeMock.options.at(-1)).toMatchObject({
+      incidentScope: { tenantId: 'tnt_1', organizationId: 'org_1' },
+    });
     expect(Object.values(dbState.tables.payment_intents)).toHaveLength(1);
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBe('pi_existing');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('pending_payment');
@@ -589,6 +597,8 @@ describe('createPaymentIntentActivity capture mode', () => {
     dbState.tables.brands = {
       brd_1: {
         id: 'brd_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
         payment_account_id: 'pa_1',
       },
     };
@@ -1712,6 +1722,14 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
         tenant_id: 'tnt_1',
         organization_id: 'org_1',
         status: 'published',
+      },
+    },
+    brands: {
+      brd_1: {
+        id: 'brd_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        payment_account_id: null,
       },
     },
     checkout_holds: {

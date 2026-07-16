@@ -7,6 +7,7 @@ import {
 import {
   loadProviderIncidentEvidenceConfiguration,
   createBoundedProviderIncidentCaptureHandler,
+  createProviderIncidentEvidenceRuntime,
   ProviderIncidentEvidenceService,
   ProviderIncidentEvidenceUnavailableError,
   type ProviderIncidentEvidenceStore,
@@ -46,6 +47,18 @@ describe('provider incident evidence configuration', () => {
       });
     },
   );
+
+  it('does not install an exact request-ID callback while the sink is disabled', () => {
+    const disabled = createProviderIncidentEvidenceRuntime({} as never, {}, () => now);
+    const enabled = createProviderIncidentEvidenceRuntime(
+      {} as never,
+      enabledEnvironment(),
+      () => now,
+    );
+
+    expect(disabled.providerClientRuntime.onExactRequestId).toBeUndefined();
+    expect(enabled.providerClientRuntime.onExactRequestId).toEqual(expect.any(Function));
+  });
 
   it.each([
     ['invalid enable flag', { PROVIDER_INCIDENT_SINK_ENABLED: 'yes' }],

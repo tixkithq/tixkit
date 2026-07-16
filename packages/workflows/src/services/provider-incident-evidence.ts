@@ -63,16 +63,17 @@ export function createProviderIncidentEvidenceRuntime(
   environment: NodeJS.ProcessEnv = process.env,
   now: () => number = Date.now,
 ): ProviderIncidentEvidenceRuntime {
+  const configuration = loadProviderIncidentEvidenceConfiguration(environment, now());
   const service = new ProviderIncidentEvidenceService(
     new ProviderIncidentEvidenceRepository(db),
-    loadProviderIncidentEvidenceConfiguration(environment, now()),
+    configuration,
     now,
   );
   return {
     service,
-    providerClientRuntime: {
-      onExactRequestId: createBoundedProviderIncidentCaptureHandler(service),
-    },
+    providerClientRuntime: configuration.enabled
+      ? { onExactRequestId: createBoundedProviderIncidentCaptureHandler(service) }
+      : {},
   };
 }
 

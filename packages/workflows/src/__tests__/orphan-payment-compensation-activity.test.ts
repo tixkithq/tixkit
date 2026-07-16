@@ -5,8 +5,14 @@ const mockState = vi.hoisted(() => ({
   checkoutSession: {
     id: 'cs_1',
     tenant_id: 'tnt_1',
+    brand_id: 'brd_1',
     currency: 'USD',
     status: 'pending_payment',
+  } as Record<string, any> | undefined,
+  brand: {
+    id: 'brd_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
   } as Record<string, any> | undefined,
   order: undefined as Record<string, any> | undefined,
   compensation: undefined as Record<string, any> | undefined,
@@ -20,6 +26,7 @@ const mockState = vi.hoisted(() => ({
   stripeRetrieve: vi.fn(),
   stripeCancel: vi.fn(),
   stripeRefundCreate: vi.fn(),
+  stripeOptions: [] as Record<string, unknown>[],
 }));
 
 vi.mock('@tixkit/shared', () => ({
@@ -33,6 +40,10 @@ vi.mock('@tixkit/shared', () => ({
 vi.mock('@tixkit/provider-clients', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tixkit/provider-clients')>();
   class MockStripeSdkGateway {
+    constructor(optionsOrKey: string, options?: Record<string, unknown>) {
+      void optionsOrKey;
+      mockState.stripeOptions.push(options ?? {});
+    }
     async retrievePaymentIntent(id: string) {
       const intent = await mockState.stripeRetrieve(id);
       return {
@@ -94,11 +105,13 @@ function updateQuery(table: string) {
 vi.mock('@tixkit/db', () => {
   const db = {
     selectFrom: (table: string) => {
+      const filters: Array<[string, unknown]> = [];
       const query = {
         select() {
           return query;
         },
-        where() {
+        where(column: string, _operator: string, value: unknown) {
+          filters.push([column, value]);
           return query;
         },
         forUpdate() {
@@ -107,6 +120,12 @@ vi.mock('@tixkit/db', () => {
         async executeTakeFirst() {
           if (table === 'orders') return mockState.order;
           if (table === 'checkout_sessions') return mockState.checkoutSession;
+          if (table === 'brands') {
+            return mockState.brand &&
+              filters.every(([column, value]) => mockState.brand?.[column] === value)
+              ? mockState.brand
+              : undefined;
+          }
           return undefined;
         },
       };
@@ -228,9 +247,15 @@ describe('compensateOrphanPaymentActivity', () => {
     mockState.checkoutSession = {
       id: 'cs_1',
       tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
       currency: 'USD',
       status: 'pending_payment',
       cart: JSON.stringify({ items: [] }),
+    };
+    mockState.brand = {
+      id: 'brd_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
     };
     mockState.order = undefined;
     mockState.compensation = undefined;
@@ -240,6 +265,7 @@ describe('compensateOrphanPaymentActivity', () => {
     mockState.checkoutHoldUpdates = [];
     mockState.checkoutSessionUpdates = [];
     mockState.ticketListingUpdates = [];
+    mockState.stripeOptions = [];
     mockState.destroy.mockClear();
     mockState.stripeRetrieve.mockReset();
     mockState.stripeCancel.mockReset();
@@ -387,6 +413,65 @@ describe('compensateOrphanPaymentActivity', () => {
     expect(mockState.checkoutSessionUpdates).toHaveLength(0);
   });
 
+  it('does not create compensation state when the checkout session is missing', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    mockState.paymentIntent = undefined;
+    mockState.checkoutSession = undefined;
+
+    const result = await compensateOrphanPaymentActivity({
+      checkoutSessionId: 'cs_missing',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_provider_1',
+      amountCents: 2500,
+      currency: 'USD',
+      reason: 'test missing checkout session',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'PAYMENT_COMPENSATION_UNTRUSTED',
+      retryable: false,
+    });
+    expect(mockState.createdCompensations).toHaveLength(0);
+    expect(mockState.updatedCompensations).toHaveLength(0);
+    expect(mockState.stripeRetrieve).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['tenant-mismatched', { id: 'brd_1', tenant_id: 'tnt_2', organization_id: 'org_other' }],
+  ])('does not create compensation state when the checkout brand is %s', async (_label, brand) => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    mockState.paymentIntent = {
+      ...mockState.paymentIntent,
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+    };
+    mockState.brand = brand;
+
+    const result = await compensateOrphanPaymentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_provider_1',
+      amountCents: 2500,
+      currency: 'USD',
+      reason: 'test missing compensation scope',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'PAYMENT_COMPENSATION_SCOPE_MISSING',
+      retryable: false,
+    });
+    expect(mockState.createdCompensations).toHaveLength(0);
+    expect(mockState.updatedCompensations).toHaveLength(0);
+    expect(mockState.stripeRetrieve).not.toHaveBeenCalled();
+    expect(mockState.stripeRefundCreate).not.toHaveBeenCalled();
+    expect(mockState.stripeCancel).not.toHaveBeenCalled();
+  });
+
   it('refunds captured Stripe payments with a stable orphan idempotency key', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_1';
     mockState.paymentIntent = {
@@ -413,6 +498,9 @@ describe('compensateOrphanPaymentActivity', () => {
     });
 
     expect(result).toMatchObject({ ok: true, value: { status: 'succeeded', action: 'refund' } });
+    expect(mockState.stripeOptions.at(-1)).toMatchObject({
+      incidentScope: { tenantId: 'tnt_1', organizationId: 'org_1' },
+    });
     expect(mockState.stripeRefundCreate).toHaveBeenCalledWith(
       { payment_intent: 'pi_provider_1', amount: 2500 },
       { idempotencyKey: 'orphan-payment:refund:stripe:pi_provider_1:cs_1' },

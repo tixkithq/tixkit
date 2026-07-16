@@ -14,6 +14,7 @@ import { buildTransactionalMergeTagContext } from './messaging-context.js';
 import {
   durablyStartNotificationDeliveryWorkflow,
   getActivityDb,
+  getActivityProviderClientRuntime,
   restartQueuedNotificationDeliveryWorkflow,
 } from './activity-clients.js';
 
@@ -56,6 +57,7 @@ type RefundReservation =
       order: {
         id: string;
         tenantId: string;
+        organizationId: string;
         totalCents: number;
         currency: string;
       };
@@ -244,6 +246,7 @@ export async function processRefundActivity(input: {
           order: {
             id: order.id,
             tenantId: order.tenant_id,
+            organizationId: order.organization_id,
             totalCents: Number(order.total_cents),
             currency: order.currency,
           },
@@ -300,6 +303,7 @@ export async function processRefundActivity(input: {
         order: {
           id: order.id,
           tenantId: order.tenant_id,
+          organizationId: order.organization_id,
           totalCents: Number(order.total_cents),
           currency: order.currency,
         },
@@ -342,6 +346,11 @@ export async function processRefundActivity(input: {
     if (requiresStripeRefund && stripeSecretKey && reservation.paymentIntent.providerIntentId) {
       const stripe = new StripeSdkGateway(stripeSecretKey, {
         onTelemetry: paymentProviderTelemetry,
+        onExactRequestId: getActivityProviderClientRuntime().onExactRequestId,
+        incidentScope: {
+          tenantId: reservation.order.tenantId,
+          organizationId: reservation.order.organizationId,
+        },
       });
       const stripeRefund = await stripe.createRefund({
         paymentIntentId: reservation.paymentIntent.providerIntentId,

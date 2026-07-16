@@ -30,6 +30,7 @@ import { buildTransactionalMergeTagContext } from './messaging-context.js';
 import {
   durablyStartNotificationDeliveryWorkflow,
   getActivityDb,
+  getActivityProviderClientRuntime,
   restartQueuedNotificationDeliveryWorkflow,
 } from './activity-clients.js';
 
@@ -810,14 +811,20 @@ export async function createPaymentIntentActivity(input: {
       return okResult({ providerIntentId, clientSecret, provider });
     }
 
-    const stripe = new StripeSdkGateway(stripeSecretKey, { onTelemetry: paymentProviderTelemetry });
-
     // Resolve the brand's connected payment account for Stripe Connect direct payouts.
     const brand = await db
       .selectFrom('brands')
-      .select(['payment_account_id'])
+      .select(['organization_id', 'payment_account_id'])
+      .where('tenant_id', '=', input.tenantId)
       .where('id', '=', input.brandId)
       .executeTakeFirst();
+    if (!brand) return errResult('BRAND_NOT_FOUND', 'Checkout brand was not found', false);
+    const incidentRuntime = getActivityProviderClientRuntime();
+    const stripe = new StripeSdkGateway(stripeSecretKey, {
+      onTelemetry: paymentProviderTelemetry,
+      onExactRequestId: incidentRuntime.onExactRequestId,
+      incidentScope: { tenantId: input.tenantId, organizationId: brand.organization_id },
+    });
 
     let connectedAccountId: string | undefined;
     let paymentAccountId: string | null = null;
@@ -1006,7 +1013,7 @@ export async function compensateOrphanPaymentActivity(input: {
 
     const session = await db
       .selectFrom('checkout_sessions')
-      .select(['id', 'tenant_id', 'currency'])
+      .select(['id', 'tenant_id', 'brand_id', 'currency'])
       .where('id', '=', input.checkoutSessionId)
       .executeTakeFirst();
     if (!session) {
@@ -1041,6 +1048,27 @@ export async function compensateOrphanPaymentActivity(input: {
         'Provider and provider intent are required',
         false,
       );
+    }
+
+    let stripeIncidentScope: { tenantId: string; organizationId: string } | undefined;
+    if (isStripePaymentProvider(provider)) {
+      const brandScope = await db
+        .selectFrom('brands')
+        .select(['organization_id'])
+        .where('id', '=', session.brand_id)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+      if (!brandScope) {
+        return errResult(
+          'PAYMENT_COMPENSATION_SCOPE_MISSING',
+          'Checkout organization scope is unavailable for provider compensation',
+          false,
+        );
+      }
+      stripeIncidentScope = {
+        tenantId,
+        organizationId: brandScope.organization_id,
+      };
     }
 
     const amountCents = Number(paymentIntent?.amount_cents ?? input.amountCents ?? 0);
@@ -1150,7 +1178,15 @@ export async function compensateOrphanPaymentActivity(input: {
       });
     }
 
-    const stripe = new StripeSdkGateway(stripeSecretKey, { onTelemetry: paymentProviderTelemetry });
+    if (!stripeIncidentScope) {
+      throw new Error('Stripe payment compensation incident scope was not resolved');
+    }
+    const incidentRuntime = getActivityProviderClientRuntime();
+    const stripe = new StripeSdkGateway(stripeSecretKey, {
+      onTelemetry: paymentProviderTelemetry,
+      onExactRequestId: incidentRuntime.onExactRequestId,
+      incidentScope: stripeIncidentScope,
+    });
     const stripePaymentIntent = await stripe.retrievePaymentIntent(providerIntentId);
 
     if (paymentIntent) {

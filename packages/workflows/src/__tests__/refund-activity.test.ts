@@ -188,7 +188,10 @@ vi.mock('@tixkit/db', () => {
         if (table === 'email_jobs') return dbState.existingJob;
         if (table === 'email_provider_routes') return { id: 'epr_1' };
         if (table === 'notification_templates as template') return { id: 'ntv_1' };
-        if (table === 'orders') return matches(dbState.order, filters) ? dbState.order : undefined;
+        if (table === 'orders')
+          return matches(dbState.order, filters)
+            ? { organization_id: 'org_1', ...dbState.order }
+            : undefined;
         if (table === 'events') return dbState.event;
         if (table === 'brands') return dbState.brand;
         if (table === 'payment_accounts') return dbState.paymentAccount;
@@ -197,7 +200,7 @@ vi.mock('@tixkit/db', () => {
         return undefined;
       },
       async executeTakeFirstOrThrow() {
-        if (table === 'orders') return dbState.order;
+        if (table === 'orders') return { organization_id: 'org_1', ...dbState.order };
         if (table === 'inventory_pools') {
           const pool = dbState.inventoryPools.find((row) => matches(row, filters));
           if (pool) return pool;
@@ -336,6 +339,7 @@ vi.mock('@tixkit/db', () => {
 });
 
 const stripeMock = vi.hoisted(() => ({
+  options: [] as Record<string, unknown>[],
   refundsCreate: vi.fn(async (opts: Record<string, unknown>, opts2: Record<string, unknown>) => {
     dbState.stripeRefunds.push({ opts, opts2 });
     return { id: 're_stripe_1', status: 'succeeded' };
@@ -345,6 +349,9 @@ const stripeMock = vi.hoisted(() => ({
 vi.mock('@tixkit/provider-clients', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tixkit/provider-clients')>();
   class MockStripeSdkGateway {
+    constructor(_key: string, options?: Record<string, unknown>) {
+      stripeMock.options.push(options ?? {});
+    }
     async createRefund(input: Record<string, any>) {
       return stripeMock.refundsCreate(
         {
@@ -728,6 +735,7 @@ describe('processRefundActivity - idempotency / dedup', () => {
     dbState.refunds = [];
     dbState.createdRefunds = [];
     dbState.stripeRefunds = [];
+    stripeMock.options = [];
     dbState.timeline = [];
     dbState.paymentAccount = null;
     dbState.paymentIntent = {
@@ -956,6 +964,9 @@ describe('processRefundActivity - idempotency / dedup', () => {
       nonce: 'refund_nonce_1',
     });
     expect(result.ok).toBe(true);
+    expect(stripeMock.options.at(-1)).toMatchObject({
+      incidentScope: { tenantId: 'tnt_1', organizationId: 'org_1' },
+    });
     expect(dbState.refunds.filter((refund) => refund.status === 'succeeded')).toHaveLength(1);
     expect(dbState.refunds.find((refund) => refund.id === 'rfd_2')).toMatchObject({
       status: 'superseded',

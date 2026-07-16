@@ -344,13 +344,23 @@ async function requireUniqueClerkOrganizationId(
 function stripeGatewayFromContext(
   context: unknown,
   onTelemetry: (event: Readonly<ProviderTelemetryEvent>) => void,
+  incidentScope: { tenantId: string; organizationId: string },
 ): StripeGateway | null {
   const injected = (context as { stripeGateway?: StripeGateway }).stripeGateway;
   if (injected) return injected;
   const secretKey = process.env.STRIPE_SECRET_KEY;
   const connectClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
   if (!secretKey || !connectClientId) return null;
-  return new StripeSdkGateway(secretKey, { onTelemetry });
+  const providerClientRuntime = (context as AppContext).providerClientRuntime;
+  const options = {
+    onTelemetry,
+    onExactRequestId: providerClientRuntime?.onExactRequestId,
+    incidentScope,
+  };
+  return (
+    (context as AppContext).stripeGatewayFactory?.(secretKey, options) ??
+    new StripeSdkGateway(secretKey, options)
+  );
 }
 
 function requireStripeConnectIdempotencyKey(value: unknown): string {
@@ -1172,8 +1182,10 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         organizationId,
         'stripe_connect',
       );
-      const stripe = stripeGatewayFromContext(app.context, (event) =>
-        observeApiPaymentProviderAttempt(app.observability.metrics, event),
+      const stripe = stripeGatewayFromContext(
+        app.context,
+        (event) => observeApiPaymentProviderAttempt(app.observability.metrics, event),
+        { tenantId: organization.tenant_id, organizationId },
       );
       if (!stripe) {
         if (activeStripe) return reply.status(200).send(serializePaymentAccount(activeStripe));
@@ -1315,8 +1327,10 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         throw new ValidationError('Payment account is not a Stripe Connect account');
       }
 
-      const stripe = stripeGatewayFromContext(app.context, (event) =>
-        observeApiPaymentProviderAttempt(app.observability.metrics, event),
+      const stripe = stripeGatewayFromContext(
+        app.context,
+        (event) => observeApiPaymentProviderAttempt(app.observability.metrics, event),
+        { tenantId: organization.tenant_id, organizationId },
       );
       if (!stripe) {
         throw new ValidationError(

@@ -2317,9 +2317,13 @@ describe('brand domain creation', () => {
     const originalAdminDashboardUrl = process.env.ADMIN_DASHBOARD_URL;
     const originalNextPublicAdminOrigin = process.env.NEXT_PUBLIC_ADMIN_ORIGIN;
     const originalApiBaseUrl = process.env.API_BASE_URL;
+    const originalStripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    const originalStripeConnectClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
     delete process.env.ADMIN_DASHBOARD_URL;
     delete process.env.NEXT_PUBLIC_ADMIN_ORIGIN;
     process.env.API_BASE_URL = 'http://localhost:4000';
+    process.env.STRIPE_SECRET_KEY = 'sk_test_incident_scope';
+    process.env.STRIPE_CONNECT_CLIENT_ID = 'ca_incident_scope';
     const tables = {
       organizations: [
         {
@@ -2355,8 +2359,14 @@ describe('brand domain creation', () => {
         create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_created_1' })),
       },
     };
+    const onExactRequestId = vi.fn();
+    let gatewayOptions: Record<string, unknown> | undefined;
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
-      stripeGateway: stripeGatewayTestDouble(stripe),
+      providerClientRuntime: { onExactRequestId },
+      stripeGatewayFactory: (_secretKey: string, options: Record<string, unknown>) => {
+        gatewayOptions = options;
+        return stripeGatewayTestDouble(stripe);
+      },
     });
     try {
       const res = await app.inject({
@@ -2427,6 +2437,10 @@ describe('brand domain creation', () => {
           idempotencyKey: 'stripe-connect-test-create:account-link:acct_created_1',
         },
       );
+      expect(gatewayOptions).toMatchObject({
+        onExactRequestId,
+        incidentScope: { tenantId: 'tnt_1', organizationId: 'org_1' },
+      });
     } finally {
       if (originalAdminDashboardUrl === undefined) {
         delete process.env.ADMIN_DASHBOARD_URL;
@@ -2443,6 +2457,10 @@ describe('brand domain creation', () => {
       } else {
         process.env.API_BASE_URL = originalApiBaseUrl;
       }
+      if (originalStripeSecretKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = originalStripeSecretKey;
+      if (originalStripeConnectClientId === undefined) delete process.env.STRIPE_CONNECT_CLIENT_ID;
+      else process.env.STRIPE_CONNECT_CLIENT_ID = originalStripeConnectClientId;
       await app.close();
     }
   });

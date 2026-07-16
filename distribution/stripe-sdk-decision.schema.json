@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/stripe-sdk-decision.schema.json",
+  "title": "Tixkit Stripe contained-SDK evaluation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "decision",
+    "bindings",
+    "containedSdk",
+    "directCandidate",
+    "parityGates",
+    "benefitThresholds",
+    "benefitMeasurements",
+    "startupMeasurement",
+    "maintenanceSurface",
+    "decisionReasons"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "decision": { "enum": ["retain-contained-sdk", "migrate-to-direct-http"] },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerRegistrySha256",
+        "lockfileSha256",
+        "stripeGatewaySourceSha256",
+        "providerManifestSha256",
+        "evaluationImplementationSha256",
+        "localEvidenceSha256",
+        "decisionInputsSha256"
+      ],
+      "properties": {
+        "providerRegistrySha256": { "$ref": "#/$defs/sha256" },
+        "lockfileSha256": { "$ref": "#/$defs/sha256" },
+        "stripeGatewaySourceSha256": { "$ref": "#/$defs/sha256" },
+        "providerManifestSha256": { "$ref": "#/$defs/sha256" },
+        "evaluationImplementationSha256": { "$ref": "#/$defs/sha256" },
+        "localEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "decisionInputsSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "containedSdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package",
+        "declaredRange",
+        "resolvedVersion",
+        "lockIntegrity",
+        "dependencyClass",
+        "runtimeImportPath",
+        "testOnlyPlacements",
+        "logicalInstalledBytes",
+        "logicalInstalledFiles",
+        "logicalContentSha256",
+        "operations",
+        "diagnostics",
+        "retainedRuntimeResponsibilities"
+      ],
+      "properties": {
+        "package": { "const": "stripe" },
+        "declaredRange": { "type": "string", "minLength": 1 },
+        "resolvedVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+        },
+        "lockIntegrity": { "type": "string", "pattern": "^sha512-[A-Za-z0-9+/]+={0,2}$" },
+        "dependencyClass": { "const": "dependencies" },
+        "runtimeImportPath": { "const": "packages/provider-clients/src/stripe.ts" },
+        "testOnlyPlacements": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["manifest", "dependencyClass", "importPath"],
+            "properties": {
+              "manifest": { "type": "string", "minLength": 1 },
+              "dependencyClass": { "const": "devDependencies" },
+              "importPath": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "logicalInstalledBytes": { "type": "integer", "minimum": 1 },
+        "logicalInstalledFiles": { "type": "integer", "minimum": 1 },
+        "logicalContentSha256": { "$ref": "#/$defs/sha256" },
+        "operations": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/operation" }
+        },
+        "diagnostics": { "$ref": "#/$defs/diagnostics" },
+        "retainedRuntimeResponsibilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "directCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "shippingRuntime",
+        "networkCallsPerformed",
+        "operations",
+        "diagnostics",
+        "stripeRuntimeDependencyStillRequired",
+        "stripeRuntimeDependencyReason"
+      ],
+      "properties": {
+        "state": { "const": "bounded-wire-prototype-unproven" },
+        "shippingRuntime": { "const": false },
+        "networkCallsPerformed": { "const": false },
+        "operations": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/operation" }
+        },
+        "diagnostics": { "$ref": "#/$defs/diagnostics" },
+        "stripeRuntimeDependencyStillRequired": { "const": true },
+        "stripeRuntimeDependencyReason": {
+          "const": "webhook-signature-verification-runtime-boundary"
+        }
+      }
+    },
+    "parityGates": {
+      "type": "array",
+      "minItems": 12,
+      "items": { "$ref": "#/$defs/gate" }
+    },
+    "benefitThresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumDependencyBytesRemoved",
+        "minimumDependencyPercentRemoved",
+        "minimumStartupMedianMsReduction",
+        "minimumStartupPercentReduction",
+        "minimumNewDiagnosticFields"
+      ],
+      "properties": {
+        "minimumDependencyBytesRemoved": { "const": 1048576 },
+        "minimumDependencyPercentRemoved": { "const": 25 },
+        "minimumStartupMedianMsReduction": { "const": 10 },
+        "minimumStartupPercentReduction": { "const": 20 },
+        "minimumNewDiagnosticFields": { "const": 4 }
+      }
+    },
+    "benefitMeasurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dependencyBytesRemoved",
+        "dependencyPercentRemoved",
+        "startupMedianMsReduction",
+        "startupPercentReduction",
+        "newDiagnosticFields",
+        "dependencyBenefitPass",
+        "startupBenefitPass",
+        "diagnosticBenefitPass",
+        "materialBenefitPass"
+      ],
+      "properties": {
+        "dependencyBytesRemoved": { "type": "integer", "minimum": 0 },
+        "dependencyPercentRemoved": { "type": "number", "minimum": 0, "maximum": 100 },
+        "startupMedianMsReduction": { "type": "number" },
+        "startupPercentReduction": { "type": "number" },
+        "newDiagnosticFields": { "type": "integer", "minimum": 0 },
+        "dependencyBenefitPass": { "type": "boolean" },
+        "startupBenefitPass": { "type": "boolean" },
+        "diagnosticBenefitPass": { "type": "boolean" },
+        "materialBenefitPass": { "type": "boolean" }
+      }
+    },
+    "startupMeasurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "warmups", "samplesPerCase", "containedSdkMs", "directCandidateMs"],
+      "properties": {
+        "runtime": { "type": "string", "minLength": 1 },
+        "warmups": { "const": 5 },
+        "samplesPerCase": { "const": 30 },
+        "containedSdkMs": { "$ref": "#/$defs/timing" },
+        "directCandidateMs": { "$ref": "#/$defs/timing" }
+      }
+    },
+    "maintenanceSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["containedSdkOwnedResponsibilities", "directCandidateOwnedResponsibilities"],
+      "properties": {
+        "containedSdkOwnedResponsibilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "directCandidateOwnedResponsibilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "decisionReasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "method",
+        "path",
+        "sideEffecting",
+        "idempotencyRequired",
+        "localRequestShapeProof"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "method": { "enum": ["GET", "POST", "DELETE"] },
+        "path": { "type": "string", "pattern": "^/v1/" },
+        "sideEffecting": { "type": "boolean" },
+        "idempotencyRequired": { "type": "boolean" },
+        "localRequestShapeProof": { "type": "boolean" }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "statusText",
+        "contentType",
+        "responseSize",
+        "responseClassification",
+        "bodyDigest",
+        "retryAfter",
+        "hashedRequestId",
+        "exactRequestIdIncidentSink",
+        "providerBackedProof"
+      ],
+      "properties": {
+        "status": { "type": "boolean" },
+        "statusText": { "type": "boolean" },
+        "contentType": { "type": "boolean" },
+        "responseSize": { "type": "boolean" },
+        "responseClassification": { "type": "boolean" },
+        "bodyDigest": { "type": "boolean" },
+        "retryAfter": { "type": "boolean" },
+        "hashedRequestId": { "type": "boolean" },
+        "exactRequestIdIncidentSink": { "type": "boolean" },
+        "providerBackedProof": { "type": "boolean" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "required", "status", "evidence"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "required": { "const": true },
+        "status": { "enum": ["passed", "not-run", "failed"] },
+        "evidence": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["samples", "median", "p95", "minimum", "maximum"],
+      "properties": {
+        "samples": {
+          "type": "array",
+          "minItems": 30,
+          "maxItems": 30,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "median": { "type": "number", "exclusiveMinimum": 0 },
+        "p95": { "type": "number", "exclusiveMinimum": 0 },
+        "minimum": { "type": "number", "exclusiveMinimum": 0 },
+        "maximum": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

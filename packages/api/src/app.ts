@@ -41,6 +41,7 @@ import {
   createProviderIncidentEvidenceRuntime,
   ProviderIncidentEvidenceService,
 } from './services/provider-incident-evidence.js';
+import type { ProviderClientRuntime, StripeGatewayOptions } from '@tixkit/provider-clients';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
 type CorsOriginValidatorOptions = {
@@ -58,9 +59,11 @@ export type AppContext = {
   emailTransport: EmailTransport;
   smsTransport: SmsTransport;
   stripeGateway?: StripeGateway;
+  stripeGatewayFactory?: (secretKey: string, options: StripeGatewayOptions) => StripeGateway;
   readinessServiceFactory?: (db: Database) => ReadinessService;
   dashboardActionServiceFactory?: (db: Database) => DashboardActionService;
   providerIncidentEvidenceService?: ProviderIncidentEvidenceService;
+  providerClientRuntime?: ProviderClientRuntime;
   portableDryRunAttestation?: PortableDryRunAttestationConfiguration;
   portableCutoverTrust?: PortableCutoverTrustConfiguration;
   eventDuplicationCheckpoint?: (input: {
@@ -466,6 +469,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     emailTransport,
     smsTransport,
     providerIncidentEvidenceService,
+    providerClientRuntime: providerIncidentEvidenceRuntime.providerClientRuntime,
   };
   app.decorate('context', ctx);
   registerErrorHandler(app);

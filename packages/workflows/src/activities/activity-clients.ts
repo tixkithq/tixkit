@@ -5,7 +5,10 @@ import { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } from '../shared
 import { notificationDeliveryWorkflow } from '../workflows/notification.js';
 import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
 import { temporalConnectionOptions } from '../temporal-connection.js';
-import { createProviderIncidentEvidenceRuntime } from '../services/provider-incident-evidence.js';
+import {
+  createProviderIncidentEvidenceRuntime,
+  loadProviderIncidentEvidenceConfiguration,
+} from '../services/provider-incident-evidence.js';
 
 type TemporalConnection = Awaited<ReturnType<typeof Connection.connect>>;
 
@@ -75,8 +78,11 @@ export function getActivityDb(): Database {
 }
 
 export function getActivityProviderClientRuntime(): ProviderClientRuntime {
-  cachedProviderClientRuntime ??=
-    createProviderIncidentEvidenceRuntime(getActivityDb()).providerClientRuntime;
+  if (cachedProviderClientRuntime) return cachedProviderClientRuntime;
+  const configuration = loadProviderIncidentEvidenceConfiguration(process.env);
+  cachedProviderClientRuntime = configuration.enabled
+    ? createProviderIncidentEvidenceRuntime(getActivityDb()).providerClientRuntime
+    : {};
   return cachedProviderClientRuntime;
 }
 
