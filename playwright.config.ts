@@ -87,6 +87,8 @@ const localApiEnv = {
   STRIPE_SECRET_KEY: stripeSecretKey,
   STRIPE_WEBHOOK_SECRET: stripeWebhookSecret,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
+  PAYMENT_PROVIDER_TEST_MODE: useStripeProvider ? '1' : '',
+  E2E_PAID_CAPTURE_MODE: useStripeProvider ? '' : '1',
   OTEL_SDK_DISABLED: 'true',
   QR_SIGNING_SECRET: process.env.QR_SIGNING_SECRET ?? 'ci-qr-signing-secret',
   OFFLINE_MANIFEST_SIGNING_KEY:
@@ -111,6 +113,7 @@ const localApiEnv = {
 };
 const localWorkerEnv = {
   NODE_ENV: 'development',
+  E2E_PAID_CAPTURE_MODE: useStripeProvider ? '' : '1',
   DATABASE_URL: databaseUrl,
   REDIS_URL: 'redis://localhost:6379',
   TEMPORAL_ADDRESS: 'localhost:7233',

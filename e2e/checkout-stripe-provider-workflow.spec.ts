@@ -300,7 +300,7 @@ test.describe('Stripe provider hosted checkout workflow', () => {
 
     const suffix = `stripe-ui-${testInfo.workerIndex}-${Date.now()}`;
     const { event, ticketType, inventoryPool } = await seedPaidCheckoutEvent(request, suffix);
-    await seedRefundNotificationPrerequisites(suffix);
+    await seedRefundNotificationPrerequisites(suffix, event.id);
 
     await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
     await expect(page.getByRole('heading', { name: event.title })).toBeVisible();

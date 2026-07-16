@@ -5,6 +5,7 @@ import {
   evaluateAcknowledgement,
   evaluateLifecycleContent,
   evaluateSellableTickets,
+  resolvePaymentMode,
 } from '../services/readiness.js';
 
 describe('readiness service invariants', () => {
@@ -74,6 +75,54 @@ describe('readiness service invariants', () => {
       status: 'blocked',
       reasonCode: 'payment_capture_mode_paid_unsupported',
     });
+  });
+
+  it('allows the explicit non-production provider-test platform path without a connected account', () => {
+    expect(
+      evaluateEventPaymentReadiness({
+        requiresPayment: true,
+        paymentMode: 'provider_test',
+        eventCurrency: 'USD',
+      }),
+    ).toEqual({ status: 'complete', reasonCode: 'payment_ready' });
+  });
+
+  it('allows provider and capture test modes only in explicit development or test environments', () => {
+    const original = {
+      nodeEnv: process.env.NODE_ENV,
+      stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+      providerTestMode: process.env.PAYMENT_PROVIDER_TEST_MODE,
+      captureTestMode: process.env.E2E_PAID_CAPTURE_MODE,
+    };
+    try {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_not_a_real_secret';
+      process.env.PAYMENT_PROVIDER_TEST_MODE = '1';
+      for (const nodeEnv of [undefined, 'production', 'staging', 'preview', 'developmnt']) {
+        if (nodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = nodeEnv;
+        expect(resolvePaymentMode()).toBe('provider');
+      }
+      for (const nodeEnv of ['development', 'test']) {
+        process.env.NODE_ENV = nodeEnv;
+        expect(resolvePaymentMode()).toBe('provider_test');
+      }
+
+      delete process.env.STRIPE_SECRET_KEY;
+      process.env.E2E_PAID_CAPTURE_MODE = '1';
+      process.env.NODE_ENV = 'development';
+      expect(resolvePaymentMode()).toBe('provider_test');
+      process.env.NODE_ENV = 'staging';
+      expect(resolvePaymentMode()).toBe('capture');
+    } finally {
+      if (original.nodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = original.nodeEnv;
+      if (original.stripeSecretKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = original.stripeSecretKey;
+      if (original.providerTestMode === undefined) delete process.env.PAYMENT_PROVIDER_TEST_MODE;
+      else process.env.PAYMENT_PROVIDER_TEST_MODE = original.providerTestMode;
+      if (original.captureTestMode === undefined) delete process.env.E2E_PAID_CAPTURE_MODE;
+      else process.env.E2E_PAID_CAPTURE_MODE = original.captureTestMode;
+    }
   });
 
   it('requires an active charges-enabled currency-coherent provider account', () => {

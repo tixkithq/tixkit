@@ -136,6 +136,7 @@ describeStripeConnect('Stripe Connect onboarding/status validation (real Stripe 
       const createRes = await app.inject({
         method: 'POST',
         url: `/organizations/${ids.organizationId}/payment-accounts/stripe-connect`,
+        headers: { 'idempotency-key': `stripe-connect-provider-create-${suffix}` },
       });
       expect(createRes.statusCode).toBe(201);
 
@@ -157,6 +158,17 @@ describeStripeConnect('Stripe Connect onboarding/status validation (real Stripe 
       expect(created.onboardingUrl).toEqual(
         expect.stringMatching(/^https:\/\/connect\.stripe\.com\//),
       );
+
+      const replayRes = await app.inject({
+        method: 'POST',
+        url: `/organizations/${ids.organizationId}/payment-accounts/stripe-connect`,
+        headers: { 'idempotency-key': `stripe-connect-provider-create-${suffix}` },
+      });
+      expect(replayRes.statusCode).toBe(200);
+      expect(replayRes.json()).toMatchObject({
+        id: created.id,
+        providerAccountId: created.providerAccountId,
+      });
 
       const persisted = await db
         .selectFrom('payment_accounts')
@@ -189,6 +201,7 @@ describeStripeConnect('Stripe Connect onboarding/status validation (real Stripe 
       const refreshRes = await app.inject({
         method: 'POST',
         url: `/organizations/${ids.organizationId}/payment-accounts/${created.id}/stripe-connect/refresh`,
+        headers: { 'idempotency-key': `stripe-connect-provider-refresh-${suffix}` },
       });
       expect(refreshRes.statusCode).toBe(200);
 

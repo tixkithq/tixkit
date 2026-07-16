@@ -21,8 +21,15 @@ export const EVENT_READINESS_QUERY_BUDGET = 12;
 export type PaymentMode = 'capture' | 'provider_test' | 'provider';
 
 export function resolvePaymentMode(): PaymentMode {
-  if (!process.env.STRIPE_SECRET_KEY) return 'capture';
-  return process.env.PAYMENT_PROVIDER_TEST_MODE === '1' ? 'provider_test' : 'provider';
+  const testModeAllowed = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return testModeAllowed && process.env.E2E_PAID_CAPTURE_MODE === '1'
+      ? 'provider_test'
+      : 'capture';
+  }
+  return testModeAllowed && process.env.PAYMENT_PROVIDER_TEST_MODE === '1'
+    ? 'provider_test'
+    : 'provider';
 }
 
 export function evaluateEventPaymentReadiness(input: {
@@ -47,6 +54,9 @@ export function evaluateEventPaymentReadiness(input: {
       status: 'blocked',
       reasonCode: 'payment_capture_mode_paid_unsupported',
     };
+  }
+  if (input.paymentMode === 'provider_test') {
+    return { status: 'complete', reasonCode: 'payment_ready' };
   }
   if (!input.account?.id) {
     return { status: 'blocked', reasonCode: 'payment_path_missing' };
@@ -431,6 +441,7 @@ export class ReadinessService {
     );
     const paymentReady =
       this.paymentMode === 'capture' ||
+      this.paymentMode === 'provider_test' ||
       Boolean(
         paymentAccount && paymentAccount.status === 'active' && paymentAccount.charges_enabled,
       );

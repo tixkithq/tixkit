@@ -742,6 +742,8 @@ describe('processRefundActivity - idempotency / dedup', () => {
   afterEach(() => {
     delete process.env.STRIPE_SECRET_KEY;
     delete process.env.TIXKIT_RUNTIME_MODE;
+    delete process.env.E2E_PAID_CAPTURE_MODE;
+    vi.unstubAllEnvs();
   });
 
   it('fails closed when a Stripe refund has no configured secret key', async () => {
@@ -875,6 +877,58 @@ describe('processRefundActivity - idempotency / dedup', () => {
     });
     expect(dbState.stripeRefunds).toHaveLength(0);
     expect(dbState.order.refunded_cents).toBe(5000);
+  });
+
+  it('allows the explicit local E2E capture mode in development', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    process.env.E2E_PAID_CAPTURE_MODE = '1';
+    delete process.env.STRIPE_SECRET_KEY;
+    dbState.paymentIntent = {
+      ...dbState.paymentIntent!,
+      provider: 'stripe_capture',
+      provider_intent_id: 'capture_pi_1',
+    };
+
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_capture_e2e',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        providerRefundId: 'local-refund:ord_1:refund_capture_e2e',
+        status: 'succeeded',
+      },
+    });
+    expect(dbState.stripeRefunds).toHaveLength(0);
+  });
+
+  it('rejects the local E2E capture mode outside development and test', async () => {
+    vi.stubEnv('NODE_ENV', 'staging');
+    process.env.E2E_PAID_CAPTURE_MODE = '1';
+    delete process.env.STRIPE_SECRET_KEY;
+    dbState.paymentIntent = {
+      ...dbState.paymentIntent!,
+      provider: 'stripe_capture',
+      provider_intent_id: 'capture_pi_1',
+    };
+
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_capture_staging',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'REFUND_PROVIDER_UNSUPPORTED',
+      retryable: false,
+    });
+    expect(dbState.order.refunded_cents).toBe(0);
   });
 
   it('dedupes on providerRefundId for replay path', async () => {

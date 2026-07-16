@@ -34,6 +34,7 @@ export type SeededAdminAttendeeTableRow = SeededCheckoutEvent & {
 export async function seedPublishedEventPageContent(input: {
   event: { id: string; title: string };
   suffix: string;
+  brandId?: string;
 }): Promise<void> {
   const now = new Date();
   const safeSuffix = compactIdPart(input.suffix, 24);
@@ -55,7 +56,7 @@ export async function seedPublishedEventPageContent(input: {
         id: documentId,
         tenant_id: devTenantId,
         organization_id: devOrganizationId,
-        brand_id: devBrandId,
+        brand_id: input.brandId ?? devBrandId,
         event_id: input.event.id,
         channel: 'event_page',
         key: 'main',
@@ -71,7 +72,7 @@ export async function seedPublishedEventPageContent(input: {
         oc.column('id').doUpdateSet({
           tenant_id: devTenantId,
           organization_id: devOrganizationId,
-          brand_id: devBrandId,
+          brand_id: input.brandId ?? devBrandId,
           event_id: input.event.id,
           channel: 'event_page',
           key: 'main',
@@ -134,6 +135,7 @@ export async function seedPublishedEventPageContent(input: {
 export async function seedPublishedOrderConfirmationContent(input: {
   eventId: string;
   suffix: string;
+  brandId?: string;
 }): Promise<void> {
   const now = new Date();
   const safeSuffix = compactIdPart(input.suffix, 20);
@@ -146,7 +148,7 @@ export async function seedPublishedOrderConfirmationContent(input: {
         id: documentId,
         tenant_id: devTenantId,
         organization_id: devOrganizationId,
-        brand_id: devBrandId,
+        brand_id: input.brandId ?? devBrandId,
         event_id: input.eventId,
         channel: 'email',
         key: 'order-confirmed',
@@ -563,7 +565,7 @@ export async function ensureDevTenantGraph(): Promise<void> {
 }
 
 function safeIdPart(suffix: string): string {
-  return suffix.replaceAll(/[^a-zA-Z0-9_-]/g, '-').slice(0, 18);
+  return compactIdPart(suffix, 18);
 }
 
 function compactIdPart(suffix: string, maxLength = 18): string {
@@ -994,8 +996,6 @@ export async function seedPaidCheckoutEvent(
   suffix: string,
   options: { brandId?: string } = {},
 ): Promise<SeededPaidCheckoutEvent> {
-  await seedTicketIssueNotificationPrerequisites(suffix);
-
   const eventTitle = `E2E Paid Checkout ${suffix}`;
   const event = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events`, {
@@ -1014,6 +1014,8 @@ export async function seedPaidCheckoutEvent(
     }),
     201,
   )) as { id: string; title: string };
+
+  await seedTicketIssueNotificationPrerequisites(suffix, event.id, options.brandId ?? devBrandId);
 
   const inventoryPool = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events/${event.id}/inventory-pools`, {
@@ -1042,6 +1044,19 @@ export async function seedPaidCheckoutEvent(
     201,
   )) as { id: string; name: string };
 
+  await seedPublishedEventPageContent({ event, suffix, brandId: options.brandId });
+  await seedPublishedOrderConfirmationContent({
+    eventId: event.id,
+    suffix,
+    brandId: options.brandId,
+  });
+  await expectJsonResponse(
+    await request.post(
+      `${apiBaseUrl}/v1/events/${event.id}/readiness-acknowledgements/checkout_consent`,
+      { data: {} },
+    ),
+    201,
+  );
   await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
       data: {},
@@ -1052,19 +1067,65 @@ export async function seedPaidCheckoutEvent(
   return { event, ticketType, inventoryPool };
 }
 
-async function seedTicketIssueNotificationPrerequisites(suffix: string): Promise<void> {
+async function seedTicketIssueNotificationPrerequisites(
+  suffix: string,
+  eventId: string,
+  brandId: string,
+): Promise<void> {
   const now = new Date();
   const safeSuffix = safeIdPart(suffix);
   const templateId = `ntf_tix_${safeSuffix}`.slice(0, 32);
   const templateVersionId = `ntv_tix_${safeSuffix}`.slice(0, 32);
   const providerRouteId = `epr_tix_${safeSuffix}`.slice(0, 32);
+  const contentDocumentId = `doc_tix_${safeSuffix}`.slice(0, 32);
+  const contentVersionId = `ver_tix_${safeSuffix}`.slice(0, 32);
 
   await withE2eDb(async (db) => {
+    await db
+      .insertInto('content_documents')
+      .values({
+        id: contentDocumentId,
+        tenant_id: devTenantId,
+        organization_id: devOrganizationId,
+        brand_id: brandId,
+        event_id: eventId,
+        channel: 'email',
+        key: 'tickets-issued',
+        name: 'Tickets issued',
+        status: 'published',
+        locale: 'en',
+        current_draft_version_id: null,
+        published_version_id: contentVersionId,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('content_document_versions')
+      .values({
+        id: contentVersionId,
+        document_id: contentDocumentId,
+        version_number: 1,
+        status: 'published',
+        schema_version: 1,
+        subject: 'Your Tixkit tickets',
+        preview_text: 'Your tickets are ready',
+        content_json: JSON.stringify({}),
+        rendered_html: '<p>Your tickets are attached.</p>',
+        rendered_text: 'Your tickets are attached.',
+        variables: JSON.stringify(['orderId', 'orderNumber', 'ticketCount', 'attachments']),
+        validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        created_by: 'e2e',
+        created_at: now,
+        published_at: now,
+      })
+      .execute();
+
     const existingTemplate = await db
       .selectFrom('notification_templates')
       .select(['id'])
       .where('tenant_id', '=', devTenantId)
-      .where('brand_id', '=', devBrandId)
+      .where('brand_id', '=', brandId)
       .where('key', '=', 'tickets-issued')
       .executeTakeFirst();
 
@@ -1074,7 +1135,7 @@ async function seedTicketIssueNotificationPrerequisites(suffix: string): Promise
         .values({
           id: templateId,
           tenant_id: devTenantId,
-          brand_id: devBrandId,
+          brand_id: brandId,
           key: 'tickets-issued',
           name: `E2E tickets issued ${safeSuffix}`,
           description: 'Seeded by Playwright for paid checkout ticket delivery coverage.',
@@ -1108,7 +1169,7 @@ async function seedTicketIssueNotificationPrerequisites(suffix: string): Promise
       .selectFrom('email_provider_routes')
       .select(['id'])
       .where('tenant_id', '=', devTenantId)
-      .where('brand_id', '=', devBrandId)
+      .where('brand_id', '=', brandId)
       .where('provider_type', '=', 'capture')
       .where('status', '=', 'active')
       .where('smoke_send_verified', '=', true)
@@ -1120,7 +1181,7 @@ async function seedTicketIssueNotificationPrerequisites(suffix: string): Promise
         .values({
           id: providerRouteId,
           tenant_id: devTenantId,
-          brand_id: devBrandId,
+          brand_id: brandId,
           provider_type: 'capture',
           credentials_ref: 'capture',
           sender_domain: 'example.com',
@@ -1381,20 +1442,66 @@ export async function setInventoryPoolCapacity(
   });
 }
 
-export async function seedRefundNotificationPrerequisites(suffix: string): Promise<void> {
+export async function seedRefundNotificationPrerequisites(
+  suffix: string,
+  eventId: string,
+  brandId: string = devBrandId,
+): Promise<void> {
   const now = new Date();
   const safeSuffix = safeIdPart(suffix);
   const templateId = `ntf_ref_${safeSuffix}`.slice(0, 32);
   const templateVersionId = `ntv_ref_${safeSuffix}`.slice(0, 32);
   const providerRouteId = `epr_ref_${safeSuffix}`.slice(0, 32);
+  const contentDocumentId = `doc_ref_${safeSuffix}`.slice(0, 32);
+  const contentVersionId = `ver_ref_${safeSuffix}`.slice(0, 32);
 
   await withE2eDb(async (db) => {
+    await db
+      .insertInto('content_documents')
+      .values({
+        id: contentDocumentId,
+        tenant_id: devTenantId,
+        organization_id: devOrganizationId,
+        brand_id: brandId,
+        event_id: eventId,
+        channel: 'email',
+        key: 'order-refunded',
+        name: 'Order refunded',
+        status: 'published',
+        locale: 'en',
+        current_draft_version_id: null,
+        published_version_id: contentVersionId,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('content_document_versions')
+      .values({
+        id: contentVersionId,
+        document_id: contentDocumentId,
+        version_number: 1,
+        status: 'published',
+        schema_version: 1,
+        subject: 'Refund processed',
+        preview_text: 'Your refund has been processed',
+        content_json: JSON.stringify({}),
+        rendered_html: '<p>Refund processed for {{orderNumber}}</p>',
+        rendered_text: 'Refund processed for {{orderNumber}}',
+        variables: JSON.stringify(['orderId', 'orderNumber', 'refundedCents']),
+        validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        created_by: 'e2e',
+        created_at: now,
+        published_at: now,
+      })
+      .execute();
+
     await db
       .insertInto('notification_templates')
       .values({
         id: templateId,
         tenant_id: devTenantId,
-        brand_id: devBrandId,
+        brand_id: brandId,
         key: 'order-refunded',
         name: `E2E order refunded ${safeSuffix}`,
         description: 'Seeded by Playwright for admin refund workflow coverage.',
@@ -1430,7 +1537,7 @@ export async function seedRefundNotificationPrerequisites(suffix: string): Promi
       .values({
         id: providerRouteId,
         tenant_id: devTenantId,
-        brand_id: devBrandId,
+        brand_id: brandId,
         provider_type: 'capture',
         credentials_ref: 'capture',
         sender_domain: 'example.com',
@@ -1501,15 +1608,25 @@ export async function seedPaidRefundableOrder(
     201,
   )) as { id: string; name: string };
 
+  await seedPublishedEventPageContent({ event, suffix });
+  await seedPublishedOrderConfirmationContent({ eventId: event.id, suffix });
+  await expectJsonResponse(
+    await request.post(
+      `${apiBaseUrl}/v1/events/${event.id}/readiness-acknowledgements/checkout_consent`,
+      { data: {} },
+    ),
+    201,
+  );
+  await seedRefundNotificationPrerequisites(suffix, event.id);
   await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
       data: {},
     }),
     200,
   );
-  await seedRefundNotificationPrerequisites(suffix);
 
   const checkoutSessionId = `cks_ref_${safeSuffix}`.slice(0, 32);
+  const paymentIntentId = `pi_ref_${safeSuffix}`.slice(0, 32);
   const holdId = `hld_ref_${safeSuffix}`.slice(0, 32);
   const orderId = `ord_ref_${safeSuffix}`.slice(0, 32);
   const lineItemId = `oli_ref_${safeSuffix}`.slice(0, 32);
@@ -1599,14 +1716,40 @@ export async function seedPaidRefundableOrder(
           buyer_first_name: 'Refund',
           buyer_last_name: 'Buyer',
           buyer_phone: null,
-          payment_intent_id: null,
-          payment_provider: 'local',
+          payment_intent_id: paymentIntentId,
+          payment_provider: 'stripe_capture',
           paid_at: now,
           refunded_at: null,
           cancelled_at: null,
           created_at: now,
           updated_at: now,
         })
+        .execute();
+
+      await trx
+        .insertInto('payment_intents')
+        .values({
+          id: paymentIntentId,
+          tenant_id: devTenantId,
+          order_id: orderId,
+          checkout_session_id: checkoutSessionId,
+          provider: 'stripe_capture',
+          provider_intent_id: `pi_capture_${safeSuffix}`,
+          amount_cents: 10_000,
+          currency: 'USD',
+          status: 'succeeded',
+          client_secret: `cs_ref_${safeSuffix}`,
+          metadata: JSON.stringify({ source: 'e2e_refund_fixture' }),
+          payment_account_id: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      await trx
+        .updateTable('checkout_sessions')
+        .set({ payment_intent_id: paymentIntentId, updated_at: now })
+        .where('id', '=', checkoutSessionId)
         .execute();
 
       await trx

@@ -323,8 +323,12 @@ export async function processRefundActivity(input: {
       paymentProvider === 'stripe' ||
       paymentProvider === 'stripe_connect' ||
       reservation.paymentAccountProvider === 'stripe_connect';
+    const isDevelopmentCapture =
+      (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') &&
+      process.env.E2E_PAID_CAPTURE_MODE === '1';
     const isSandboxCapture =
-      process.env.TIXKIT_RUNTIME_MODE === 'sandbox' && paymentProvider === 'stripe_capture';
+      paymentProvider === 'stripe_capture' &&
+      (process.env.TIXKIT_RUNTIME_MODE === 'sandbox' || isDevelopmentCapture);
 
     if (requiresStripeRefund && (!stripeSecretKey || !reservation.paymentIntent.providerIntentId)) {
       return errResult(
