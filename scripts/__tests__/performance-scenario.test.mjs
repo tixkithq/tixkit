@@ -317,6 +317,11 @@ test('workflow and scenarios keep runner, database, selection, and early-evidenc
   );
   assert.match(workflow, /DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
   assert.match(workflow, /schedule\|workflow_dispatch/);
+  assert.match(
+    workflow,
+    /command: --log-bin-trust-function-creators=1/,
+    'nightly MySQL 8.4 must support the trigger-bearing migration chain',
+  );
   assert.match(workflow, /INVOCATION_OUTCOME: \$\{\{ steps\.invocation\.outcome \}\}/);
   assert.match(
     workflow,
