@@ -41,38 +41,69 @@ function immediateDirectories(root, parent) {
     .sort();
 }
 
-function walkFiles(directory, symlinks) {
+const alwaysSkippedDirectories = new Set([
+  '.astro',
+  '.dart_tool',
+  '.gradle',
+  '.nuxt',
+  '.svelte-kit',
+  '.turbo',
+  'coverage',
+  'node_modules',
+]);
+const trackedSourceDirectoryNames = new Set(['.build', 'build', 'dist', 'out', 'target']);
+
+function trackedFiles(root) {
+  try {
+    return new Set(
+      execFileSync(gitExecutable, ['ls-files', '-z', '--cached'], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .split('\0')
+        .filter(Boolean),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function hasTrackedPath(tracked, prefix) {
+  if (!tracked) return true;
+  const directoryPrefix = `${prefix}/`;
+  return [...tracked].some((path) => path.startsWith(directoryPrefix));
+}
+
+function walkFiles(directory, symlinks, root, tracked, trackedOnly = false) {
   const files = [];
   const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
     left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
   );
   for (const entry of entries) {
     if (
-      [
-        '.astro',
-        '.build',
-        '.dart_tool',
-        '.gradle',
-        '.nuxt',
-        '.svelte-kit',
-        '.turbo',
-        'build',
-        'coverage',
-        'dist',
-        'node_modules',
-        'out',
-        'target',
-      ].includes(entry.name) ||
+      alwaysSkippedDirectories.has(entry.name) ||
       entry.name === '.next' ||
       entry.name.startsWith('.next-')
     )
       continue;
     const path = join(directory, entry.name);
+    const repositoryPath = relative(root, path).split(sep).join('/');
+    const insideTrackedSourceDirectory = trackedOnly || trackedSourceDirectoryNames.has(entry.name);
+    if (
+      insideTrackedSourceDirectory &&
+      tracked &&
+      (entry.isDirectory()
+        ? !hasTrackedPath(tracked, repositoryPath)
+        : !tracked.has(repositoryPath))
+    )
+      continue;
     if (entry.isSymbolicLink()) {
       symlinks.push(path);
       continue;
     }
-    if (entry.isDirectory()) files.push(...walkFiles(path, symlinks));
+    if (entry.isDirectory())
+      files.push(...walkFiles(path, symlinks, root, tracked, insideTrackedSourceDirectory));
     else if (entry.isFile()) files.push(path);
   }
   return files;
@@ -285,6 +316,7 @@ function publicScanEntries(manifest, root) {
   ];
   const files = new Set();
   const symlinks = [];
+  const tracked = trackedFiles(root);
   for (const path of paths) {
     const absolute = resolve(root, path);
     const metadata = lstatSync(absolute, { throwIfNoEntry: false });
@@ -294,7 +326,7 @@ function publicScanEntries(manifest, root) {
       continue;
     }
     if (metadata.isDirectory()) {
-      for (const file of walkFiles(absolute, symlinks)) files.add(file);
+      for (const file of walkFiles(absolute, symlinks, root, tracked)) files.add(file);
     } else if (metadata.isFile()) {
       files.add(absolute);
     }

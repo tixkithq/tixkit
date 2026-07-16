@@ -44,7 +44,9 @@ test('rejects workspace protocols from publishable npm manifests', () => {
     ],
   );
   assert.deepEqual(
-    npmReleaseDependencyViolations({ dependencies: { '@tixkit/domain': '0.1.0' } }),
+    npmReleaseDependencyViolations({
+      dependencies: { '@tixkit/domain': '0.1.0' },
+    }),
     [],
   );
 });
@@ -271,6 +273,7 @@ test('scans workflow and script references throughout the public boundary', () =
   try {
     mkdirSync(resolve(fixtureRoot, '.github/workflows'), { recursive: true });
     mkdirSync(resolve(fixtureRoot, 'scripts'), { recursive: true });
+    mkdirSync(resolve(fixtureRoot, 'scripts/build'), { recursive: true });
     mkdirSync(resolve(fixtureRoot, 'managed'), { recursive: true });
     writeFileSync(
       resolve(fixtureRoot, '.github/workflows/ci.yml'),
@@ -299,6 +302,17 @@ test('scans workflow and script references throughout the public boundary', () =
       resolve(fixtureRoot, 'scripts/link.mjs'),
     );
     symlinkSync(resolve(fixtureRoot, 'managed'), resolve(fixtureRoot, 'scripts/private-dir'));
+    writeFileSync(
+      resolve(fixtureRoot, 'scripts/build/private.sh'),
+      'git clone https://github.com/tixkit/tixkit-cloud\n',
+    );
+    execFileSync('/usr/bin/git', ['init', '--quiet'], { cwd: fixtureRoot });
+    execFileSync('/usr/bin/git', ['add', '.'], { cwd: fixtureRoot });
+    mkdirSync(resolve(fixtureRoot, 'scripts/dist'), { recursive: true });
+    writeFileSync(
+      resolve(fixtureRoot, 'scripts/dist/untracked-generated.js'),
+      "await import('../../../managed/untracked.js');\n",
+    );
     const fixtureManifest = {
       source: {
         rootFiles: [],
@@ -317,6 +331,7 @@ test('scans workflow and script references throughout the public boundary', () =
       '.github/workflows/ci.yml: forbidden private dependency/build reference',
       'scripts/Dockerfile: forbidden private dependency/build reference',
       'scripts/build.mjs: forbidden private dependency/build reference',
+      'scripts/build/private.sh: forbidden private dependency/build reference',
       'scripts/package.json: forbidden dependencies dependency internal-provider',
       'scripts/package.json: forbidden private script reference build',
       'scripts/tsconfig.json: forbidden private JSON build reference',
