@@ -1072,6 +1072,32 @@ test('Compact-only insecure frontend build escape stays limited to loopback URLs
     assert.doesNotMatch(content, /http:\/\/0\.0\.0\.0/u);
     assert.match(content, /node_modules/u);
   }
+
+  const adminDockerfile = readFileSync(resolve(root, 'Dockerfile.admin'), 'utf8');
+  const compactCompose = readFileSync(resolve(root, 'infra/compact/compose.yml'), 'utf8');
+  const adminNextConfig = readFileSync(
+    resolve(root, 'apps/admin-dashboard/next.config.mjs'),
+    'utf8',
+  );
+  const adminEventLinks = readFileSync(
+    resolve(root, 'apps/admin-dashboard/src/lib/event-links.ts'),
+    'utf8',
+  );
+  assert.match(adminDockerfile, /ARG NEXT_PUBLIC_CHECKOUT_URL/u);
+  assert.match(adminDockerfile, /ENV NEXT_PUBLIC_CHECKOUT_URL=\$\{NEXT_PUBLIC_CHECKOUT_URL\}/u);
+  assert.match(
+    adminDockerfile,
+    /if \[ -n "\$\{NEXT_PUBLIC_CHECKOUT_URL\}" \]; then case "\$\{NEXT_PUBLIC_CHECKOUT_URL\}" in http:\/\/localhost:\*\|http:\/\/127\.0\.0\.1:\*/u,
+  );
+  assert.match(
+    compactCompose,
+    /NEXT_PUBLIC_CHECKOUT_URL: http:\/\/localhost:\$\{CHECKOUT_PORT:-3000\}/u,
+  );
+  assert.match(
+    adminNextConfig,
+    /process\.env\.NEXT_PUBLIC_CHECKOUT_URL \?\?\s+process\.env\.PUBLIC_CHECKOUT_URL/u,
+  );
+  assert.match(adminEventLinks, /process\.env\.NEXT_PUBLIC_CHECKOUT_URL/u);
 });
 
 test('Compact application images install only their build dependency closures', () => {

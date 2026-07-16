@@ -262,6 +262,7 @@ services:
       args:
         NEXT_PUBLIC_ADMIN_API_BASE_URL: http://localhost:${API_PORT:-4000}
         NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_PORT:-4000}
+        NEXT_PUBLIC_CHECKOUT_URL: http://localhost:${CHECKOUT_PORT:-3000}
         ALLOW_INSECURE_LOCAL_ORIGINS: '1'
     restart: unless-stopped
     environment:

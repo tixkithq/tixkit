@@ -1,11 +1,38 @@
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { adminBaseUrl, checkoutBaseUrl } from './helpers/env';
+import { isLoopbackHostname } from '../apps/admin-dashboard/next.config.mjs';
 
 function expectCspDirectives(header: string | null, directives: string[]): void {
   expect(header).toBeTruthy();
   const policy = header ?? '';
   for (const directive of directives) {
     expect(policy).toContain(directive);
+  }
+}
+
+function expectAdminCspRuntimeFloor(policy: string): void {
+  const adminRuntime =
+    process.env.E2E_ADMIN_RUNTIME ??
+    (process.env.E2E_LIVE_CLERK === '1' ? 'production' : 'development');
+
+  if (adminRuntime === 'development') {
+    expect(policy).toContain("'unsafe-eval'");
+    return;
+  }
+
+  expect(adminRuntime).toBe('production');
+
+  expect(policy).not.toContain("'unsafe-eval'");
+  expect(policy).not.toContain('https://esm.sh');
+
+  const connectDirective = policy
+    .split('; ')
+    .find((candidate) => candidate.startsWith('connect-src '));
+  expect(connectDirective).toBeDefined();
+  for (const source of connectDirective?.split(/\s+/u).slice(1) ?? []) {
+    if (!/^(?:http|ws)s?:\/\//u.test(source)) continue;
+    const parseableSource = source.replace(/:\*$/u, ':65535');
+    expect(isLoopbackHostname(new URL(parseableSource).hostname), source).toBe(false);
   }
 }
 
@@ -28,6 +55,7 @@ test.describe('browser security headers', () => {
       "frame-ancestors 'none'",
       "form-action 'self'",
     ]);
+    expectAdminCspRuntimeFloor(response.headers()['content-security-policy'] ?? '');
     expect(response.headers()['x-frame-options']).toBe('DENY');
     expect(response.headers()['x-content-type-options']).toBe('nosniff');
     expect(response.headers()['referrer-policy']).toBe('strict-origin-when-cross-origin');
@@ -79,6 +107,7 @@ test.describe('browser security headers', () => {
       "frame-ancestors 'none'",
       "form-action 'self'",
     ]);
+    expectAdminCspRuntimeFloor(headers['content-security-policy'] ?? '');
     expect(headers['x-frame-options']).toBe('DENY');
     expect(headers['x-content-type-options']).toBe('nosniff');
     expect(headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
