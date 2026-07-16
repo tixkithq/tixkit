@@ -1,0 +1,27 @@
+---
+title: API migration from 2026-08-08 to 2026-08-09
+description: Add replay-safe Stripe Connect onboarding and refresh requests.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-08-09
+prerequisites:
+  - An integration using API version 2026-08-08
+related:
+  - /reference/api-versions
+  - /platform
+---
+
+API version `2026-08-09` requires an `Idempotency-Key` header on these organization payment-account operations:
+
+- `POST /v1/organizations/{organizationId}/payment-accounts/stripe-connect`
+- `POST /v1/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh`
+
+Use a non-blank value no longer than 128 characters. Reuse the same value when retrying the same logical request; generate a new value only when the organizer intends a new operation. The JavaScript SDK accepts an optional explicit key and otherwise generates a fresh key for each new method call.
+
+Tixkit derives a stable account-creation key from the tenant and organization, a cleanup key from the provider account, and each account-link key from the request key. Those operation-specific namespaces cannot collide, and replaying account creation cannot create duplicate Stripe resources. Provider failures expose only normalized Tixkit errors: confirmed permanent rejections return `400`, while retryable or ambiguous dependency outcomes return `503`. Provider payloads, credentials and raw error messages are never returned.
+
+This contract change requires no database migration. Existing payment accounts and retained `2026-08-08` artifacts remain unchanged.

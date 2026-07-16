@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-08';
+export const TIXKIT_API_VERSION = '2026-08-09';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -5805,19 +5805,25 @@ class PaymentAccountResource {
   async list(organizationId: string): Promise<PaymentAccount[]> {
     return this.client.request('GET', `/organizations/${organizationId}/payment-accounts`);
   }
-  async createStripeConnect(organizationId: string): Promise<PaymentAccount> {
+  async createStripeConnect(
+    organizationId: string,
+    idempotencyKey = randomIdempotencyKey('stripe-connect'),
+  ): Promise<PaymentAccount> {
     return this.client.request(
       'POST',
       `/organizations/${organizationId}/payment-accounts/stripe-connect`,
+      { idempotencyKey },
     );
   }
   async refreshStripeConnect(
     organizationId: string,
     paymentAccountId: string,
+    idempotencyKey = randomIdempotencyKey('stripe-connect-refresh'),
   ): Promise<PaymentAccount> {
     return this.client.request(
       'POST',
       `/organizations/${organizationId}/payment-accounts/${paymentAccountId}/stripe-connect/refresh`,
+      { idempotencyKey },
     );
   }
 }

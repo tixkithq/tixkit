@@ -32,7 +32,7 @@ import {
   registerMetricsRoute,
   registerObservability,
 } from './observability.js';
-import type Stripe from 'stripe';
+import type { StripeGateway } from '@tixkit/provider-clients';
 import type { EmailTransport, SendSmsInput, SendSmsResult, SmsTransport } from '@tixkit/domain';
 import type { ReadinessService } from './services/readiness.js';
 import type { DashboardActionService } from './services/dashboard-actions.js';
@@ -53,7 +53,7 @@ export type AppContext = {
   temporalClient: TemporalClient;
   emailTransport: EmailTransport;
   smsTransport: SmsTransport;
-  stripe?: Stripe;
+  stripeGateway?: StripeGateway;
   readinessServiceFactory?: (db: Database) => ReadinessService;
   dashboardActionServiceFactory?: (db: Database) => DashboardActionService;
   portableDryRunAttestation?: PortableDryRunAttestationConfiguration;

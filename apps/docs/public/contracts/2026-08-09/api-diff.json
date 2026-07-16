@@ -1,0 +1,24 @@
+{
+  "from": "2026-08-08",
+  "to": "2026-08-09",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 2,
+    "compatible": 0
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "required-parameter-added",
+      "path": "POST /organizations/{organizationId}/payment-accounts/stripe-connect.parameters.header:Idempotency-Key",
+      "message": "A required parameter was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-parameter-added",
+      "path": "POST /organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh.parameters.header:Idempotency-Key",
+      "message": "A required parameter was added."
+    }
+  ]
+}

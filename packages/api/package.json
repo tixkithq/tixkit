@@ -38,6 +38,7 @@
     "@tixkit/email-transport": "workspace:*",
     "@tixkit/migration-core": "workspace:*",
     "@tixkit/portability": "workspace:*",
+    "@tixkit/provider-clients": "workspace:*",
     "@tixkit/shared": "workspace:*",
     "@tixkit/workflows": "workspace:*",
     "fastify": "^5.8.0",

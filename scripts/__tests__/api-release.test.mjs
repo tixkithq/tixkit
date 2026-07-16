@@ -9,7 +9,7 @@ import { acquireRepositoryMutationLock } from './helpers/repository-mutation-loc
 const root = resolve(import.meta.dirname, '../..');
 const releaseRepositoryMutationLock = await acquireRepositoryMutationLock(root);
 after(releaseRepositoryMutationLock);
-const currentVersion = '2026-08-08';
+const currentVersion = '2026-08-09';
 const currentReleaseManifest = JSON.parse(
   readFileSync(resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`), 'utf8'),
 );

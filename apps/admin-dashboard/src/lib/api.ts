@@ -5012,6 +5012,7 @@ export const adminApi: AdminApi = {
           `/v1/organizations/${organizationId}/payment-accounts/stripe-connect`,
           {
             method: 'POST',
+            headers: { 'Idempotency-Key': newIdempotencyKey('stripe_connect') },
           },
         );
         return result.ok
@@ -5045,7 +5046,10 @@ export const adminApi: AdminApi = {
       async () => {
         const result = await request<AdminPaymentAccount>(
           `/v1/organizations/${organizationId}/payment-accounts/${paymentAccountId}/stripe-connect/refresh`,
-          { method: 'POST' },
+          {
+            method: 'POST',
+            headers: { 'Idempotency-Key': newIdempotencyKey('stripe_connect_refresh') },
+          },
         );
         return result.ok
           ? ok(normalizePaymentAccount(asRecord(result.data), organizationId))

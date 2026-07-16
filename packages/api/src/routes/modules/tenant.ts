@@ -39,7 +39,12 @@ import {
   serializeBrandSenderIdentity,
   serializeOrganization,
 } from '../../http/contracts.js';
-import Stripe from 'stripe';
+import {
+  ProviderOperationError,
+  StripeSdkGateway,
+  type StripeConnectAccount,
+  type StripeGateway,
+} from '@tixkit/provider-clients';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
 type PaymentAccountRow = {
@@ -263,23 +268,21 @@ function stripeConnectRefreshUrl(organizationId: string): string {
   return `${baseUrl.replace(/\/$/, '')}/settings/payments?organizationId=${encodeURIComponent(organizationId)}&stripeConnect=refresh`;
 }
 
-function stripeAccountStatus(account: Stripe.Account): 'active' | 'pending' | 'restricted' {
-  if (account.charges_enabled && account.payouts_enabled) return 'active';
-  if ((account.requirements?.disabled_reason ?? null) !== null) return 'restricted';
+function stripeAccountStatus(account: StripeConnectAccount): 'active' | 'pending' | 'restricted' {
+  if (account.chargesEnabled && account.payoutsEnabled) return 'active';
+  if (account.disabledReason !== null) return 'restricted';
   return 'pending';
 }
 
-function stripeAccountState(account: Stripe.Account) {
+function stripeAccountState(account: StripeConnectAccount) {
   return {
     status: stripeAccountStatus(account),
-    defaultCurrency: account.default_currency?.toUpperCase() ?? 'USD',
-    detailsSubmitted: Boolean(account.details_submitted),
-    chargesEnabled: Boolean(account.charges_enabled),
-    payoutsEnabled: Boolean(account.payouts_enabled),
-    requirements: account.requirements
-      ? (account.requirements as unknown as Record<string, unknown>)
-      : {},
-    disabledReason: account.requirements?.disabled_reason ?? null,
+    defaultCurrency: account.defaultCurrency ?? 'USD',
+    detailsSubmitted: account.detailsSubmitted,
+    chargesEnabled: account.chargesEnabled,
+    payoutsEnabled: account.payoutsEnabled,
+    requirements: account.requirements,
+    disabledReason: account.disabledReason,
   };
 }
 
@@ -336,15 +339,35 @@ async function requireUniqueClerkOrganizationId(
   }
 }
 
-function stripeClientFromContext(
-  context: unknown,
-): Pick<Stripe, 'accounts' | 'accountLinks'> | null {
-  const injected = (context as { stripe?: Pick<Stripe, 'accounts' | 'accountLinks'> }).stripe;
+function stripeGatewayFromContext(context: unknown): StripeGateway | null {
+  const injected = (context as { stripeGateway?: StripeGateway }).stripeGateway;
   if (injected) return injected;
   const secretKey = process.env.STRIPE_SECRET_KEY;
   const connectClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
   if (!secretKey || !connectClientId) return null;
-  return new Stripe(secretKey);
+  return new StripeSdkGateway(secretKey);
+}
+
+function requireStripeConnectIdempotencyKey(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 128) {
+    throw new ValidationError(
+      'Idempotency-Key header is required and must not exceed 128 characters',
+    );
+  }
+  return value.trim();
+}
+
+function stripeConnectProviderError(error: unknown): never {
+  if (!(error instanceof ProviderOperationError)) throw error;
+  if (!error.retryable && error.deliveryState === 'rejected') {
+    throw new ValidationError('Stripe Connect rejected the provider operation');
+  }
+  const unavailable = Object.assign(new Error('Stripe Connect is temporarily unavailable'), {
+    code: 'STRIPE_CONNECT_UNAVAILABLE',
+    statusCode: 503,
+    expose: true,
+  });
+  throw unavailable;
 }
 
 export const tenantRoutes: FastifyPluginAsync = async (app) => {
@@ -1135,13 +1158,16 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         organizationId,
       );
       await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
+      const requestIdempotencyKey = requireStripeConnectIdempotencyKey(
+        request.headers['idempotency-key'],
+      );
 
       const paymentAccounts = new PaymentAccountRepository(db);
       const activeStripe = await paymentAccounts.findByOrganizationAndProvider(
         organizationId,
         'stripe_connect',
       );
-      const stripe = stripeClientFromContext(app.context);
+      const stripe = stripeGatewayFromContext(app.context);
       if (!stripe) {
         if (activeStripe) return reply.status(200).send(serializePaymentAccount(activeStripe));
         throw new ValidationError(
@@ -1152,17 +1178,17 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       let account = activeStripe;
       let wasCreated = false;
       if (!account) {
-        const stripeAccount = await stripe.accounts.create({
-          type: 'express',
-          country: 'US',
-          business_profile: {
-            name: organization.name,
-          },
-          metadata: {
-            tenantId: organization.tenant_id,
-            organizationId: organization.id,
-          },
-        });
+        const stripeAccount = await stripe
+          .createConnectAccount({
+            country: 'US',
+            businessName: organization.name,
+            metadata: {
+              tenantId: organization.tenant_id,
+              organizationId: organization.id,
+            },
+            idempotencyKey: `stripe-connect-account:${organization.tenant_id}:${organization.id}`,
+          })
+          .catch(stripeConnectProviderError);
         const stripeState = stripeAccountState(stripeAccount);
         try {
           account = await paymentAccounts.create({
@@ -1188,16 +1214,31 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
             .where('provider', '=', 'stripe_connect')
             .executeTakeFirst();
           if (!account) throw error;
-          void stripe.accounts.del(stripeAccount.id).catch((cleanupError) => {
-            request.log.warn(
-              {
-                err: cleanupError,
-                organizationId,
-                stripeAccountId: stripeAccount.id,
-              },
-              'Failed to clean up duplicate Stripe Connect account after concurrent payment-account creation',
-            );
-          });
+          if (stripeAccount.id !== account.provider_account_id) {
+            void stripe
+              .deleteConnectAccount(
+                stripeAccount.id,
+                `stripe-connect-cleanup:${organization.tenant_id}:${organization.id}:${stripeAccount.id}`,
+              )
+              .catch((cleanupError) => {
+                const providerError =
+                  cleanupError instanceof ProviderOperationError
+                    ? {
+                        kind: cleanupError.kind,
+                        retryable: cleanupError.retryable,
+                        deliveryState: cleanupError.deliveryState,
+                      }
+                    : { kind: 'unknown' };
+                request.log.warn(
+                  {
+                    providerError,
+                    organizationId,
+                    stripeAccountId: stripeAccount.id,
+                  },
+                  'Failed to clean up duplicate Stripe Connect account after concurrent payment-account creation',
+                );
+              });
+          }
         }
 
         if (wasCreated) {
@@ -1215,12 +1256,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const accountLink = await stripe.accountLinks.create({
-        account: account.provider_account_id,
-        type: 'account_onboarding',
-        refresh_url: stripeConnectRefreshUrl(organizationId),
-        return_url: stripeConnectReturnUrl(organizationId),
-      });
+      const accountLink = await stripe
+        .createAccountLink({
+          accountId: account.provider_account_id,
+          refreshUrl: stripeConnectRefreshUrl(organizationId),
+          returnUrl: stripeConnectReturnUrl(organizationId),
+          idempotencyKey: `${requestIdempotencyKey}:account-link:${account.provider_account_id}`,
+        })
+        .catch(stripeConnectProviderError);
 
       return reply
         .status(wasCreated ? 201 : 200)
@@ -1245,6 +1288,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         organizationId,
       );
       await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
+      const requestIdempotencyKey = requireStripeConnectIdempotencyKey(
+        request.headers['idempotency-key'],
+      );
 
       const paymentAccounts = new PaymentAccountRepository(db);
       const account = await paymentAccounts.findById(paymentAccountId);
@@ -1262,7 +1308,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         throw new ValidationError('Payment account is not a Stripe Connect account');
       }
 
-      const stripe = stripeClientFromContext(app.context);
+      const stripe = stripeGatewayFromContext(app.context);
       if (!stripe) {
         throw new ValidationError(
           'Stripe Connect status refresh is not configured for this environment',
@@ -1271,9 +1317,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
       const previousStatus = account.status;
       const previousDefaultCurrency = account.default_currency;
-      const stripeAccount = (await stripe.accounts.retrieve(
-        account.provider_account_id,
-      )) as Stripe.Account;
+      const stripeAccount = await stripe
+        .retrieveConnectAccount(account.provider_account_id)
+        .catch(stripeConnectProviderError);
       const stripeState = stripeAccountState(stripeAccount);
       const updated = await paymentAccounts.update(account.id, {
         status: stripeState.status,
@@ -1304,12 +1350,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const accountLink = await stripe.accountLinks.create({
-        account: updated.provider_account_id,
-        type: 'account_onboarding',
-        refresh_url: stripeConnectRefreshUrl(organizationId),
-        return_url: stripeConnectReturnUrl(organizationId),
-      });
+      const accountLink = await stripe
+        .createAccountLink({
+          accountId: updated.provider_account_id,
+          refreshUrl: stripeConnectRefreshUrl(organizationId),
+          returnUrl: stripeConnectReturnUrl(organizationId),
+          idempotencyKey: `${requestIdempotencyKey}:account-link:${updated.provider_account_id}`,
+        })
+        .catch(stripeConnectProviderError);
 
       return serializePaymentAccount(updated, accountLink.url);
     },

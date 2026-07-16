@@ -620,7 +620,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-08',
+    version: '2026-08-09',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -2731,8 +2731,8 @@ const rawOpenApiSpec = {
           organizationId: 'org_example',
           brandId: 'brd_example',
           evaluationVersion: 1,
-          generatedAt: '2026-08-08T12:00:00.000Z',
-          expiresAt: '2026-08-08T12:05:00.000Z',
+          generatedAt: '2026-08-09T12:00:00.000Z',
+          expiresAt: '2026-08-09T12:05:00.000Z',
           nextCursor: null,
           actions: [
             {
@@ -2763,9 +2763,9 @@ const rawOpenApiSpec = {
               staleness: {
                 state: 'current',
                 consistency: 'repeatable_read',
-                evaluatedAt: '2026-08-08T12:00:00.000Z',
-                expiresAt: '2026-08-08T12:05:00.000Z',
-                sourceUpdatedAt: '2026-08-08T11:45:00.000Z',
+                evaluatedAt: '2026-08-09T12:00:00.000Z',
+                expiresAt: '2026-08-09T12:05:00.000Z',
+                sourceUpdatedAt: '2026-08-09T11:45:00.000Z',
                 sourceVersion: 1,
                 evidenceRevision:
                   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -5701,7 +5701,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-08, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-09, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5748,7 +5748,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-08, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-09, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5855,7 +5855,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-08 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-09 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5892,7 +5892,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-08 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-09 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8178,7 +8178,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-08 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-09 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8235,7 +8235,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-08 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-09 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -16161,6 +16161,14 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Create or return the Stripe Connect payment account for an organization',
         security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 128, pattern: '.*\\S.*' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Existing active Stripe payment account returned',
@@ -16203,7 +16211,16 @@ const rawOpenApiSpec = {
             },
           },
           '400': {
-            description: 'Stripe Connect onboarding is not configured for this environment',
+            description:
+              'Idempotency is missing, Stripe Connect is not configured, or Stripe rejected onboarding',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '503': {
+            description: 'Stripe Connect is temporarily unavailable',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },
@@ -16217,6 +16234,14 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Refresh Stripe Connect payment account status and return a fresh account link',
         security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 128, pattern: '.*\\S.*' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Payment account status refreshed from Stripe',
@@ -16251,7 +16276,16 @@ const rawOpenApiSpec = {
             },
           },
           '400': {
-            description: 'Stripe Connect status refresh is not configured for this environment',
+            description:
+              'Idempotency is missing, Stripe Connect is not configured, or Stripe rejected the refresh',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '503': {
+            description: 'Stripe Connect is temporarily unavailable',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },

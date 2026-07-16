@@ -310,6 +310,7 @@
         "@tixkit/email-transport": "workspace:*",
         "@tixkit/migration-core": "workspace:*",
         "@tixkit/portability": "workspace:*",
+        "@tixkit/provider-clients": "workspace:*",
         "@tixkit/shared": "workspace:*",
         "@tixkit/workflows": "workspace:*",
         "fastify": "^5.8.0",
@@ -560,8 +561,8 @@
       "name": "@tixkit/openapi",
       "version": "0.1.0",
       "dependencies": {
-        "@tixkit/agent-protocol": "workspace:*",
-        "@tixkit/domain": "workspace:*",
+        "@tixkit/agent-protocol": "0.1.0",
+        "@tixkit/domain": "0.1.0",
       },
       "devDependencies": {
         "typescript": "7.0.2",

@@ -3,6 +3,7 @@ import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
+import { ProviderOperationError, type StripeGateway } from '@tixkit/provider-clients';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
 import type { AppContext } from '../../app.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
@@ -648,6 +649,66 @@ function checkoutOccurrence(id: string, startsAt: Date) {
     status: 'scheduled',
     created_at: new Date(),
     updated_at: new Date(),
+  };
+}
+
+function stripeGatewayTestDouble(stripe: {
+  accounts?: {
+    create?: (...args: any[]) => Promise<any>;
+    retrieve?: (...args: any[]) => Promise<any>;
+    del?: (...args: any[]) => Promise<any>;
+  };
+  accountLinks?: { create?: (...args: any[]) => Promise<any> };
+}): StripeGateway {
+  const connectAccount = (account: Record<string, any>) => ({
+    id: account.id,
+    defaultCurrency: String(account.default_currency ?? 'usd').toUpperCase(),
+    detailsSubmitted: account.details_submitted === true,
+    chargesEnabled: account.charges_enabled === true,
+    payoutsEnabled: account.payouts_enabled === true,
+    requirements: account.requirements ?? {},
+    disabledReason: account.requirements?.disabled_reason ?? null,
+  });
+  return {
+    createConnectAccount: async (input) =>
+      connectAccount(
+        await stripe.accounts!.create!(
+          {
+            type: 'express',
+            country: input.country,
+            business_profile: { name: input.businessName },
+            metadata: input.metadata,
+          },
+          { idempotencyKey: input.idempotencyKey },
+        ),
+      ),
+    retrieveConnectAccount: async (accountId) =>
+      connectAccount(await stripe.accounts!.retrieve!(accountId)),
+    deleteConnectAccount: async (accountId, idempotencyKey) => {
+      await stripe.accounts!.del!(accountId, {}, { idempotencyKey });
+    },
+    createAccountLink: async (input) =>
+      stripe.accountLinks!.create!(
+        {
+          account: input.accountId,
+          type: 'account_onboarding',
+          refresh_url: input.refreshUrl,
+          return_url: input.returnUrl,
+        },
+        { idempotencyKey: input.idempotencyKey },
+      ),
+    createPaymentIntent: async () => {
+      throw new Error('Unexpected createPaymentIntent call');
+    },
+    retrievePaymentIntent: async () => {
+      throw new Error('Unexpected retrievePaymentIntent call');
+    },
+    cancelPaymentIntent: async () => {
+      throw new Error('Unexpected cancelPaymentIntent call');
+    },
+    createRefund: async () => {
+      throw new Error('Unexpected createRefund call');
+    },
   };
 }
 
@@ -2102,6 +2163,7 @@ describe('brand domain creation', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/organizations/org_1/payment-accounts/stripe-connect',
+        headers: { 'idempotency-key': 'stripe-connect-test-unconfigured' },
       });
       expect(res.statusCode).toBe(400);
       expect(tables.payment_accounts).toHaveLength(0);
@@ -2118,6 +2180,137 @@ describe('brand domain creation', () => {
       }
       await app.close();
     }
+  });
+
+  it('POST /organizations/:organizationId/payment-accounts/stripe-connect requires idempotency', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [],
+    };
+    const createConnectAccount = vi.fn();
+    const stripeGateway = {
+      ...stripeGatewayTestDouble({}),
+      createConnectAccount,
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripeGateway });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/stripe-connect',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message).toContain('Idempotency-Key');
+    expect(createConnectAccount).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    {
+      label: 'retryable failure',
+      error: new ProviderOperationError(
+        'stripe.connect-account.create failed: transport',
+        'stripe',
+        'connect-account.create',
+        'transport',
+        true,
+        'unknown',
+        false,
+        { bodyPreview: 'buyer@example.com sk_live_secret' },
+      ),
+      status: 503,
+      message: 'temporarily unavailable',
+    },
+    {
+      label: 'permanent rejection',
+      error: new ProviderOperationError(
+        'stripe.connect-account.create failed: validation (HTTP 400)',
+        'stripe',
+        'connect-account.create',
+        'validation',
+        false,
+        'rejected',
+        false,
+        { status: 400, providerCode: 'invalid_request' },
+      ),
+      status: 400,
+      message: 'rejected the provider operation',
+    },
+    {
+      label: 'accepted malformed response',
+      error: new ProviderOperationError(
+        'stripe.connect-account.create failed: malformed-response',
+        'stripe',
+        'connect-account.create',
+        'malformed-response',
+        false,
+        'accepted',
+        false,
+        { bodyPreview: 'buyer@example.com sk_live_secret' },
+      ),
+      status: 503,
+      message: 'temporarily unavailable',
+    },
+    {
+      label: 'ambiguous permanent provider failure',
+      error: new ProviderOperationError(
+        'stripe.connect-account.create failed: server (HTTP 501)',
+        'stripe',
+        'connect-account.create',
+        'server',
+        false,
+        'unknown',
+        false,
+        { status: 501, bodyPreview: 'buyer@example.com sk_live_secret' },
+      ),
+      status: 503,
+      message: 'temporarily unavailable',
+    },
+  ])('maps Stripe Connect $label to a safe response', async ({ error, status, message }) => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [],
+    };
+    const stripeGateway = {
+      ...stripeGatewayTestDouble({}),
+      createConnectAccount: vi.fn(async () => Promise.reject(error)),
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripeGateway });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/stripe-connect',
+      headers: { 'idempotency-key': `stripe-connect-provider-${status}` },
+    });
+
+    expect(response.statusCode).toBe(status);
+    expect(response.json().message).toContain(message);
+    expect(response.body).not.toContain('buyer@example.com');
+    expect(response.body).not.toContain('sk_live_secret');
+    expect(tables.payment_accounts).toHaveLength(0);
+    await app.close();
   });
 
   it('POST /organizations/:organizationId/payment-accounts/stripe-connect creates a Stripe account and onboarding link when configured', async () => {
@@ -2162,11 +2355,14 @@ describe('brand domain creation', () => {
         create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_created_1' })),
       },
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway: stripeGatewayTestDouble(stripe),
+    });
     try {
       const res = await app.inject({
         method: 'POST',
         url: '/organizations/org_1/payment-accounts/stripe-connect',
+        headers: { 'idempotency-key': 'stripe-connect-test-create' },
       });
 
       expect(res.statusCode).toBe(201);
@@ -2206,23 +2402,31 @@ describe('brand domain creation', () => {
       ).toMatchObject({
         currently_due: ['business_profile.url'],
       });
-      expect(stripe.accounts.create).toHaveBeenCalledWith({
-        type: 'express',
-        country: 'US',
-        business_profile: { name: 'Org' },
-        metadata: {
-          tenantId: 'tnt_1',
-          organizationId: 'org_1',
+      expect(stripe.accounts.create).toHaveBeenCalledWith(
+        {
+          type: 'express',
+          country: 'US',
+          business_profile: { name: 'Org' },
+          metadata: {
+            tenantId: 'tnt_1',
+            organizationId: 'org_1',
+          },
         },
-      });
-      expect(stripe.accountLinks.create).toHaveBeenCalledWith({
-        account: 'acct_created_1',
-        type: 'account_onboarding',
-        refresh_url:
-          'http://localhost:3001/settings/payments?organizationId=org_1&stripeConnect=refresh',
-        return_url:
-          'http://localhost:3001/settings/payments?organizationId=org_1&stripeConnect=return',
-      });
+        { idempotencyKey: 'stripe-connect-account:tnt_1:org_1' },
+      );
+      expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+        {
+          account: 'acct_created_1',
+          type: 'account_onboarding',
+          refresh_url:
+            'http://localhost:3001/settings/payments?organizationId=org_1&stripeConnect=refresh',
+          return_url:
+            'http://localhost:3001/settings/payments?organizationId=org_1&stripeConnect=return',
+        },
+        {
+          idempotencyKey: 'stripe-connect-test-create:account-link:acct_created_1',
+        },
+      );
     } finally {
       if (originalAdminDashboardUrl === undefined) {
         delete process.env.ADMIN_DASHBOARD_URL;
@@ -2300,10 +2504,13 @@ describe('brand domain creation', () => {
         create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_connect' })),
       },
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway: stripeGatewayTestDouble(stripe),
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/payment-accounts/stripe-connect',
+      headers: { 'idempotency-key': 'stripe-connect-test-existing' },
     });
 
     expect(res.statusCode).toBe(200);
@@ -2314,16 +2521,19 @@ describe('brand domain creation', () => {
       onboardingUrl: 'https://connect.stripe.test/onboard/acct_connect',
     });
     expect(stripe.accounts.create).not.toHaveBeenCalled();
-    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
-      account: 'acct_connect',
-      type: 'account_onboarding',
-      refresh_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
-      ),
-      return_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=return',
-      ),
-    });
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+      {
+        account: 'acct_connect',
+        type: 'account_onboarding',
+        refresh_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+        ),
+        return_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=return',
+        ),
+      },
+      { idempotencyKey: 'stripe-connect-test-existing:account-link:acct_connect' },
+    );
     await app.close();
   });
 
@@ -2382,10 +2592,13 @@ describe('brand domain creation', () => {
         create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_winner' })),
       },
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway: stripeGatewayTestDouble(stripe),
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/payment-accounts/stripe-connect',
+      headers: { 'idempotency-key': 'stripe-connect-test-race' },
     });
 
     expect(res.statusCode).toBe(200);
@@ -2398,17 +2611,24 @@ describe('brand domain creation', () => {
     expect(tables.payment_accounts).toHaveLength(1);
     expect(tables.audit_logs).toHaveLength(0);
     expect(stripe.accounts.create).toHaveBeenCalledTimes(1);
-    expect(stripe.accounts.del).toHaveBeenCalledWith('acct_loser');
-    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
-      account: 'acct_winner',
-      type: 'account_onboarding',
-      refresh_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
-      ),
-      return_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=return',
-      ),
-    });
+    expect(stripe.accounts.del).toHaveBeenCalledWith(
+      'acct_loser',
+      {},
+      { idempotencyKey: 'stripe-connect-cleanup:tnt_1:org_1:acct_loser' },
+    );
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+      {
+        account: 'acct_winner',
+        type: 'account_onboarding',
+        refresh_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+        ),
+        return_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=return',
+        ),
+      },
+      { idempotencyKey: 'stripe-connect-test-race:account-link:acct_winner' },
+    );
     await app.close();
   });
 
@@ -2466,11 +2686,14 @@ describe('brand domain creation', () => {
         create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_winner' })),
       },
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway: stripeGatewayTestDouble(stripe),
+    });
     const startedAt = Date.now();
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/payment-accounts/stripe-connect',
+      headers: { 'idempotency-key': 'stripe-connect-test-cleanup' },
     });
 
     expect(Date.now() - startedAt).toBeLessThan(1000);
@@ -2480,17 +2703,111 @@ describe('brand domain creation', () => {
       providerAccountId: 'acct_winner',
       onboardingUrl: 'https://connect.stripe.test/onboard/acct_winner',
     });
-    expect(stripe.accounts.del).toHaveBeenCalledWith('acct_loser');
-    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
-      account: 'acct_winner',
-      type: 'account_onboarding',
-      refresh_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
-      ),
-      return_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=return',
-      ),
+    expect(stripe.accounts.del).toHaveBeenCalledWith(
+      'acct_loser',
+      {},
+      { idempotencyKey: 'stripe-connect-cleanup:tnt_1:org_1:acct_loser' },
+    );
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+      {
+        account: 'acct_winner',
+        type: 'account_onboarding',
+        refresh_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+        ),
+        return_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=return',
+        ),
+      },
+      { idempotencyKey: 'stripe-connect-test-cleanup:account-link:acct_winner' },
+    );
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/payment-accounts/stripe-connect preserves a provider-idempotency replay won by another request', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [],
+      audit_logs: [],
+      paymentAccountInsertConflictRow: {
+        id: 'pa_winner',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_replayed',
+        status: 'pending',
+        default_currency: 'USD',
+        details_submitted: false,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: JSON.stringify({ currently_due: [] }),
+        disabled_reason: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    };
+    const stripe = {
+      accounts: {
+        create: vi.fn(async () => ({
+          id: 'acct_replayed',
+          charges_enabled: false,
+          payouts_enabled: false,
+          details_submitted: false,
+          default_currency: 'usd',
+          requirements: {
+            currently_due: [],
+            pending_verification: [],
+            disabled_reason: null,
+          },
+        })),
+        del: vi.fn(),
+      },
+      accountLinks: {
+        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_replayed' })),
+      },
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway: stripeGatewayTestDouble(stripe),
     });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/payment-accounts/stripe-connect',
+      headers: { 'idempotency-key': 'stripe-connect-test-provider-replay' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'pa_winner',
+      providerAccountId: 'acct_replayed',
+      onboardingUrl: 'https://connect.stripe.test/onboard/acct_replayed',
+    });
+    expect(stripe.accounts.del).not.toHaveBeenCalled();
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+      {
+        account: 'acct_replayed',
+        type: 'account_onboarding',
+        refresh_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+        ),
+        return_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=return',
+        ),
+      },
+      {
+        idempotencyKey: 'stripe-connect-test-provider-replay:account-link:acct_replayed',
+      },
+    );
     await app.close();
   });
 
@@ -2535,16 +2852,60 @@ describe('brand domain creation', () => {
         create: vi.fn(),
       },
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway: stripeGatewayTestDouble(stripe),
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/payment-accounts/pa_legacy/stripe-connect/refresh',
+      headers: { 'idempotency-key': 'stripe-connect-test-legacy' },
     });
 
     expect(res.statusCode).toBe(400);
     expect(res.json().message).toContain('Stripe Connect account');
     expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
     expect(stripe.accountLinks.create).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh rejects missing, blank and overlong idempotency keys', async () => {
+    const tables = {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Org',
+          slug: 'org',
+          clerk_organization_id: null,
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      payment_accounts: [],
+    };
+    const stripeGateway = {
+      ...stripeGatewayTestDouble({}),
+      retrieveConnectAccount: vi.fn(),
+      createAccountLink: vi.fn(),
+    };
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripeGateway });
+
+    for (const headers of [
+      undefined,
+      { 'idempotency-key': '   ' },
+      { 'idempotency-key': 'x'.repeat(129) },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/organizations/org_1/payment-accounts/pa_1/stripe-connect/refresh',
+        ...(headers ? { headers } : {}),
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).toContain('Idempotency-Key');
+    }
+    expect(stripeGateway.retrieveConnectAccount).not.toHaveBeenCalled();
+    expect(stripeGateway.createAccountLink).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -2597,10 +2958,13 @@ describe('brand domain creation', () => {
         create: vi.fn(async () => ({ url: 'https://connect.stripe.test/update/acct_refresh_1' })),
       },
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway: stripeGatewayTestDouble(stripe),
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/payment-accounts/pa_1/stripe-connect/refresh',
+      headers: { 'idempotency-key': 'stripe-connect-test-refresh' },
     });
 
     expect(res.statusCode).toBe(200);
@@ -2633,16 +2997,19 @@ describe('brand domain creation', () => {
     });
     expect(tables.audit_logs).toHaveLength(1);
     expect(stripe.accounts.retrieve).toHaveBeenCalledWith('acct_refresh_1');
-    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
-      account: 'acct_refresh_1',
-      type: 'account_onboarding',
-      refresh_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
-      ),
-      return_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=return',
-      ),
-    });
+    expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+      {
+        account: 'acct_refresh_1',
+        type: 'account_onboarding',
+        refresh_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=refresh',
+        ),
+        return_url: expect.stringContaining(
+          '/settings/payments?organizationId=org_1&stripeConnect=return',
+        ),
+      },
+      { idempotencyKey: 'stripe-connect-test-refresh:account-link:acct_refresh_1' },
+    );
     await app.close();
   });
 });

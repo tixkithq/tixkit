@@ -6,7 +6,7 @@ product_area: api
 content_type: reference
 status: beta
 owner: developer-platform
-last_verified: 2026-08-08
+last_verified: 2026-08-09
 prerequisites: [A sandbox API credential]
 related: [/reference/api, /reference/api-versions, /sdks/javascript]
 ---
@@ -21,8 +21,8 @@ Before release, run:
 
 ```bash
 bun scripts/build-api-release.ts
-(cd artifacts/api/2026-08-08 && sha256sum --check CHECKSUMS.sha256)
-bunx tsc --noEmit --skipLibCheck artifacts/api/2026-08-08/openapi.d.ts
+(cd artifacts/api/2026-08-09 && sha256sum --check CHECKSUMS.sha256)
+bunx tsc --noEmit --skipLibCheck artifacts/api/2026-08-09/openapi.d.ts
 node scripts/sdk-parity-matrix.mjs
 node scripts/test-contract-test-consumers.mjs
 ```

@@ -202,6 +202,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-08 dashboard actions',
         routeId: 'apiMigration20260807To20260808',
       },
+      {
+        label: 'Adopt 2026-08-09 replay-safe Stripe Connect',
+        routeId: 'apiMigration20260808To20260809',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

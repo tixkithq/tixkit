@@ -3716,7 +3716,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-08',
+        'X-Tixkit-Version': '2026-08-09',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
@@ -4272,12 +4272,31 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.paymentAccounts.refreshStripeConnect('org_1', 'pa_1');
+    await c.paymentAccounts.refreshStripeConnect('org_1', 'pa_1', 'refresh_connect_1');
     const call = getCall(fm);
     expect(call.url).toBe(
       'https://api.test/v1/organizations/org_1/payment-accounts/pa_1/stripe-connect/refresh',
     );
     expect(call.method).toBe('POST');
+    expect(call.headers['Idempotency-Key']).toBe('refresh_connect_1');
+  });
+
+  it('paymentAccounts.createStripeConnect propagates caller idempotency', async () => {
+    const fm = mockFetch(201, { id: 'pa_1', status: 'pending' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.paymentAccounts.createStripeConnect('org_1', 'create_connect_1');
+
+    const call = getCall(fm);
+    expect(call.url).toBe(
+      'https://api.test/v1/organizations/org_1/payment-accounts/stripe-connect',
+    );
+    expect(call.method).toBe('POST');
+    expect(call.headers['Idempotency-Key']).toBe('create_connect_1');
   });
 
   it('orders.list sends organization and event filters with pagination', async () => {
