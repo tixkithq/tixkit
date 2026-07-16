@@ -30,7 +30,13 @@ TypeScript ES modules on server runtimes with standards-compatible `fetch` and `
 
 ## Configuration
 
-Callers provide credentials, provider base URLs, explicit deadlines, and optional telemetry listeners. The package performs no hidden retry.
+Callers provide credentials, provider base URLs, explicit deadlines, and optional telemetry or
+diagnostic listeners. The package performs no hidden retry. Diagnostic listeners receive only a
+frozen, bounded envelope: canonical status metadata, an allowlisted media type, byte count, response
+classification, body digest, bounded `Retry-After` guidance, and hashed provider correlation. Normalized
+errors and telemetry remain authoritative for retryability because provider semantics can override the
+HTTP status. Listener failures
+never change the provider operation result.
 
 ## Security
 
@@ -39,7 +45,8 @@ only bounded diagnostic shapes with provider-controlled values redacted; provide
 are represented by stable SHA-256 correlation tokens. Authorization material, secrets, payment tokens,
 personal data, and unrestricted bodies must not leave this boundary. Ambiguous failures from
 side-effecting operations are non-retryable until an adapter has executable provider deduplication or
-reconciliation proof.
+reconciliation proof. Exact upstream request IDs are not exposed by this runtime contract; privileged
+capture requires the separately encrypted, scoped, audited, and short-retained incident path.
 
 ## Validation
 

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { STATUS_CODES } from 'node:http';
 import { SpanKind, SpanStatusCode, trace, type Span } from '@opentelemetry/api';
 
 const DEFAULT_DEADLINE_MS = 10_000;
@@ -8,6 +9,16 @@ const RETRYABLE_SERVER_STATUSES = new Set([500, 502, 503, 504]);
 const MAX_IDEMPOTENCY_KEY_BYTES = 255;
 const SAFE_DIAGNOSTIC_KEYS = new Set(['code', 'type', 'error_code']);
 const SAFE_DIAGNOSTIC_ENVELOPES = new Set(['error', 'errors']);
+const SAFE_CONTENT_TYPES = new Set([
+  'application/json',
+  'application/octet-stream',
+  'application/problem+json',
+  'application/x-www-form-urlencoded',
+  'application/xml',
+  'text/html',
+  'text/plain',
+  'text/xml',
+]);
 const REDACTED = '[REDACTED]';
 
 export type ProviderFailureKind =
@@ -28,6 +39,18 @@ export const PROVIDER_SERVICE_OUTCOMES = [
 ] as const;
 export type ProviderServiceOutcome = (typeof PROVIDER_SERVICE_OUTCOMES)[number];
 export type ProviderDeliveryState = 'not-sent' | 'rejected' | 'unknown' | 'accepted';
+export type ProviderResponseClassification = 'json' | 'html' | 'text' | 'empty' | 'invalid-utf8';
+
+export interface ProviderDiagnosticEnvelope {
+  status: number;
+  statusText: string;
+  contentType?: string;
+  responseBytes: number;
+  responseClassification: ProviderResponseClassification;
+  bodyDigest: string;
+  retryAfterMs?: number;
+  providerRequestId?: string;
+}
 
 export interface ProviderTelemetryEvent {
   dependency: string;
@@ -40,10 +63,18 @@ export interface ProviderTelemetryEvent {
   status?: number;
 }
 
+export interface ProviderDiagnosticEvent {
+  dependency: string;
+  operation: string;
+  method: string;
+  envelope: ProviderDiagnosticEnvelope;
+}
+
 export interface ProviderClientRuntime {
   deadlineMs?: number;
   fetch?: typeof globalThis.fetch;
   onTelemetry?: (event: Readonly<ProviderTelemetryEvent>) => void;
+  onDiagnostic?: (event: Readonly<ProviderDiagnosticEvent>) => void | Promise<void>;
 }
 
 export class ProviderOperationError extends Error {
@@ -63,6 +94,7 @@ export class ProviderOperationError extends Error {
       providerRequestId?: string;
       retryAfterMs?: number;
       bodyPreview?: string;
+      diagnostic?: ProviderDiagnosticEnvelope;
     } = {},
     cause?: unknown,
   ) {
@@ -70,6 +102,7 @@ export class ProviderOperationError extends Error {
   }
 
   forRetry(): ProviderOperationError {
+    const diagnostic = safeDiagnosticEnvelope(this.details.diagnostic);
     const safeDetails = {
       ...(this.details.status !== undefined &&
       Number.isSafeInteger(this.details.status) &&
@@ -92,6 +125,7 @@ export class ProviderOperationError extends Error {
       this.details.retryAfterMs <= 86_400_000
         ? { retryAfterMs: this.details.retryAfterMs }
         : {}),
+      ...(diagnostic === undefined ? {} : { diagnostic }),
     };
     return new ProviderOperationError(
       this.message,
@@ -128,6 +162,7 @@ export interface ProviderHttpResult<T> {
   data: T;
   status: number;
   providerRequestId?: string;
+  diagnostic: ProviderDiagnosticEnvelope;
   durationMs: number;
 }
 
@@ -200,16 +235,10 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
     }
 
     const providerRequestId = extractProviderRequestId(response.headers, request.requestIdHeaders);
-    if (response.status >= 300 && response.status < 400) {
-      throw operationError(request, 'malformed-response', false, 'unknown', false, {
-        status: response.status,
-        providerRequestId,
-      });
-    }
     const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
-    let rawBody: string;
+    let responseBody: BoundedResponseBody;
     try {
-      rawBody = await readBoundedBody(response, maxResponseBytes, interruption);
+      responseBody = await readBoundedBody(response, maxResponseBytes, interruption);
     } catch {
       if (timedOut) {
         throw operationError(request, 'timeout', !sideEffecting, 'unknown', false, {});
@@ -226,6 +255,42 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
         { status: response.status, providerRequestId },
       );
     }
+    const diagnostic = createDiagnosticEnvelope(
+      response,
+      responseBody,
+      retryAfterMs,
+      providerRequestId,
+    );
+    emitDiagnostic(request, {
+      dependency: request.dependency,
+      operation: request.operation,
+      method,
+      envelope: diagnostic,
+    });
+    if (response.status >= 300 && response.status < 400) {
+      throw operationError(request, 'malformed-response', false, 'unknown', false, {
+        status: response.status,
+        providerRequestId,
+        retryAfterMs,
+        diagnostic,
+      });
+    }
+    if (responseBody.classification === 'invalid-utf8') {
+      throw operationError(
+        request,
+        'malformed-response',
+        false,
+        response.ok ? 'accepted' : 'unknown',
+        false,
+        {
+          status: response.status,
+          providerRequestId,
+          retryAfterMs,
+          diagnostic,
+        },
+      );
+    }
+    const rawBody = responseBody.text ?? '';
     const bodyPreview = sanitizeBodyPreview(
       rawBody,
       request.bodyPreviewBytes ?? DEFAULT_BODY_PREVIEW_BYTES,
@@ -244,6 +309,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
         providerRequestId,
         retryAfterMs,
         bodyPreview,
+        diagnostic,
       });
     }
 
@@ -252,6 +318,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
       throw operationError(request, 'malformed-response', false, 'accepted', false, {
         status: response.status,
         providerRequestId,
+        diagnostic,
       });
     }
     if (expectsJson && parsed === undefined) {
@@ -259,6 +326,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
         status: response.status,
         providerRequestId,
         bodyPreview,
+        diagnostic,
       });
     }
 
@@ -282,6 +350,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
             status: response.status,
             ...(providerCode === undefined ? {} : { providerCode }),
             ...(providerRequestId === undefined ? {} : { providerRequestId }),
+            diagnostic,
           },
         );
       }
@@ -289,6 +358,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
         status: response.status,
         providerRequestId,
         bodyPreview,
+        diagnostic,
       });
     }
     const durationMs = elapsed(startedAt);
@@ -303,7 +373,13 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
       retryable: false,
       status: response.status,
     });
-    return { data, status: response.status, providerRequestId, durationMs };
+    return {
+      data,
+      status: response.status,
+      providerRequestId,
+      diagnostic,
+      durationMs,
+    };
   } catch (error) {
     const normalized =
       error instanceof ProviderOperationError
@@ -436,12 +512,19 @@ export function parseRetryAfter(value: string | null, now = Date.now()): number 
     : undefined;
 }
 
+interface BoundedResponseBody {
+  bytes: Uint8Array;
+  text?: string;
+  classification: ProviderResponseClassification;
+  digest: string;
+}
+
 async function readBoundedBody(
   response: Response,
   maxBytes: number,
   interruption: Promise<never>,
-): Promise<string> {
-  if (!response.body) return '';
+): Promise<BoundedResponseBody> {
+  if (!response.body) return boundedResponseBody(new Uint8Array());
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -477,7 +560,102 @@ async function readBoundedBody(
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder('utf-8', { fatal: true }).decode(body);
+  return boundedResponseBody(body, response.headers.get('content-type'));
+}
+
+function boundedResponseBody(
+  bytes: Uint8Array,
+  contentTypeValue?: string | null,
+): BoundedResponseBody {
+  const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  if (bytes.byteLength === 0) {
+    return { bytes, text: '', classification: 'empty', digest };
+  }
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return { bytes, classification: 'invalid-utf8', digest };
+  }
+  const trimmed = text.trim();
+  let classification: ProviderResponseClassification = 'text';
+  try {
+    JSON.parse(trimmed);
+    classification = 'json';
+  } catch {
+    const contentType = safeContentType(contentTypeValue);
+    if (contentType === 'text/html' || /^\s*(?:<!doctype\s+html|<html(?:\s|>))/iu.test(trimmed)) {
+      classification = 'html';
+    }
+  }
+  return { bytes, text, classification, digest };
+}
+
+function createDiagnosticEnvelope(
+  response: Response,
+  body: BoundedResponseBody,
+  retryAfterMs: number | undefined,
+  providerRequestId: string | undefined,
+): ProviderDiagnosticEnvelope {
+  return Object.freeze({
+    status: response.status,
+    statusText: canonicalStatusText(response.status),
+    ...(safeContentType(response.headers.get('content-type')) === undefined
+      ? {}
+      : { contentType: safeContentType(response.headers.get('content-type')) }),
+    responseBytes: body.bytes.byteLength,
+    responseClassification: body.classification,
+    bodyDigest: body.digest,
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    ...(providerRequestId === undefined ? {} : { providerRequestId }),
+  });
+}
+
+function canonicalStatusText(status: number): string {
+  return STATUS_CODES[status] ?? '[UNRECOGNIZED]';
+}
+
+function safeContentType(value: string | null | undefined): string | undefined {
+  const mediaType = value?.split(';', 1)[0]?.trim().toLowerCase();
+  return mediaType && SAFE_CONTENT_TYPES.has(mediaType) ? mediaType : undefined;
+}
+
+function safeDiagnosticEnvelope(
+  value: ProviderDiagnosticEnvelope | undefined,
+): ProviderDiagnosticEnvelope | undefined {
+  if (
+    !value ||
+    !Number.isSafeInteger(value.status) ||
+    value.status < 100 ||
+    value.status > 599 ||
+    !['json', 'html', 'text', 'empty', 'invalid-utf8'].includes(value.responseClassification) ||
+    !Number.isSafeInteger(value.responseBytes) ||
+    value.responseBytes < 0 ||
+    value.responseBytes > 1024 * 1024 ||
+    !/^sha256:[a-f0-9]{64}$/u.test(value.bodyDigest) ||
+    (value.providerRequestId !== undefined &&
+      !/^sha256:[a-f0-9]{64}$/u.test(value.providerRequestId)) ||
+    (value.retryAfterMs !== undefined &&
+      (!Number.isSafeInteger(value.retryAfterMs) ||
+        value.retryAfterMs < 0 ||
+        value.retryAfterMs > 86_400_000))
+  ) {
+    return undefined;
+  }
+  const statusText = canonicalStatusText(value.status);
+  const contentType = safeContentType(value.contentType);
+  return Object.freeze({
+    status: value.status,
+    statusText,
+    ...(contentType === undefined ? {} : { contentType }),
+    responseBytes: value.responseBytes,
+    responseClassification: value.responseClassification,
+    bodyDigest: value.bodyDigest,
+    ...(value.retryAfterMs === undefined ? {} : { retryAfterMs: value.retryAfterMs }),
+    ...(value.providerRequestId === undefined
+      ? {}
+      : { providerRequestId: value.providerRequestId }),
+  });
 }
 
 export function extractProviderRequestId(
@@ -582,6 +760,15 @@ function emitTelemetry(request: ProviderClientRuntime, event: ProviderTelemetryE
   }
 }
 
+function emitDiagnostic(request: ProviderClientRuntime, event: ProviderDiagnosticEvent): void {
+  try {
+    const exported = request.onDiagnostic?.(Object.freeze({ ...event }));
+    if (exported) void Promise.resolve(exported).catch(() => undefined);
+  } catch {
+    // Diagnostic export is best-effort and must never alter provider operation semantics.
+  }
+}
+
 function elapsed(startedAt: number): number {
   return Math.max(0, Math.round((performance.now() - startedAt) * 1_000) / 1_000);
 }
@@ -640,14 +827,22 @@ export class TelnyxMessagingClient {
 
 export class TwilioMessagingClient {
   constructor(
-    private readonly config: { accountSid: string; authToken: string; baseUrl?: string },
+    private readonly config: {
+      accountSid: string;
+      authToken: string;
+      baseUrl?: string;
+    },
     private readonly runtime: ProviderClientRuntime = {},
   ) {}
 
   async sendSms(input: SmsMessageInput): Promise<ProviderMessageResult> {
     requireCredential(this.config.accountSid, 'twilio', 'send-sms');
     requireCredential(this.config.authToken, 'twilio', 'send-sms');
-    const form = new URLSearchParams({ From: input.from, To: input.to, Body: input.body });
+    const form = new URLSearchParams({
+      From: input.from,
+      To: input.to,
+      Body: input.body,
+    });
     if (input.webhookUrl) form.set('StatusCallback', input.webhookUrl);
     const baseUrl = providerBaseUrl(
       this.config.baseUrl ?? 'https://api.twilio.com/2010-04-01',
@@ -675,7 +870,11 @@ export class TwilioMessagingClient {
 
 export class VonageMessagingClient {
   constructor(
-    private readonly config: { apiKey: string; apiSecret: string; baseUrl?: string },
+    private readonly config: {
+      apiKey: string;
+      apiSecret: string;
+      baseUrl?: string;
+    },
     private readonly runtime: ProviderClientRuntime = {},
   ) {}
 
@@ -703,7 +902,10 @@ export class VonageMessagingClient {
         'send-sms',
       )}/sms/json`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      idempotency: { key: input.idempotencyKey, header: 'X-Tixkit-Idempotency-Key' },
+      idempotency: {
+        key: input.idempotencyKey,
+        header: 'X-Tixkit-Idempotency-Key',
+      },
       body: form,
       parse: vonageMessageResult,
     });
@@ -713,7 +915,11 @@ export class VonageMessagingClient {
 
 export class PlivoMessagingClient {
   constructor(
-    private readonly config: { authId: string; authToken: string; baseUrl?: string },
+    private readonly config: {
+      authId: string;
+      authToken: string;
+      baseUrl?: string;
+    },
     private readonly runtime: ProviderClientRuntime = {},
   ) {}
 
@@ -736,7 +942,10 @@ export class PlivoMessagingClient {
         Authorization: `Basic ${Buffer.from(`${this.config.authId}:${this.config.authToken}`).toString('base64')}`,
         'Content-Type': 'application/json',
       },
-      idempotency: { key: input.idempotencyKey, header: 'X-Tixkit-Idempotency-Key' },
+      idempotency: {
+        key: input.idempotencyKey,
+        header: 'X-Tixkit-Idempotency-Key',
+      },
       body: JSON.stringify({
         src: input.from,
         dst: input.to,
@@ -759,7 +968,11 @@ export interface ResendEmailInput {
   replyTo?: string;
   headers?: Readonly<Record<string, string>>;
   tags?: ReadonlyArray<{ name: string; value: string }>;
-  attachments?: ReadonlyArray<{ filename: string; content: string; contentType: string }>;
+  attachments?: ReadonlyArray<{
+    filename: string;
+    content: string;
+    contentType: string;
+  }>;
 }
 
 export class ResendMessagingClient {
