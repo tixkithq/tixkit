@@ -52,6 +52,7 @@ const dbState = vi.hoisted(() => ({
   timeline: [] as Record<string, unknown>[],
   paymentIntent: {
     id: 'pi_db_1',
+    provider: 'stripe',
     provider_intent_id: 'pi_stripe_1',
     payment_account_id: null,
   } as Record<string, unknown> | null,
@@ -722,6 +723,7 @@ describe('processRefundActivity - idempotency / dedup', () => {
     dbState.paymentAccount = null;
     dbState.paymentIntent = {
       id: 'pi_db_1',
+      provider: 'stripe',
       provider_intent_id: 'pi_stripe_1',
       payment_account_id: null,
     };
@@ -730,6 +732,79 @@ describe('processRefundActivity - idempotency / dedup', () => {
 
   afterEach(() => {
     delete process.env.STRIPE_SECRET_KEY;
+    delete process.env.TIXKIT_RUNTIME_MODE;
+  });
+
+  it('fails closed when a Stripe refund has no configured secret key', async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_missing_key',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'REFUND_PROVIDER_CONFIGURATION_INVALID',
+      retryable: false,
+    });
+    expect(dbState.stripeRefunds).toHaveLength(0);
+    expect(dbState.createdRefunds).toHaveLength(1);
+    expect(dbState.createdRefunds[0]?.status).toBe('pending');
+    expect(dbState.order.refunded_cents).toBe(0);
+    expect(dbState.order.status).toBe('paid');
+  });
+
+  it('fails closed when a Stripe refund has no provider payment reference', async () => {
+    dbState.paymentIntent = {
+      ...dbState.paymentIntent!,
+      provider_intent_id: null,
+    };
+
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_missing_intent',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'REFUND_PROVIDER_CONFIGURATION_INVALID',
+      retryable: false,
+    });
+    expect(dbState.stripeRefunds).toHaveLength(0);
+    expect(dbState.createdRefunds[0]?.status).toBe('pending');
+    expect(dbState.order.refunded_cents).toBe(0);
+  });
+
+  it('allows an explicit sandbox capture refund without Stripe', async () => {
+    process.env.TIXKIT_RUNTIME_MODE = 'sandbox';
+    delete process.env.STRIPE_SECRET_KEY;
+    dbState.paymentIntent = {
+      ...dbState.paymentIntent!,
+      provider: 'stripe_capture',
+      provider_intent_id: 'capture_pi_1',
+    };
+
+    const result = await processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_capture',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        providerRefundId: 'local-refund:ord_1:refund_capture',
+        status: 'succeeded',
+      },
+    });
+    expect(dbState.stripeRefunds).toHaveLength(0);
+    expect(dbState.order.refunded_cents).toBe(5000);
   });
 
   it('dedupes on providerRefundId for replay path', async () => {
@@ -1030,6 +1105,7 @@ describe('processRefundActivity - Stripe Connect', () => {
     dbState.stripeRefunds = [];
     dbState.paymentIntent = {
       id: 'pi_db_1',
+      provider: 'stripe_connect',
       provider_intent_id: 'pi_stripe_1',
       payment_account_id: 'pa_1',
     };

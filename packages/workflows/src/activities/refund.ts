@@ -59,7 +59,7 @@ type RefundReservation =
         totalCents: number;
         currency: string;
       };
-      paymentIntent: { id: string; providerIntentId: string | null };
+      paymentIntent: { id: string; provider: string | null; providerIntentId: string | null };
       paymentAccountProvider?: string;
       pendingProviderRefundId: string;
     };
@@ -249,6 +249,7 @@ export async function processRefundActivity(input: {
           },
           paymentIntent: {
             id: dbPi?.id ?? '',
+            provider: dbPi?.provider ?? null,
             providerIntentId: dbPi?.provider_intent_id ?? null,
           },
           paymentAccountProvider,
@@ -268,7 +269,7 @@ export async function processRefundActivity(input: {
         tenantId: order.tenant_id,
         orderId: order.id,
         paymentIntentId: dbPi?.id,
-        provider: 'stripe',
+        provider: dbPi?.provider ?? 'stripe',
         providerRefundId: pendingProviderRefundId,
         requestIdempotencyKey: stripeIdempotencyKey,
         requestNonce: input.nonce,
@@ -304,6 +305,7 @@ export async function processRefundActivity(input: {
         },
         paymentIntent: {
           id: dbPi?.id ?? '',
+          provider: dbPi?.provider ?? null,
           providerIntentId: dbPi?.provider_intent_id ?? null,
         },
         paymentAccountProvider,
@@ -316,7 +318,24 @@ export async function processRefundActivity(input: {
     }
 
     let providerRefundId: string;
-    if (stripeSecretKey && reservation.paymentIntent.providerIntentId) {
+    const paymentProvider =
+      reservation.paymentIntent.provider ?? reservation.paymentAccountProvider ?? null;
+    const requiresStripeRefund =
+      paymentProvider === 'stripe' ||
+      paymentProvider === 'stripe_connect' ||
+      reservation.paymentAccountProvider === 'stripe_connect';
+    const isSandboxCapture =
+      process.env.TIXKIT_RUNTIME_MODE === 'sandbox' && paymentProvider === 'stripe_capture';
+
+    if (requiresStripeRefund && (!stripeSecretKey || !reservation.paymentIntent.providerIntentId)) {
+      return errResult(
+        'REFUND_PROVIDER_CONFIGURATION_INVALID',
+        'Stripe refund configuration or provider payment reference is unavailable',
+        false,
+      );
+    }
+
+    if (requiresStripeRefund && stripeSecretKey && reservation.paymentIntent.providerIntentId) {
       const stripe = new Stripe(stripeSecretKey);
       const refundOpts: Stripe.RefundCreateParams = {
         payment_intent: reservation.paymentIntent.providerIntentId,
@@ -347,8 +366,14 @@ export async function processRefundActivity(input: {
         },
       );
       providerRefundId = stripeRefund.id;
-    } else {
+    } else if (isSandboxCapture) {
       providerRefundId = `local-refund:${input.orderId}:${input.nonce}`;
+    } else {
+      return errResult(
+        'REFUND_PROVIDER_UNSUPPORTED',
+        'The payment provider does not support automatic refunds',
+        false,
+      );
     }
 
     return await db.transaction().execute(async (trx) => {
