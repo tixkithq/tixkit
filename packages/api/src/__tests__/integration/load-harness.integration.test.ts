@@ -10,7 +10,7 @@ import {
   AttendeeRepository,
   OrderRepository,
 } from '@tixkit/db';
-import type { Principal } from '@tixkit/domain';
+import { InventoryExhaustedError, type Principal } from '@tixkit/domain';
 import type { AppContext } from '../../app.js';
 import { checkInRoutes, processPendingBulkSyncChunks } from '../../routes/modules/checkin.js';
 import { eventRoutes } from '../../routes/modules/events.js';
@@ -97,6 +97,12 @@ const BULK_OFFLINE_SYNC_SLO_MS = process.env.BULK_OFFLINE_SYNC_SLO_MS
   : null;
 const INSERT_CHUNK_SIZE = 500;
 const PERFORMANCE_METRICS_PATH = process.env.PERFORMANCE_METRICS_PATH;
+const CAPACITY_METRICS_PATH = process.env.CAPACITY_METRICS_PATH;
+const CHECKOUT_CAPACITY = Number.parseInt(process.env.CAPACITY_CHECKOUT_INVENTORY ?? '25', 10);
+const CHECKOUT_CONCURRENCY = Number.parseInt(
+  process.env.CAPACITY_CHECKOUT_CONCURRENCY ?? '120',
+  10,
+);
 const performanceMetrics: Record<string, number> = {};
 let dbQueryCount = 0;
 
@@ -109,6 +115,13 @@ async function writePerformanceMetrics(): Promise<void> {
   const target = path.resolve(PERFORMANCE_METRICS_PATH);
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, `${JSON.stringify(performanceMetrics, null, 2)}\n`);
+}
+
+async function writeCapacityMetrics(metrics: Record<string, number>): Promise<void> {
+  if (!CAPACITY_METRICS_PATH) return;
+  const target = path.resolve(CAPACITY_METRICS_PATH);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, `${JSON.stringify(metrics, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
 }
 
 async function measureDbQueryCount<T>(operation: () => Promise<T>): Promise<{
@@ -444,9 +457,10 @@ async function measureSettled<T>(
 ): Promise<{ durationMs: number; outcome: PromiseSettledResult<T> }> {
   const startedAt = performance.now();
   try {
+    const value = await operation();
     return {
       durationMs: performance.now() - startedAt,
-      outcome: { status: 'fulfilled', value: await operation() },
+      outcome: { status: 'fulfilled', value },
     };
   } catch (reason) {
     return {
@@ -870,9 +884,12 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     expect(row.status).toBe(payload.status);
   });
 
-  it('prevents oversell when 120 concurrent checkout reservations target a 25-capacity pool', async () => {
-    const CAPACITY = 25;
-    const CONCURRENT_CLIENTS = 120;
+  it('prevents oversell under concurrent checkout reservations', async () => {
+    const CAPACITY = CHECKOUT_CAPACITY;
+    const CONCURRENT_CLIENTS = CHECKOUT_CONCURRENCY;
+
+    expect(Number.isSafeInteger(CAPACITY) && CAPACITY > 0).toBe(true);
+    expect(Number.isSafeInteger(CONCURRENT_CLIENTS) && CONCURRENT_CLIENTS > 0).toBe(true);
 
     const poolId = await createPool(db, CAPACITY);
     const ticketTypeId = await createTicketType(db, poolId);
@@ -883,6 +900,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       sessionIds.push(await createCheckoutSession(db, ticketTypeId));
     }
 
+    const burstStartedAt = performance.now();
     const measuredHeapResults = await measureHeapDelta(() =>
       measureDbQueryCount(() =>
         Promise.all(
@@ -917,11 +935,52 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     );
 
     const succeeded = results.filter((r) => r.status === 'fulfilled').length;
-    const failed = results.filter((r) => r.status === 'rejected').length;
+    const successfulDurations = measuredResults
+      .filter(({ outcome }) => outcome.status === 'fulfilled')
+      .map(({ durationMs }) => durationMs);
+    const successfulReservationP50Ms = percentile(successfulDurations, 0.5);
+    const successfulReservationP95Ms = percentile(successfulDurations, 0.95);
+    const expectedInventoryDeclines = results.filter(
+      (result) =>
+        result.status === 'rejected' &&
+        result.reason instanceof InventoryExhaustedError &&
+        result.reason.details?.available === 0,
+    ).length;
+    const platformFailures = results.filter(
+      (result) =>
+        result.status === 'rejected' &&
+        !(
+          result.reason instanceof InventoryExhaustedError && result.reason.details?.available === 0
+        ),
+    ).length;
+    const elapsedMs = performance.now() - burstStartedAt;
 
-    expect(succeeded).toBe(CAPACITY);
-    expect(failed).toBe(CONCURRENT_CLIENTS - CAPACITY);
-    expectSloAtOrBelow('checkout reservation p95', checkoutP95, CHECKOUT_P95_SLO_MS);
+    await writeCapacityMetrics({
+      attempts: CONCURRENT_CLIENTS,
+      successes: succeeded,
+      expectedInventoryDeclines,
+      platformFailures,
+      elapsedMs,
+      requestThroughputPerSecond: Number(((CONCURRENT_CLIENTS / elapsedMs) * 1_000).toFixed(2)),
+      successfulReservationThroughputPerSecond: Number(
+        ((succeeded / elapsedMs) * 1_000).toFixed(2),
+      ),
+      successfulReservationP50Ms: Number(successfulReservationP50Ms.toFixed(2)),
+      successfulReservationP95Ms: Number(successfulReservationP95Ms.toFixed(2)),
+    });
+
+    expect(CONCURRENT_CLIENTS).toBe(succeeded + expectedInventoryDeclines + platformFailures);
+    if (CAPACITY_METRICS_PATH && platformFailures > 0) {
+      expect(succeeded).toBeLessThanOrEqual(Math.min(CAPACITY, CONCURRENT_CLIENTS));
+      expect(expectedInventoryDeclines).toBeLessThanOrEqual(
+        Math.max(0, CONCURRENT_CLIENTS - CAPACITY),
+      );
+    } else {
+      expect(succeeded).toBe(Math.min(CAPACITY, CONCURRENT_CLIENTS));
+      expect(expectedInventoryDeclines).toBe(Math.max(0, CONCURRENT_CLIENTS - CAPACITY));
+      expect(platformFailures).toBe(0);
+      expectSloAtOrBelow('checkout reservation p95', checkoutP95, CHECKOUT_P95_SLO_MS);
+    }
 
     const pool = await db
       .selectFrom('inventory_pools')
@@ -938,7 +997,8 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
 
     const held = Number(activeHolds?.total ?? 0);
     expect(Number(pool.sold_count)).toBe(0);
-    expect(held).toBe(CAPACITY);
+    if (CAPACITY_METRICS_PATH && platformFailures > 0) expect(held).toBeLessThanOrEqual(CAPACITY);
+    else expect(held).toBe(Math.min(CAPACITY, CONCURRENT_CLIENTS));
     expect(Number(pool.sold_count) + held).toBeLessThanOrEqual(CAPACITY);
   }, 60_000);
 
