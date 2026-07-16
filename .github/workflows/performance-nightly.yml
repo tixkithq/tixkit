@@ -12,8 +12,8 @@ on:
         type: choice
         options:
           - both
-          - postgresql-trusted-soak
-          - mysql-trusted-soak
+          - postgresql-trusted-regression
+          - mysql-trusted-regression
 
 concurrency:
   group: performance-nightly
@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        scenario: ${{ fromJSON(inputs.scenario == 'postgresql-trusted-soak' && '["postgresql-trusted-soak"]' || inputs.scenario == 'mysql-trusted-soak' && '["mysql-trusted-soak"]' || '["postgresql-trusted-soak","mysql-trusted-soak"]') }}
+        scenario: ${{ fromJSON(inputs.scenario == 'postgresql-trusted-regression' && '["postgresql-trusted-regression"]' || inputs.scenario == 'mysql-trusted-regression' && '["mysql-trusted-regression"]' || '["postgresql-trusted-regression","mysql-trusted-regression"]') }}
     services:
       postgres:
         image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
@@ -176,7 +176,7 @@ jobs:
           SCENARIO_OUTCOME: ${{ steps.scenario.outcome }}
         run: |
           node -e "const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path'); const phases=['invocation','checkout','setup','install','contracts','migration','baseline','scenario']; const phase=phases.find(p=>['failure','cancelled'].includes(process.env[p.toUpperCase()+'_OUTCOME']))||'workflow'; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const payload={schemaVersion:'tixkit-performance-scenario-failure-v1',status:'failed',scope:'workflow',scenarioId:process.env.SCENARIO_ID.slice(0,63),phase,failedAt:new Date().toISOString(),error:('workflow '+process.env.JOB_STATUS).slice(0,500)}; const value={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.EVIDENCE_ROOT,'workflow-failure.json'),JSON.stringify(value,null,2)+'\\n',{flag:'wx',mode:0o600});"
-      - name: Upload raw, aggregate, trend, and failure evidence
+      - name: Upload raw, aggregate, and failure evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

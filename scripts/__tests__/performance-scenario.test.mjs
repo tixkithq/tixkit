@@ -102,7 +102,7 @@ test('committed nightly scenarios satisfy the fail-closed schema and relational 
   assert.equal(validateScenarioConfig(committedConfig), committedConfig);
   assert.deepEqual(
     committedConfig.scenarios.map((scenario) => scenario.id),
-    ['postgresql-trusted-soak', 'mysql-trusted-soak'],
+    ['postgresql-trusted-regression', 'mysql-trusted-regression'],
   );
 });
 

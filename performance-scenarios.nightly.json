@@ -3,7 +3,7 @@
   "schemaVersion": "tixkit-performance-scenarios-v1",
   "scenarios": [
     {
-      "id": "postgresql-trusted-soak",
+      "id": "postgresql-trusted-regression",
       "profile": "trusted-single-host-regression",
       "durationSeconds": 1800,
       "sampleIntervalSeconds": 600,
@@ -33,7 +33,7 @@
       }
     },
     {
-      "id": "mysql-trusted-soak",
+      "id": "mysql-trusted-regression",
       "profile": "trusted-single-host-regression",
       "durationSeconds": 1800,
       "sampleIntervalSeconds": 600,
