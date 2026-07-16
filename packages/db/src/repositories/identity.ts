@@ -129,8 +129,21 @@ export class ApiKeyRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
-  async revoke(id: string) {
-    return this.updateReturning('api_keys', id, { revoked_at: new Date(), updated_at: new Date() });
+  async revokeScoped(input: {
+    id: string;
+    organizationId: string;
+    tenantId: string;
+  }): Promise<number> {
+    const now = new Date();
+    const result = await this.db
+      .updateTable('api_keys')
+      .set({ revoked_at: now, updated_at: now })
+      .where('id', '=', input.id)
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('revoked_at', 'is', null)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows ?? 0);
   }
 
   async updateLastUsed(id: string) {

@@ -108,70 +108,75 @@ function createScannerDeviceLifecycleDb() {
     return tables[table];
   };
 
-  return {
-    tables,
-    db: {
-      insertInto(table: string) {
-        return {
-          values(values: Record<string, unknown>) {
-            const insert = {
-              returningAll() {
-                return insert;
-              },
-              async executeTakeFirstOrThrow() {
-                rowsFor(table).push(values);
-                return values;
-              },
-              async execute() {
-                rowsFor(table).push(values);
-                return [];
-              },
-            };
-            return insert;
-          },
-        };
-      },
-      selectFrom(table: string) {
-        const conditions: QueryCondition[] = [];
-        const query = {
-          selectAll() {
-            return query;
-          },
-          where(column: string, operator: string, value: unknown) {
-            conditions.push({ column, operator, value });
-            return query;
-          },
-          async executeTakeFirst() {
-            return rowsFor(table).find((row) => matchesScannerLifecycleRow(row, conditions));
-          },
-        };
-        return query;
-      },
-      updateTable(table: string) {
-        const conditions: QueryCondition[] = [];
-        let values: Record<string, unknown> = {};
-        const update = {
-          set(nextValues: Record<string, unknown>) {
-            values = nextValues;
-            return update;
-          },
-          where(column: string, operator: string, value: unknown) {
-            conditions.push({ column, operator, value });
-            return update;
-          },
-          async execute() {
-            for (const row of rowsFor(table).filter((candidate) =>
-              matchesScannerLifecycleRow(candidate, conditions),
-            )) {
-              Object.assign(row, values);
-            }
-            return [];
-          },
-        };
-        return update;
-      },
+  const db = {
+    transaction() {
+      return {
+        execute<T>(operation: (database: typeof db) => Promise<T>) {
+          return operation(db);
+        },
+      };
+    },
+    insertInto(table: string) {
+      return {
+        values(values: Record<string, unknown>) {
+          const insert = {
+            returningAll() {
+              return insert;
+            },
+            async executeTakeFirstOrThrow() {
+              rowsFor(table).push(values);
+              return values;
+            },
+            async execute() {
+              rowsFor(table).push(values);
+              return [];
+            },
+          };
+          return insert;
+        },
+      };
+    },
+    selectFrom(table: string) {
+      const conditions: QueryCondition[] = [];
+      const query = {
+        selectAll() {
+          return query;
+        },
+        where(column: string, operator: string, value: unknown) {
+          conditions.push({ column, operator, value });
+          return query;
+        },
+        async executeTakeFirst() {
+          return rowsFor(table).find((row) => matchesScannerLifecycleRow(row, conditions));
+        },
+      };
+      return query;
+    },
+    updateTable(table: string) {
+      const conditions: QueryCondition[] = [];
+      let values: Record<string, unknown> = {};
+      const update = {
+        set(nextValues: Record<string, unknown>) {
+          values = nextValues;
+          return update;
+        },
+        where(column: string, operator: string, value: unknown) {
+          conditions.push({ column, operator, value });
+          return update;
+        },
+        async execute() {
+          for (const row of rowsFor(table).filter((candidate) =>
+            matchesScannerLifecycleRow(candidate, conditions),
+          )) {
+            Object.assign(row, values);
+          }
+          return [];
+        },
+      };
+      return update;
     },
   };
+  return { tables, db };
 }
 
 function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {

@@ -13,14 +13,16 @@ export type AuditEntry = {
 
 /**
  * Writes an audit log entry for a privileged mutation, capturing the actor,
- * resource, diff summary, IP, and user agent. Audit logging must never block
- * the underlying mutation, so failures are swallowed after being logged.
+ * resource, diff summary, IP, and user agent. The default mode is best-effort
+ * for legacy callers. Consequential credential mutations use `failClosed`
+ * inside their database transaction so an audit failure rolls back the change.
  */
 export async function writeAuditLog(
   repo: AuditLogRepository,
   request: FastifyRequest,
   principal: Principal,
   entry: AuditEntry,
+  options: { failClosed?: boolean } = {},
 ): Promise<void> {
   try {
     await repo.create({
@@ -39,5 +41,6 @@ export async function writeAuditLog(
     });
   } catch (err) {
     request.log.warn({ err, action: entry.action }, 'Failed to write audit log');
+    if (options.failClosed) throw err;
   }
 }

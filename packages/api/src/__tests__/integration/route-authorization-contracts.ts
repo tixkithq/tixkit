@@ -191,9 +191,39 @@ export const MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.
   }),
 ]);
 
+export const API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postApiKeys',
+    path: '/api-keys',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'api-key-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'api-key-route-authorization.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 204 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'DELETE',
+    operationId: 'deleteApiKeysByKeyId',
+    path: '/api-keys/{keyId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'api-key-route-authorization-db.integration.test.ts',
+    resourceParameters: ['keyId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'api-key-route-authorization.test.ts',
+  }),
+]);
+
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

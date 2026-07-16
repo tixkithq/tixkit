@@ -277,23 +277,30 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     await assertBrandIds(principal, body.brandIds);
     await assertEventIds(principal, body.eventIds);
 
-    const repo = new ApiKeyRepository(db);
-    const { apiKey, record } = await repo.create({
-      tenantId: principal.tenantId,
-      organizationId: body.organizationId,
-      name: body.name,
-      scopes: body.scopes,
-      brandIds: body.brandIds,
-      eventIds: body.eventIds,
-      expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
-    });
-
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'api_key.created',
-      organizationId: body.organizationId,
-      resourceType: 'ApiKey',
-      resourceId: record.id as string,
-      diffSummary: { name: body.name, scopes: body.scopes },
+    const { apiKey, record } = await db.transaction().execute(async (transaction) => {
+      const created = await new ApiKeyRepository(transaction).create({
+        tenantId: principal.tenantId,
+        organizationId: body.organizationId,
+        name: body.name,
+        scopes: body.scopes,
+        brandIds: body.brandIds,
+        eventIds: body.eventIds,
+        expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+      });
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'api_key.created',
+          organizationId: body.organizationId,
+          resourceType: 'ApiKey',
+          resourceId: created.record.id as string,
+          diffSummary: { name: body.name, scopes: body.scopes },
+        },
+        { failClosed: true },
+      );
+      return created;
     });
 
     // The raw `apiKey` is returned exactly once at creation. The persisted
@@ -363,7 +370,6 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const { keyId } = request.params as { keyId: string };
-    const repo = new ApiKeyRepository(db);
     const key = await db
       .selectFrom('api_keys')
       .selectAll()
@@ -374,12 +380,25 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, key.organization_id);
     const [authorizedKey] = await filterManageableScopedCredentialRows(principal, [key]);
     if (!authorizedKey) throw new NotFoundError('ApiKey', keyId);
-    await repo.revoke(keyId);
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'api_key.revoked',
-      organizationId: key.organization_id,
-      resourceType: 'ApiKey',
-      resourceId: keyId,
+    await db.transaction().execute(async (transaction) => {
+      const revoked = await new ApiKeyRepository(transaction).revokeScoped({
+        id: keyId,
+        tenantId: principal.tenantId,
+        organizationId: key.organization_id,
+      });
+      if (revoked !== 1) throw new NotFoundError('ApiKey', keyId);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'api_key.revoked',
+          organizationId: key.organization_id,
+          resourceType: 'ApiKey',
+          resourceId: keyId,
+        },
+        { failClosed: true },
+      );
     });
     return reply.status(204).send();
   });

@@ -86,7 +86,7 @@ describe('API route access inventory (C-123)', () => {
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
     expect(PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(22);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(24);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -99,8 +99,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(22);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(55);
+    expect(coveredRoutes).toHaveLength(24);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(64);
     expect(
       inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,
     ).toEqual([]);
