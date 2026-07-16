@@ -133,6 +133,7 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   const config = rendered.find((resource) => resource.kind === 'ConfigMap');
   assert.equal(config.data.TIXKIT_DEPLOYMENT_PROFILE, 'production');
   assert.equal(config.data.API_BASE_URL, 'https://api.tixkit.com');
+  assert.equal(config.data.ADMIN_DASHBOARD_URL, 'https://admin.tixkit.com');
   assert.equal(config.data.INTERNAL_API_BASE_URL, 'http://tixkit-tixkit-api:4000');
   assert.equal(config.data.TIXKIT_CHECKOUT_URL, 'https://checkout.tixkit.com');
   assert.equal(config.data.TIXKIT_DOCS_URL, 'https://docs.tixkit.com');
@@ -833,6 +834,37 @@ test('Helm rejects insecure, missing, or inexact public admin runtime origins', 
       new RegExp(`${setting} must be an exact HTTPS origin`, 'u'),
     );
   }
+  for (const value of [
+    '',
+    'http://admin.example.test',
+    'https://admin.example.test/path',
+    'https://admin.example.test?query=value',
+    'https://admin.example.test#fragment',
+    'https://user@admin.example.test',
+  ]) {
+    assert.throws(
+      () => render(evaluation, [`global.adminUrl=${value}`]),
+      /global\.adminUrl must be an exact HTTPS origin/u,
+    );
+  }
+  for (const value of [
+    'https://localhost:3001',
+    'https://127.0.0.1:3001',
+    'https://127.1.2.3:3001',
+    'https://0.0.0.0:3001',
+  ]) {
+    assert.throws(
+      () => render(evaluation, [`global.adminUrl=${value}`]),
+      /global\.adminUrl must not use localhost, a loopback address, or an unspecified address/u,
+    );
+  }
+  assert.throws(
+    () => render(evaluation, ['global.adminUrl=https://admin.example.test:443']),
+    /global\.adminUrl must be a canonical HTTPS origin without the default port/u,
+  );
+  assert.doesNotThrow(() =>
+    render(evaluation, ['global.adminUrl=https://admin.example.test:8443']),
+  );
   assert.throws(
     () => render(evaluation, ['global.docsUrl=docs.example.test']),
     /global\.docsUrl must be empty or an exact HTTPS origin/u,

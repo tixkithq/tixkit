@@ -17,11 +17,19 @@
 {{- end -}}
 {{- range $setting := list
   (dict "name" "global.apiBaseUrl" "value" .Values.global.apiBaseUrl)
+  (dict "name" "global.adminUrl" "value" .Values.global.adminUrl)
   (dict "name" "global.checkoutUrl" "value" .Values.global.checkoutUrl)
   (dict "name" "global.s3PublicEndpoint" "value" .Values.global.s3PublicEndpoint) -}}
 {{- if not (regexMatch "^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$" $setting.value) -}}
 {{- fail (printf "%s must be an exact HTTPS origin" $setting.name) -}}
 {{- end -}}
+{{- end -}}
+{{- $adminOrigin := lower .Values.global.adminUrl -}}
+{{- if regexMatch "^https://(localhost|127(\\.[0-9]{1,3}){3}|0\\.0\\.0\\.0)(:[0-9]+)?$" $adminOrigin -}}
+{{- fail "global.adminUrl must not use localhost, a loopback address, or an unspecified address" -}}
+{{- end -}}
+{{- if regexMatch ":443$" $adminOrigin -}}
+{{- fail "global.adminUrl must be a canonical HTTPS origin without the default port" -}}
 {{- end -}}
 {{- if and .Values.global.docsUrl (not (regexMatch "^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$" .Values.global.docsUrl)) -}}
 {{- fail "global.docsUrl must be empty or an exact HTTPS origin" -}}

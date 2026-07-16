@@ -11,6 +11,7 @@ data:
   DB_DRIVER: {{ .Values.database.driver | quote }}
   AUTH_PROVIDER: {{ .Values.auth.provider | quote }}
   API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
+  ADMIN_DASHBOARD_URL: {{ .Values.global.adminUrl | quote }}
   INTERNAL_API_BASE_URL: {{ printf "http://%s-api:%v" (include "tixkit.fullname" .) .Values.api.port | quote }}
   TIXKIT_CHECKOUT_URL: {{ .Values.global.checkoutUrl | quote }}
   {{- with .Values.global.docsUrl }}

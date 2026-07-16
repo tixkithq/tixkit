@@ -6,6 +6,7 @@ import { createCorsOriginValidator } from '../app.js';
 import { loadConfig, parseTrustProxy, resolveCorsAllowedOrigins } from '../config/index.js';
 
 const ENV_KEYS = [
+  'ADMIN_DASHBOARD_URL',
   'API_BASE_URL',
   'API_COMPRESSION_THRESHOLD_BYTES',
   'AUTH_PROVIDER',
@@ -57,6 +58,7 @@ afterEach(() => {
 
 function setValidProductionConfig(): void {
   process.env.NODE_ENV = 'production';
+  process.env.ADMIN_DASHBOARD_URL = 'https://admin.example.com';
   process.env.API_BASE_URL = 'https://api.example.com';
   process.env.AUTH_PROVIDER = 'clerk';
   process.env.CLERK_PUBLISHABLE_KEY = 'pk_live_example';
@@ -468,6 +470,7 @@ describe('API exposure config parsing', () => {
       'REDIS_URL',
       'METRICS_BEARER_TOKEN',
       'API_BASE_URL',
+      'ADMIN_DASHBOARD_URL',
       'CORS_ALLOWED_ORIGINS',
       'STRIPE_SECRET_KEY',
       'STRIPE_WEBHOOK_SECRET',
@@ -486,6 +489,28 @@ describe('API exposure config parsing', () => {
     }
   });
 
+  it('requires an exact HTTPS admin dashboard origin in production', () => {
+    setValidProductionConfig();
+    for (const value of [
+      'http://admin.example.com',
+      'https://admin.example.com/',
+      'https://admin.example.com/invitations',
+      'https://admin.example.com?campaign=test',
+      'https://admin.example.com#fragment',
+      'https://user@admin.example.com',
+      'https://admin.example.com:443',
+      ' https://admin.example.com',
+    ]) {
+      process.env.ADMIN_DASHBOARD_URL = value;
+      expect(() => loadConfig(), value).toThrow(
+        'ADMIN_DASHBOARD_URL must be an exact HTTPS origin in production',
+      );
+    }
+
+    process.env.ADMIN_DASHBOARD_URL = 'https://admin.example.com:8443';
+    expect(loadConfig().nodeEnv).toBe('production');
+  });
+
   it('rejects local production endpoints and default MinIO credentials', () => {
     setValidProductionConfig();
 
@@ -493,6 +518,13 @@ describe('API exposure config parsing', () => {
       ['DATABASE_URL', 'postgres://tixkit:tixkit@localhost:5432/tixkit', 'DATABASE_URL'],
       ['REDIS_URL', 'redis://127.0.0.1:6379', 'REDIS_URL'],
       ['API_BASE_URL', 'http://localhost:4000', 'API_BASE_URL'],
+      ['ADMIN_DASHBOARD_URL', 'https://localhost:3001', 'ADMIN_DASHBOARD_URL'],
+      ['ADMIN_DASHBOARD_URL', 'https://127.1.2.3:3001', 'ADMIN_DASHBOARD_URL'],
+      ['ADMIN_DASHBOARD_URL', 'https://[::1]:3001', 'ADMIN_DASHBOARD_URL'],
+      ['ADMIN_DASHBOARD_URL', 'https://[::ffff:7f00:1]:3001', 'ADMIN_DASHBOARD_URL'],
+      ['ADMIN_DASHBOARD_URL', 'https://[::ffff:7f01:203]:3001', 'ADMIN_DASHBOARD_URL'],
+      ['ADMIN_DASHBOARD_URL', 'https://0.0.0.0:3001', 'ADMIN_DASHBOARD_URL'],
+      ['ADMIN_DASHBOARD_URL', 'https://[::]:3001', 'ADMIN_DASHBOARD_URL'],
       ['S3_ENDPOINT', 'http://localhost:9000', 'S3_ENDPOINT'],
       ['S3_ACCESS_KEY_ID', 'minioadmin', 'local default credentials for S3_ACCESS_KEY_ID'],
       ['S3_SECRET_ACCESS_KEY', 'minioadmin', 'local default credentials for S3_SECRET_ACCESS_KEY'],

@@ -79,7 +79,8 @@ function hostnameFromUrlLike(value: string): string {
   const candidate = value.trim();
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
     try {
-      return new URL(candidate).hostname.toLowerCase();
+      const hostname = new URL(candidate).hostname.toLowerCase();
+      return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
     } catch {
       return '';
     }
@@ -92,11 +93,15 @@ function hostnameFromUrlLike(value: string): string {
 }
 
 function isLocalHostname(hostname: string): boolean {
+  const isIpv4MappedLoopback = /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(hostname);
   return (
     hostname === 'localhost' ||
     hostname === '::1' ||
+    hostname === '::' ||
+    hostname === '0.0.0.0' ||
     hostname === '127.0.0.1' ||
-    hostname.startsWith('127.')
+    hostname.startsWith('127.') ||
+    isIpv4MappedLoopback
   );
 }
 
@@ -135,6 +140,17 @@ function requireHttpsEndpoint(name: string, value: string | undefined): void {
   }
 }
 
+function requireExactHttpsOrigin(name: string, value: string | undefined): void {
+  try {
+    if (!value || value !== value.trim()) throw new Error();
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'https:' || parsed.origin !== value || parsed.port === '443')
+      throw new Error();
+  } catch {
+    throw new Error(`${name} must be an exact HTTPS origin in production`);
+  }
+}
+
 function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig): void {
   if (nodeEnv !== 'production') return;
 
@@ -159,6 +175,7 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
     'METRICS_BEARER_TOKEN',
     'DASHBOARD_CURSOR_SIGNING_KEY',
     'API_BASE_URL',
+    'ADMIN_DASHBOARD_URL',
     'CORS_ALLOWED_ORIGINS',
     'STRIPE_SECRET_KEY',
     'STRIPE_WEBHOOK_SECRET',
@@ -185,11 +202,13 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
       process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
     );
   }
+  requireExactHttpsOrigin('ADMIN_DASHBOARD_URL', process.env.ADMIN_DASHBOARD_URL);
 
   const localEndpoints = [
     [requiredDatabaseVariable, databaseUrl()],
     ['REDIS_URL', process.env.REDIS_URL],
     ['API_BASE_URL', process.env.API_BASE_URL],
+    ['ADMIN_DASHBOARD_URL', process.env.ADMIN_DASHBOARD_URL],
     ['S3_ENDPOINT', process.env.S3_ENDPOINT],
     ['S3_PUBLIC_ENDPOINT', process.env.S3_PUBLIC_ENDPOINT],
   ]
