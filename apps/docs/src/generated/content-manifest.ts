@@ -35,8 +35,8 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/contributing/architecture": {
     sourcePath: "docs/public/contributing/architecture.mdx",
-    frontmatter: {"title":"Monorepo architecture","description":"Locate applications, packages, contract sources, durable workflows, and the public/private repository boundary.","audience":["contributor"],"product_area":"contributing","content_type":"concept","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-11","prerequisites":["A source checkout"],"related":["/getting-started/platform-overview","/contributing/add-an-api-route"]},
-    headings: [{"id":"runtime-applications","text":"Runtime applications","level":2},{"id":"backend-boundaries","text":"Backend boundaries","level":2},{"id":"frontend-and-integration-packages","text":"Frontend and integration packages","level":2},{"id":"repository-boundary","text":"Repository boundary","level":2}],
+    frontmatter: {"title":"Monorepo architecture","description":"Locate applications, packages, contract sources, durable workflows, and the public/private repository boundary.","audience":["contributor"],"product_area":"contributing","content_type":"concept","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-16","prerequisites":["A source checkout"],"related":["/getting-started/platform-overview","/contributing/add-an-api-route"]},
+    headings: [{"id":"runtime-applications","text":"Runtime applications","level":2},{"id":"backend-boundaries","text":"Backend boundaries","level":2},{"id":"outbound-provider-boundary","text":"Outbound provider boundary","level":2},{"id":"frontend-and-integration-packages","text":"Frontend and integration packages","level":2},{"id":"repository-boundary","text":"Repository boundary","level":2}],
     load: () => import("../../../../docs/public/contributing/architecture.mdx"),
   },
   "/contributing/contracts/event-page": {
@@ -161,8 +161,8 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/operations/incidents": {
     sourcePath: "docs/public/operations/incidents.mdx",
-    frontmatter: {"title":"Incident runbooks","description":"Triage and recover payment, refund, webhook, checkout-workflow, export, and worker incidents.","audience":["self-hoster"],"product_area":"operations","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["Authorized production access and an incident communication channel"],"related":["/self-hosting/observability","/self-hosting/backups-and-restore"]},
-    headings: [{"id":"general-triage","text":"General triage","level":2},{"id":"payment-or-refund-disagreement","text":"Payment or refund disagreement","level":2},{"id":"webhook-dead-letters","text":"Webhook dead letters","level":2},{"id":"stuck-checkout-or-export","text":"Stuck checkout or export","level":2},{"id":"recovery-validation","text":"Recovery validation","level":2}],
+    frontmatter: {"title":"Incident runbooks","description":"Triage and recover payment, refund, webhook, checkout-workflow, export, and worker incidents.","audience":["self-hoster"],"product_area":"operations","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-16","prerequisites":["Authorized production access and an incident communication channel"],"related":["/self-hosting/observability","/self-hosting/backups-and-restore"]},
+    headings: [{"id":"general-triage","text":"General triage","level":2},{"id":"payment-or-refund-disagreement","text":"Payment or refund disagreement","level":2},{"id":"webhook-dead-letters","text":"Webhook dead letters","level":2},{"id":"outbound-provider-failure","text":"Outbound provider failure","level":2},{"id":"stuck-checkout-or-export","text":"Stuck checkout or export","level":2},{"id":"recovery-validation","text":"Recovery validation","level":2}],
     load: () => import("../../../../docs/public/operations/incidents.mdx"),
   },
   "/operations/temporal": {
@@ -221,7 +221,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/operators/messaging": {
     sourcePath: "docs/public/operators/messaging.mdx",
-    frontmatter: {"title":"Configure and send messages","description":"Work with lifecycle and campaign content while respecting sender verification, consent, and delivery evidence.","audience":["operator"],"product_area":"messaging","content_type":"how-to","status":"beta","owner":"product-ui","last_verified":"2026-07-10","prerequisites":["Messaging write permission","A verified sender path for provider delivery"],"related":["/operators/brands","/operators/reports-and-exports"]},
+    frontmatter: {"title":"Configure and send messages","description":"Work with lifecycle and campaign content while respecting sender verification, consent, and delivery evidence.","audience":["operator"],"product_area":"messaging","content_type":"how-to","status":"beta","owner":"product-ui","last_verified":"2026-07-16","prerequisites":["Messaging write permission","A verified sender path for provider delivery"],"related":["/operators/brands","/operators/reports-and-exports"]},
     headings: [{"id":"prepare-content","text":"Prepare content","level":2},{"id":"verify-sender-readiness","text":"Verify sender readiness","level":2},{"id":"send-and-verify","text":"Send and verify","level":2}],
     load: () => import("../../../../docs/public/operators/messaging.mdx"),
   },
@@ -677,8 +677,8 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosting/observability": {
     sourcePath: "docs/public/self-hosting/observability.mdx",
-    frontmatter: {"title":"Configure observability","description":"Monitor request, workflow, datastore, provider, export, checkout, and documentation health without logging sensitive data.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-12","prerequisites":["A telemetry backend compatible with the repository configuration"],"related":["/operations/incidents","/reference/performance"]},
-    headings: [{"id":"correlate-safely","text":"Correlate safely","level":2},{"id":"alert-on-outcomes","text":"Alert on outcomes","level":2},{"id":"production-helm-contract","text":"Production Helm contract","level":2}],
+    frontmatter: {"title":"Configure observability","description":"Monitor request, workflow, datastore, provider, export, checkout, and documentation health without logging sensitive data.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-16","prerequisites":["A telemetry backend compatible with the repository configuration"],"related":["/operations/incidents","/reference/performance"]},
+    headings: [{"id":"correlate-safely","text":"Correlate safely","level":2},{"id":"separate-dependency-failures","text":"Separate dependency failures","level":2},{"id":"alert-on-outcomes","text":"Alert on outcomes","level":2},{"id":"production-helm-contract","text":"Production Helm contract","level":2}],
     load: () => import("../../../../docs/public/self-hosting/observability.mdx"),
   },
   "/self-hosting/production": {

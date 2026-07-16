@@ -7,7 +7,7 @@ product_area: operations
 content_type: runbook
 status: beta
 owner: platform-operations
-last_verified: 2026-07-10
+last_verified: 2026-07-16
 prerequisites:
   - Authorized production access and an incident communication channel
 related:
@@ -31,6 +31,12 @@ Reconcile Tixkit order/refund records, workflow history, and provider references
 ## Webhook dead letters
 
 Confirm endpoint reachability and signature verification, then fix receiver idempotency before replay. Replay a bounded event set and verify event IDs at the receiver.
+
+## Outbound provider failure
+
+Classify the failure before replaying work: transport or deadline, `429` rate limit, selected `5xx`, malformed/non-JSON gateway response, permanent provider `4xx`, or customer/recipient decline. Correlate dependency, operation, status, duration, retry classification, Tixkit request/workflow ID, and a safe provider request ID. Respect `Retry-After` and the owning workflow's retry policy; stop retry multiplication if both layers are repeating the same operation.
+
+For a timeout after a side-effecting payment, refund, or message request, assume the result is ambiguous. Reconcile with the same idempotency key or provider reference before attempting another side effect. Preserve bounded redacted diagnostics, but do not attach authorization headers, client secrets, webhook signatures, full provider bodies, or customer payloads to the incident.
 
 ## Stuck checkout or export
 

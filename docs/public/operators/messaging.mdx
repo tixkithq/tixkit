@@ -7,7 +7,7 @@ product_area: messaging
 content_type: how-to
 status: beta
 owner: product-ui
-last_verified: 2026-07-10
+last_verified: 2026-07-16
 prerequisites:
   - Messaging write permission
   - A verified sender path for provider delivery
@@ -30,4 +30,4 @@ Provider delivery requires the environment's verified email or SMS sender config
 
 Use a limited test audience first. Confirm the dashboard's delivery/capture state and, when authorized, provider evidence. Do not copy recipient lists, message bodies containing personal data, or provider credentials into support reports.
 
-If delivery fails, distinguish invalid sender, provider rejection, transport error, recipient status, and template/render failure before retrying.
+If delivery fails, distinguish invalid sender, provider validation or authentication rejection, rate limiting, provider `5xx`, transport/deadline failure, malformed gateway response, recipient status, and template/render failure before retrying. A timeout after submission can be ambiguous: use the existing delivery/idempotency record and provider evidence instead of creating a second distinct send. Give support only safe correlation identifiers and the provider request ID when available; never include credentials or full message/request/response bodies.

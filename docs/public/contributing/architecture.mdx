@@ -7,7 +7,7 @@ product_area: contributing
 content_type: concept
 status: beta
 owner: documentation-architecture
-last_verified: 2026-07-11
+last_verified: 2026-07-16
 prerequisites:
   - A source checkout
 related:
@@ -24,6 +24,12 @@ The Bun/Turbo workspace contains runtime applications under `apps/` and reusable
 ## Backend boundaries
 
 `packages/domain` owns pure rules and types. `packages/db` owns Kysely repositories/migrations. `packages/api` owns Fastify routes, auth, permissions, and serialization. `packages/workflows` owns Temporal workflows/activities. `packages/openapi` owns the public HTTP schema.
+
+## Outbound provider boundary
+
+Provider operations cross Tixkit-owned adapters. Routes, activities, and feature modules do not instantiate vendor clients or call provider endpoints directly. The internal provider-client boundary owns deadlines, idempotency propagation, explicit API versions, error and retry classification, bounded redacted diagnostics, and dependency telemetry; business policy, persistence, reconciliation, consent, and workflow retries remain with their owning packages.
+
+Vendor SDKs may remain inside an adapter when they implement a meaningful browser, security, signing, protocol, workflow-runtime, or instrumentation boundary. This rule concerns upstream dependencies and does not change the public Tixkit SDKs offered to integrators. The accepted decision and migration scope are recorded in `docs/internal/architecture/outbound-provider-clients.md`.
 
 ## Frontend and integration packages
 

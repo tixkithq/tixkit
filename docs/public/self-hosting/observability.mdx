@@ -7,7 +7,7 @@ product_area: self-hosting
 content_type: how-to
 status: beta
 owner: platform-operations
-last_verified: 2026-07-12
+last_verified: 2026-07-16
 prerequisites:
   - A telemetry backend compatible with the repository configuration
 related:
@@ -20,6 +20,12 @@ Collect service-level metrics, traces, structured logs, and health signals for t
 ## Correlate safely
 
 Use request, workflow, delivery, export-job, checkout-session, and order identifiers only where policy permits. Redact authorization headers, cookies, API keys, signing secrets, provider credentials, ticket codes, and personal-data payloads.
+
+For an outbound provider incident, correlate the Tixkit request or workflow with dependency, operation, outcome, HTTP status, duration, retry classification, and a provider request ID when one is safely available. Do not use raw URLs containing identifiers as metric labels. Do not export authorization headers, client secrets, webhook signatures, full request/response bodies, or customer payloads. A bounded redacted body preview is diagnostic evidence, not application data, and must follow the same access and retention controls as logs.
+
+## Separate dependency failures
+
+Distinguish transport failures and deadlines from provider rate limits, selected `5xx` failures, malformed gateway responses, permanent `4xx` validation/authentication failures, and customer declines. Alert and SLO calculations should identify the dependency and operation without treating a provider rejection as a Tixkit platform crash. Honor provider retry guidance, but investigate retry multiplication when both Temporal and an adapter appear to retry the same operation.
 
 ## Alert on outcomes
 
