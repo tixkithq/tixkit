@@ -6,9 +6,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,6 +21,7 @@ import test from 'node:test';
 const root = resolve(import.meta.dirname, '../..');
 const prove = resolve(root, 'scripts/prove-production-rehearsal.mjs');
 const verify = resolve(root, 'scripts/verify-production-rehearsal.mjs');
+const { writeAll } = await import('../prove-production-rehearsal.mjs');
 const beforeImages = {
   api: 'ghcr.io/tixkit/tixkit-api@sha256:' + '1'.repeat(64),
   worker: 'ghcr.io/tixkit/tixkit-worker@sha256:' + '2'.repeat(64),
@@ -71,7 +74,7 @@ function fixture(kind = 'dependency-loss') {
   const evidence = join(directory, 'evidence');
   const state = join(directory, 'state');
   const calls = join(directory, 'calls');
-  mkdirSync(evidence);
+  mkdirSync(evidence, { mode: 0o700 });
   writeFileSync(state, 'before\n');
   writeFileSync(calls, '');
   const before = join(directory, 'before.json');
@@ -179,7 +182,11 @@ else exit 2; fi`,
     ...(kind === 'dependency-loss' ? { dependency: 'temporal' } : {}),
     beforeReleaseManifest: before,
     ...(kind === 'release-upgrade-rollback' ? { targetReleaseManifest: target } : {}),
-    thresholds: { adapterTimeoutSeconds: 5, maxOutageSeconds: 5, maxRecoverySeconds: 5 },
+    thresholds: {
+      adapterTimeoutSeconds: 5,
+      maxOutageSeconds: 5,
+      maxRecoverySeconds: 5,
+    },
     adapters: { baselineProbe, inject, duringProbe, recover, recoveredProbe },
   };
   const configPath = join(directory, 'config.json');
@@ -207,7 +214,9 @@ else exit 2; fi`,
     ),
   };
   const expectationsPath = join(directory, 'expectations.json');
-  writeFileSync(expectationsPath, JSON.stringify(expectations));
+  writeFileSync(expectationsPath, JSON.stringify(expectations), {
+    mode: 0o600,
+  });
   return {
     directory,
     evidence,
@@ -232,11 +241,28 @@ function proveArgs(value) {
     value.evidence,
     '--private-key',
     value.privateKeyPath,
+    '--expectations',
+    value.expectationsPath,
     '--kubectl',
     value.kubectl,
     '--helm',
     value.helm,
   ];
+}
+
+function writeConfig(value) {
+  writeFileSync(value.configPath, JSON.stringify(value.config));
+}
+
+function writeExpectations(value) {
+  writeFileSync(value.expectationsPath, JSON.stringify(value.expectations));
+}
+
+function updateAdapterExpectation(value, name) {
+  value.expectations.adapterSha256[name] = createHash('sha256')
+    .update(readFileSync(value.config.adapters[name]))
+    .digest('hex');
+  writeExpectations(value);
 }
 
 function verifyArgs(value, evidencePath) {
@@ -253,6 +279,207 @@ function verifyArgs(value, evidencePath) {
     value.expectationsPath,
   ];
 }
+
+test('artifact writes complete every short write or fail on zero progress', () => {
+  const payloads = {
+    evidence: Buffer.from('{"status":"passed"}\n'),
+    signature: Buffer.from('c2lnbmF0dXJlCg==\n'),
+    checksum: Buffer.from(`${'a'.repeat(64)}  evidence.json\n`),
+  };
+  for (const [name, payload] of Object.entries(payloads)) {
+    const chunks = [];
+    const written = writeAll(0, payload, (_descriptor, bytes, offset, length) => {
+      const count = Math.min(name.length % 4 || 1, length);
+      chunks.push(Buffer.from(bytes.subarray(offset, offset + count)));
+      return count;
+    });
+    assert.deepEqual(Buffer.concat(chunks), payload);
+    assert.deepEqual(written, payload);
+  }
+  assert.throws(() => writeAll(0, Buffer.from('proof'), () => 0), /write made invalid progress/u);
+});
+
+test('rehearsal rejects unreviewed inputs and unsafe evidence directories before adapters run', async (t) => {
+  const cases = [
+    {
+      name: 'missing expectations',
+      mutate(value, args) {
+        const index = args.indexOf('--expectations');
+        args.splice(index, 2);
+      },
+      message: /--expectations is required/u,
+    },
+    {
+      name: 'changed inject adapter',
+      mutate(value) {
+        executable(
+          value.config.adapters.inject,
+          `printf unreviewed >>"$MOCK_CALLS"; printf '%s' '{"schemaVersion":"tixkit-production-adapter-result-v1","healthy":true,"outageMilliseconds":0,"observationCount":2}'`,
+        );
+      },
+      message: /do not exactly match the reviewed expectations/u,
+    },
+    {
+      name: 'weakened outage threshold',
+      mutate(value) {
+        value.config.thresholds.maxOutageSeconds = 10;
+        writeConfig(value);
+      },
+      message: /do not exactly match the reviewed expectations/u,
+    },
+    {
+      name: 'changed prior manifest and image map',
+      mutate(value) {
+        const manifest = JSON.parse(readFileSync(value.config.beforeReleaseManifest, 'utf8'));
+        const image = manifest.core.images.find(({ name }) => name === 'api');
+        image.reference = 'ghcr.io/tixkit/tixkit-api@sha256:' + '9'.repeat(64);
+        image.digest = 'sha256:' + '9'.repeat(64);
+        writeFileSync(value.config.beforeReleaseManifest, JSON.stringify(manifest));
+      },
+      message: /do not exactly match the reviewed expectations/u,
+    },
+    {
+      name: 'changed target manifest and image map',
+      kind: 'release-upgrade-rollback',
+      mutate(value) {
+        const manifest = JSON.parse(readFileSync(value.config.targetReleaseManifest, 'utf8'));
+        const image = manifest.core.images.find(({ name }) => name === 'worker');
+        image.reference = 'ghcr.io/tixkit/tixkit-worker@sha256:' + '9'.repeat(64);
+        image.digest = 'sha256:' + '9'.repeat(64);
+        writeFileSync(value.config.targetReleaseManifest, JSON.stringify(manifest));
+      },
+      message: /do not exactly match the reviewed expectations/u,
+    },
+    {
+      name: 'actual cluster identity mismatch',
+      mutate(value) {
+        value.expectations.namespaceUid = 'different-namespace-uid';
+        writeExpectations(value);
+      },
+      message: /do not exactly match the reviewed expectations/u,
+    },
+    {
+      name: 'mode 0755 evidence directory',
+      mutate(value) {
+        chmodSync(value.evidence, 0o755);
+      },
+      message: /must not be group\/world accessible/u,
+    },
+    {
+      name: 'mode 0777 evidence directory',
+      mutate(value) {
+        chmodSync(value.evidence, 0o777);
+      },
+      message: /must not be group\/world accessible/u,
+    },
+    {
+      name: 'group-readable expectations',
+      mutate(value) {
+        chmodSync(value.expectationsPath, 0o640);
+      },
+      message: /must not be group\/world accessible/u,
+    },
+    {
+      name: 'symlinked expectations',
+      mutate(value) {
+        const target = `${value.expectationsPath}.target`;
+        writeFileSync(target, JSON.stringify(value.expectations), { mode: 0o600 });
+        rmSync(value.expectationsPath);
+        symlinkSync(target, value.expectationsPath);
+      },
+      message: /invalid production expectations/u,
+    },
+    {
+      name: 'oversized expectations',
+      mutate(value) {
+        writeFileSync(value.expectationsPath, ' '.repeat(1024 * 1024 + 1), { mode: 0o600 });
+      },
+      message: /exceeds the 1048576-byte safety limit/u,
+    },
+  ];
+
+  for (const entry of cases) {
+    await t.test(entry.name, () => {
+      const value = fixture(entry.kind);
+      try {
+        const args = proveArgs(value);
+        entry.mutate(value, args);
+        const result = spawnSync(process.execPath, [prove, ...args], {
+          cwd: root,
+          env: value.env,
+          encoding: 'utf8',
+        });
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, entry.message);
+        assert.equal(readFileSync(value.calls, 'utf8'), '');
+      } finally {
+        rmSync(value.directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
+      }
+    });
+  }
+});
+
+test('rehearsal refuses artifact or evidence-directory substitution before publication', async (t) => {
+  const cases = [
+    {
+      name: 'artifact inode replacement',
+      command:
+        'rm -f "$MOCK_ARTIFACT"; printf substituted >"$MOCK_ARTIFACT"; chmod 400 "$MOCK_ARTIFACT"',
+      message: /artifact identity changed/u,
+    },
+    {
+      name: 'artifact permission change',
+      command: 'chmod 600 "$MOCK_ARTIFACT"',
+      message: /artifact identity changed/u,
+    },
+    {
+      name: 'artifact hard link',
+      command: 'ln "$MOCK_ARTIFACT" "$MOCK_ARTIFACT.link"',
+      message: /artifact identity changed/u,
+    },
+    {
+      name: 'evidence directory pathname exchange',
+      command: 'mv "$MOCK_EVIDENCE" "$MOCK_EVIDENCE.moved"; mkdir -m 700 "$MOCK_EVIDENCE"',
+      message: /evidence-dir identity changed|ENOENT.*reviewed-adapters/su,
+    },
+  ];
+
+  for (const entry of cases) {
+    await t.test(entry.name, () => {
+      const value = fixture('zone-loss');
+      try {
+        executable(
+          value.config.adapters.recoveredProbe,
+          `printf recovered >>"$MOCK_CALLS"; ${entry.command}; printf '%s' '{"schemaVersion":"tixkit-production-adapter-result-v1","healthy":true,"outageMilliseconds":0,"observationCount":2}'`,
+        );
+        updateAdapterExpectation(value, 'recoveredProbe');
+        const evidencePath = join(value.evidence, `${value.config.drillId}.json`);
+        const result = spawnSync(process.execPath, [prove, ...proveArgs(value)], {
+          cwd: root,
+          env: {
+            ...value.env,
+            MOCK_ARTIFACT: evidencePath,
+            MOCK_EVIDENCE: value.evidence,
+          },
+          encoding: 'utf8',
+        });
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, entry.message);
+        assert.notEqual(
+          spawnSync(process.execPath, [verify, ...verifyArgs(value, evidencePath)]).status,
+          0,
+        );
+      } finally {
+        const movedEvidence = `${value.evidence}.moved`;
+        if (existsSync(movedEvidence))
+          for (const name of readdirSync(movedEvidence))
+            if (name.startsWith('.tixkit-reviewed-adapters-'))
+              chmodSync(join(movedEvidence, name), 0o700);
+        rmSync(value.directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
+      }
+    });
+  }
+});
 
 test('dependency-loss rehearsal publishes signed, threshold-bound recovery evidence', () => {
   const value = fixture();
@@ -320,6 +547,7 @@ test('release rehearsal binds target release and always performs verified rollba
       env: value.env,
       encoding: 'utf8',
     }).trim();
+    execFileSync(process.execPath, [verify, ...verifyArgs(value, evidencePath)], { cwd: root });
     const proof = JSON.parse(readFileSync(evidencePath, 'utf8'));
     assert.deepEqual(
       proof.snapshots.map(({ phase }) => phase),
@@ -417,6 +645,7 @@ test('SIGTERM after fault injection triggers bounded verified recovery', () => {
       value.config.adapters.inject,
       'printf inject >>"$MOCK_CALLS"; printf fault >"$MOCK_STATE"; kill -TERM "$PPID"; sleep 10',
     );
+    updateAdapterExpectation(value, 'inject');
     const result = spawnSync(process.execPath, [prove, ...proveArgs(value)], {
       cwd: root,
       env: value.env,
@@ -439,6 +668,7 @@ test('SIGTERM in the final safe probe prevents destructive injection', () => {
       value.config.adapters.baselineProbe,
       'printf baseline >>"$MOCK_CALLS"; kill -TERM "$PPID"; sleep 10',
     );
+    updateAdapterExpectation(value, 'baselineProbe');
     const result = spawnSync(process.execPath, [prove, ...proveArgs(value)], {
       cwd: root,
       env: value.env,
@@ -462,7 +692,9 @@ test('adapter timeout terminates the full process group before recovery', async 
       '(trap "" TERM; exec </dev/null >/dev/null 2>&1; sleep 1.4; printf orphan >"$MOCK_ORPHAN") & printf inject >>"$MOCK_CALLS"; printf fault >"$MOCK_STATE"; sleep 10',
     );
     value.config.thresholds.adapterTimeoutSeconds = 1;
-    writeFileSync(value.configPath, JSON.stringify(value.config));
+    value.expectations.thresholds.adapterTimeoutSeconds = 1;
+    updateAdapterExpectation(value, 'inject');
+    writeConfig(value);
     const result = spawnSync(process.execPath, [prove, ...proveArgs(value)], {
       cwd: root,
       env: { ...value.env, MOCK_ORPHAN: orphan },
@@ -499,7 +731,7 @@ test('rehearsal refuses acknowledgement drift and evidence tampering', () => {
   const value = fixture('zone-loss');
   try {
     value.config.acknowledgement = 'yes';
-    writeFileSync(value.configPath, JSON.stringify(value.config));
+    writeConfig(value);
     const refusal = spawnSync(process.execPath, [prove, ...proveArgs(value)], {
       cwd: root,
       env: value.env,
@@ -510,7 +742,9 @@ test('rehearsal refuses acknowledgement drift and evidence tampering', () => {
 
     value.config.acknowledgement = 'I authorize production zone-loss fault injection and recovery';
     value.config.drillId = 'zone-loss-002';
-    writeFileSync(value.configPath, JSON.stringify(value.config));
+    value.expectations.drillId = value.config.drillId;
+    writeConfig(value);
+    writeExpectations(value);
     const evidencePath = execFileSync(process.execPath, [prove, ...proveArgs(value)], {
       cwd: root,
       env: value.env,

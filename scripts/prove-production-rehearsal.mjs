@@ -12,11 +12,14 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
+  realpathSync,
   rmSync,
   writeSync,
 } from 'node:fs';
 import { createHash, createPublicKey, sign } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 
@@ -96,7 +99,7 @@ function parseArgs(argv) {
     if (!flag?.startsWith('--') || value === undefined) fail(`invalid argument ${flag ?? ''}`);
     options[flag.slice(2)] = value;
   }
-  for (const required of ['config', 'evidence-dir', 'private-key'])
+  for (const required of ['config', 'evidence-dir', 'private-key', 'expectations'])
     if (!options[required]) fail(`--${required} is required`);
   return options;
 }
@@ -130,26 +133,73 @@ function loadValidated(path, schemaPath) {
   return value;
 }
 
-function safeFile(path, { executable = false, secret = false } = {}) {
+function safeFile(path, { executable = false, secret = false, ownerOnly = false, maxBytes } = {}) {
   const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const before = fstatSync(descriptor);
     if (!before.isFile()) fail(`${path} must be a regular non-symlink file`);
     if (executable && (before.mode & 0o111) === 0) fail(`${path} must be executable`);
     if (secret && (before.mode & 0o077) !== 0) fail(`${path} must not be group/world accessible`);
-    const bytes = readFileSync(descriptor);
+    if (ownerOnly) {
+      if (typeof process.getuid !== 'function') fail('owner verification requires a POSIX runtime');
+      if (before.uid !== process.getuid()) fail(`${path} must be owned by the current user`);
+      if ((before.mode & 0o077) !== 0) fail(`${path} must not be group/world accessible`);
+    }
+    let bytes;
+    if (maxBytes === undefined) {
+      bytes = readFileSync(descriptor);
+    } else {
+      if (before.size > maxBytes) fail(`${path} exceeds the ${maxBytes}-byte safety limit`);
+      const bounded = Buffer.allocUnsafe(maxBytes + 1);
+      let length = 0;
+      while (length <= maxBytes) {
+        const count = readSync(descriptor, bounded, length, maxBytes + 1 - length, null);
+        if (count === 0) break;
+        length += count;
+      }
+      if (length > maxBytes) fail(`${path} exceeds the ${maxBytes}-byte safety limit`);
+      bytes = bounded.subarray(0, length);
+    }
     const after = fstatSync(descriptor);
     if (
+      !after.isFile() ||
       before.dev !== after.dev ||
       before.ino !== after.ino ||
+      before.uid !== after.uid ||
+      before.gid !== after.gid ||
+      before.mode !== after.mode ||
+      before.nlink !== after.nlink ||
       before.size !== after.size ||
-      before.mtimeMs !== after.mtimeMs
+      before.mtimeMs !== after.mtimeMs ||
+      before.ctimeMs !== after.ctimeMs
     )
       fail(`${path} changed while it was being reviewed`);
     return { bytes, stat: after };
   } finally {
     closeSync(descriptor);
   }
+}
+
+function loadExpectations(path) {
+  let expectations;
+  try {
+    expectations = JSON.parse(safeFile(path, { ownerOnly: true, maxBytes: 1024 * 1024 }).bytes);
+  } catch (error) {
+    fail(`invalid production expectations ${path}: ${error.message}`);
+  }
+  const proofSchema = JSON.parse(
+    readFileSync(join(root, 'infra/production/rehearsal-proof.schema.json'), 'utf8'),
+  );
+  const expectationsSchema = JSON.parse(
+    readFileSync(join(root, 'infra/production/rehearsal-expectations.schema.json'), 'utf8'),
+  );
+  const ajv = new Ajv({ allErrors: true, strict: true });
+  addFormats(ajv);
+  ajv.addSchema(proofSchema);
+  const validate = ajv.compile(expectationsSchema);
+  if (!validate(expectations))
+    fail(`invalid production expectations: ${ajv.errorsText(validate.errors)}`);
+  return expectations;
 }
 
 function resolveConfigFile(configPath, value) {
@@ -228,8 +278,9 @@ function commandIdentity(path) {
   return { path, device: stat.dev, inode: stat.ino, sha256: sha256(bytes) };
 }
 
-function stageAdapters(configPath, config, evidenceDir) {
-  const stagingDirectory = mkdtempSync(join(evidenceDir, '.tixkit-reviewed-adapters-'));
+function stageAdapters(configPath, config, evidenceDirectory) {
+  assertEvidenceDirectory(evidenceDirectory);
+  const stagingDirectory = mkdtempSync(join(evidenceDirectory.path, '.tixkit-reviewed-adapters-'));
   chmodSync(stagingDirectory, 0o700);
   const adapters = {};
   try {
@@ -254,10 +305,16 @@ function stageAdapters(configPath, config, evidenceDir) {
       adapters[name] = identity;
     }
     chmodSync(stagingDirectory, 0o500);
+    assertEvidenceDirectory(evidenceDirectory);
     return { adapters, stagingDirectory };
   } catch (error) {
-    chmodSync(stagingDirectory, 0o700);
-    rmSync(stagingDirectory, { recursive: true, force: true });
+    try {
+      assertEvidenceDirectory(evidenceDirectory);
+      chmodSync(stagingDirectory, 0o700);
+      rmSync(stagingDirectory, { recursive: true, force: true });
+    } catch {
+      // Never follow a replaced evidence-directory path during cleanup.
+    }
     throw error;
   }
 }
@@ -461,7 +518,10 @@ async function snapshot(phase, kubectl, helm, config, expectedImages) {
   const nodeZones = new Map(
     nodes.items.map((node) => [
       node.metadata?.name,
-      { uid: node.metadata?.uid, zone: node.metadata?.labels?.['topology.kubernetes.io/zone'] },
+      {
+        uid: node.metadata?.uid,
+        zone: node.metadata?.labels?.['topology.kubernetes.io/zone'],
+      },
     ]),
   );
   const images = {};
@@ -600,50 +660,166 @@ async function snapshot(phase, kubectl, helm, config, expectedImages) {
   };
 }
 
-function openArtifacts(evidenceDir, drillId) {
-  const directory = lstatSync(evidenceDir);
-  if (directory.isSymbolicLink() || !directory.isDirectory())
+function openEvidenceDirectory(evidenceDir) {
+  const requestedPath = resolve(evidenceDir);
+  const requested = lstatSync(requestedPath);
+  if (requested.isSymbolicLink() || !requested.isDirectory())
     fail('--evidence-dir must be an existing non-symlink directory');
+  if (typeof process.getuid !== 'function') fail('owner verification requires a POSIX runtime');
+  if (requested.uid !== process.getuid()) fail('--evidence-dir must be owned by the current user');
+  if ((requested.mode & 0o077) !== 0) fail('--evidence-dir must not be group/world accessible');
+  const path = realpathSync(requestedPath);
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
+  );
+  const opened = fstatSync(descriptor);
+  if (
+    !opened.isDirectory() ||
+    opened.dev !== requested.dev ||
+    opened.ino !== requested.ino ||
+    opened.uid !== requested.uid
+  ) {
+    closeSync(descriptor);
+    fail('--evidence-dir identity changed while it was opened');
+  }
+  return {
+    path,
+    descriptor,
+    device: opened.dev,
+    inode: opened.ino,
+    uid: opened.uid,
+  };
+}
+
+function assertEvidenceDirectory(evidenceDirectory) {
+  const pathIdentity = lstatSync(evidenceDirectory.path);
+  const descriptorIdentity = fstatSync(evidenceDirectory.descriptor);
+  for (const identity of [pathIdentity, descriptorIdentity]) {
+    if (
+      identity.isSymbolicLink() ||
+      !identity.isDirectory() ||
+      identity.dev !== evidenceDirectory.device ||
+      identity.ino !== evidenceDirectory.inode ||
+      identity.uid !== evidenceDirectory.uid
+    )
+      fail('--evidence-dir identity changed during the rehearsal');
+    if ((identity.mode & 0o077) !== 0)
+      fail('--evidence-dir became group/world accessible during the rehearsal');
+  }
+  if (realpathSync(evidenceDirectory.path) !== evidenceDirectory.path)
+    fail('--evidence-dir canonical path changed during the rehearsal');
+}
+
+function artifactIdentity(path, descriptor) {
+  const identity = fstatSync(descriptor);
+  if (
+    !identity.isFile() ||
+    identity.uid !== process.getuid() ||
+    (identity.mode & 0o777) !== 0o400 ||
+    identity.nlink !== 1
+  )
+    fail(`reserved production evidence artifact is unsafe: ${path}`);
+  return {
+    path,
+    descriptor,
+    device: identity.dev,
+    inode: identity.ino,
+    uid: identity.uid,
+  };
+}
+
+function assertArtifactIdentity(artifact) {
+  const descriptorIdentity = fstatSync(artifact.descriptor);
+  const pathIdentity = lstatSync(artifact.path);
+  for (const identity of [descriptorIdentity, pathIdentity])
+    if (
+      identity.isSymbolicLink() ||
+      !identity.isFile() ||
+      identity.dev !== artifact.device ||
+      identity.ino !== artifact.inode ||
+      identity.uid !== artifact.uid ||
+      (identity.mode & 0o777) !== 0o400 ||
+      identity.nlink !== 1
+    )
+      fail(`production evidence artifact identity changed: ${artifact.path}`);
+}
+
+function assertArtifactContent(artifact, expectedBytes) {
+  const content = safeFile(artifact.path, { maxBytes: expectedBytes.length });
+  if (
+    content.stat.dev !== artifact.device ||
+    content.stat.ino !== artifact.inode ||
+    content.bytes.length !== expectedBytes.length ||
+    sha256(content.bytes) !== sha256(expectedBytes)
+  )
+    fail(`production evidence artifact content is incomplete: ${artifact.path}`);
+}
+
+export function writeAll(descriptor, value, writer = writeSync) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writer(descriptor, bytes, offset, bytes.length - offset);
+    if (!Number.isInteger(written) || written <= 0 || written > bytes.length - offset)
+      fail('production evidence artifact write made invalid progress');
+    offset += written;
+  }
+  return bytes;
+}
+
+function openArtifacts(evidenceDirectory, drillId) {
+  assertEvidenceDirectory(evidenceDirectory);
   const flags =
     constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0);
   const paths = {
-    evidence: join(evidenceDir, `${drillId}.json`),
-    signature: join(evidenceDir, `${drillId}.json.sig`),
-    checksum: join(evidenceDir, `${drillId}.json.sha256`),
+    evidence: join(evidenceDirectory.path, `${drillId}.json`),
+    signature: join(evidenceDirectory.path, `${drillId}.json.sig`),
+    checksum: join(evidenceDirectory.path, `${drillId}.json.sha256`),
   };
-  const descriptors = {};
-  const directoryDescriptor = openSync(
-    evidenceDir,
-    constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0),
-  );
+  const artifacts = {};
   try {
     for (const [name, path] of Object.entries(paths)) {
-      descriptors[name] = openSync(path, flags, 0o400);
-      fchmodSync(descriptors[name], 0o400);
+      const descriptor = openSync(path, flags, 0o400);
+      fchmodSync(descriptor, 0o400);
+      artifacts[name] = artifactIdentity(path, descriptor);
     }
-    fsyncSync(directoryDescriptor);
+    fsyncSync(evidenceDirectory.descriptor);
+    assertEvidenceDirectory(evidenceDirectory);
+    for (const artifact of Object.values(artifacts)) assertArtifactIdentity(artifact);
   } catch (error) {
-    for (const descriptor of Object.values(descriptors)) closeSync(descriptor);
-    closeSync(directoryDescriptor);
-    throw new Error(`refusing to overwrite or follow production evidence path: ${error.message}`);
+    for (const artifact of Object.values(artifacts)) closeSync(artifact.descriptor);
+    throw new Error(`refusing to overwrite or follow production evidence path: ${error.message}`, {
+      cause: error,
+    });
   }
-  return { descriptors, directoryDescriptor, paths };
+  return { artifacts, paths };
 }
 
-function publish(descriptors, directoryDescriptor, payload, signatureBytes) {
+function publish(artifacts, evidenceDirectory, payload, signatureBytes) {
+  assertEvidenceDirectory(evidenceDirectory);
+  for (const artifact of Object.values(artifacts)) assertArtifactIdentity(artifact);
   const checksum = sha256(payload);
   const values = {
     evidence: payload,
     signature: `${signatureBytes.toString('base64')}\n`,
     checksum: `${checksum}  evidence.json\n`,
   };
-  for (const [name, descriptor] of Object.entries(descriptors)) {
-    writeSync(descriptor, values[name]);
-    fsyncSync(descriptor);
-    closeSync(descriptor);
+  for (const [name, artifact] of Object.entries(artifacts)) {
+    const expectedBytes = writeAll(artifact.descriptor, values[name]);
+    if (fstatSync(artifact.descriptor).size !== expectedBytes.length)
+      fail(`production evidence artifact has an unexpected size: ${artifact.path}`);
+    fsyncSync(artifact.descriptor);
+    assertArtifactIdentity(artifact);
+    assertArtifactContent(artifact, expectedBytes);
   }
-  fsyncSync(directoryDescriptor);
-  closeSync(directoryDescriptor);
+  fsyncSync(evidenceDirectory.descriptor);
+  assertEvidenceDirectory(evidenceDirectory);
+  for (const [name, artifact] of Object.entries(artifacts)) {
+    assertArtifactIdentity(artifact);
+    assertArtifactContent(artifact, Buffer.from(values[name]));
+    closeSync(artifact.descriptor);
+  }
 }
 
 function assertSnapshotTransitions(kind, snapshots) {
@@ -674,6 +850,39 @@ function assertSnapshotTransitions(kind, snapshots) {
     fail('failure recovery unexpectedly changed the Helm release');
 }
 
+function assertReviewedExpectations(
+  { config, identity, beforeManifest, targetManifest, adapters },
+  expected,
+) {
+  const actual = {
+    schemaVersion: 'tixkit-production-rehearsal-expectations-v1',
+    drillId: config.drillId,
+    kind: config.kind,
+    ...(config.dependency ? { dependency: config.dependency } : {}),
+    context: identity.cluster.context,
+    clusterServer: identity.cluster.server,
+    clusterCaSha256: identity.cluster.caSha256,
+    systemNamespaceUid: identity.cluster.systemNamespaceUid,
+    namespaceName: identity.namespace.name,
+    namespaceUid: identity.namespace.uid,
+    release: config.release,
+    beforeReleaseSha256: beforeManifest.identity.sha256,
+    beforeImages: beforeManifest.images,
+    ...(targetManifest
+      ? {
+          targetReleaseSha256: targetManifest.identity.sha256,
+          targetImages: targetManifest.images,
+        }
+      : {}),
+    thresholds: config.thresholds,
+    adapterSha256: Object.fromEntries(
+      Object.entries(adapters).map(([name, adapter]) => [name, adapter.sha256]),
+    ),
+  };
+  if (jsonBytes(actual) !== jsonBytes(expected))
+    fail('production rehearsal inputs do not exactly match the reviewed expectations');
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const configPath = resolve(options.config);
@@ -689,8 +898,9 @@ async function main() {
   if (publicKey.asymmetricKeyType !== 'ed25519')
     fail('production evidence signing key must be Ed25519');
   const signingKeyFingerprint = sha256(publicKey.export({ type: 'spki', format: 'der' }));
-  const evidenceDirectory = resolve(options['evidence-dir']);
-  const artifacts = openArtifacts(evidenceDirectory, config.drillId);
+  const expectations = loadExpectations(resolve(options.expectations));
+  const evidenceDirectory = openEvidenceDirectory(options['evidence-dir']);
+  let artifacts;
   let stagingDirectory;
   const signalHandlers = new Map(
     ['SIGINT', 'SIGTERM'].map((signal) => [signal, () => handleSignal(signal)]),
@@ -709,14 +919,19 @@ async function main() {
     const staged = stageAdapters(configPath, config, evidenceDirectory);
     const adapters = staged.adapters;
     stagingDirectory = staged.stagingDirectory;
+    assertReviewedExpectations(
+      { config, identity, beforeManifest, targetManifest, adapters },
+      expectations,
+    );
+    artifacts = openArtifacts(evidenceDirectory, config.drillId);
     const steps = [];
     const snapshots = [];
     const startedAt = new Date().toISOString();
     snapshots.push(await snapshot('before', kubectl, helm, config, beforeManifest.images));
     steps.push(await runAdapter('baseline-probe', adapters.baselineProbe, config));
-    const injectedAt = performance.now();
     let recoveryStartedAt;
     let primaryError;
+    let recoveryError;
     try {
       steps.push(await runAdapter('inject', adapters.inject, config, [0], true, true));
       const expectedDuring = config.kind === 'dependency-loss' ? [1] : [0];
@@ -739,13 +954,15 @@ async function main() {
       try {
         steps.push(await runAdapter('recover', adapters.recover, config));
         steps.push(await runAdapter('recovered-probe', adapters.recoveredProbe, config));
-      } catch (recoveryError) {
-        throw new AggregateError(
-          [...(primaryError ? [primaryError] : []), recoveryError],
-          'production recovery failed',
-        );
+      } catch (error) {
+        recoveryError = error;
       }
     }
+    if (recoveryError)
+      throw new AggregateError(
+        [...(primaryError ? [primaryError] : []), recoveryError],
+        'production recovery failed',
+      );
     const recoveredAt = performance.now();
     let finalSnapshotError;
     try {
@@ -810,28 +1027,32 @@ async function main() {
     if (!validate(proof)) fail(`generated invalid proof: ${ajv.errorsText(validate.errors)}`);
     const payload = jsonBytes(proof);
     publish(
-      artifacts.descriptors,
-      artifacts.directoryDescriptor,
+      artifacts.artifacts,
+      evidenceDirectory,
       payload,
       sign(null, Buffer.from(payload), privateKeyBytes),
     );
     published = true;
     process.stdout.write(`${artifacts.paths.evidence}\n`);
   } finally {
-    if (!published)
-      for (const descriptor of Object.values(artifacts.descriptors))
+    if (!published && artifacts)
+      for (const artifact of Object.values(artifacts.artifacts))
         try {
-          closeSync(descriptor);
+          closeSync(artifact.descriptor);
         } catch {}
-    if (!published)
-      try {
-        closeSync(artifacts.directoryDescriptor);
-      } catch {}
-    privateKeyBytes.fill(0);
     if (stagingDirectory) {
-      chmodSync(stagingDirectory, 0o700);
-      rmSync(stagingDirectory, { recursive: true, force: true });
+      try {
+        assertEvidenceDirectory(evidenceDirectory);
+        chmodSync(stagingDirectory, 0o700);
+        rmSync(stagingDirectory, { recursive: true, force: true });
+      } catch {
+        // Fail closed without following a replaced evidence-directory path.
+      }
     }
+    try {
+      closeSync(evidenceDirectory.descriptor);
+    } catch {}
+    privateKeyBytes.fill(0);
     for (const [signal, handler] of signalHandlers) process.off(signal, handler);
   }
 }
@@ -842,7 +1063,8 @@ function formatError(error, indent = '') {
   return [current, ...error.errors.map((cause) => formatError(cause, `${indent}  `))].join('\n');
 }
 
-main().catch((error) => {
-  process.stderr.write(`${formatError(error)}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+  main().catch((error) => {
+    process.stderr.write(`${formatError(error)}\n`);
+    process.exitCode = 1;
+  });

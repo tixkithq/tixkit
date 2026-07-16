@@ -85,7 +85,7 @@ Create a credential with `POST /v1/agent-principals/{id}/oauth-clients`. Its org
 
 Exchange the client ID and secret at `POST /v1/oauth/token` with `grant_type=client_credentials`. Use HTTP Basic or JSON/form fields, never both and never query parameters. The response is a ten-minute `tk_aat_...` token with fixed `agent.invoke` scope and no refresh token. The JavaScript SDK exposes this server-side flow as `tixkit.agentAuth.exchangeClientCredentials`.
 
-Call `GET /v1/agent/session` with that token to verify the live explicit principal. The session has no organization authority or product permissions. Agent authentication never copies sponsor scopes: current delegation and policy checks remain separate and mandatory for every action. All generic authenticated routes deny agent principals unless their route contract explicitly opts in. Client or principal revocation takes effect on the next request.
+Call `GET /v1/agent/session` with that token to verify the live explicit principal. The session has no organization authority or product permissions. Agent authentication never copies sponsor scopes: current delegation and policy checks remain separate and mandatory for every action. All generic authenticated routes deny agent principals unless their route contract explicitly opts in. Client or principal revocation takes effect on the next request. OAuth issuance and every bearer request require the principal's exact current agent-protocol version, so an upgrade rejects stale credentials and already-issued tokens immediately. Create a new current-version principal and credential instead of expecting refresh or compatibility fallback.
 
 ## Register an explicit principal
 
