@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:net';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
@@ -108,6 +109,93 @@ function checkoutPdfWithRootDictionary(rootDictionary: string): Buffer {
     '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
     '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n',
   ]);
+}
+
+async function startClamAvTestServer(
+  behavior: {
+    response?: Buffer | string;
+    disconnect?: boolean;
+    responseDelayMs?: number;
+    dripIntervalMs?: number;
+  } = {},
+): Promise<{ port: number; close: () => Promise<void> }> {
+  const sockets = new Set<import('node:net').Socket>();
+  const server = createServer({ allowHalfOpen: true }, (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    if (behavior.disconnect) {
+      socket.destroy();
+      return;
+    }
+    const response = behavior.response;
+    let request = Buffer.alloc(0);
+    let responded = false;
+    let dripTimer: NodeJS.Timeout | undefined;
+    socket.on('close', () => {
+      if (dripTimer) clearInterval(dripTimer);
+    });
+    socket.on('data', (chunk) => {
+      if (responded) return;
+      request = Buffer.concat([request, chunk]);
+      const command = Buffer.from('zINSTREAM\0');
+      if (request.length < command.length) return;
+      if (!request.subarray(0, command.length).equals(command)) {
+        socket.destroy();
+        return;
+      }
+      let offset = command.length;
+      let complete = false;
+      while (offset + 4 <= request.length) {
+        const size = request.readUInt32BE(offset);
+        offset += 4;
+        if (size === 0) {
+          if (offset !== request.length) socket.destroy();
+          else complete = true;
+          break;
+        }
+        if (offset + size > request.length) return;
+        offset += size;
+      }
+      if (!complete) return;
+      responded = true;
+      if (response === undefined) return;
+      const sendResponse = (): void => {
+        if (!behavior.dripIntervalMs) {
+          socket.end(response);
+          return;
+        }
+        const bytes = Buffer.from(response);
+        let responseOffset = 0;
+        dripTimer = setInterval(() => {
+          if (responseOffset >= bytes.length) {
+            clearInterval(dripTimer);
+            dripTimer = undefined;
+            socket.end();
+            return;
+          }
+          socket.write(bytes.subarray(responseOffset, responseOffset + 1));
+          responseOffset += 1;
+        }, behavior.dripIntervalMs);
+      };
+      if (behavior.responseDelayMs) setTimeout(sendResponse, behavior.responseDelayMs);
+      else sendResponse();
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Test ClamAV server has no TCP port');
+  return {
+    port: address.port,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    },
+  };
 }
 
 function mutatePdfXrefRow(pdf: Buffer, rowIndex: number, row: string): Buffer {
@@ -381,6 +469,7 @@ describe('upload artifact service', () => {
     delete process.env.UPLOAD_MALWARE_SCANNER;
     delete process.env.CLAMAV_HOST;
     delete process.env.CLAMAV_PORT;
+    delete process.env.CLAMAV_TIMEOUT_MS;
   });
 
   it('signs browser-facing object URLs against the public storage endpoint', async () => {
@@ -515,6 +604,21 @@ describe('upload artifact service', () => {
 
       process.env.UPLOAD_MALWARE_SCANNER = 'clamav';
       process.env.CLAMAV_HOST = '127.0.0.1';
+      process.env.CLAMAV_PORT = '0';
+      await expect(
+        createUploadArtifact(db, {
+          tenantId: 'tnt_1',
+          purpose: 'checkout_answer',
+          fileName: 'waiver.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 1024,
+        }),
+      ).rejects.toMatchObject({
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Upload malware scanner is unavailable',
+      });
+
+      process.env.CLAMAV_PORT = '3310';
       await expect(
         createUploadArtifact(db, {
           tenantId: 'tnt_1',
@@ -530,6 +634,7 @@ describe('upload artifact service', () => {
       process.env.NODE_ENV = originalEnv;
       delete process.env.UPLOAD_MALWARE_SCANNER;
       delete process.env.CLAMAV_HOST;
+      delete process.env.CLAMAV_PORT;
     }
   });
 
@@ -2298,6 +2403,182 @@ describe('upload artifact service', () => {
       process.env.NODE_ENV = originalEnv;
       delete process.env.UPLOAD_MALWARE_SCANNER;
     }
+  });
+
+  it('accepts only exact bounded ClamAV protocol responses', async () => {
+    process.env.UPLOAD_MALWARE_SCANNER = 'clamav';
+    process.env.CLAMAV_HOST = '127.0.0.1';
+
+    for (const [response, expected] of [
+      ['stream: OK\0', { clean: true, result: 'stream: OK' }],
+      ['stream: Eicar-Signature FOUND\0', { clean: false, result: 'stream: Eicar-Signature FOUND' }],
+    ] as const) {
+      const scanner = await startClamAvTestServer({ response });
+      process.env.CLAMAV_PORT = String(scanner.port);
+      try {
+        await expect(scanUploadBuffer(Buffer.from('sample'))).resolves.toEqual(expected);
+      } finally {
+        await scanner.close();
+      }
+    }
+
+    for (const behavior of [
+      { response: 'stream: OK' },
+      { response: '\nstream: OK\0' },
+      { response: 'stream: OK\n\0' },
+      { response: 'stream: OK\0\0' },
+      { response: 'stream: NOT OK\0' },
+      { response: 'stream: Eicar-Signature FOUND\nstream: OK\0' },
+      { response: Buffer.alloc(4097, 0x41) },
+      { disconnect: true },
+    ]) {
+      const scanner = await startClamAvTestServer(behavior);
+      process.env.CLAMAV_PORT = String(scanner.port);
+      try {
+        await expect(scanUploadBuffer(Buffer.from('sample'))).rejects.toMatchObject({
+          code: 'SERVICE_UNAVAILABLE',
+          statusCode: 503,
+          message: 'Upload malware scanner is unavailable',
+        });
+      } finally {
+        await scanner.close();
+      }
+    }
+
+    const scanner = await startClamAvTestServer();
+    process.env.CLAMAV_PORT = String(scanner.port);
+    process.env.CLAMAV_TIMEOUT_MS = '50';
+    try {
+      await expect(scanUploadBuffer(Buffer.from('sample'))).rejects.toMatchObject({
+        code: 'SERVICE_UNAVAILABLE',
+        statusCode: 503,
+        message: 'Upload malware scanner is unavailable',
+      });
+    } finally {
+      await scanner.close();
+    }
+
+    const dripScanner = await startClamAvTestServer({
+      response: 'stream: OK\0',
+      dripIntervalMs: 20,
+    });
+    process.env.CLAMAV_PORT = String(dripScanner.port);
+    const startedAt = Date.now();
+    try {
+      await expect(scanUploadBuffer(Buffer.from('sample'))).rejects.toMatchObject({
+        code: 'SERVICE_UNAVAILABLE',
+        statusCode: 503,
+        message: 'Upload malware scanner is unavailable',
+      });
+      expect(Date.now() - startedAt).toBeLessThan(250);
+    } finally {
+      await dripScanner.close();
+    }
+  });
+
+  it('releases only its completion claim after a transient scanner failure for immediate retry', async () => {
+    const failingScanner = await startClamAvTestServer({ response: 'stream: unavailable ERROR\0' });
+    process.env.UPLOAD_MALWARE_SCANNER = 'clamav';
+    process.env.CLAMAV_HOST = '127.0.0.1';
+    process.env.CLAMAV_PORT = String(failingScanner.port);
+    const { db, tables } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'checkout_answer',
+      fileName: 'note.txt',
+      contentType: 'text/plain',
+      sizeBytes: 5,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+      });
+
+    try {
+      await expect(completeUploadArtifact(db, artifact.artifactId)).rejects.toMatchObject({
+        code: 'SERVICE_UNAVAILABLE',
+        statusCode: 503,
+        message: 'Upload malware scanner is unavailable',
+      });
+    } finally {
+      await failingScanner.close();
+    }
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'pending',
+      scan_status: 'pending',
+      scan_result: null,
+      completion_owner_token: null,
+      completion_started_at: null,
+    });
+    expect(s3Send).toHaveBeenCalledTimes(2);
+
+    const healthyScanner = await startClamAvTestServer({ response: 'stream: OK\0' });
+    process.env.CLAMAV_PORT = String(healthyScanner.port);
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+      })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+    try {
+      await expect(completeUploadArtifact(db, artifact.artifactId)).resolves.toMatchObject({
+        status: 'uploaded',
+        scanStatus: 'clean',
+      });
+    } finally {
+      await healthyScanner.close();
+    }
+  });
+
+  it('does not release a replacement owner after a delayed scanner failure', async () => {
+    const scanner = await startClamAvTestServer({
+      response: 'stream: unavailable ERROR\0',
+      responseDelayMs: 500,
+    });
+    process.env.UPLOAD_MALWARE_SCANNER = 'clamav';
+    process.env.CLAMAV_HOST = '127.0.0.1';
+    process.env.CLAMAV_PORT = String(scanner.port);
+    const { db, tables } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'checkout_answer',
+      fileName: 'note.txt',
+      contentType: 'text/plain',
+      sizeBytes: 5,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+    });
+
+    const completion = completeUploadArtifact(db, artifact.artifactId);
+    const completionResult = completion.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(s3Send).toHaveBeenCalledTimes(2));
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'processing',
+      scan_status: 'scanning',
+    });
+    tables.upload_artifacts[0]!.completion_owner_token = 'ucl_replacement_owner';
+    try {
+      await expect(completionResult).resolves.toMatchObject({
+        message: 'Upload artifact completion lease was lost',
+      });
+    } finally {
+      await scanner.close();
+    }
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'processing',
+      scan_status: 'scanning',
+      completion_owner_token: 'ucl_replacement_owner',
+    });
   });
 
   it('requires referenced file-answer artifacts to be completed, clean, tenant scoped, and event scoped', async () => {

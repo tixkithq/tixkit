@@ -60,6 +60,11 @@ export type UploadArtifactResponse = {
 const EICAR_SIGNATURE = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
 const UPLOAD_TTL_SECONDS = 15 * 60;
 const UPLOAD_SCANNER_UNAVAILABLE_MESSAGE = 'Upload malware scanner is unavailable';
+const CLAMAV_DEFAULT_PORT = 3310;
+const CLAMAV_DEFAULT_TIMEOUT_MS = 10_000;
+const CLAMAV_MIN_TIMEOUT_MS = 50;
+const CLAMAV_MAX_TIMEOUT_MS = 30_000;
+const CLAMAV_MAX_RESPONSE_BYTES = 4 * 1024;
 export { MIGRATION_IMPORT_MAX_BYTES };
 export const MIGRATION_IMPORT_RETENTION_MS = MIGRATION_IMPORT_INITIAL_RETENTION_MS;
 const MIGRATION_IMPORT_ACTIVE_RENEWAL_MS = MIGRATION_IMPORT_PREPARATION_LEASE_MS;
@@ -1082,9 +1087,35 @@ function uploadScannerMode(): string {
 
 function assertProductionUploadScannerConfigured(mode: string): void {
   if (process.env.NODE_ENV !== 'production') return;
-  if (mode !== 'clamav' || !process.env.CLAMAV_HOST?.trim()) {
+  if (mode !== 'clamav') throw new UploadScannerUnavailableError();
+  clamAvConfiguration();
+}
+
+function clamAvConfiguration(): { host: string; port: number; timeoutMs: number } {
+  const rawHost = process.env.CLAMAV_HOST ?? '';
+  const host = rawHost.trim();
+  const rawPort = process.env.CLAMAV_PORT ?? String(CLAMAV_DEFAULT_PORT);
+  const rawTimeout = process.env.CLAMAV_TIMEOUT_MS ?? String(CLAMAV_DEFAULT_TIMEOUT_MS);
+  if (
+    host.length === 0 ||
+    host !== rawHost ||
+    host.length > 253 ||
+    !/^\d+$/u.test(rawPort) ||
+    !/^\d+$/u.test(rawTimeout)
+  )
     throw new UploadScannerUnavailableError();
-  }
+  const port = Number(rawPort);
+  const timeoutMs = Number(rawTimeout);
+  if (
+    !Number.isSafeInteger(port) ||
+    port < 1 ||
+    port > 65_535 ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < CLAMAV_MIN_TIMEOUT_MS ||
+    timeoutMs > CLAMAV_MAX_TIMEOUT_MS
+  )
+    throw new UploadScannerUnavailableError();
+  return { host, port, timeoutMs };
 }
 
 function finalObjectKeyFromStaging(stagingKey: string, checksum: string): string {
@@ -1144,39 +1175,89 @@ async function bodyToBuffer(
 }
 
 async function scanWithClamAv(buffer: Buffer): Promise<{ clean: boolean; result: string }> {
-  const host = process.env.CLAMAV_HOST;
-  const port = Number(process.env.CLAMAV_PORT ?? 3310);
-  if (!host) {
-    throw new Error('CLAMAV_HOST is required when UPLOAD_MALWARE_SCANNER=clamav');
-  }
+  const { host, port, timeoutMs } = clamAvConfiguration();
 
   return new Promise((resolve, reject) => {
     const socket = new Socket();
     const chunks: Buffer[] = [];
-    socket.setTimeout(10_000);
-    socket.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    socket.on('error', reject);
-    socket.on('timeout', () => {
+    let responseBytes = 0;
+    let settled = false;
+    let deadline: NodeJS.Timeout | undefined;
+    const unavailable = (): void => {
+      if (settled) return;
+      settled = true;
+      if (deadline) clearTimeout(deadline);
       socket.destroy();
-      reject(new Error('ClamAV scan timed out'));
+      reject(new UploadScannerUnavailableError());
+    };
+    const complete = (result: { clean: boolean; result: string }): void => {
+      if (settled) return;
+      settled = true;
+      if (deadline) clearTimeout(deadline);
+      socket.destroy();
+      resolve(result);
+    };
+    deadline = setTimeout(unavailable, timeoutMs);
+    socket.setTimeout(timeoutMs);
+    socket.on('data', (chunk) => {
+      responseBytes += chunk.length;
+      if (responseBytes > CLAMAV_MAX_RESPONSE_BYTES) {
+        unavailable();
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
+    socket.on('error', unavailable);
+    socket.on('timeout', () => {
+      unavailable();
+    });
+    socket.on('end', () => {
+      if (settled) return;
+      let response: string;
+      try {
+        const responseBuffer = Buffer.concat(chunks);
+        if (
+          responseBuffer.length < 2 ||
+          responseBuffer.at(-1) !== 0 ||
+          responseBuffer.subarray(0, -1).includes(0)
+        ) {
+          unavailable();
+          return;
+        }
+        response = new TextDecoder('utf-8', { fatal: true }).decode(
+          responseBuffer.subarray(0, -1),
+        );
+      } catch {
+        unavailable();
+        return;
+      }
+      if (response === 'stream: OK') {
+        complete({ clean: true, result: response });
+        return;
+      }
+      if (/^stream: [^\r\n]{1,512} FOUND$/u.test(response)) {
+        complete({ clean: false, result: response });
+        return;
+      }
+      unavailable();
     });
     socket.on('close', () => {
-      const response = Buffer.concat(chunks).toString('utf8');
-      if (response.includes('FOUND')) resolve({ clean: false, result: response.trim() });
-      else if (response.includes('OK')) resolve({ clean: true, result: response.trim() });
-      else reject(new Error(`Unexpected ClamAV response: ${response.trim()}`));
+      if (!settled) unavailable();
     });
     socket.connect(port, host, () => {
-      socket.write('zINSTREAM\0');
-      for (let offset = 0; offset < buffer.length; offset += 8192) {
-        const chunk = buffer.subarray(offset, offset + 8192);
-        const size = Buffer.alloc(4);
-        size.writeUInt32BE(chunk.length, 0);
-        socket.write(size);
-        socket.write(chunk);
+      try {
+        socket.write('zINSTREAM\0');
+        for (let offset = 0; offset < buffer.length; offset += 8192) {
+          const chunk = buffer.subarray(offset, offset + 8192);
+          const size = Buffer.alloc(4);
+          size.writeUInt32BE(chunk.length, 0);
+          socket.write(size);
+          socket.write(chunk);
+        }
+        socket.end(Buffer.alloc(4));
+      } catch {
+        unavailable();
       }
-      socket.write(Buffer.alloc(4));
-      socket.end();
     });
   });
 }
@@ -1753,7 +1834,30 @@ export async function completeUploadArtifact(
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError(result);
   }
-  const scan = await scanUploadBuffer(buffer);
+  let scan: Awaited<ReturnType<typeof scanUploadBuffer>>;
+  try {
+    scan = await scanUploadBuffer(buffer);
+  } catch (error) {
+    if (!(error instanceof UploadScannerUnavailableError)) throw error;
+    const released = await db
+      .updateTable('upload_artifacts')
+      .set({
+        status: 'pending',
+        scan_status: 'pending',
+        scan_result: null,
+        completion_owner_token: null,
+        completion_started_at: null,
+        updated_at: new Date(),
+      })
+      .where('id', '=', artifact.id)
+      .where('status', '=', 'processing')
+      .where('scan_status', '=', 'scanning')
+      .where('completion_owner_token', '=', claimToken)
+      .executeTakeFirst();
+    if (Number(released.numUpdatedRows) !== 1)
+      throw new ValidationError('Upload artifact completion lease was lost');
+    throw error;
+  }
   const sourceChecksum = createHash('sha256').update(buffer).digest('hex');
   const now = new Date();
   if (!scan.clean) {
