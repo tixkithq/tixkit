@@ -72,7 +72,7 @@ export const EXPECTED_TRUST_CLAIMS = Object.freeze({
     'No independent security assessment or remediation summary has been published.',
   'managed-sla': 'Managed support plans and SLA commitments are not published.',
   'performance-evidence':
-    'Performance budgets and trusted single-host regression, trend, capacity, fault and soak workflow contracts are locally validated; no hosted or production result is published.',
+    'Performance budgets, decline-separated payment signals and trusted single-host regression, trend, capacity, fault and soak workflow contracts are locally validated; no hosted or production result is published.',
   'privacy-roles':
     'Managed Cloud controller, processor and retention responsibilities are not published.',
   'release-provenance':
@@ -102,7 +102,7 @@ export const EXPECTED_TRUST_BLOCKERS = Object.freeze({
   'managed-sla':
     'Commercial, operational and legal owners must approve managed support commitments.',
   'performance-evidence':
-    'Supported-profile capacity and hosted production evidence remain incomplete.',
+    'Supported-profile capacity, approved service objectives, routed-alert proof and hosted production evidence remain incomplete.',
   'privacy-roles': 'The managed operating model requires product, privacy and legal approval.',
   'release-provenance':
     'The protected public release workflow has not published an approved release.',
@@ -159,11 +159,22 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
       'infra/helm/tixkit/templates/_helpers.tpl',
       'infra/helm/tixkit/templates/monitoring.yaml',
       'infra/helm/tixkit/values.yaml',
+      'packages/api/src/__tests__/observability.test.ts',
       'packages/api/src/__tests__/rum-observability.test.ts',
+      'packages/api/src/observability.ts',
       'packages/api/src/routes/modules/rum.ts',
+      'packages/api/src/routes/modules/tenant.ts',
       'packages/api/src/routes/registry.ts',
+      'packages/provider-clients/src/__tests__/index.test.ts',
+      'packages/provider-clients/src/__tests__/stripe.test.ts',
+      'packages/provider-clients/src/index.ts',
+      'packages/provider-clients/src/stripe.ts',
       'packages/shared/src/__tests__/observability.test.ts',
       'packages/shared/src/observability.ts',
+      'packages/workflows/src/__tests__/observability.test.ts',
+      'packages/workflows/src/activities/checkout.ts',
+      'packages/workflows/src/activities/refund.ts',
+      'packages/workflows/src/observability.ts',
       'performance-budgets.json',
       'performance-capacity.trusted.json',
       'performance-faults.trusted.json',

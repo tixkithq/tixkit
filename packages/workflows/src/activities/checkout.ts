@@ -19,6 +19,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
 import QRCode from 'qrcode';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { paymentProviderTelemetry } from '../observability.js';
 import {
   generateAppleWalletPass,
   generateGoogleWalletPass,
@@ -809,7 +810,7 @@ export async function createPaymentIntentActivity(input: {
       return okResult({ providerIntentId, clientSecret, provider });
     }
 
-    const stripe = new StripeSdkGateway(stripeSecretKey);
+    const stripe = new StripeSdkGateway(stripeSecretKey, { onTelemetry: paymentProviderTelemetry });
 
     // Resolve the brand's connected payment account for Stripe Connect direct payouts.
     const brand = await db
@@ -1149,7 +1150,7 @@ export async function compensateOrphanPaymentActivity(input: {
       });
     }
 
-    const stripe = new StripeSdkGateway(stripeSecretKey);
+    const stripe = new StripeSdkGateway(stripeSecretKey, { onTelemetry: paymentProviderTelemetry });
     const stripePaymentIntent = await stripe.retrievePaymentIntent(providerIntentId);
 
     if (paymentIntent) {

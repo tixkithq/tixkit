@@ -34,6 +34,16 @@ export {
   type RumWebVital,
 } from '@tixkit/domain';
 
+export const PROVIDER_SERVICE_SURFACES = ['payment'] as const;
+export const PROVIDER_SERVICE_OUTCOMES = [
+  'success',
+  'decline',
+  'caller_cancelled',
+  'platform_failure',
+] as const;
+export type ProviderServiceSurface = (typeof PROVIDER_SERVICE_SURFACES)[number];
+export type ProviderServiceOutcome = (typeof PROVIDER_SERVICE_OUTCOMES)[number];
+
 const REDACTED = '[REDACTED]';
 const SENSITIVE_KEY_PATTERN =
   /(authorization|cookie|password|secret|token|api[_-]?key|client[_-]?secret|signature|email|phone|card|buyer|attendee)/i;
@@ -258,6 +268,13 @@ export function createTixkitMetrics(serviceName: string) {
     registers: [registry],
   });
 
+  const providerServiceAttempts = new Counter({
+    name: 'tixkit_provider_service_attempts_total',
+    help: 'Provider operation attempts by bounded service surface and normalized outcome.',
+    labelNames: ['surface', 'outcome'],
+    registers: [registry],
+  });
+
   const refundEvents = new Counter({
     name: 'tixkit_refund_events_total',
     help: 'Refund events by operation, provider, and outcome.',
@@ -369,6 +386,7 @@ export function createTixkitMetrics(serviceName: string) {
       httpRequestErrors,
       checkoutEvents,
       paymentEvents,
+      providerServiceAttempts,
       refundEvents,
       webhookEvents,
       exportEvents,
@@ -385,6 +403,21 @@ export function createTixkitMetrics(serviceName: string) {
       migrationProgressAge,
     },
   };
+}
+
+export function observeProviderServiceAttempt(
+  metrics: TixkitMetrics,
+  input: { surface: ProviderServiceSurface; outcome: ProviderServiceOutcome },
+): void {
+  if (
+    !PROVIDER_SERVICE_SURFACES.includes(input.surface) ||
+    !PROVIDER_SERVICE_OUTCOMES.includes(input.outcome)
+  ) {
+    throw new TypeError(
+      'Provider service attempt must use the bounded surface and outcome contract',
+    );
+  }
+  metrics.metrics.providerServiceAttempts.inc(input);
 }
 
 export function observeRumWebVital(

@@ -144,8 +144,8 @@
       "kind": "evidence",
       "scope": "public-core",
       "state": "locally-proven",
-      "claim": "Performance budgets and trusted single-host regression, trend, capacity, fault and soak workflow contracts are locally validated; no hosted or production result is published.",
-      "lastVerified": "2026-07-15",
+      "claim": "Performance budgets, decline-separated payment signals and trusted single-host regression, trend, capacity, fault and soak workflow contracts are locally validated; no hosted or production result is published.",
+      "lastVerified": "2026-07-16",
       "publicArtifacts": [
         ".github/workflows/performance-capacity.yml",
         ".github/workflows/performance-fault.yml",
@@ -160,11 +160,22 @@
         "infra/helm/tixkit/templates/_helpers.tpl",
         "infra/helm/tixkit/templates/monitoring.yaml",
         "infra/helm/tixkit/values.yaml",
+        "packages/api/src/__tests__/observability.test.ts",
         "packages/api/src/__tests__/rum-observability.test.ts",
+        "packages/api/src/observability.ts",
         "packages/api/src/routes/modules/rum.ts",
+        "packages/api/src/routes/modules/tenant.ts",
         "packages/api/src/routes/registry.ts",
+        "packages/provider-clients/src/__tests__/index.test.ts",
+        "packages/provider-clients/src/__tests__/stripe.test.ts",
+        "packages/provider-clients/src/index.ts",
+        "packages/provider-clients/src/stripe.ts",
         "packages/shared/src/__tests__/observability.test.ts",
         "packages/shared/src/observability.ts",
+        "packages/workflows/src/__tests__/observability.test.ts",
+        "packages/workflows/src/activities/checkout.ts",
+        "packages/workflows/src/activities/refund.ts",
+        "packages/workflows/src/observability.ts",
         "performance-budgets.json",
         "performance-capacity.trusted.json",
         "performance-faults.trusted.json",
@@ -204,7 +215,7 @@
           "timeoutMs": 120000
         }
       ],
-      "blocker": "Supported-profile capacity and hosted production evidence remain incomplete."
+      "blocker": "Supported-profile capacity, approved service objectives, routed-alert proof and hosted production evidence remain incomplete."
     },
     {
       "id": "privacy-roles",

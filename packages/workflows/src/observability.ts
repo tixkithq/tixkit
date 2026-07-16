@@ -5,11 +5,13 @@ import type {
   Next,
 } from '@temporalio/worker';
 import type { Database } from '@tixkit/db';
+import type { ProviderTelemetryEvent } from '@tixkit/provider-clients';
 import {
   createTixkitMetrics,
   deleteMetricsFromGateway,
   observeTemporalActivity,
   observeMigrationOperation,
+  observeProviderServiceAttempt,
   pushMetricsToGateway,
   startOpenTelemetry,
   type TixkitMetrics,
@@ -74,6 +76,22 @@ export async function startWorkerObservability(): Promise<WorkerObservability> {
 
   observability ??= { metrics: createTixkitMetrics('tixkit-worker') };
   return observability;
+}
+
+export function observePaymentProviderAttempt(
+  metrics: TixkitMetrics,
+  event: Pick<ProviderTelemetryEvent, 'serviceOutcome'>,
+): void {
+  observeProviderServiceAttempt(metrics, {
+    surface: 'payment',
+    outcome: event.serviceOutcome,
+  });
+}
+
+export function paymentProviderTelemetry(event: Readonly<ProviderTelemetryEvent>): void {
+  if (!observability) return;
+  observePaymentProviderAttempt(observability.metrics, event);
+  scheduleMetricsPush(observability.metrics);
 }
 
 export class TixkitActivityMetricsInterceptor implements ActivityInboundCallsInterceptor {

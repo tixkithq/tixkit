@@ -6,6 +6,7 @@ import {
   type ProviderClientRuntime,
   type ProviderDeliveryState,
   type ProviderFailureKind,
+  type ProviderServiceOutcome,
   type ProviderTelemetryEvent,
 } from './index.js';
 
@@ -323,6 +324,7 @@ export class StripeSdkGateway implements StripeGateway {
         operation,
         method,
         outcome: 'success',
+        serviceOutcome: 'success',
         durationMs,
         retryable: false,
         status: response.statusCode ?? 200,
@@ -330,6 +332,7 @@ export class StripeSdkGateway implements StripeGateway {
       return parsed;
     } catch (cause) {
       const error = normalizeStripeError(operation, sideEffecting, cause);
+      const serviceOutcome = stripeServiceOutcome(cause);
       const durationMs = elapsed(startedAt);
       span.setAttributes({
         'tixkit.provider.outcome': error.kind,
@@ -345,6 +348,7 @@ export class StripeSdkGateway implements StripeGateway {
         operation,
         method,
         outcome: error.kind,
+        serviceOutcome,
         durationMs,
         retryable: error.retryable,
         ...(error.details.status === undefined ? {} : { status: error.details.status }),
@@ -354,6 +358,15 @@ export class StripeSdkGateway implements StripeGateway {
       span.end();
     }
   }
+}
+
+function stripeServiceOutcome(cause: unknown): ProviderServiceOutcome {
+  if (cause instanceof ProviderOperationError) return 'platform_failure';
+  const record = isRecord(cause) ? cause : {};
+  const raw = isRecord(record.raw) ? record.raw : {};
+  const type = stringValue(record.type) ?? stringValue(raw.type) ?? stringValue(record.name);
+  const status = integerValue(record.statusCode) ?? integerValue(raw.statusCode);
+  return type === 'StripeCardError' || status === 402 ? 'decline' : 'platform_failure';
 }
 
 function normalizeStripeError(

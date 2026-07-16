@@ -9,6 +9,7 @@ import {
 import { ProviderOperationError, StripeSdkGateway } from '@tixkit/provider-clients';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { paymentProviderTelemetry } from '../observability.js';
 import { buildTransactionalMergeTagContext } from './messaging-context.js';
 import {
   durablyStartNotificationDeliveryWorkflow,
@@ -339,7 +340,9 @@ export async function processRefundActivity(input: {
     }
 
     if (requiresStripeRefund && stripeSecretKey && reservation.paymentIntent.providerIntentId) {
-      const stripe = new StripeSdkGateway(stripeSecretKey);
+      const stripe = new StripeSdkGateway(stripeSecretKey, {
+        onTelemetry: paymentProviderTelemetry,
+      });
       const stripeRefund = await stripe.createRefund({
         paymentIntentId: reservation.paymentIntent.providerIntentId,
         amount: input.amountCents,

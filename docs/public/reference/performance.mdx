@@ -32,6 +32,14 @@ Checkout and hosted event pages send only LCP, INP and CLS to `POST /v1/public/r
 
 Production-profile alert definitions evaluate 15-minute p75 values after at least 100 samples: LCP ≤ 2.5 seconds, INP ≤ 0.2 seconds and CLS ≤ 0.1. These public samples are untrusted operational signals, not product analytics or release evidence. The repository proves the local collector, browser adapter, metric contract and rendered alert expressions; it does not claim representative production traffic, abuse resistance, privacy or retention approval, a routed alert, budget attainment, or an SLA/SLO.
 
+## Payment-provider service signals
+
+Every dispatched payment-provider operation attempt is normalized at the provider-client boundary as `success`, `decline`, `caller_cancelled` or `platform_failure`. Stripe card errors and HTTP 402 payment rejections are declines. Invalid requests, configuration failures, timeouts, transport failures, rate limits, server failures, malformed responses and unknown failures are platform failures. Only an explicit caller abort is caller cancellation; API status or error text does not perform this classification.
+
+Workers count callbacks from every attempt, including calls repeated by Temporal activity retries, in a fixed-cardinality metric with only `surface="payment"` and the bounded outcome. The Production chart defaults to a 15-minute window and 100 eligible samples. Platform failure is measured as `platform_failure / (success + platform_failure)` with a 2% threshold. Declines are separately measured as `decline / (success + decline)` with a 15% threshold. Caller cancellations are outside both ratios.
+
+Tests prove the local classifier, immutable and failure-isolated callback, bounded metric labels and rendered PromQL. These defaults are not a production SLA/SLO, provider baseline or alert-delivery claim. Operators need retained production volume, routed-alert proof and an approved objective before making such a claim.
+
 Trusted database regression jobs retain three fresh-process samples and a deterministic aggregate for PostgreSQL and MySQL. The aggregate binds the commit, runner label, pinned database image, workload, complete metric set, and checksums, and reports per-metric min, median, p95, and max. Every individual sample must remain inside the absolute budget.
 
 These checksums provide integrity detection, not a producer signature or independent authenticity proof. Authenticity depends on the trusted workflow and retained-artifact controls.

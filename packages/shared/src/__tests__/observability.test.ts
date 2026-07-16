@@ -3,6 +3,7 @@ import {
   createTixkitMetrics,
   createTelemetryResource,
   observeMigrationOperation,
+  observeProviderServiceAttempt,
   observeRumWebVital,
   parseOtlpHeaders,
   redactObject,
@@ -173,6 +174,7 @@ describe('Tixkit Prometheus metrics', () => {
     expect(output).toContain('tixkit_http_request_duration_seconds_bucket');
     expect(output).toContain('tixkit_checkout_events_total');
     expect(output).toContain('tixkit_payment_events_total');
+    expect(output).toContain('tixkit_provider_service_attempts_total');
     expect(output).toContain('tixkit_refund_events_total');
     expect(output).toContain('tixkit_webhook_events_total');
     expect(output).toContain('tixkit_export_events_total');
@@ -181,6 +183,32 @@ describe('Tixkit Prometheus metrics', () => {
     expect(output).toContain('tixkit_temporal_activity_events_total');
     expect(output).toContain('tixkit_migration_events_total');
     expect(output).toContain('error_code="rollback_refused"');
+  });
+
+  it('records provider service attempts with only bounded surface and outcome labels', async () => {
+    const metrics = createTixkitMetrics('test-provider-service');
+    for (const outcome of ['success', 'decline', 'caller_cancelled', 'platform_failure'] as const) {
+      observeProviderServiceAttempt(metrics, { surface: 'payment', outcome });
+    }
+
+    const output = await metrics.registry.metrics();
+    const lines = output
+      .split('\n')
+      .filter((line) => line.startsWith('tixkit_provider_service_attempts_total'))
+      .join('\n');
+    expect(lines).toContain('surface="payment"');
+    expect(lines).toContain('outcome="decline"');
+    for (const line of lines.split('\n')) {
+      expect(line).toMatch(
+        /^tixkit_provider_service_attempts_total\{surface="payment",outcome="(?:success|decline|caller_cancelled|platform_failure)",service="test-provider-service"\} 1$/u,
+      );
+    }
+    expect(() =>
+      observeProviderServiceAttempt(metrics, {
+        surface: 'payment',
+        outcome: 'unknown' as never,
+      }),
+    ).toThrow(/bounded surface and outcome/u);
   });
 
   it('records only bounded, identifier-free RUM metric families', async () => {

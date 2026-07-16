@@ -229,6 +229,10 @@ observability:
     rumLcpP75Seconds: 2.5
     rumInpP75Seconds: 0.2
     rumClsP75Score: 0.1
+    paymentProviderWindow: 15m
+    paymentProviderMinimumSamples: 100
+    paymentProviderPlatformFailureRateThreshold: 0.02
+    paymentProviderDeclineRateThreshold: 0.15
     migrationProgressAgeSeconds: 900
     workerPushFreshnessSeconds: 120
     runbookUrl: https://docs.tixkit.com/operations/incidents

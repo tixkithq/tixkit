@@ -22,6 +22,13 @@ export type ProviderFailureKind =
   | 'malformed-response';
 
 export type ProviderOutcome = 'success' | ProviderFailureKind;
+export const PROVIDER_SERVICE_OUTCOMES = [
+  'success',
+  'decline',
+  'caller_cancelled',
+  'platform_failure',
+] as const;
+export type ProviderServiceOutcome = (typeof PROVIDER_SERVICE_OUTCOMES)[number];
 export type ProviderDeliveryState = 'not-sent' | 'rejected' | 'unknown' | 'accepted';
 
 export interface ProviderTelemetryEvent {
@@ -29,6 +36,7 @@ export interface ProviderTelemetryEvent {
   operation: string;
   method: string;
   outcome: ProviderOutcome;
+  serviceOutcome: ProviderServiceOutcome;
   durationMs: number;
   retryable: boolean;
   status?: number;
@@ -224,6 +232,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
       operation: request.operation,
       method,
       outcome: 'success',
+      serviceOutcome: 'success',
       durationMs,
       retryable: false,
       status: response.status,
@@ -241,6 +250,10 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
       operation: request.operation,
       method,
       outcome: normalized.kind,
+      serviceOutcome:
+        normalized.kind === 'cancelled' && request.signal?.aborted === true && !timedOut
+          ? 'caller_cancelled'
+          : 'platform_failure',
       durationMs,
       retryable: normalized.retryable,
       ...(normalized.details.status === undefined ? {} : { status: normalized.details.status }),

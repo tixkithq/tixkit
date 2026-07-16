@@ -103,6 +103,22 @@ spec:
           annotations:
             summary: Buyer CLS p75 exceeds the real-user budget
             runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+        - alert: TixkitPaymentProviderPlatformFailureRateHigh
+          expr: (sum(increase(tixkit_provider_service_attempts_total{surface="payment",outcome="platform_failure"}[{{ .Values.observability.alerts.paymentProviderWindow }}])) / sum(increase(tixkit_provider_service_attempts_total{surface="payment",outcome=~"success|platform_failure"}[{{ .Values.observability.alerts.paymentProviderWindow }}])) > {{ .Values.observability.alerts.paymentProviderPlatformFailureRateThreshold }}) and (sum(increase(tixkit_provider_service_attempts_total{surface="payment",outcome=~"success|platform_failure"}[{{ .Values.observability.alerts.paymentProviderWindow }}])) >= {{ .Values.observability.alerts.paymentProviderMinimumSamples }})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Payment provider platform failure rate exceeds its production threshold
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+        - alert: TixkitPaymentProviderDeclineRateHigh
+          expr: (sum(increase(tixkit_provider_service_attempts_total{surface="payment",outcome="decline"}[{{ .Values.observability.alerts.paymentProviderWindow }}])) / sum(increase(tixkit_provider_service_attempts_total{surface="payment",outcome=~"success|decline"}[{{ .Values.observability.alerts.paymentProviderWindow }}])) > {{ .Values.observability.alerts.paymentProviderDeclineRateThreshold }}) and (sum(increase(tixkit_provider_service_attempts_total{surface="payment",outcome=~"success|decline"}[{{ .Values.observability.alerts.paymentProviderWindow }}])) >= {{ .Values.observability.alerts.paymentProviderMinimumSamples }})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Payment provider decline rate exceeds its separate production threshold
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
         - alert: TixkitMigrationProgressStalled
           expr: max(tixkit_migration_progress_age_seconds{service="tixkit-worker"} and on(job, instance) (time() - push_time_seconds{job="tixkit-worker"} < {{ .Values.observability.alerts.workerPushFreshnessSeconds }})) > {{ .Values.observability.alerts.migrationProgressAgeSeconds }}
           for: 5m

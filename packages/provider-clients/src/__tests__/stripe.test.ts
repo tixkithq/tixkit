@@ -301,63 +301,103 @@ describe('StripeSdkGateway', () => {
         raw: { message: 'buyer@example.com sk_live_secret', code: 'rate_limit' },
       },
       { kind: 'rate-limit', retryable: true, deliveryState: 'rejected', status: 429 },
+      'platform_failure',
     ],
     [
       'server',
       { type: 'StripeAPIError', statusCode: 503, code: 'api_error' },
       { kind: 'server', retryable: true, deliveryState: 'unknown', status: 503 },
+      'platform_failure',
     ],
     [
       'timeout',
       { type: 'StripeConnectionError', message: 'Request timed out', code: 'ETIMEDOUT' },
       { kind: 'timeout', retryable: true, deliveryState: 'unknown', status: undefined },
+      'platform_failure',
     ],
     [
       'validation',
       { type: 'StripeCardError', statusCode: 402, code: 'card_declined' },
       { kind: 'validation', retryable: false, deliveryState: 'rejected', status: 402 },
+      'decline',
+    ],
+    [
+      'HTTP 402 rejection',
+      { type: 'StripeInvalidRequestError', statusCode: 402, code: 'payment_rejected' },
+      { kind: 'validation', retryable: false, deliveryState: 'rejected', status: 402 },
+      'decline',
+    ],
+    [
+      'invalid request',
+      { type: 'StripeInvalidRequestError', statusCode: 400, code: 'parameter_invalid' },
+      { kind: 'validation', retryable: false, deliveryState: 'rejected', status: 400 },
+      'platform_failure',
+    ],
+    [
+      'forged cancellation',
+      new ProviderOperationError(
+        'forged cancellation',
+        'stripe',
+        'payment-intent.create',
+        'cancelled',
+        false,
+        'unknown',
+        false,
+      ),
+      { kind: 'cancelled', retryable: false, deliveryState: 'unknown', status: undefined },
+      'platform_failure',
     ],
     [
       'non-retryable server',
       { type: 'StripeAPIError', statusCode: 501, code: 'not_implemented' },
       { kind: 'server', retryable: false, deliveryState: 'unknown', status: 501 },
+      'platform_failure',
     ],
-  ])('normalizes %s failures without leaking request data', async (_label, failure, expected) => {
-    const { factory } = stripeFixture({
-      paymentIntentCreate: vi.fn(async () => Promise.reject(failure)),
-    });
-    const gateway = new StripeSdkGateway('sk_test_boundary', { sdkFactory: factory });
-
-    const error = await operationError(
-      gateway.createPaymentIntent({
-        amount: 1_000,
-        currency: 'USD',
-        metadata: {},
-        idempotencyKey: 'checkout_1',
-      }),
-    );
-    expect(error).toMatchObject({
-      dependency: 'stripe',
-      operation: 'payment-intent.create',
-      kind: expected.kind,
-      retryable: expected.retryable,
-      deliveryState: expected.deliveryState,
-    });
-    if (expected.status === undefined) expect(error.details.status).toBeUndefined();
-    else expect(error.details.status).toBe(expected.status);
-    expect(JSON.stringify(error)).not.toContain('buyer@example.com');
-    expect(JSON.stringify(error)).not.toContain('sk_live_secret');
-    if (expected.kind === 'rate-limit') {
-      expect(error.details).toMatchObject({
-        providerCode: 'rate_limit',
-        providerRequestId: 'req_rate_1',
-        retryAfterMs: 2_500,
+  ])(
+    'normalizes %s failures without leaking request data',
+    async (_label, failure, expected, serviceOutcome) => {
+      const telemetry: ProviderTelemetryEvent[] = [];
+      const { factory } = stripeFixture({
+        paymentIntentCreate: vi.fn(async () => Promise.reject(failure)),
       });
-    }
-    const retryError = error.forRetry();
-    expect(retryError.details).toEqual({});
-    expect(retryError.cause).toBeUndefined();
-  });
+      const gateway = new StripeSdkGateway('sk_test_boundary', {
+        sdkFactory: factory,
+        onTelemetry: (event) => telemetry.push(event),
+      });
+
+      const error = await operationError(
+        gateway.createPaymentIntent({
+          amount: 1_000,
+          currency: 'USD',
+          metadata: {},
+          idempotencyKey: 'checkout_1',
+        }),
+      );
+      expect(error).toMatchObject({
+        dependency: 'stripe',
+        operation: 'payment-intent.create',
+        kind: expected.kind,
+        retryable: expected.retryable,
+        deliveryState: expected.deliveryState,
+      });
+      if (expected.status === undefined) expect(error.details.status).toBeUndefined();
+      else expect(error.details.status).toBe(expected.status);
+      expect(JSON.stringify(error)).not.toContain('buyer@example.com');
+      expect(JSON.stringify(error)).not.toContain('sk_live_secret');
+      if (expected.kind === 'rate-limit') {
+        expect(error.details).toMatchObject({
+          providerCode: 'rate_limit',
+          providerRequestId: 'req_rate_1',
+          retryAfterMs: 2_500,
+        });
+      }
+      const retryError = error.forRetry();
+      expect(retryError.details).toEqual({});
+      expect(retryError.cause).toBeUndefined();
+      expect(telemetry).toEqual([expect.objectContaining({ serviceOutcome })]);
+      expect(Object.isFrozen(telemetry[0])).toBe(true);
+    },
+  );
 
   it('treats an unrecognized side-effect failure as ambiguous instead of rejected', async () => {
     const { factory } = stripeFixture({
@@ -403,6 +443,7 @@ describe('StripeSdkGateway', () => {
         operation: 'payment-intent.retrieve',
         method: 'GET',
         outcome: 'malformed-response',
+        serviceOutcome: 'platform_failure',
       }),
     ]);
     expect(JSON.stringify(telemetry)).not.toContain('pi_secret_identifier');

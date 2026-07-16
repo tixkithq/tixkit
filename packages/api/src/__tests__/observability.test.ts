@@ -6,6 +6,7 @@ import type { Database } from '@tixkit/db';
 import { describe, expect, it, vi } from 'vitest';
 import {
   refreshInventoryHoldGauge,
+  observeApiPaymentProviderAttempt,
   registerMetricsRoute,
   registerObservability,
   type ApiObservability,
@@ -39,6 +40,16 @@ function createHoldDb(quantity: number | string | null): HoldDb {
 }
 
 describe('API observability', () => {
+  it('records API-owned Stripe Connect attempts in the bounded payment service signal', async () => {
+    const metrics = createTixkitMetrics('test-api-provider-attempts');
+    observeApiPaymentProviderAttempt(metrics, { serviceOutcome: 'platform_failure' });
+
+    const output = await metrics.registry.metrics();
+    expect(output).toMatch(
+      /tixkit_provider_service_attempts_total\{[^}]*surface="payment"[^}]*outcome="platform_failure"[^}]*service="test-api-provider-attempts"[^}]*\} 1/u,
+    );
+  });
+
   it('records HTTP and checkout route metrics with request correlation', async () => {
     const app = Fastify({ logger: false, genReqId: () => 'req_observability' });
     const observability: ApiObservability = { metrics: createTixkitMetrics('test-api') };

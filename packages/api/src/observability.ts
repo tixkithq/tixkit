@@ -1,9 +1,11 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { SpanKind, SpanStatusCode, trace, type Span } from '@opentelemetry/api';
 import type { Database } from '@tixkit/db';
+import type { ProviderTelemetryEvent } from '@tixkit/provider-clients';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   createTixkitMetrics,
+  observeProviderServiceAttempt,
   redactError,
   sanitizeSpanAttributes,
   startOpenTelemetry,
@@ -70,6 +72,16 @@ export function registerObservability(app: FastifyInstance, observability: ApiOb
   app.addHook('onResponse', (request, reply, done) => {
     finishRequestObservability(observability.metrics, request, reply);
     done();
+  });
+}
+
+export function observeApiPaymentProviderAttempt(
+  metrics: TixkitMetrics,
+  event: Pick<ProviderTelemetryEvent, 'serviceOutcome'>,
+): void {
+  observeProviderServiceAttempt(metrics, {
+    surface: 'payment',
+    outcome: event.serviceOutcome,
   });
 }
 

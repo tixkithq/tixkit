@@ -9,6 +9,7 @@ import {
   deleteWorkerMetricsGrouping,
   refreshMigrationProgressAgeMetrics,
   startMigrationProgressAgeRefresh,
+  observePaymentProviderAttempt,
 } from '../observability.js';
 import { createWorkflowExporterSink } from '../otel-workflow-exporter.js';
 
@@ -24,6 +25,10 @@ vi.mock('@tixkit/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tixkit/shared')>();
   return {
     ...actual,
+    observeProviderServiceAttempt: (
+      metrics: ReturnType<typeof createTixkitMetrics>,
+      input: { surface: 'payment'; outcome: string },
+    ) => metrics.metrics.providerServiceAttempts.inc(input),
     deleteMetricsFromGateway: deleteMetricsFromGatewayMock,
     pushMetricsToGateway: pushMetricsToGatewayMock,
     startOpenTelemetry: () => ({ shutdown: async () => undefined }),
@@ -196,6 +201,20 @@ describe('worker observability', () => {
     expect(output).toContain('service="test-worker-error"');
     expect(output).toContain('activity="processRefundActivity"');
     expect(output).toContain('outcome="error"} 1');
+  });
+
+  it('records each provider callback as one payment attempt including retry attempts', async () => {
+    const metrics = createTixkitMetrics('test-worker-provider-attempts');
+    observePaymentProviderAttempt(metrics, { serviceOutcome: 'platform_failure' });
+    observePaymentProviderAttempt(metrics, { serviceOutcome: 'success' });
+
+    const output = await metrics.registry.metrics();
+    expect(output).toMatch(
+      /tixkit_provider_service_attempts_total\{[^}]*surface="payment"[^}]*outcome="platform_failure"[^}]*service="test-worker-provider-attempts"[^}]*\} 1/u,
+    );
+    expect(output).toMatch(
+      /tixkit_provider_service_attempts_total\{[^}]*surface="payment"[^}]*outcome="success"[^}]*service="test-worker-provider-attempts"[^}]*\} 1/u,
+    );
   });
 
   it('does not overlap metrics pushes when the gateway never settles', async () => {

@@ -137,6 +137,8 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
       'TixkitRumLcpP75BudgetExceeded',
       'TixkitRumInpP75BudgetExceeded',
       'TixkitRumClsP75BudgetExceeded',
+      'TixkitPaymentProviderPlatformFailureRateHigh',
+      'TixkitPaymentProviderDeclineRateHigh',
       'TixkitMigrationProgressStalled',
     ],
   );
@@ -157,7 +159,19 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     assert.match(rule.expr, />= 100\)/u);
     assert.doesNotMatch(rule.expr, /tenant|event_id|session|user|route|url/iu);
   }
-  const migrationStallExpression = alerts.spec.groups[0].rules[5].expr;
+  const providerFailureExpression = alerts.spec.groups[0].rules[5].expr;
+  assert.match(providerFailureExpression, /outcome="platform_failure"/u);
+  assert.match(providerFailureExpression, /outcome=~"success\|platform_failure"/u);
+  assert.match(providerFailureExpression, /> 0\.02\)/u);
+  assert.match(providerFailureExpression, />= 100\)/u);
+  assert.doesNotMatch(providerFailureExpression, /decline|caller_cancelled/u);
+  const providerDeclineExpression = alerts.spec.groups[0].rules[6].expr;
+  assert.match(providerDeclineExpression, /outcome="decline"/u);
+  assert.match(providerDeclineExpression, /outcome=~"success\|decline"/u);
+  assert.match(providerDeclineExpression, /> 0\.15\)/u);
+  assert.match(providerDeclineExpression, />= 100\)/u);
+  assert.doesNotMatch(providerDeclineExpression, /platform_failure|caller_cancelled/u);
+  const migrationStallExpression = alerts.spec.groups[0].rules[7].expr;
   assert.match(migrationStallExpression, /push_time_seconds\{job="tixkit-worker"\}/);
   assert.match(migrationStallExpression, /< 120/);
   const metricsIngress = rendered.find(
@@ -560,6 +574,26 @@ test('Production rejects observability thresholds that disable meaningful alerts
     ['observability.alerts.rumInpP75Seconds=10.1', 'rumInpP75Seconds'],
     ['observability.alerts.rumClsP75Score=0', 'rumClsP75Score'],
     ['observability.alerts.rumClsP75Score=1.1', 'rumClsP75Score'],
+    ['observability.alerts.paymentProviderWindow=0m', 'paymentProviderWindow'],
+    ['observability.alerts.paymentProviderWindow=15m]', 'paymentProviderWindow'],
+    ['observability.alerts.paymentProviderMinimumSamples=0', 'paymentProviderMinimumSamples'],
+    ['observability.alerts.paymentProviderMinimumSamples=100001', 'paymentProviderMinimumSamples'],
+    [
+      'observability.alerts.paymentProviderPlatformFailureRateThreshold=0',
+      'paymentProviderPlatformFailureRateThreshold',
+    ],
+    [
+      'observability.alerts.paymentProviderPlatformFailureRateThreshold=1',
+      'paymentProviderPlatformFailureRateThreshold',
+    ],
+    [
+      'observability.alerts.paymentProviderDeclineRateThreshold=0',
+      'paymentProviderDeclineRateThreshold',
+    ],
+    [
+      'observability.alerts.paymentProviderDeclineRateThreshold=1',
+      'paymentProviderDeclineRateThreshold',
+    ],
     ['observability.alerts.migrationProgressAgeSeconds=0', 'migrationProgressAgeSeconds'],
     ['observability.alerts.workerPushFreshnessSeconds=60', 'workerPushFreshnessSeconds'],
   ]) {

@@ -67,6 +67,18 @@
 {{- if or (le (float64 .Values.observability.alerts.rumClsP75Score) 0.0) (gt (float64 .Values.observability.alerts.rumClsP75Score) 1.0) -}}
 {{- fail "observability rumClsP75Score must be greater than 0 and at most 1" -}}
 {{- end -}}
+{{- if not (has .Values.observability.alerts.paymentProviderWindow (list "5m" "10m" "15m" "30m" "1h")) -}}
+{{- fail "observability paymentProviderWindow must be one of 5m, 10m, 15m, 30m, or 1h" -}}
+{{- end -}}
+{{- if or (lt (int .Values.observability.alerts.paymentProviderMinimumSamples) 1) (gt (int .Values.observability.alerts.paymentProviderMinimumSamples) 100000) -}}
+{{- fail "observability paymentProviderMinimumSamples must be between 1 and 100000" -}}
+{{- end -}}
+{{- if or (le (float64 .Values.observability.alerts.paymentProviderPlatformFailureRateThreshold) 0.0) (ge (float64 .Values.observability.alerts.paymentProviderPlatformFailureRateThreshold) 1.0) -}}
+{{- fail "observability paymentProviderPlatformFailureRateThreshold must be between 0 and 1" -}}
+{{- end -}}
+{{- if or (le (float64 .Values.observability.alerts.paymentProviderDeclineRateThreshold) 0.0) (ge (float64 .Values.observability.alerts.paymentProviderDeclineRateThreshold) 1.0) -}}
+{{- fail "observability paymentProviderDeclineRateThreshold must be between 0 and 1" -}}
+{{- end -}}
 {{- if le (int .Values.observability.alerts.migrationProgressAgeSeconds) 0 -}}
 {{- fail "observability migrationProgressAgeSeconds must be positive" -}}
 {{- end -}}

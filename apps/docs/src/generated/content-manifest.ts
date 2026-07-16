@@ -534,7 +534,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   "/reference/performance": {
     sourcePath: "docs/public/reference/performance.mdx",
     frontmatter: {"title":"Performance budgets","description":"Review documentation and platform performance contracts and the commands that reproduce them.","audience":["developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"platform-operations","last_verified":"2026-07-15","prerequisites":["A production build for browser measurements"],"related":["/self-hosting/observability","/contributing/testing"]},
-    headings: [{"id":"real-user-monitoring-contract","text":"Real-user monitoring contract","level":2}],
+    headings: [{"id":"real-user-monitoring-contract","text":"Real-user monitoring contract","level":2},{"id":"payment-provider-service-signals","text":"Payment-provider service signals","level":2}],
     load: () => import("../../../../docs/public/reference/performance.mdx"),
   },
   "/reference/privacy-and-retention": {

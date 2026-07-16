@@ -39,11 +39,13 @@ import {
   serializeBrandSenderIdentity,
   serializeOrganization,
 } from '../../http/contracts.js';
+import { observeApiPaymentProviderAttempt } from '../../observability.js';
 import {
   ProviderOperationError,
   StripeSdkGateway,
   type StripeConnectAccount,
   type StripeGateway,
+  type ProviderTelemetryEvent,
 } from '@tixkit/provider-clients';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
@@ -339,13 +341,16 @@ async function requireUniqueClerkOrganizationId(
   }
 }
 
-function stripeGatewayFromContext(context: unknown): StripeGateway | null {
+function stripeGatewayFromContext(
+  context: unknown,
+  onTelemetry: (event: Readonly<ProviderTelemetryEvent>) => void,
+): StripeGateway | null {
   const injected = (context as { stripeGateway?: StripeGateway }).stripeGateway;
   if (injected) return injected;
   const secretKey = process.env.STRIPE_SECRET_KEY;
   const connectClientId = process.env.STRIPE_CONNECT_CLIENT_ID;
   if (!secretKey || !connectClientId) return null;
-  return new StripeSdkGateway(secretKey);
+  return new StripeSdkGateway(secretKey, { onTelemetry });
 }
 
 function requireStripeConnectIdempotencyKey(value: unknown): string {
@@ -1167,7 +1172,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         organizationId,
         'stripe_connect',
       );
-      const stripe = stripeGatewayFromContext(app.context);
+      const stripe = stripeGatewayFromContext(app.context, (event) =>
+        observeApiPaymentProviderAttempt(app.observability.metrics, event),
+      );
       if (!stripe) {
         if (activeStripe) return reply.status(200).send(serializePaymentAccount(activeStripe));
         throw new ValidationError(
@@ -1308,7 +1315,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         throw new ValidationError('Payment account is not a Stripe Connect account');
       }
 
-      const stripe = stripeGatewayFromContext(app.context);
+      const stripe = stripeGatewayFromContext(app.context, (event) =>
+        observeApiPaymentProviderAttempt(app.observability.metrics, event),
+      );
       if (!stripe) {
         throw new ValidationError(
           'Stripe Connect status refresh is not configured for this environment',
