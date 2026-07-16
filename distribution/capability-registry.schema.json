@@ -47,6 +47,17 @@
       "required": ["status"],
       "properties": {
         "status": { "enum": ["versioned", "not-yet-versioned"] },
+        "version": { "const": "tixkit.messaging-provider/v1" },
+        "packageBoundary": {
+          "type": "object",
+          "required": ["packageName", "exportPath", "symbol"],
+          "properties": {
+            "packageName": { "const": "@tixkit/domain" },
+            "exportPath": { "const": "./messaging" },
+            "symbol": { "const": "registerMessagingProviderExtension" }
+          },
+          "additionalProperties": false
+        },
         "missingContractReason": { "type": "string", "minLength": 1, "pattern": "\\S" }
       },
       "additionalProperties": false
@@ -129,6 +140,13 @@
               "publicBoundary": { "$ref": "#/$defs/boundary" },
               "extensionContract": {
                 "type": "object",
+                "required": ["status", "version", "packageBoundary"],
+                "properties": {
+                  "status": {},
+                  "version": {},
+                  "packageBoundary": {},
+                  "missingContractReason": {}
+                },
                 "not": {
                   "type": "object",
                   "properties": {
@@ -162,7 +180,16 @@
                     "pattern": "\\S"
                   }
                 },
-                "required": ["missingContractReason"]
+                "required": ["missingContractReason"],
+                "not": {
+                  "anyOf": [
+                    { "properties": { "version": {} }, "required": ["version"] },
+                    {
+                      "properties": { "packageBoundary": {} },
+                      "required": ["packageBoundary"]
+                    }
+                  ]
+                }
               },
               "publicBoundary": false,
               "lifecycle": { "const": "planned" },

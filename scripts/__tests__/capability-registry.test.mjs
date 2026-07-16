@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -7,6 +8,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import {
   capabilityRegistryViolations,
   EXPECTED_CAPABILITY_DECISIONS,
+  publishedPackageBoundaryViolations,
   REQUIRED_CAPABILITY_DECISIONS,
   renderCapabilityRegistryDocumentation,
   validateCapabilityRegistry,
@@ -166,6 +168,22 @@ test('versioned extension contracts require an exported public boundary', () => 
     /publicBoundary is required by schema when extensionContract\.status is versioned/u,
   );
 
+  const missingVersion = structuredClone(registry);
+  delete missingVersion.capabilities.find(({ id }) => id === 'generic-messaging-contracts')
+    .extensionContract.version;
+  assert.throws(
+    () => validateCapabilityRegistry(missingVersion, root, publicDistribution),
+    /extensionContract\.version is required by schema/u,
+  );
+
+  const missingPackageBoundary = structuredClone(registry);
+  delete missingPackageBoundary.capabilities.find(({ id }) => id === 'generic-messaging-contracts')
+    .extensionContract.packageBoundary;
+  assert.throws(
+    () => validateCapabilityRegistry(missingPackageBoundary, root, publicDistribution),
+    /extensionContract\.packageBoundary is required by schema/u,
+  );
+
   const forbiddenReason = structuredClone(registry);
   const resend = forbiddenReason.capabilities.find(({ id }) => id === 'resend-email-adapter');
   resend.extensionContract.missingContractReason =
@@ -183,6 +201,13 @@ test('not-yet-versioned contracts require a reason and forbid boundary substitut
   assert.throws(
     () => validateCapabilityRegistry(missingReason, root, publicDistribution),
     /missingContractReason is required by schema when extensionContract\.status is not-yet-versioned/u,
+  );
+
+  const disguisedVersion = structuredClone(registry);
+  disguisedVersion.capabilities[0].extensionContract.version = 'tixkit.messaging-provider/v1';
+  assert.throws(
+    () => validateCapabilityRegistry(disguisedVersion, root, publicDistribution),
+    /extensionContract\.version is forbidden by schema/u,
   );
 
   const substitutedBoundary = structuredClone(registry);
@@ -252,6 +277,63 @@ test('managed capabilities cannot expose private paths or claim GA availability'
       violation.includes('references a private source/import path'),
     ),
   );
+});
+
+test('versioned contracts resolve through a publishable immutable package export', () => {
+  const privateDistribution = structuredClone(publicDistribution);
+  privateDistribution.release.packages = privateDistribution.release.packages.filter(
+    ({ path }) => path !== 'packages/domain',
+  );
+  assert.ok(
+    capabilityRegistryViolations(registry, root, privateDistribution).some((violation) =>
+      violation.includes('not uniquely present in the public release'),
+    ),
+  );
+
+  const missingExport = structuredClone(registry);
+  missingExport.capabilities.find(
+    ({ id }) => id === 'generic-messaging-contracts',
+  ).extensionContract.packageBoundary.exportPath = './missing';
+  assert.throws(
+    () => validateCapabilityRegistry(missingExport, root, publicDistribution),
+    /exportPath must equal "\.\/messaging"/u,
+  );
+});
+
+test('declared package subpath must re-export the extension symbol', () => {
+  const fixtureRoot = mkdtempSync(resolve(tmpdir(), 'tixkit-capability-package-'));
+  try {
+    mkdirSync(resolve(fixtureRoot, 'packages/domain/src/messaging'), { recursive: true });
+    writeFileSync(
+      resolve(fixtureRoot, 'packages/domain/package.json'),
+      JSON.stringify({
+        name: '@tixkit/domain',
+        exports: { './messaging': { import: './dist/messaging/index.js' } },
+      }),
+    );
+    writeFileSync(
+      resolve(fixtureRoot, 'packages/domain/src/messaging/index.ts'),
+      "export * from './provider-extensions.js';\n",
+    );
+    writeFileSync(
+      resolve(fixtureRoot, 'packages/domain/src/messaging/provider-extensions.ts'),
+      'export const unrelated = true;\n',
+    );
+    const violations = publishedPackageBoundaryViolations(
+      fixtureRoot,
+      { release: { packages: [{ path: 'packages/domain', ecosystem: 'npm' }] } },
+      {
+        packageName: '@tixkit/domain',
+        exportPath: './messaging',
+        symbol: 'registerMessagingProviderExtension',
+      },
+    );
+    assert.deepEqual(violations, [
+      'versioned extension contract package entrypoint does not export: ./messaging#registerMessagingProviderExtension',
+    ]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test('accepted decisions cannot bypass policy through valid reclassification or contract drift', () => {

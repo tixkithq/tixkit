@@ -13,13 +13,9 @@ import {
 } from '@tixkit/db';
 import {
   buildEmailTransport,
+  buildSmsTransport,
   createDefaultEmailTransport,
   FallbackEmailTransport,
-  TelnyxSmsTransport,
-  TwilioSmsTransport,
-  VonageSmsTransport,
-  PlivoSmsTransport,
-  CaptureSmsTransport,
   FallbackSmsTransport,
   ProviderRouteSelector,
   UnsupportedProviderRouteError,
@@ -33,7 +29,10 @@ import {
 } from '@tixkit/content-email';
 import { normalizeSmsTemplateDocument, renderSmsTemplate } from '@tixkit/content-message';
 import type { EmailTransport, TemplateKey } from '@tixkit/domain';
-import type { SmsTransport } from '@tixkit/domain/messaging';
+import {
+  InvalidMessagingProviderResultError,
+  MessagingProviderIdentityMismatchError,
+} from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
@@ -387,24 +386,6 @@ function buildTransport(
   return buildEmailTransport(providerType, credentialsRef, senderDomain);
 }
 
-function buildSmsTransport(providerType: string, credentialsRef: string): SmsTransport {
-  if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureSmsTransport();
-  switch (providerType) {
-    case 'telnyx':
-      return new TelnyxSmsTransport(credentialsRef);
-    case 'twilio':
-      return new TwilioSmsTransport();
-    case 'vonage':
-      return new VonageSmsTransport();
-    case 'plivo':
-      return new PlivoSmsTransport();
-    case 'capture':
-      return new CaptureSmsTransport();
-    default:
-      throw new UnsupportedProviderRouteError('sms', providerType);
-  }
-}
-
 export async function sendEmailActivity(input: {
   jobId: string;
   providerRouteId: string;
@@ -645,6 +626,12 @@ export async function sendEmailActivity(input: {
       if (err.retryable) throw err.forRetry();
       return errResult('EMAIL_SEND_FAILED', err.message, false);
     }
+    if (err instanceof MessagingProviderIdentityMismatchError) {
+      return errResult('EMAIL_PROVIDER_IDENTITY_MISMATCH', err.message, false);
+    }
+    if (err instanceof InvalidMessagingProviderResultError) {
+      return errResult('EMAIL_PROVIDER_RESULT_INVALID', err.message, false);
+    }
     return errResult('EMAIL_SEND_FAILED', 'Unexpected email transport failure', true);
   }
 }
@@ -809,6 +796,12 @@ export async function sendSmsActivity(input: {
     if (err instanceof ProviderOperationError) {
       if (err.retryable) throw err.forRetry();
       return errResult('SMS_SEND_FAILED', err.message, false);
+    }
+    if (err instanceof MessagingProviderIdentityMismatchError) {
+      return errResult('SMS_PROVIDER_IDENTITY_MISMATCH', err.message, false);
+    }
+    if (err instanceof InvalidMessagingProviderResultError) {
+      return errResult('SMS_PROVIDER_RESULT_INVALID', err.message, false);
     }
     return errResult('SMS_SEND_FAILED', 'Unexpected SMS transport failure', true);
   }

@@ -1,0 +1,11 @@
+{
+  "$schema": "./scripts/performance-trends.schema.json",
+  "schemaVersion": "tixkit-performance-trends-config-v1",
+  "claimScope": "trusted-single-host-cross-revision-trend",
+  "workflowPath": ".github/workflows/performance-nightly.yml",
+  "artifactPrefix": "nightly-performance-",
+  "scenarioConfig": "performance-scenarios.nightly.json",
+  "maximumRuns": 30,
+  "retentionDays": 90,
+  "maximumGapHours": 48
+}

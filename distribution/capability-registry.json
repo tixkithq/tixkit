@@ -37,7 +37,15 @@
         "platformApi": "available",
         "selfHosted": "available"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/domain/src/messaging/index.ts",
         "symbols": ["EmailTransport", "SmsTransport"]
@@ -66,7 +74,15 @@
         "platformApi": "planned",
         "selfHosted": "unavailable"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/domain/src/messaging/index.ts",
         "symbols": ["EmailTransport"]
@@ -91,10 +107,18 @@
       "classification": "managed-intelligence",
       "lifecycle": "planned",
       "availability": { "cloud": "planned", "platformApi": "planned", "selfHosted": "unavailable" },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
-        "path": "packages/email-transport/src/index.ts",
-        "symbols": ["ProviderRouteSelector"]
+        "path": "packages/domain/src/messaging/provider-extensions.ts",
+        "symbols": ["MessagingProviderRouteSelector"]
       },
       "obligations": {
         "credentialCustody": "managed-cloud",
@@ -120,7 +144,15 @@
         "platformApi": "planned",
         "selfHosted": "unavailable"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/domain/src/messaging/index.ts",
         "symbols": ["SmsTransport"]
@@ -149,7 +181,15 @@
         "platformApi": "planned",
         "selfHosted": "planned"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/email-transport/src/index.ts",
         "symbols": ["OpenCoreEmailSdkTransport"]
@@ -178,7 +218,15 @@
         "platformApi": "planned",
         "selfHosted": "planned"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/email-transport/src/index.ts",
         "symbols": ["PlivoSmsTransport"]
@@ -231,7 +279,15 @@
         "platformApi": "available",
         "selfHosted": "available"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/email-transport/src/index.ts",
         "symbols": ["ResendEmailTransport"]
@@ -260,7 +316,15 @@
         "platformApi": "planned",
         "selfHosted": "planned"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/email-transport/src/index.ts",
         "symbols": ["SmtpEmailTransport"]
@@ -289,7 +353,15 @@
         "platformApi": "available",
         "selfHosted": "available"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/email-transport/src/index.ts",
         "symbols": ["TelnyxSmsTransport"]
@@ -318,7 +390,15 @@
         "platformApi": "planned",
         "selfHosted": "planned"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/email-transport/src/index.ts",
         "symbols": ["TwilioSmsTransport"]
@@ -347,7 +427,15 @@
         "platformApi": "planned",
         "selfHosted": "planned"
       },
-      "extensionContract": { "status": "versioned" },
+      "extensionContract": {
+        "status": "versioned",
+        "version": "tixkit.messaging-provider/v1",
+        "packageBoundary": {
+          "packageName": "@tixkit/domain",
+          "exportPath": "./messaging",
+          "symbol": "registerMessagingProviderExtension"
+        }
+      },
       "publicBoundary": {
         "path": "packages/email-transport/src/index.ts",
         "symbols": ["VonageSmsTransport"]

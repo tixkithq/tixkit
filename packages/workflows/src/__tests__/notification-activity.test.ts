@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
+import {
+  MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
+  registerMessagingProviderExtension,
+} from '@tixkit/domain/messaging';
 
 const dbState = vi.hoisted(() => ({
   emailJob: {
@@ -849,6 +853,254 @@ describe('notification activity deliverability gating', () => {
     });
     expect(dbState.smsDeliveries).toHaveLength(0);
     expect(dbState.renderArtifacts).toHaveLength(0);
+  });
+
+  it('executes an operator SMS extension registered through the published domain contract', async () => {
+    const sends: Array<{ body: string; credentialsRef: string }> = [];
+    let providerReads = 0;
+    const unregister = registerMessagingProviderExtension({
+      descriptor: {
+        contractVersion: MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
+        providerType: 'operator_extension',
+        displayName: 'Operator Extension',
+        channels: ['sms'],
+        operations: ['send'],
+      },
+      createSms: ({ credentialsRef }) => ({
+        providerName: 'operator_extension',
+        async send(input) {
+          sends.push({ body: input.body, credentialsRef });
+          return {
+            deliveryId: input.deliveryId,
+            get provider() {
+              providerReads += 1;
+              return providerReads === 1 ? 'operator_extension' : 'attacker';
+            },
+            providerMessageId: 'operator-message-1',
+            status: 'accepted',
+            attemptedFallbackProviders: [],
+            sentAt: new Date().toISOString(),
+          };
+        },
+      }),
+    });
+    dbState.contentDocument = { ...dbState.contentDocument!, channel: 'sms' };
+    dbState.contentVersion = {
+      ...dbState.contentVersion!,
+      subject: null,
+      renderedHtml: null,
+      renderedText: 'Update',
+      contentJson: createDefaultSmsTemplate({
+        editor: { body: 'Update' },
+        settings: {
+          templateKey: 'event-update',
+          category: 'bulk',
+          consentCategory: 'marketing',
+          segmentLimit: 2,
+          optOutText: 'Reply STOP to opt out',
+        },
+      }),
+    };
+    dbState.smsRoutes = [activeSmsRoute({ provider_type: 'operator_extension' })];
+    dbState.smsSender = {
+      id: 'ssi_1',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      sender: '+15550000002',
+      verified: true,
+    };
+
+    try {
+      const result = await sendSmsActivity({
+        jobId: 'smj_1',
+        providerRouteId: 'spr_1',
+        notificationType: 'bulk',
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { provider: 'operator_extension' },
+      });
+      expect(sends).toEqual([{ body: 'Update', credentialsRef: 'cred_sms' }]);
+      expect(providerReads).toBe(1);
+      expect(dbState.smsDeliveries).toContainEqual(
+        expect.objectContaining({ provider: 'operator_extension' }),
+      );
+    } finally {
+      unregister();
+    }
+  });
+
+  it('persists an operator email extension under its registered descriptor identity', async () => {
+    let providerReads = 0;
+    const unregister = registerMessagingProviderExtension({
+      descriptor: {
+        contractVersion: MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
+        providerType: 'operator_email',
+        displayName: 'Operator Email',
+        channels: ['email'],
+        operations: ['send'],
+      },
+      createEmail: () => ({
+        providerName: 'operator_email',
+        async send(input) {
+          return {
+            deliveryId: input.deliveryId,
+            get provider() {
+              providerReads += 1;
+              return providerReads === 1 ? 'operator_email' : 'attacker';
+            },
+            providerMessageId: 'operator-email-1',
+            status: 'accepted',
+            attemptedFallbackProviders: [],
+            sentAt: new Date().toISOString(),
+          };
+        },
+      }),
+    });
+    dbState.emailJob.template_version_id = 'cver_1';
+    dbState.emailRoutes = [activeEmailRoute({ provider_type: 'operator_email' })];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      reply_to_email: 'support@example.com',
+      verified: true,
+    };
+
+    try {
+      const result = await sendEmailActivity({
+        jobId: 'emj_1',
+        providerRouteId: 'epr_1',
+        subject: 'Update for All Access',
+        html: '<p>Hello Ada</p>',
+        text: 'Hello Ada',
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { provider: 'operator_email' },
+      });
+      expect(providerReads).toBe(1);
+      expect(dbState.emailDeliveries).toContainEqual(
+        expect.objectContaining({ provider: 'operator_email' }),
+      );
+    } finally {
+      unregister();
+    }
+  });
+
+  it('does not persist an operator SMS result with a substituted provider identity', async () => {
+    const unregister = registerMessagingProviderExtension({
+      descriptor: {
+        contractVersion: MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
+        providerType: 'operator_sms_spoof',
+        displayName: 'Operator SMS Spoof',
+        channels: ['sms'],
+        operations: ['send'],
+      },
+      createSms: () => ({
+        providerName: 'operator_sms_spoof',
+        async send(input) {
+          return {
+            deliveryId: input.deliveryId,
+            provider: 'sk_live_DO_NOT_EXPOSE_123456\nInjected: secret',
+            providerMessageId: 'spoofed-message',
+            status: 'accepted',
+            attemptedFallbackProviders: [],
+            sentAt: new Date().toISOString(),
+          };
+        },
+      }),
+    });
+    dbState.smsRoutes = [activeSmsRoute({ provider_type: 'operator_sms_spoof' })];
+    dbState.smsSender = {
+      id: 'ssi_1',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      sender: '+15550000002',
+      verified: true,
+    };
+
+    try {
+      const result = await sendSmsActivity({
+        jobId: 'smj_1',
+        providerRouteId: 'spr_1',
+        notificationType: 'bulk',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        errorCode: 'SMS_PROVIDER_IDENTITY_MISMATCH',
+        message: 'Messaging provider extension returned an invalid provider identity',
+        retryable: false,
+      });
+      expect(JSON.stringify(result)).not.toContain('sk_live_DO_NOT_EXPOSE_123456');
+      expect(dbState.smsDeliveries).toHaveLength(0);
+      expect(dbState.smsJobUpdates).toHaveLength(0);
+      expect(dbState.renderArtifacts).toHaveLength(0);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('does not persist an operator email result with a substituted provider identity', async () => {
+    const unregister = registerMessagingProviderExtension({
+      descriptor: {
+        contractVersion: MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
+        providerType: 'operator_email_spoof',
+        displayName: 'Operator Email Spoof',
+        channels: ['email'],
+        operations: ['send'],
+      },
+      createEmail: () => ({
+        providerName: 'operator_email_spoof',
+        async send(input) {
+          return {
+            deliveryId: input.deliveryId,
+            provider: `attacker\n${'x'.repeat(10_000)}`,
+            providerMessageId: 'spoofed-message',
+            status: 'accepted',
+            attemptedFallbackProviders: [],
+            sentAt: new Date().toISOString(),
+          };
+        },
+      }),
+    });
+    dbState.emailRoutes = [activeEmailRoute({ provider_type: 'operator_email_spoof' })];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      reply_to_email: 'support@example.com',
+      verified: true,
+    };
+
+    try {
+      const result = await sendEmailActivity({
+        jobId: 'emj_1',
+        providerRouteId: 'epr_1',
+        subject: 'Update for All Access',
+        html: '<p>Hello Ada</p>',
+        text: 'Hello Ada',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        errorCode: 'EMAIL_PROVIDER_IDENTITY_MISMATCH',
+        message: 'Messaging provider extension returned an invalid provider identity',
+        retryable: false,
+      });
+      expect(JSON.stringify(result)).not.toContain('attacker');
+      expect(JSON.stringify(result).length).toBeLessThan(256);
+      expect(dbState.emailDeliveries).toHaveLength(0);
+      expect(dbState.emailJobUpdates).toHaveLength(0);
+      expect(dbState.renderArtifacts).toHaveLength(0);
+    } finally {
+      unregister();
+    }
   });
 
   it('records send render artifacts for accepted content email deliveries', async () => {

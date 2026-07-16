@@ -2,6 +2,7 @@ import type { BaseEntity, ISO8601Date, TenantScopedEntity, Ulid } from '../share
 import type { TemplateKey } from './template-lifecycles.js';
 
 export * from './merge-tags.js';
+export * from './provider-extensions.js';
 export * from './short-links.js';
 export * from './template-lifecycles.js';
 

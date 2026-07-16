@@ -95,7 +95,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Validate scenario contracts
         id: contracts
-        run: node --test scripts/__tests__/performance-evidence.test.mjs scripts/__tests__/performance-scenario.test.mjs
+        run: node --test scripts/__tests__/performance-evidence.test.mjs scripts/__tests__/performance-scenario.test.mjs scripts/__tests__/performance-trends.test.mjs
       - name: Migrate performance databases
         id: migration
         run: |
@@ -109,12 +109,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          preserve_baseline=false
+          cleanup_baseline() {
+            rm -f "${RUNNER_TEMP}"/performance-baseline-*.zip "${RUNNER_TEMP}"/performance-baseline-*-entries.txt \
+              "${RUNNER_TEMP}/performance-runs.json" "${RUNNER_TEMP}/performance-candidates.tsv"
+            if [ "${preserve_baseline}" != true ]; then rm -f "${RUNNER_TEMP}/performance-baseline.json"; fi
+          }
+          trap cleanup_baseline EXIT
           default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.default_branch')"
           if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${GITHUB_REF_NAME}" != "${default_branch}" ]; then
             echo 'Manual performance evidence must run from the default branch.' >&2
             exit 1
           fi
           runs_json="${RUNNER_TEMP}/performance-runs.json"
+          baseline_sample_count="$(SCENARIO_ID='${{ matrix.scenario }}' node -e "const c=require('./performance-scenarios.nightly.json'); const s=c.scenarios.find(v=>v.id===process.env.SCENARIO_ID); if(!s)process.exit(1); process.stdout.write(String(s.sampleCount));")"
           gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/performance-nightly.yml/runs?branch=${default_branch}&status=success&per_page=50" > "${runs_json}"
           candidates="${RUNNER_TEMP}/performance-candidates.tsv"
           RUNS_PATH="${runs_json}" WORKFLOW_PATH='.github/workflows/performance-nightly.yml' \
@@ -126,16 +134,49 @@ jobs:
           baseline_sha=''
           while IFS=$'\t' read -r run_id head_sha; do
             [ -n "${run_id}" ] || continue
-            artifact_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
-              --jq '.artifacts[] | select(.name == $ENV.ARTIFACT_NAME and .expired == false) | .id' | head -n 1)"
-            [ -n "${artifact_id}" ] || continue
+            artifact_rows="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
+              --jq '.artifacts[] | select(.name == $ENV.ARTIFACT_NAME and .expired == false) | [.id,.size_in_bytes] | @tsv')"
+            [ "$(printf '%s\n' "${artifact_rows}" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 ] || continue
+            IFS=$'\t' read -r artifact_id declared_size <<< "${artifact_rows}"
+            [[ "${declared_size}" =~ ^[0-9]+$ ]] && [ "${declared_size}" -le 52428800 ] || {
+              echo "Baseline artifact ${run_id} has an invalid or oversized API size" >&2
+              exit 1
+            }
             archive="${RUNNER_TEMP}/performance-baseline-${run_id}.zip"
-            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${archive}"
-            evidence_entry="$(unzip -Z1 "${archive}" | awk '$0 ~ /(^|\/)evidence\.json$/ { print; exit }')"
-            [ -n "${evidence_entry}" ] || continue
+            (ulimit -f 102400; gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${archive}")
+            archive_size="$(stat -f '%z' "${archive}" 2>/dev/null || stat -c '%s' "${archive}")"
+            [ "${archive_size}" -le "${declared_size}" ] && [ "${archive_size}" -le 52428800 ] || { echo "Baseline artifact ${run_id} exceeds its declared or 50 MiB bound" >&2; exit 1; }
+            entries_file="${RUNNER_TEMP}/performance-baseline-${run_id}-entries.txt"
+            unzip -Z1 "${archive}" > "${entries_file}"
+            entry_count="$(wc -l < "${entries_file}" | tr -d ' ')"
+            [[ "${entry_count}" =~ ^[0-9]+$ ]] && [ "${entry_count}" -le 512 ] || {
+              echo "Baseline artifact ${run_id} has too many entries" >&2
+              exit 1
+            }
+            if awk '/(^\/)|(^|\/)\.\.(\/|$)|\\/ { found=1 } END { exit !found }' "${entries_file}"; then
+              echo "Baseline artifact ${run_id} contains an unsafe entry" >&2
+              exit 1
+            fi
+            if awk '$0 !~ /(^|\/)(scenario|scenario\/raw|trend)\/$/ && $0 !~ /(^|\/)run-identity\.txt$/ && $0 !~ /(^|\/)scenario\/(evidence|scenario-run|baseline-evidence)\.json$/ && $0 !~ /(^|\/)scenario\/raw\/(metrics|sample)-[1-9][0-9]*\.json$/ && $0 !~ /(^|\/)trend\/(trend\.json|index\.html)$/ { found=1 } END { exit !found }' "${entries_file}"; then
+              echo "Baseline artifact ${run_id} contains an unexpected entry" >&2
+              exit 1
+            fi
+            raw_entry_count="$(awk '$0 ~ /(^|\/)scenario\/raw\/(metrics|sample)-[1-9][0-9]*\.json$/ { count++ } END { print count+0 }' "${entries_file}")"
+            [ "${raw_entry_count}" -eq "$((baseline_sample_count * 2))" ] || { echo "Baseline artifact ${run_id} has an unexpected raw sample set" >&2; exit 1; }
+            uncompressed_size="$(zipinfo -t "${archive}" | node scripts/performance-trends.mjs zipinfo-total)"
+            [[ "${uncompressed_size}" =~ ^[0-9]+$ ]] && [ "${uncompressed_size}" -le 104857600 ] || {
+              echo "Baseline artifact ${run_id} has invalid or oversized extracted bytes" >&2
+              exit 1
+            }
+            evidence_entries="$(awk '$0 ~ /(^|\/)scenario\/evidence\.json$/ { print }' "${entries_file}")"
+            if [ "$(printf '%s\n' "${evidence_entries}" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ]; then
+              rm -f "${archive}" "${entries_file}"
+              continue
+            fi
             baseline="${RUNNER_TEMP}/performance-baseline.json"
-            unzip -p "${archive}" "${evidence_entry}" > "${baseline}"
+            unzip -p "${archive}" "${evidence_entries}" > "${baseline}"
             baseline_sha="${head_sha}"
+            rm -f "${archive}" "${entries_file}"
             break
           done < "${candidates}"
           if [ -z "${baseline}" ]; then
@@ -143,6 +184,7 @@ jobs:
           fi
           echo "path=${baseline}" >> "${GITHUB_OUTPUT}"
           echo "git-sha=${baseline_sha}" >> "${GITHUB_OUTPUT}"
+          preserve_baseline=true
       - name: Run bounded sustained regression scenario
         id: scenario
         env:
@@ -151,6 +193,7 @@ jobs:
           SCENARIO_ID: ${{ matrix.scenario }}
         run: |
           set -euo pipefail
+          trap 'if [ -n "${BASELINE_PATH}" ]; then rm -f "${BASELINE_PATH}"; fi' EXIT
           output="${EVIDENCE_ROOT}/scenario"
           baseline_args=()
           if [ -n "${BASELINE_PATH}" ]; then
@@ -162,6 +205,153 @@ jobs:
             --output "${output}" \
             --git-sha "${GITHUB_SHA}" \
             "${baseline_args[@]}"
+          if [ -n "${BASELINE_PATH}" ]; then
+            cp "${BASELINE_PATH}" "${output}/baseline-evidence.json"
+          fi
+      - name: Assemble bounded verified trend history
+        id: trend-history
+        env:
+          ARTIFACT_NAME: nightly-performance-${{ matrix.scenario }}
+          GH_TOKEN: ${{ github.token }}
+          TREND_MAXIMUM_RUNS: '30'
+        run: |
+          set -euo pipefail
+          trend_input="${EVIDENCE_ROOT}/trend-input"
+          metadata_root="${RUNNER_TEMP}/performance-trend-metadata-${GITHUB_RUN_ID}-${{ matrix.scenario }}"
+          preserve_trend_input=false
+          cleanup_trend_history() {
+            rm -f "${RUNNER_TEMP}"/performance-trend-*.zip "${RUNNER_TEMP}"/performance-trend-*-entries.txt \
+              "${RUNNER_TEMP}/performance-trend-runs.json" "${RUNNER_TEMP}/performance-trend-candidates.tsv"
+            rm -rf "${metadata_root}"
+            if [ "${preserve_trend_input}" != true ]; then rm -rf "${trend_input}"; fi
+          }
+          trap cleanup_trend_history EXIT
+          mkdir -m 700 "${trend_input}" "${metadata_root}"
+          sample_count="$(SCENARIO_ID='${{ matrix.scenario }}' node -e "const c=require('./performance-scenarios.nightly.json'); const s=c.scenarios.find(v=>v.id===process.env.SCENARIO_ID); if(!s)process.exit(1); process.stdout.write(String(s.sampleCount));")"
+          cp "${EVIDENCE_ROOT}/scenario/evidence.json" "${trend_input}/${GITHUB_RUN_ID}-evidence.json"
+          cp "${EVIDENCE_ROOT}/scenario/scenario-run.json" "${trend_input}/${GITHUB_RUN_ID}-scenario-run.json"
+          for sample in $(seq 1 "${sample_count}"); do
+            cp "${EVIDENCE_ROOT}/scenario/raw/metrics-${sample}.json" "${trend_input}/${GITHUB_RUN_ID}-metrics-${sample}.json"
+            cp "${EVIDENCE_ROOT}/scenario/raw/sample-${sample}.json" "${trend_input}/${GITHUB_RUN_ID}-sample-${sample}.json"
+          done
+          if [ -f "${EVIDENCE_ROOT}/scenario/baseline-evidence.json" ]; then
+            cp "${EVIDENCE_ROOT}/scenario/baseline-evidence.json" "${trend_input}/${GITHUB_RUN_ID}-baseline.json"
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > "${metadata_root}/${GITHUB_RUN_ID}.json"
+
+          default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.default_branch')"
+          runs_json="${RUNNER_TEMP}/performance-trend-runs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/performance-nightly.yml/runs?branch=${default_branch}&status=success&per_page=50" > "${runs_json}"
+          candidates="${RUNNER_TEMP}/performance-trend-candidates.tsv"
+          RUNS_PATH="${runs_json}" WORKFLOW_PATH='.github/workflows/performance-nightly.yml' \
+            DEFAULT_BRANCH="${default_branch}" CURRENT_RUN_ID="${GITHUB_RUN_ID}" MAXIMUM_RUNS="${TREND_MAXIMUM_RUNS}" \
+            node --input-type=module -e \
+              "import fs from 'node:fs'; import { eligibleBaselineRuns } from './scripts/performance-scenario.mjs'; const runs=JSON.parse(fs.readFileSync(process.env.RUNS_PATH,'utf8')).workflow_runs; const eligible=eligibleBaselineRuns(runs,{workflowPath:process.env.WORKFLOW_PATH,defaultBranch:process.env.DEFAULT_BRANCH,currentRunId:Number(process.env.CURRENT_RUN_ID)}).slice(0,Number(process.env.MAXIMUM_RUNS)-1); for(const run of eligible) console.log(run.id+'\\t'+run.head_sha);" \
+              > "${candidates}"
+
+          while IFS=$'\t' read -r run_id head_sha; do
+            [ -n "${run_id}" ] || continue
+            artifact_rows="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
+              --jq '.artifacts[] | select(.name == $ENV.ARTIFACT_NAME and .expired == false) | [.id,.size_in_bytes] | @tsv')"
+            [ "$(printf '%s\n' "${artifact_rows}" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 ] || continue
+            IFS=$'\t' read -r artifact_id declared_size <<< "${artifact_rows}"
+            [[ "${declared_size}" =~ ^[0-9]+$ ]] && [ "${declared_size}" -le 52428800 ] || {
+              echo "Trend artifact ${run_id} has an invalid or oversized API size" >&2
+              exit 1
+            }
+            archive="${RUNNER_TEMP}/performance-trend-${run_id}.zip"
+            (ulimit -f 102400; gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${archive}")
+            archive_size="$(stat -f '%z' "${archive}" 2>/dev/null || stat -c '%s' "${archive}")"
+            [ "${archive_size}" -le "${declared_size}" ] && [ "${archive_size}" -le 52428800 ] || { echo "Trend artifact ${run_id} exceeds its declared or 50 MiB bound" >&2; exit 1; }
+            entries_file="${RUNNER_TEMP}/performance-trend-${run_id}-entries.txt"
+            unzip -Z1 "${archive}" > "${entries_file}"
+            entry_count="$(wc -l < "${entries_file}" | tr -d ' ')"
+            [[ "${entry_count}" =~ ^[0-9]+$ ]] && [ "${entry_count}" -le 512 ] || {
+              echo "Trend artifact ${run_id} has too many entries" >&2
+              exit 1
+            }
+            if awk '/(^\/)|(^|\/)\.\.(\/|$)|\\/ { found=1 } END { exit !found }' "${entries_file}"; then
+              echo "Trend artifact ${run_id} contains an unsafe entry" >&2
+              exit 1
+            fi
+            if awk '$0 !~ /(^|\/)(scenario|scenario\/raw|trend)\/$/ && $0 !~ /(^|\/)run-identity\.txt$/ && $0 !~ /(^|\/)scenario\/(evidence|scenario-run|baseline-evidence)\.json$/ && $0 !~ /(^|\/)scenario\/raw\/(metrics|sample)-[1-9][0-9]*\.json$/ && $0 !~ /(^|\/)trend\/(trend\.json|index\.html)$/ { found=1 } END { exit !found }' "${entries_file}"; then
+              echo "Trend artifact ${run_id} contains an unexpected entry" >&2
+              exit 1
+            fi
+            raw_entry_count="$(awk '$0 ~ /(^|\/)scenario\/raw\/(metrics|sample)-[1-9][0-9]*\.json$/ { count++ } END { print count+0 }' "${entries_file}")"
+            [ "${raw_entry_count}" -eq "$((sample_count * 2))" ] || { echo "Trend artifact ${run_id} has an unexpected raw sample set" >&2; exit 1; }
+            uncompressed_size="$(zipinfo -t "${archive}" | node scripts/performance-trends.mjs zipinfo-total)"
+            [[ "${uncompressed_size}" =~ ^[0-9]+$ ]] && [ "${uncompressed_size}" -le 104857600 ] || {
+              echo "Trend artifact ${run_id} has invalid or oversized extracted bytes" >&2
+              exit 1
+            }
+            evidence_entries="$(unzip -Z1 "${archive}" | awk '$0 ~ /(^|\/)scenario\/evidence\.json$/ { print }')"
+            run_entries="$(unzip -Z1 "${archive}" | awk '$0 ~ /(^|\/)scenario\/scenario-run\.json$/ { print }')"
+            if [ "$(printf '%s\n' "${evidence_entries}" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ] || \
+              [ "$(printf '%s\n' "${run_entries}" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ]; then
+              rm -f "${archive}"
+              continue
+            fi
+            unzip -p "${archive}" "${evidence_entries}" > "${trend_input}/${run_id}-evidence.json"
+            unzip -p "${archive}" "${run_entries}" > "${trend_input}/${run_id}-scenario-run.json"
+            complete=true
+            for sample in $(seq 1 "${sample_count}"); do
+              metrics_entries="$(awk -v sample="${sample}" '$0 ~ "(^|/)scenario/raw/metrics-" sample "\\.json$" { print }' "${entries_file}")"
+              sample_entries="$(awk -v sample="${sample}" '$0 ~ "(^|/)scenario/raw/sample-" sample "\\.json$" { print }' "${entries_file}")"
+              if [ "$(printf '%s\n' "${metrics_entries}" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ] || \
+                [ "$(printf '%s\n' "${sample_entries}" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ]; then
+                complete=false
+                break
+              fi
+              unzip -p "${archive}" "${metrics_entries}" > "${trend_input}/${run_id}-metrics-${sample}.json"
+              unzip -p "${archive}" "${sample_entries}" > "${trend_input}/${run_id}-sample-${sample}.json"
+            done
+            baseline_entries="$(awk '$0 ~ /(^|\/)scenario\/baseline-evidence\.json$/ { print }' "${entries_file}")"
+            baseline_required="$(RUN_FILE="${trend_input}/${run_id}-scenario-run.json" node -e "const r=require(process.env.RUN_FILE);process.stdout.write(r.baselineEvidenceSha256?'true':'false')")"
+            if [ "${baseline_required}" = true ]; then
+              if [ "$(printf '%s\n' "${baseline_entries}" | sed '/^$/d' | wc -l | tr -d ' ')" != 1 ]; then complete=false
+              else unzip -p "${archive}" "${baseline_entries}" > "${trend_input}/${run_id}-baseline.json"
+              fi
+            elif [ -n "${baseline_entries}" ]; then
+              complete=false
+            fi
+            if [ "${complete}" != true ]; then
+              rm -f "${trend_input}/${run_id}-"*.json "${archive}" "${entries_file}"
+              continue
+            fi
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${metadata_root}/${run_id}.json"
+            rm -f "${archive}" "${entries_file}"
+          done < "${candidates}"
+
+          TREND_INPUT="${trend_input}" METADATA_ROOT="${metadata_root}" CURRENT_RUN_ID="${GITHUB_RUN_ID}" ARTIFACT_NAME="${ARTIFACT_NAME}" \
+            node --input-type=module -e \
+              "import fs from 'node:fs'; import path from 'node:path'; const root=process.env.TREND_INPUT,metadata=process.env.METADATA_ROOT,current=Number(process.env.CURRENT_RUN_ID); const runs=fs.readdirSync(metadata).filter(n=>/^[0-9]+\\.json$/.test(n)).map(name=>JSON.parse(fs.readFileSync(path.join(metadata,name),'utf8'))).map(run=>{const scenarioRun=JSON.parse(fs.readFileSync(path.join(root,run.id+'-scenario-run.json'),'utf8'));return {source:run.id===current?'current':'retained',runId:run.id,runAttempt:run.run_attempt,runUrl:run.html_url,workflowPath:run.path,event:run.event,headBranch:run.head_branch,headSha:run.head_sha,status:run.id===current?'in_progress':run.status,conclusion:run.id===current?null:run.conclusion,createdAt:run.created_at,updatedAt:run.updated_at,artifactName:process.env.ARTIFACT_NAME,evidenceFile:run.id+'-evidence.json',scenarioRunFile:run.id+'-scenario-run.json',...(scenarioRun.baselineEvidenceSha256?{baselineFile:run.id+'-baseline.json'}:{}),rawSamples:Array.from({length:scenarioRun.sampleCount},(_,index)=>({name:'sample-'+(index+1)+'.json',metricsFile:run.id+'-metrics-'+(index+1)+'.json',sampleFile:run.id+'-sample-'+(index+1)+'.json'}))}}); fs.writeFileSync(path.join(root,'history.json'),JSON.stringify({schemaVersion:'tixkit-performance-trend-history-v1',runs},null,2)+'\\n',{flag:'wx',mode:0o600});"
+          echo "default-branch=${default_branch}" >> "${GITHUB_OUTPUT}"
+          echo "generated-at=$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "${GITHUB_OUTPUT}"
+          preserve_trend_input=true
+      - name: Generate checksum-verified cross-revision trend
+        id: trend
+        run: |
+          set -euo pipefail
+          trap 'rm -rf "${EVIDENCE_ROOT}/trend-input"' EXIT
+          node scripts/performance-trends.mjs \
+            --config performance-trends.trusted.json \
+            --scenario "${{ matrix.scenario }}" \
+            --history "${EVIDENCE_ROOT}/trend-input/history.json" \
+            --output "${EVIDENCE_ROOT}/trend" \
+            --failure-directory "${EVIDENCE_ROOT}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --default-branch "${{ steps.trend-history.outputs.default-branch }}" \
+            --generated-at "${{ steps.trend-history.outputs.generated-at }}"
+      - name: Remove transient historical inputs
+        if: always()
+        run: |
+          rm -rf "${EVIDENCE_ROOT}/trend-input" "${RUNNER_TEMP}"/performance-trend-metadata-*
+          rm -f "${RUNNER_TEMP}"/performance-baseline.json "${RUNNER_TEMP}"/performance-baseline-*.zip \
+            "${RUNNER_TEMP}"/performance-baseline-*-entries.txt "${RUNNER_TEMP}"/performance-runs.json \
+            "${RUNNER_TEMP}"/performance-candidates.tsv "${RUNNER_TEMP}"/performance-trend-*.zip \
+            "${RUNNER_TEMP}"/performance-trend-*-entries.txt "${RUNNER_TEMP}"/performance-trend-runs.json \
+            "${RUNNER_TEMP}"/performance-trend-candidates.tsv
       - name: Record bounded workflow failure evidence
         if: ${{ always() && job.status != 'success' }}
         env:
@@ -175,8 +365,10 @@ jobs:
           MIGRATION_OUTCOME: ${{ steps.migration.outcome }}
           BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
           SCENARIO_OUTCOME: ${{ steps.scenario.outcome }}
+          TREND_HISTORY_OUTCOME: ${{ steps.trend-history.outcome }}
+          TREND_OUTCOME: ${{ steps.trend.outcome }}
         run: |
-          node -e "const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path'); const phases=['invocation','checkout','setup','install','contracts','migration','baseline','scenario']; const phase=phases.find(p=>['failure','cancelled'].includes(process.env[p.toUpperCase()+'_OUTCOME']))||'workflow'; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const payload={schemaVersion:'tixkit-performance-scenario-failure-v1',status:'failed',scope:'workflow',scenarioId:process.env.SCENARIO_ID.slice(0,63),phase,failedAt:new Date().toISOString(),error:('workflow '+process.env.JOB_STATUS).slice(0,500)}; const value={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.EVIDENCE_ROOT,'workflow-failure.json'),JSON.stringify(value,null,2)+'\\n',{flag:'wx',mode:0o600});"
+          node -e "const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path'); const phases=['invocation','checkout','setup','install','contracts','migration','baseline','scenario','trend-history','trend']; const phase=phases.find(p=>['failure','cancelled'].includes(process.env[p.replace('-','_').toUpperCase()+'_OUTCOME']))||'workflow'; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const payload={schemaVersion:'tixkit-performance-scenario-failure-v1',status:'failed',scope:'workflow',scenarioId:process.env.SCENARIO_ID.slice(0,63),phase,failedAt:new Date().toISOString(),error:('workflow '+process.env.JOB_STATUS).slice(0,500)}; const value={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.EVIDENCE_ROOT,'workflow-failure.json'),JSON.stringify(value,null,2)+'\\n',{flag:'wx',mode:0o600});"
       - name: Upload raw, aggregate, and failure evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

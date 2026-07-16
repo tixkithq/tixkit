@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
-import { resolve, relative, sep } from 'node:path';
+import { dirname, resolve, relative, sep } from 'node:path';
 import { jsonSchemaViolations } from './public-distribution.mjs';
 
 export const REQUIRED_CAPABILITY_DECISIONS = Object.freeze([
@@ -32,7 +32,15 @@ function acceptedDecision(
     classification,
     lifecycle,
     availability: Object.freeze(availability),
-    extensionContract: Object.freeze({ status: 'versioned' }),
+    extensionContract: Object.freeze({
+      status: 'versioned',
+      version: 'tixkit.messaging-provider/v1',
+      packageBoundary: Object.freeze({
+        packageName: '@tixkit/domain',
+        exportPath: './messaging',
+        symbol: 'registerMessagingProviderExtension',
+      }),
+    }),
     publicBoundary: Object.freeze({ path, symbols: Object.freeze(symbols) }),
     obligations: Object.freeze({
       credentialCustody,
@@ -121,8 +129,8 @@ export const EXPECTED_CAPABILITY_DECISIONS = Object.freeze({
     'managed-intelligence',
     'planned',
     plannedManaged,
-    'packages/email-transport/src/index.ts',
-    ['ProviderRouteSelector'],
+    'packages/domain/src/messaging/provider-extensions.ts',
+    ['MessagingProviderRouteSelector'],
     'managed-cloud',
     'contract-metadata',
   ),
@@ -248,6 +256,76 @@ function exportedSymbolPattern(symbol) {
   );
 }
 
+function packageExportTarget(definition) {
+  if (typeof definition === 'string') return definition;
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return undefined;
+  return definition.import ?? definition.default;
+}
+
+function sourceEntrypoint(root, packagePath, target) {
+  if (typeof target !== 'string' || !/^\.\/dist\/.+\.js$/u.test(target)) return undefined;
+  const source = target.replace(/^\.\/dist\//u, './src/').replace(/\.js$/u, '.ts');
+  const packageRoot = resolve(root, packagePath);
+  const candidate = resolve(packageRoot, source);
+  const location = relative(packageRoot, candidate);
+  if (location === '..' || location.startsWith(`..${sep}`) || location.startsWith('/')) {
+    return undefined;
+  }
+  return candidate;
+}
+
+function moduleExportsSymbol(modulePath, symbol, packageRoot, visited = new Set()) {
+  if (visited.has(modulePath)) return false;
+  visited.add(modulePath);
+  const metadata = statSync(modulePath, { throwIfNoEntry: false });
+  if (!metadata?.isFile()) return false;
+  const source = readFileSync(modulePath, 'utf8');
+  if (exportedSymbolPattern(symbol).test(source)) return true;
+  for (const match of source.matchAll(/export\s*\*\s*from\s*['"]([^'"]+)['"]/gu)) {
+    const specifier = match[1];
+    if (!specifier?.startsWith('.')) continue;
+    const candidate = resolve(dirname(modulePath), specifier.replace(/\.js$/u, '.ts'));
+    const location = relative(packageRoot, candidate);
+    if (location === '..' || location.startsWith(`..${sep}`) || location.startsWith('/')) continue;
+    if (moduleExportsSymbol(candidate, symbol, packageRoot, visited)) return true;
+  }
+  return false;
+}
+
+export function publishedPackageBoundaryViolations(root, publicDistribution, boundary) {
+  const violations = [];
+  const releasePackages = publicDistribution.release.packages.flatMap(({ path }) => {
+    const manifestPath = resolve(root, path, 'package.json');
+    if (!statSync(manifestPath, { throwIfNoEntry: false })?.isFile()) return [];
+    const packageManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    return packageManifest.name === boundary.packageName ? [{ path, packageManifest }] : [];
+  });
+  if (releasePackages.length !== 1) {
+    return ['versioned extension contract package is not uniquely present in the public release'];
+  }
+  const publishedPackage = releasePackages[0];
+  if (publishedPackage.packageManifest.private === true) {
+    violations.push('versioned extension contract package must be publishable');
+  }
+  const target = packageExportTarget(
+    publishedPackage.packageManifest.exports?.[boundary.exportPath],
+  );
+  if (!target) {
+    violations.push(
+      `versioned extension contract package export is missing: ${boundary.exportPath}`,
+    );
+    return violations;
+  }
+  const packageRoot = resolve(root, publishedPackage.path);
+  const entrypoint = sourceEntrypoint(root, publishedPackage.path, target);
+  if (!entrypoint || !moduleExportsSymbol(entrypoint, boundary.symbol, packageRoot)) {
+    violations.push(
+      `versioned extension contract package entrypoint does not export: ${boundary.exportPath}#${boundary.symbol}`,
+    );
+  }
+  return violations;
+}
+
 function formatAvailability(availability) {
   return `Cloud: ${availability.cloud}; Platform API: ${availability.platformApi}; Self-Hosted: ${availability.selfHosted}`;
 }
@@ -272,7 +350,9 @@ function formatExtensionContract(capability) {
     return `Not yet versioned: ${capability.extensionContract.missingContractReason ?? 'Missing contract reason.'}`;
   }
   if (!capability.publicBoundary) return 'Versioned: missing public boundary';
-  return `Versioned: \`${capability.publicBoundary.path}#${capability.publicBoundary.symbols.join(',')}\``;
+  const published = capability.extensionContract.packageBoundary;
+  const packageExport = `${published.packageName}${published.exportPath.slice(1)}`;
+  return `Versioned: \`${capability.extensionContract.version}\` via \`${packageExport}#${published.symbol}\`; implementation: \`${capability.publicBoundary.path}#${capability.publicBoundary.symbols.join(',')}\``;
 }
 
 function normalizeDocumentation(documentation) {
@@ -306,6 +386,14 @@ function conditionalSchemaViolations(registry) {
         violations.push(
           `${path}.extensionContract.missingContractReason is forbidden by schema when extensionContract.status is versioned`,
         );
+      if (!capability.extensionContract.version)
+        violations.push(
+          `${path}.extensionContract.version is required by schema when extensionContract.status is versioned`,
+        );
+      if (!capability.extensionContract.packageBoundary)
+        violations.push(
+          `${path}.extensionContract.packageBoundary is required by schema when extensionContract.status is versioned`,
+        );
       continue;
     }
     if (status !== 'not-yet-versioned') continue;
@@ -316,6 +404,14 @@ function conditionalSchemaViolations(registry) {
     if (!capability.extensionContract.missingContractReason?.trim())
       violations.push(
         `${path}.extensionContract.missingContractReason is required by schema when extensionContract.status is not-yet-versioned`,
+      );
+    if (capability.extensionContract.version !== undefined)
+      violations.push(
+        `${path}.extensionContract.version is forbidden by schema when extensionContract.status is not-yet-versioned`,
+      );
+    if (capability.extensionContract.packageBoundary !== undefined)
+      violations.push(
+        `${path}.extensionContract.packageBoundary is forbidden by schema when extensionContract.status is not-yet-versioned`,
       );
     if (capability.lifecycle !== 'planned')
       violations.push(
@@ -414,6 +510,14 @@ export function capabilityRegistryViolations(registry, root, publicDistribution)
     const contractStatus = capability.extensionContract.status;
     const boundary = capability.publicBoundary;
     if (contractStatus === 'versioned') {
+      const publishedBoundary = capability.extensionContract.packageBoundary;
+      if (publishedBoundary)
+        for (const violation of publishedPackageBoundaryViolations(
+          root,
+          publicDistribution,
+          publishedBoundary,
+        ))
+          violations.push(`${capability.id}: ${violation}`);
       if (!boundary) {
         violations.push(
           `${capability.id}: versioned extension contract requires a public boundary`,

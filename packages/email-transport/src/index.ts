@@ -1,5 +1,16 @@
 import type { EmailTransport, SendEmailInput, SendEmailResult } from '@tixkit/domain';
-import type { SmsTransport, SendSmsInput, SendSmsResult } from '@tixkit/domain/messaging';
+import {
+  createEmailProviderTransport,
+  createSmsProviderTransport,
+  discoverMessagingProviderExtensions,
+  MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
+  registerMessagingProviderExtension,
+  type MessagingProviderRoute,
+  type MessagingProviderRouteSelector,
+  type SmsTransport,
+  type SendSmsInput,
+  type SendSmsResult,
+} from '@tixkit/domain/messaging';
 import {
   PlivoMessagingClient,
   ProviderOperationError,
@@ -9,6 +20,18 @@ import {
   VonageMessagingClient,
 } from '@tixkit/provider-clients';
 import { ulid } from 'ulid';
+
+export {
+  discoverMessagingProviderExtensions,
+  DuplicateMessagingProviderExtensionError,
+  MessagingProviderExtensionRegistry,
+  registerMessagingProviderExtension,
+} from '@tixkit/domain/messaging';
+export type {
+  EmailProviderExtensionContext,
+  MessagingProviderExtension,
+  SmsProviderExtensionContext,
+} from '@tixkit/domain/messaging';
 
 export class UnsupportedProviderRouteError extends Error {
   constructor(
@@ -25,6 +48,7 @@ export class UnsupportedProviderRouteError extends Error {
  * Records all sends without making network calls.
  */
 export class CaptureEmailTransport implements EmailTransport {
+  providerName = 'capture';
   public sent: SendEmailInput[] = [];
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
@@ -53,6 +77,7 @@ export class CaptureEmailTransport implements EmailTransport {
 }
 
 export class CaptureSmsTransport implements SmsTransport {
+  providerName = 'capture';
   public sent: SendSmsInput[] = [];
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
@@ -435,6 +460,46 @@ function attachmentContentBase64(content: string | Uint8Array, contentEncoding?:
   return Buffer.from(content).toString('base64');
 }
 
+function builtInDescriptor(
+  providerType: string,
+  displayName: string,
+  channels: Array<'email' | 'sms'>,
+) {
+  return {
+    contractVersion: MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
+    providerType,
+    displayName,
+    channels,
+    operations: ['send'] as const,
+  };
+}
+
+registerMessagingProviderExtension({
+  descriptor: builtInDescriptor('capture', 'Capture', ['email', 'sms']),
+  createEmail: () => new CaptureEmailTransport(),
+  createSms: () => new CaptureSmsTransport(),
+});
+registerMessagingProviderExtension({
+  descriptor: builtInDescriptor('resend', 'Resend', ['email']),
+  createEmail: ({ credentialsRef }) => new ResendEmailTransport(credentialsRef),
+});
+registerMessagingProviderExtension({
+  descriptor: builtInDescriptor('telnyx', 'Telnyx', ['sms']),
+  createSms: ({ credentialsRef }) => new TelnyxSmsTransport(credentialsRef),
+});
+registerMessagingProviderExtension({
+  descriptor: builtInDescriptor('twilio', 'Twilio', ['sms']),
+  createSms: () => new TwilioSmsTransport(),
+});
+registerMessagingProviderExtension({
+  descriptor: builtInDescriptor('vonage', 'Vonage', ['sms']),
+  createSms: () => new VonageSmsTransport(),
+});
+registerMessagingProviderExtension({
+  descriptor: builtInDescriptor('plivo', 'Plivo', ['sms']),
+  createSms: () => new PlivoSmsTransport(),
+});
+
 /**
  * Build an email transport for a configured provider route.
  * Explicit provider routes fail closed when no public adapter exists. Capture is
@@ -445,20 +510,23 @@ export function buildEmailTransport(
   credentialsRef: string,
   senderDomain?: string,
 ): EmailTransport & { providerName?: string } {
-  void senderDomain;
   if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
-  switch (providerType) {
-    case 'resend':
-      return new ResendEmailTransport(credentialsRef);
-    case 'opencore_email_sdk':
-      throw new UnsupportedProviderRouteError('email', providerType);
-    case 'smtp':
-      throw new UnsupportedProviderRouteError('email', providerType);
-    case 'capture':
-      return new CaptureEmailTransport();
-    default:
-      throw new UnsupportedProviderRouteError('email', providerType);
-  }
+  const transport = createEmailProviderTransport(providerType, {
+    credentialsRef,
+    senderDomain,
+  });
+  if (!transport) throw new UnsupportedProviderRouteError('email', providerType);
+  return transport;
+}
+
+export function buildSmsTransport(
+  providerType: string,
+  credentialsRef: string,
+): SmsTransport & { providerName?: string } {
+  if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureSmsTransport();
+  const transport = createSmsProviderTransport(providerType, { credentialsRef });
+  if (!transport) throw new UnsupportedProviderRouteError('sms', providerType);
+  return transport;
 }
 
 /**
@@ -480,17 +548,8 @@ export function createDefaultEmailTransport(): EmailTransport & { providerName?:
  * Provider route selector. Chooses the appropriate transport based on
  * brand configuration, message category, and fallback rules.
  */
-export class ProviderRouteSelector {
-  constructor(
-    private routes: Array<{
-      id: string;
-      transport: EmailTransport;
-      priority: number;
-      isFallback: boolean;
-      allowedCategories: string[];
-      rateLimitPerHour?: number;
-    }>,
-  ) {}
+export class ProviderRouteSelector implements MessagingProviderRouteSelector<EmailTransport> {
+  constructor(private routes: Array<MessagingProviderRoute<EmailTransport>>) {}
 
   select(category: 'transactional' | 'bulk' | 'staff' | 'system'): EmailTransport | null {
     const eligible = this.routes.filter((r) => r.allowedCategories.includes(category));
@@ -538,7 +597,13 @@ export function validateProviderFields(
     smtp: ['attachments'],
   };
 
-  const caps = providerCapabilities[providerType] ?? [];
+  const caps =
+    providerCapabilities[providerType] ??
+    (discoverMessagingProviderExtensions('email').some(
+      (descriptor) => descriptor.providerType === providerType,
+    )
+      ? ['attachments', 'tags', 'metadata', 'headers']
+      : []);
 
   if (input.attachments && input.attachments.length > 0 && !caps.includes('attachments')) {
     unsupported.push('attachments');
