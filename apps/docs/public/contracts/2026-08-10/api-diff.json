@@ -1,0 +1,18 @@
+{
+  "from": "2026-08-09",
+  "to": "2026-08-10",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /public/rum",
+      "message": "Operation was added."
+    }
+  ]
+}
