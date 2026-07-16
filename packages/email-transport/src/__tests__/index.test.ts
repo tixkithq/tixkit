@@ -269,7 +269,7 @@ describe('ResendEmailTransport', () => {
       retryable: false,
       deliveryState: 'rejected',
       safeToFailover: true,
-      details: { status: 422, providerCode: 'validation_error' },
+      details: { status: 422, providerCode: undefined },
     });
     await expect(failure).rejects.not.toThrow('Invalid from address');
   });

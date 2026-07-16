@@ -34,7 +34,12 @@ Callers provide credentials, provider base URLs, explicit deadlines, and optiona
 
 ## Security
 
-Errors expose only bounded redacted response previews. Authorization material, secrets, payment tokens, email addresses, phone numbers, and unrestricted bodies must not leave this boundary.
+Redirects are rejected rather than followed with provider credentials or message bodies. Errors expose
+only bounded diagnostic shapes with provider-controlled values redacted; provider request identifiers
+are represented by stable SHA-256 correlation tokens. Authorization material, secrets, payment tokens,
+personal data, and unrestricted bodies must not leave this boundary. Ambiguous failures from
+side-effecting operations are non-retryable until an adapter has executable provider deduplication or
+reconciliation proof.
 
 ## Validation
 

@@ -118,8 +118,8 @@ describe('SMS transports', () => {
       expect(result.providerMessageId).toBe('telnyx_msg_1');
       expect(calls[0].url).toBe('https://api.telnyx.test/v2/messages');
       expect(JSON.parse(String(calls[0].init.body))).toMatchObject({
-        from: { phone_number: '+15550000001' },
-        to: [{ phone_number: '+15550000002' }],
+        from: '+15550000001',
+        to: '+15550000002',
         text: 'Tixkit update',
         type: 'SMS',
       });

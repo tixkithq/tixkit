@@ -1,15 +1,12 @@
+import { createHash } from 'node:crypto';
 import { SpanKind, SpanStatusCode, trace, type Span } from '@opentelemetry/api';
 
 const DEFAULT_DEADLINE_MS = 10_000;
 const DEFAULT_BODY_PREVIEW_BYTES = 1_024;
 const DEFAULT_RESPONSE_BYTES = 64 * 1_024;
 const RETRYABLE_SERVER_STATUSES = new Set([500, 502, 503, 504]);
-const SENSITIVE_KEY =
-  /(authorization|cookie|password|secret|token|api[_-]?key|client[_-]?secret|signature|email|phone|card|buyer|attendee|recipient|html|text|body|content)/iu;
-const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu;
-const PHONE = /(?<![A-Za-z0-9])\+?[0-9][0-9 ().-]{7,}[0-9](?![A-Za-z0-9])/gu;
-const AUTHORIZATION = /(bearer|basic)\s+[A-Za-z0-9._~+/=-]+/giu;
-const SECRET = /\b(?:sk|pk|rk|tk|whsec|telnyx|re)_[A-Za-z0-9._~+/=-]+\b/giu;
+const SAFE_DIAGNOSTIC_KEYS = new Set(['code', 'type', 'error_code']);
+const SAFE_DIAGNOSTIC_ENVELOPES = new Set(['error', 'errors']);
 const REDACTED = '[REDACTED]';
 
 export type ProviderFailureKind =
@@ -114,6 +111,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
 ): Promise<ProviderHttpResult<T>> {
   const startedAt = performance.now();
   const method = request.method.toUpperCase();
+  const sideEffecting = !['GET', 'HEAD', 'OPTIONS'].includes(method);
   const deadlineMs = positiveDeadline(request.deadlineMs);
   const maxResponseBytes = positiveResponseLimit(request.maxResponseBytes);
   const span = startProviderSpan(request.dependency, request.operation, method);
@@ -144,6 +142,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
         headers,
         body: request.body,
         signal: controller.signal,
+        redirect: 'error',
       });
     } catch (cause) {
       if (cause instanceof ProviderOperationError) throw cause;
@@ -152,17 +151,30 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
         : request.signal?.aborted
           ? 'cancelled'
           : 'transport';
-      throw operationError(request, kind, kind !== 'cancelled', 'unknown', false, {}, cause);
+      throw operationError(
+        request,
+        kind,
+        kind !== 'cancelled' && !sideEffecting,
+        'unknown',
+        false,
+        {},
+      );
     }
 
     const providerRequestId = extractProviderRequestId(response.headers, request.requestIdHeaders);
+    if (response.status >= 300 && response.status < 400) {
+      throw operationError(request, 'malformed-response', false, 'unknown', false, {
+        status: response.status,
+        providerRequestId,
+      });
+    }
     const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
     let rawBody: string;
     try {
       rawBody = await readBoundedBody(response, maxResponseBytes);
     } catch (cause) {
       if (timedOut) {
-        throw operationError(request, 'timeout', true, 'unknown', false, {}, cause);
+        throw operationError(request, 'timeout', !sideEffecting, 'unknown', false, {});
       }
       if (request.signal?.aborted) {
         throw operationError(request, 'cancelled', false, 'unknown', false, {}, cause);
@@ -185,7 +197,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
 
     if (!response.ok) {
       const kind = classifyStatus(response.status);
-      const retryable = kind === 'rate-limit' || kind === 'server';
+      const retryable = kind === 'rate-limit' || (kind === 'server' && !sideEffecting);
       const deliveryState = kind === 'validation' || kind === 'rate-limit' ? 'rejected' : 'unknown';
       throw operationError(request, kind, retryable, deliveryState, deliveryState === 'rejected', {
         status: response.status,
@@ -242,7 +254,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
     const normalized =
       error instanceof ProviderOperationError
         ? error
-        : operationError(request, 'transport', true, 'unknown', false, {}, error);
+        : operationError(request, 'transport', !sideEffecting, 'unknown', false, {});
     const durationMs = elapsed(startedAt);
     recordFailure(span, normalized, durationMs);
     emitTelemetry(request, {
@@ -321,13 +333,11 @@ function parseResponseBody(rawBody: string): unknown | undefined {
 }
 
 function extractProviderCode(body: unknown): string | undefined {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
-  const record = body as Record<string, unknown>;
-  for (const key of ['code', 'type', 'name', 'error_code']) {
-    const value = record[key];
-    if (typeof value === 'string' && value.length <= 128) return redactText(value);
-    if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
-  }
+  // Provider-controlled values can contain credentials or customer identifiers even
+  // when they appear under conventional diagnostic keys. Provider adapters may add
+  // typed, enumerated codes after proving the provider contract; the generic HTTP
+  // boundary never persists an untrusted value.
+  void body;
   return undefined;
 }
 
@@ -389,7 +399,7 @@ export function extractProviderRequestId(
   ];
   for (const name of new Set(candidates.map((candidate) => candidate.toLowerCase()))) {
     const value = headers.get(name)?.trim();
-    if (value && /^[A-Za-z0-9._:/-]{1,200}$/u.test(value)) return value;
+    if (value) return `sha256:${createHash('sha256').update(value).digest('hex')}`;
   }
   return undefined;
 }
@@ -400,37 +410,36 @@ export function sanitizeBodyPreview(rawBody: string, limit = DEFAULT_BODY_PREVIE
   }
   let safe: string;
   try {
-    safe = JSON.stringify(redactStructured(JSON.parse(rawBody) as unknown));
+    safe = JSON.stringify(allowlistedStructuredPreview(JSON.parse(rawBody) as unknown));
   } catch {
-    safe = redactText(rawBody);
+    safe = REDACTED;
   }
   const bytes = Buffer.from(safe, 'utf8');
   if (bytes.byteLength <= limit) return safe;
+  const ellipsis = Buffer.from('…', 'utf8');
   return `${bytes
-    .subarray(0, limit)
+    .subarray(0, limit - ellipsis.byteLength)
     .toString('utf8')
-    .replace(/\uFFFD$/u, '')}…`;
+    .replace(/\uFFFD+$/u, '')}…`;
 }
 
-function redactStructured(value: unknown, depth = 0): unknown {
-  if (depth > 8) return REDACTED;
-  if (Array.isArray(value)) return value.map((entry) => redactStructured(entry, depth + 1));
-  if (!value || typeof value !== 'object') {
-    return typeof value === 'string' ? redactText(value) : value;
+function allowlistedStructuredPreview(value: unknown, depth = 0): unknown {
+  if (depth > 4) return {};
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((entry) => allowlistedStructuredPreview(entry, depth + 1));
   }
+  if (!value || typeof value !== 'object') return {};
   const result: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    result[key] = SENSITIVE_KEY.test(key) ? REDACTED : redactStructured(entry, depth + 1);
+    if (SAFE_DIAGNOSTIC_KEYS.has(key)) {
+      if (typeof entry === 'string' || typeof entry === 'number') result[key] = REDACTED;
+      continue;
+    }
+    if (SAFE_DIAGNOSTIC_ENVELOPES.has(key)) {
+      result[key] = allowlistedStructuredPreview(entry, depth + 1);
+    }
   }
   return result;
-}
-
-function redactText(value: string): string {
-  return value
-    .replace(AUTHORIZATION, REDACTED)
-    .replace(SECRET, REDACTED)
-    .replace(EMAIL, REDACTED)
-    .replace(PHONE, REDACTED);
 }
 
 function startProviderSpan(dependency: string, operation: string, method: string): Span {
@@ -515,8 +524,8 @@ export class TelnyxMessagingClient {
       idempotency: { key: input.idempotencyKey },
       requestIdHeaders: ['x-telnyx-request-id'],
       body: JSON.stringify({
-        from: { phone_number: input.from },
-        to: [{ phone_number: input.to }],
+        from: input.from,
+        to: input.to,
         text: input.body,
         type: 'SMS',
         webhook_url: input.webhookUrl,
@@ -576,22 +585,24 @@ export class VonageMessagingClient {
   async sendSms(input: SmsMessageInput): Promise<ProviderMessageResult> {
     requireCredential(this.config.apiKey, 'vonage', 'send-sms');
     requireCredential(this.config.apiSecret, 'vonage', 'send-sms');
+    const form = new URLSearchParams({
+      api_key: this.config.apiKey,
+      api_secret: this.config.apiSecret,
+      from: input.from,
+      to: input.to,
+      text: input.body,
+      'client-ref': input.idempotencyKey,
+    });
+    if (input.webhookUrl) form.set('callback', input.webhookUrl);
     const result = await executeProviderHttp({
       ...this.runtime,
       dependency: 'vonage',
       operation: 'send-sms',
       method: 'POST',
       url: `${trimBaseUrl(this.config.baseUrl ?? 'https://rest.nexmo.com')}/sms/json`,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       idempotency: { key: input.idempotencyKey, header: 'X-Tixkit-Idempotency-Key' },
-      body: JSON.stringify({
-        api_key: this.config.apiKey,
-        api_secret: this.config.apiSecret,
-        from: input.from,
-        to: input.to,
-        text: input.body,
-        client_ref: input.idempotencyKey,
-      }),
+      body: form,
       parse: recordBody,
     });
     const messages = Array.isArray(result.data.messages) ? result.data.messages : [];

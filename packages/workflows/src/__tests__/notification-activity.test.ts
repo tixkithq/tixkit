@@ -660,7 +660,7 @@ describe('notification activity deliverability gating', () => {
     expect(dbState.emailDeliveries).toHaveLength(0);
   });
 
-  it('throws a safe retryable failure so Temporal owns provider retries', async () => {
+  it('fails terminally when a side-effecting provider response is ambiguous', async () => {
     vi.stubEnv('RESEND_API_KEY', 're_test_secret');
     const fetchMock = vi.fn(async () =>
       Response.json({ message: 'buyer@example.com upstream failure' }, { status: 503 }),
@@ -675,20 +675,20 @@ describe('notification activity deliverability gating', () => {
       verified: true,
     };
 
-    const failure = sendEmailActivity({
+    const result = await sendEmailActivity({
       jobId: 'emj_1',
       providerRouteId: 'epr_1',
       subject: 'Update',
       html: '<p>Update</p>',
     });
 
-    await expect(failure).rejects.toMatchObject({
-      kind: 'server',
-      retryable: true,
-      safeToFailover: false,
-      details: {},
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_SEND_FAILED',
+      message: 'resend.send-email failed: server (HTTP 503)',
+      retryable: false,
     });
-    await expect(failure).rejects.not.toThrow('buyer@example.com upstream failure');
+    expect(JSON.stringify(result)).not.toContain('buyer@example.com upstream failure');
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(dbState.emailDeliveries).toHaveLength(0);
   });
