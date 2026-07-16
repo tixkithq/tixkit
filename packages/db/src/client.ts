@@ -16,6 +16,13 @@ export type DbPoolConfig = {
 export type CreateDbOptions = {
   pool?: DbPoolConfig;
   log?: LogConfig;
+  /**
+   * Receives background PostgreSQL pool errors from idle clients. The pool
+   * removes those clients and remains reusable; attaching the listener avoids
+   * EventEmitter's process-terminating default while query callers continue to
+   * receive their own failures normally.
+   */
+  onPoolError?: (error: Error) => void;
 };
 
 function parseOptionalPositiveInteger(name: string, value: string | undefined): number | undefined {
@@ -142,20 +149,21 @@ export function createDb(dbUrl?: string, options: CreateDbOptions = {}): Kysely<
     });
   }
 
+  const pool = new PgPool({
+    connectionString: url,
+    ...(poolConfig.min !== undefined ? { min: poolConfig.min } : {}),
+    ...(poolConfig.max !== undefined ? { max: poolConfig.max } : {}),
+    ...(poolConfig.idleTimeoutMillis !== undefined
+      ? { idleTimeoutMillis: poolConfig.idleTimeoutMillis }
+      : {}),
+    ...(poolConfig.connectionTimeoutMillis !== undefined
+      ? { connectionTimeoutMillis: poolConfig.connectionTimeoutMillis }
+      : {}),
+  });
+  if (options.onPoolError) pool.on('error', options.onPoolError);
+
   return new Kysely<DB>({
-    dialect: new PostgresDialect({
-      pool: new PgPool({
-        connectionString: url,
-        ...(poolConfig.min !== undefined ? { min: poolConfig.min } : {}),
-        ...(poolConfig.max !== undefined ? { max: poolConfig.max } : {}),
-        ...(poolConfig.idleTimeoutMillis !== undefined
-          ? { idleTimeoutMillis: poolConfig.idleTimeoutMillis }
-          : {}),
-        ...(poolConfig.connectionTimeoutMillis !== undefined
-          ? { connectionTimeoutMillis: poolConfig.connectionTimeoutMillis }
-          : {}),
-      }),
-    }),
+    dialect: new PostgresDialect({ pool }),
     log: options.log,
   });
 }

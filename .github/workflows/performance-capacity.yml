@@ -35,6 +35,7 @@ jobs:
     services:
       database:
         image: ${{ matrix.profile == 'postgresql-trusted-host' && 'postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb' || 'mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209' }}
+        command: ${{ matrix.profile == 'mysql-trusted-host' && '--log-bin-trust-function-creators=1' || '' }}
         env:
           POSTGRES_USER: tixkit
           POSTGRES_PASSWORD: tixkit

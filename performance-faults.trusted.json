@@ -1,0 +1,73 @@
+{
+  "$schema": "./scripts/performance-fault.schema.json",
+  "schemaVersion": "tixkit-performance-fault-config-v1",
+  "claimScope": "trusted-single-host-database-dependency-fault",
+  "profiles": [
+    {
+      "id": "postgresql-trusted-host-database-loss",
+      "runnerLabel": "tixkit-epyc-trusted",
+      "database": {
+        "engine": "postgresql",
+        "image": "postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb"
+      },
+      "inventory": 64,
+      "faultAttempts": 64,
+      "authorizationPhrase": "I authorize controlled database service interruption on the dedicated trusted runner",
+      "timeoutSeconds": 300,
+      "markerTimeoutSeconds": 90,
+      "command": {
+        "executable": "bun",
+        "args": [
+          "vitest",
+          "run",
+          "src/__tests__/integration/load-harness.integration.test.ts",
+          "-t",
+          "reconciles exact reservation attempts after a controlled database dependency loss",
+          "--no-file-parallelism",
+          "--maxWorkers=1"
+        ],
+        "env": {
+          "FAULT_LOAD": "1",
+          "FAULT_CONTROL_DIRECTORY": "{controlDirectory}",
+          "FAULT_METRICS_PATH": "{metricsPath}",
+          "FAULT_CHECKOUT_INVENTORY": "{inventory}",
+          "FAULT_CHECKOUT_ATTEMPTS": "{faultAttempts}",
+          "FAULT_MARKER_TIMEOUT_MS": "{markerTimeoutMs}"
+        }
+      }
+    },
+    {
+      "id": "mysql-trusted-host-database-loss",
+      "runnerLabel": "tixkit-epyc-trusted",
+      "database": {
+        "engine": "mysql",
+        "image": "mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209"
+      },
+      "inventory": 64,
+      "faultAttempts": 64,
+      "authorizationPhrase": "I authorize controlled database service interruption on the dedicated trusted runner",
+      "timeoutSeconds": 300,
+      "markerTimeoutSeconds": 90,
+      "command": {
+        "executable": "bun",
+        "args": [
+          "vitest",
+          "run",
+          "src/__tests__/integration/load-harness.integration.test.ts",
+          "-t",
+          "reconciles exact reservation attempts after a controlled database dependency loss",
+          "--no-file-parallelism",
+          "--maxWorkers=1"
+        ],
+        "env": {
+          "FAULT_LOAD": "1",
+          "FAULT_CONTROL_DIRECTORY": "{controlDirectory}",
+          "FAULT_METRICS_PATH": "{metricsPath}",
+          "FAULT_CHECKOUT_INVENTORY": "{inventory}",
+          "FAULT_CHECKOUT_ATTEMPTS": "{faultAttempts}",
+          "FAULT_MARKER_TIMEOUT_MS": "{markerTimeoutMs}"
+        }
+      }
+    }
+  ]
+}

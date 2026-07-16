@@ -1,6 +1,7 @@
-import { expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import { expect, it, describe, beforeAll, afterAll, beforeEach } from 'vitest';
 import { performance } from 'node:perf_hooks';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createDb, type Database } from '@tixkit/db';
@@ -51,6 +52,7 @@ let attendeeRepo: AttendeeRepository;
 let orderRepo: OrderRepository;
 let app: FastifyInstance;
 let previousDbDriver: string | undefined;
+const backgroundPoolErrors: Error[] = [];
 
 const RUN_ID = ulid().slice(-10);
 const TENANT_ID = `tnt_load_${RUN_ID}`;
@@ -98,6 +100,12 @@ const BULK_OFFLINE_SYNC_SLO_MS = process.env.BULK_OFFLINE_SYNC_SLO_MS
 const INSERT_CHUNK_SIZE = 500;
 const PERFORMANCE_METRICS_PATH = process.env.PERFORMANCE_METRICS_PATH;
 const CAPACITY_METRICS_PATH = process.env.CAPACITY_METRICS_PATH;
+const FAULT_METRICS_PATH = process.env.FAULT_METRICS_PATH;
+const FAULT_LOAD = process.env.FAULT_LOAD === '1';
+const FAULT_CONTROL_DIRECTORY = process.env.FAULT_CONTROL_DIRECTORY;
+const FAULT_CHECKOUT_INVENTORY = Number.parseInt(process.env.FAULT_CHECKOUT_INVENTORY ?? '64', 10);
+const FAULT_CHECKOUT_ATTEMPTS = Number.parseInt(process.env.FAULT_CHECKOUT_ATTEMPTS ?? '64', 10);
+const FAULT_MARKER_TIMEOUT_MS = Number.parseInt(process.env.FAULT_MARKER_TIMEOUT_MS ?? '90000', 10);
 const CHECKOUT_CAPACITY = Number.parseInt(process.env.CAPACITY_CHECKOUT_INVENTORY ?? '25', 10);
 const CHECKOUT_CONCURRENCY = Number.parseInt(
   process.env.CAPACITY_CHECKOUT_CONCURRENCY ?? '120',
@@ -123,6 +131,144 @@ async function writeCapacityMetrics(metrics: Record<string, number>): Promise<vo
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, `${JSON.stringify(metrics, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
 }
+
+async function writeFaultProtocolFile(name: string, content = ''): Promise<void> {
+  if (!FAULT_CONTROL_DIRECTORY) throw new Error('FAULT_CONTROL_DIRECTORY is required');
+  const target = path.join(path.resolve(FAULT_CONTROL_DIRECTORY), name);
+  await writeFile(target, content, { flag: 'wx', mode: 0o600 });
+}
+
+async function waitForFaultProtocolFile(name: string): Promise<string> {
+  if (!FAULT_CONTROL_DIRECTORY) throw new Error('FAULT_CONTROL_DIRECTORY is required');
+  const target = path.join(path.resolve(FAULT_CONTROL_DIRECTORY), name);
+  const deadline = Date.now() + FAULT_MARKER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const stat = await lstat(target);
+      if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o777) !== 0o600) {
+        throw new Error(`${name} is not a private regular fault-protocol file`);
+      }
+      return await readFile(target, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for fault-protocol file ${name}`);
+}
+
+async function writeFaultMetrics(metrics: Record<string, unknown>): Promise<void> {
+  if (!FAULT_METRICS_PATH) throw new Error('FAULT_METRICS_PATH is required');
+  const target = path.resolve(FAULT_METRICS_PATH);
+  await writeFile(target, `${JSON.stringify(metrics)}\n`, { flag: 'wx', mode: 0o600 });
+}
+
+function classifyFaultOutcome(
+  outcome: PromiseSettledResult<unknown>,
+): 'success' | 'expectedInventoryDecline' | 'dependencyFailure' | 'unexpectedPlatformFailure' {
+  if (outcome.status === 'fulfilled') return 'success';
+  if (
+    outcome.reason instanceof InventoryExhaustedError &&
+    outcome.reason.details?.available === 0
+  ) {
+    return 'expectedInventoryDecline';
+  }
+  const pending: unknown[] = [outcome.reason];
+  const visited = new Set<unknown>();
+  for (let depth = 0; pending.length > 0 && depth < 16; depth += 1) {
+    const candidate = pending.shift();
+    if (!candidate || visited.has(candidate)) continue;
+    visited.add(candidate);
+    if (candidate instanceof AggregateError) pending.push(...candidate.errors.slice(0, 8));
+    if (typeof candidate !== 'object') continue;
+    const value = candidate as {
+      code?: unknown;
+      cause?: unknown;
+      errno?: unknown;
+      sqlState?: unknown;
+      sqlstate?: unknown;
+    };
+    const code = typeof value.code === 'string' ? value.code : undefined;
+    const errno =
+      typeof value.errno === 'string' || typeof value.errno === 'number'
+        ? String(value.errno)
+        : undefined;
+    const sqlStateValue = value.sqlState ?? value.sqlstate;
+    const sqlState = typeof sqlStateValue === 'string' ? sqlStateValue : undefined;
+    if (
+      (sqlState?.startsWith('08') ?? false) ||
+      (code?.startsWith('08') ?? false) ||
+      ['57P01', '57P02', '57P03'].includes(sqlState ?? '') ||
+      ['57P01', '57P02', '57P03'].includes(code ?? '') ||
+      [
+        'ER_SERVER_SHUTDOWN',
+        'PROTOCOL_CONNECTION_LOST',
+        'ER_SERVER_GONE_ERROR',
+        'ER_SERVER_LOST',
+        'ECONNREFUSED',
+        'ECONNRESET',
+        'ETIMEDOUT',
+      ].includes(code ?? '') ||
+      ['1053', '2006', '2013'].includes(errno ?? '')
+    ) {
+      return 'dependencyFailure';
+    }
+    if (value.cause) pending.push(value.cause);
+  }
+  return 'unexpectedPlatformFailure';
+}
+
+function identitySetSha256(ids: string[]): string {
+  return createHash('sha256')
+    .update([...ids].sort().join('\n'))
+    .digest('hex');
+}
+
+async function waitForFaultDatabaseRecovery(operation: () => Promise<unknown>): Promise<void> {
+  const deadline = Date.now() + FAULT_MARKER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const result = await measureSettled(operation);
+    if (result.outcome.status === 'fulfilled') return;
+    if (classifyFaultOutcome(result.outcome) !== 'dependencyFailure') {
+      throw result.outcome.reason;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('Database dependency remained unreachable after container recovery');
+}
+
+describe('database fault outcome classification', () => {
+  const rejected = (reason: unknown): PromiseRejectedResult => ({ status: 'rejected', reason });
+
+  it('classifies only bounded database and transport codes as dependency failures', () => {
+    const reasons: unknown[] = [
+      { code: '57P01' },
+      { sqlState: '08006' },
+      { code: 'ER_SERVER_SHUTDOWN' },
+      { errno: 2013 },
+      { cause: { code: 'ECONNRESET' } },
+      new AggregateError([{ code: 'ETIMEDOUT' }]),
+    ];
+    for (const reason of reasons) {
+      expect(classifyFaultOutcome(rejected(reason))).toBe('dependencyFailure');
+    }
+  });
+
+  it('keeps exact inventory exhaustion separate from dependency loss', () => {
+    expect(classifyFaultOutcome(rejected(new InventoryExhaustedError('pool', 1, 0)))).toBe(
+      'expectedInventoryDecline',
+    );
+  });
+
+  it('fails closed for unknown and provider-shaped errors', () => {
+    expect(classifyFaultOutcome(rejected({ code: 'UNKNOWN_DATABASE_ERROR' }))).toBe(
+      'unexpectedPlatformFailure',
+    );
+    expect(classifyFaultOutcome(rejected({ code: 'STRIPE_API_ERROR' }))).toBe(
+      'unexpectedPlatformFailure',
+    );
+  });
+});
 
 async function measureDbQueryCount<T>(operation: () => Promise<T>): Promise<{
   queryCount: number;
@@ -780,6 +926,9 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       log(event) {
         if (event.level === 'query') dbQueryCount += 1;
       },
+      onPoolError(error) {
+        backgroundPoolErrors.push(error);
+      },
     });
     inventoryService = new InventoryService(db);
     paymentEventRepo = new PaymentEventRepository(db);
@@ -1001,6 +1150,194 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     else expect(held).toBe(Math.min(CAPACITY, CONCURRENT_CLIENTS));
     expect(Number(pool.sold_count) + held).toBeLessThanOrEqual(CAPACITY);
   }, 60_000);
+
+  it.runIf(FAULT_LOAD)(
+    'reconciles exact reservation attempts after a controlled database dependency loss',
+    async () => {
+      expect(FAULT_METRICS_PATH).toBeTruthy();
+      expect(FAULT_CONTROL_DIRECTORY).toBeTruthy();
+      expect(Number.isSafeInteger(FAULT_CHECKOUT_INVENTORY) && FAULT_CHECKOUT_INVENTORY > 0).toBe(
+        true,
+      );
+      expect(Number.isSafeInteger(FAULT_CHECKOUT_ATTEMPTS) && FAULT_CHECKOUT_ATTEMPTS > 0).toBe(
+        true,
+      );
+      expect(FAULT_CHECKOUT_INVENTORY).toBe(FAULT_CHECKOUT_ATTEMPTS);
+      expect(Number.isSafeInteger(FAULT_MARKER_TIMEOUT_MS) && FAULT_MARKER_TIMEOUT_MS > 0).toBe(
+        true,
+      );
+
+      const poolId = await createPool(db, FAULT_CHECKOUT_INVENTORY);
+      const ticketTypeId = await createTicketType(db, poolId);
+      const sessionIds: string[] = [];
+      for (let index = 0; index < FAULT_CHECKOUT_ATTEMPTS; index += 1) {
+        // eslint-disable-next-line no-await-in-loop -- exact durable attempt identities must exist before fault injection.
+        sessionIds.push(await createCheckoutSession(db, ticketTypeId));
+      }
+
+      // Warm the selected database connection without mutating inventory or adding
+      // an identity outside the exact fault/replay set.
+      await db
+        .selectFrom('inventory_pools')
+        .select('id')
+        .where('id', '=', poolId)
+        .executeTakeFirstOrThrow();
+      backgroundPoolErrors.length = 0;
+      await writeFaultProtocolFile('fault-ready');
+      const protocolToken = await waitForFaultProtocolFile('fault-injected');
+      if (!/^[a-f0-9]{64}$/.test(protocolToken)) {
+        throw new Error('fault-injected has an invalid protocol token');
+      }
+
+      const faultResults = await Promise.all(
+        sessionIds.map((checkoutSessionId) =>
+          measureSettled(() =>
+            inventoryService.reserveCart({
+              items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
+              checkoutSessionId,
+            }),
+          ),
+        ),
+      );
+      const faultClassifications = faultResults.map(({ outcome }) => classifyFaultOutcome(outcome));
+      const faultCount = (classification: (typeof faultClassifications)[number]) =>
+        faultClassifications.filter((value) => value === classification).length;
+      const unexpectedBackgroundPoolErrors = backgroundPoolErrors.filter(
+        (error) =>
+          classifyFaultOutcome({ status: 'rejected', reason: error }) !== 'dependencyFailure',
+      );
+      if (unexpectedBackgroundPoolErrors.length > 0) {
+        throw new Error('Database pool emitted an unrecognized background failure during outage');
+      }
+
+      await writeFaultProtocolFile('fault-observed', protocolToken);
+      const recoveredToken = await waitForFaultProtocolFile('database-recovered');
+      if (recoveredToken !== protocolToken) {
+        throw new Error('database-recovered does not match the active fault protocol');
+      }
+      await waitForFaultDatabaseRecovery(() =>
+        db
+          .selectFrom('inventory_pools')
+          .select('id')
+          .where('id', '=', poolId)
+          .executeTakeFirstOrThrow(),
+      );
+
+      const preReplayHolds = await db
+        .selectFrom('checkout_holds')
+        .select(['id', 'checkout_session_id', 'status'])
+        .where('ticket_type_id', '=', ticketTypeId)
+        .execute();
+      const preReplayActiveHolds = preReplayHolds.length;
+
+      const replayResults = await Promise.all(
+        sessionIds.map((checkoutSessionId) =>
+          measureSettled(() =>
+            inventoryService.reserveCart({
+              items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
+              checkoutSessionId,
+            }),
+          ),
+        ),
+      );
+      const replayClassifications = replayResults.map(({ outcome }) =>
+        classifyFaultOutcome(outcome),
+      );
+      const replayCount = (classification: (typeof replayClassifications)[number]) =>
+        replayClassifications.filter((value) => value === classification).length;
+
+      const holdRows = await db
+        .selectFrom('checkout_holds')
+        .select(['checkout_session_id', 'quantity', 'status'])
+        .where('ticket_type_id', '=', ticketTypeId)
+        .execute();
+      const activeHoldRows = holdRows.filter((hold) => hold.status === 'active');
+      const activeHolds = activeHoldRows.reduce((total, hold) => total + Number(hold.quantity), 0);
+      const holdCountsBySession = new Map<string, number>();
+      for (const hold of activeHoldRows) {
+        const sessionId = String(hold.checkout_session_id);
+        holdCountsBySession.set(sessionId, (holdCountsBySession.get(sessionId) ?? 0) + 1);
+      }
+      const uniqueActiveSessions = holdCountsBySession.size;
+      const expectedSessionIds = new Set(sessionIds);
+      const allHoldCountsBySession = new Map<string, number>();
+      for (const hold of holdRows) {
+        const sessionId = String(hold.checkout_session_id);
+        allHoldCountsBySession.set(sessionId, (allHoldCountsBySession.get(sessionId) ?? 0) + 1);
+      }
+      const duplicateActiveSessions = [...allHoldCountsBySession.values()].filter(
+        (count) => count > 1,
+      ).length;
+      const partialStatusCount =
+        sessionIds.filter((sessionId) => (holdCountsBySession.get(sessionId) ?? 0) !== 1).length +
+        holdRows.filter((hold) => hold.status !== 'active').length;
+      const knownStatuses = new Set(['active', 'converted', 'released', 'expired']);
+      const unknownStatusCount = holdRows.filter(
+        (hold) =>
+          !knownStatuses.has(String(hold.status)) ||
+          !expectedSessionIds.has(String(hold.checkout_session_id)),
+      ).length;
+      const pool = await db
+        .selectFrom('inventory_pools')
+        .select(['sold_count', 'total_capacity'])
+        .where('id', '=', poolId)
+        .executeTakeFirstOrThrow();
+      const soldCount = Number(pool.sold_count);
+
+      const originalSha256 = identitySetSha256(sessionIds);
+      const replayIdentities = [...sessionIds];
+      const replaySha256 = identitySetSha256(replayIdentities);
+      const metrics = {
+        providerScope: 'not-exercised',
+        faultPhase: {
+          attempts: FAULT_CHECKOUT_ATTEMPTS,
+          successes: faultCount('success'),
+          expectedInventoryDeclines: faultCount('expectedInventoryDecline'),
+          dependencyFailures: faultCount('dependencyFailure'),
+          providerFailures: 0,
+          unexpectedPlatformFailures: faultCount('unexpectedPlatformFailure'),
+        },
+        replayPhase: {
+          attempts: FAULT_CHECKOUT_ATTEMPTS,
+          successes: replayCount('success'),
+          expectedInventoryDeclines: replayCount('expectedInventoryDecline'),
+          dependencyFailures: replayCount('dependencyFailure'),
+          providerFailures: 0,
+          unexpectedPlatformFailures: replayCount('unexpectedPlatformFailure'),
+        },
+        reconciliation: {
+          preReplayActiveHolds,
+          totalCapacity: Number(pool.total_capacity),
+          activeHeldQuantity: activeHolds,
+          uniqueSessions: uniqueActiveSessions,
+          duplicateIdentities: duplicateActiveSessions,
+          partialStatusCount,
+          unknownStatusCount,
+          soldCount,
+          oversold: soldCount + activeHolds > Number(pool.total_capacity),
+        },
+        identitySets: { originalSha256, replaySha256, identical: originalSha256 === replaySha256 },
+      };
+      await writeFaultMetrics(metrics);
+
+      expect(metrics.faultPhase.successes).toBe(0);
+      expect(metrics.faultPhase.expectedInventoryDeclines).toBe(0);
+      expect(metrics.faultPhase.unexpectedPlatformFailures).toBe(0);
+      expect(metrics.faultPhase.dependencyFailures).toBe(FAULT_CHECKOUT_ATTEMPTS);
+      expect(preReplayActiveHolds).toBe(0);
+      expect(metrics.replayPhase.successes).toBe(FAULT_CHECKOUT_ATTEMPTS);
+      expect(metrics.replayPhase.dependencyFailures).toBe(0);
+      expect(metrics.replayPhase.unexpectedPlatformFailures).toBe(0);
+      expect(activeHolds).toBe(FAULT_CHECKOUT_INVENTORY);
+      expect(uniqueActiveSessions).toBe(FAULT_CHECKOUT_ATTEMPTS);
+      expect(duplicateActiveSessions).toBe(0);
+      expect(partialStatusCount).toBe(0);
+      expect(unknownStatusCount).toBe(0);
+      expect(originalSha256).toBe(replaySha256);
+      expect(soldCount + activeHolds).toBeLessThanOrEqual(FAULT_CHECKOUT_INVENTORY);
+    },
+    240_000,
+  );
 
   it('webhook burst: concurrent deliveries for the same Stripe event dedupe to a single stored and processed row', async () => {
     const BURST = 50;

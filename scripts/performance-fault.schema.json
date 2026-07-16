@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tixkit.com/performance/fault-v1.json",
+  "title": "Tixkit trusted-host database dependency fault characterization",
+  "oneOf": [{ "$ref": "#/$defs/config" }, { "$ref": "#/$defs/evidence" }],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "image"],
+      "properties": {
+        "engine": { "enum": ["postgresql", "mysql"] },
+        "image": { "type": "string", "pattern": "^[^@]+@sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable", "args", "env"],
+      "properties": {
+        "executable": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "env": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "FAULT_CONTROL_DIRECTORY",
+            "FAULT_LOAD",
+            "FAULT_METRICS_PATH",
+            "FAULT_CHECKOUT_INVENTORY",
+            "FAULT_CHECKOUT_ATTEMPTS",
+            "FAULT_MARKER_TIMEOUT_MS"
+          ],
+          "properties": {
+            "FAULT_CONTROL_DIRECTORY": { "type": "string" },
+            "FAULT_LOAD": { "const": "1" },
+            "FAULT_METRICS_PATH": { "type": "string" },
+            "FAULT_CHECKOUT_INVENTORY": { "type": "string" },
+            "FAULT_CHECKOUT_ATTEMPTS": { "type": "string" },
+            "FAULT_MARKER_TIMEOUT_MS": { "type": "string" }
+          }
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "runnerLabel",
+        "database",
+        "inventory",
+        "faultAttempts",
+        "authorizationPhrase",
+        "timeoutSeconds",
+        "markerTimeoutSeconds",
+        "command"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9](?:[-a-z0-9]{0,62})$" },
+        "runnerLabel": { "type": "string", "minLength": 1 },
+        "database": { "$ref": "#/$defs/database" },
+        "inventory": { "type": "integer", "minimum": 2, "maximum": 1000000 },
+        "faultAttempts": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "authorizationPhrase": {
+          "const": "I authorize controlled database service interruption on the dedicated trusted runner"
+        },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "markerTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 600 },
+        "command": { "$ref": "#/$defs/command" }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$schema", "schemaVersion", "claimScope", "profiles"],
+      "properties": {
+        "$schema": { "const": "./scripts/performance-fault.schema.json" },
+        "schemaVersion": { "const": "tixkit-performance-fault-config-v1" },
+        "claimScope": {
+          "const": "trusted-single-host-database-dependency-fault"
+        },
+        "profiles": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/profile" } }
+      }
+    },
+    "phaseMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempts",
+        "successes",
+        "expectedInventoryDeclines",
+        "dependencyFailures",
+        "providerFailures",
+        "unexpectedPlatformFailures"
+      ],
+      "properties": {
+        "attempts": { "type": "integer", "minimum": 1 },
+        "successes": { "type": "integer", "minimum": 0 },
+        "expectedInventoryDeclines": { "type": "integer", "minimum": 0 },
+        "dependencyFailures": { "type": "integer", "minimum": 0 },
+        "providerFailures": { "type": "integer", "minimum": 0 },
+        "unexpectedPlatformFailures": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerScope", "faultPhase", "replayPhase", "reconciliation", "identitySets"],
+      "properties": {
+        "providerScope": { "const": "not-exercised" },
+        "faultPhase": { "$ref": "#/$defs/phaseMetrics" },
+        "replayPhase": { "$ref": "#/$defs/phaseMetrics" },
+        "reconciliation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "preReplayActiveHolds",
+            "totalCapacity",
+            "activeHeldQuantity",
+            "uniqueSessions",
+            "duplicateIdentities",
+            "partialStatusCount",
+            "unknownStatusCount",
+            "soldCount",
+            "oversold"
+          ],
+          "properties": {
+            "preReplayActiveHolds": { "type": "integer", "minimum": 0 },
+            "totalCapacity": { "type": "integer", "minimum": 1 },
+            "activeHeldQuantity": { "type": "integer", "minimum": 0 },
+            "uniqueSessions": { "type": "integer", "minimum": 0 },
+            "duplicateIdentities": { "type": "integer", "minimum": 0 },
+            "partialStatusCount": { "type": "integer", "minimum": 0 },
+            "unknownStatusCount": { "type": "integer", "minimum": 0 },
+            "soldCount": { "type": "integer", "minimum": 0 },
+            "oversold": { "type": "boolean" }
+          }
+        },
+        "identitySets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["originalSha256", "replaySha256", "identical"],
+          "properties": {
+            "originalSha256": { "$ref": "#/$defs/sha256" },
+            "replaySha256": { "$ref": "#/$defs/sha256" },
+            "identical": { "const": true }
+          }
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gitSha",
+        "runnerLabel",
+        "profile",
+        "database",
+        "workloadSha256",
+        "configSha256"
+      ],
+      "properties": {
+        "gitSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+        "runnerLabel": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "database": { "$ref": "#/$defs/database" },
+        "workloadSha256": { "$ref": "#/$defs/sha256" },
+        "configSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "claimScope",
+        "denials",
+        "integrityModel",
+        "identity",
+        "metrics",
+        "rawSha256",
+        "faultProof",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "tixkit-performance-fault-evidence-v1" },
+        "claimScope": {
+          "const": "trusted-single-host-database-dependency-fault"
+        },
+        "denials": {
+          "const": [
+            "Production availability",
+            "Production fault tolerance",
+            "Cloud availability",
+            "Compact availability",
+            "provider resilience",
+            "Temporal resilience",
+            "SLA or RTO claim"
+          ]
+        },
+        "integrityModel": { "const": "checksums-not-signatures" },
+        "identity": { "$ref": "#/$defs/identity" },
+        "metrics": { "$ref": "#/$defs/metrics" },
+        "rawSha256": { "$ref": "#/$defs/sha256" },
+        "faultProof": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "databaseStopped",
+            "databaseRecovered",
+            "injectionAfterReady",
+            "restorationAfterFaultObserved",
+            "databaseStopDurationMs",
+            "databaseRecoveryDurationMs",
+            "recoveryThresholdSeconds",
+            "sameDatabaseContainer",
+            "exactAttemptReplay",
+            "durableReconciliation",
+            "noOversell"
+          ],
+          "properties": {
+            "databaseStopped": { "const": true },
+            "databaseRecovered": { "const": true },
+            "injectionAfterReady": { "const": true },
+            "restorationAfterFaultObserved": { "const": true },
+            "databaseStopDurationMs": { "type": "number", "exclusiveMinimum": 0 },
+            "databaseRecoveryDurationMs": { "type": "number", "exclusiveMinimum": 0 },
+            "recoveryThresholdSeconds": { "type": "integer", "minimum": 1, "maximum": 600 },
+            "sameDatabaseContainer": { "const": true },
+            "exactAttemptReplay": { "const": true },
+            "durableReconciliation": { "const": true },
+            "noOversell": { "const": true }
+          }
+        },
+        "evidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

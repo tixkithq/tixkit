@@ -495,6 +495,10 @@ test('weekly/manual trusted workflow is default-branch-only, serial, pinned, pri
   assert.match(workflow, /max-parallel: 1/);
   assert.match(workflow, /postgres:16-alpine@sha256:[a-f0-9]{64}/);
   assert.match(workflow, /mysql:8\.4@sha256:[a-f0-9]{64}/);
+  assert.match(
+    workflow,
+    /command: \$\{\{ matrix\.profile == 'mysql-trusted-host' && '--log-bin-trust-function-creators=1'/,
+  );
   assert.match(workflow, /mkdir -m 700/);
   assert.match(workflow, /if: always\(\)/);
   assert.match(workflow, /if-no-files-found: error/);
