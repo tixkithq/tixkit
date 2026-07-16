@@ -21,7 +21,13 @@ const productionNetwork = [
   'networkPolicy.databaseEgressCidrs[0]=198.51.100.0/24',
 ];
 const productionBuildRevision = 'global.buildRevision=release-2026.08.10';
-const productionRuntime = [...productionImages, ...productionNetwork, productionBuildRevision];
+const productionScanner = 'uploads.malwareScanner.host=clamav.internal.example';
+const productionRuntime = [
+  ...productionImages,
+  ...productionNetwork,
+  productionBuildRevision,
+  productionScanner,
+];
 const externalSecretKeys = [
   'DATABASE_URL',
   'REDIS_URL',
@@ -91,7 +97,7 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     rendered.filter((resource) => resource.kind === 'HorizontalPodAutoscaler').length,
     4,
   );
-  assert.equal(rendered.filter((resource) => resource.kind === 'NetworkPolicy').length, 6);
+  assert.equal(rendered.filter((resource) => resource.kind === 'NetworkPolicy').length, 7);
   const deployments = rendered.filter((resource) => resource.kind === 'Deployment');
   assert.equal(deployments.length, 4);
   for (const deployment of deployments) {
@@ -134,9 +140,20 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   assert.equal(config.data.AUTH_PROVIDER, 'clerk');
   assert.equal(config.data.ALLOW_INSECURE_LOCAL_ORIGINS, '0');
   assert.equal(config.data.TIXKIT_BUILD_REVISION, 'release-2026.08.10');
+  for (const scannerSetting of ['UPLOAD_MALWARE_SCANNER', 'CLAMAV_HOST', 'CLAMAV_PORT'])
+    assert.equal(config.data[scannerSetting], undefined);
   const checkout = deployments.find(
     (deployment) => deployment.metadata.labels['app.kubernetes.io/component'] === 'checkout',
   );
+  const api = deployments.find(
+    (deployment) => deployment.metadata.labels['app.kubernetes.io/component'] === 'api',
+  );
+  assert.deepEqual(api.spec.template.spec.containers[0].env, [
+    { name: 'PORT', value: '4000' },
+    { name: 'UPLOAD_MALWARE_SCANNER', value: 'clamav' },
+    { name: 'CLAMAV_HOST', value: 'clamav.internal.example' },
+    { name: 'CLAMAV_PORT', value: '3310' },
+  ]);
   assert.equal(checkout.spec.template.spec.containers[0].readinessProbe.httpGet.path, '/ready');
   assert.equal(checkout.spec.template.spec.containers[0].livenessProbe.httpGet.path, '/health');
   const checkoutContainer = checkout.spec.template.spec.containers[0];
@@ -286,6 +303,28 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     name: 'POD_NAME',
     valueFrom: { fieldRef: { fieldPath: 'metadata.name' } },
   });
+  assert.equal(
+    worker.spec.template.spec.containers[0].env.some((entry) =>
+      ['UPLOAD_MALWARE_SCANNER', 'CLAMAV_HOST', 'CLAMAV_PORT'].includes(entry.name),
+    ),
+    false,
+  );
+  for (const frontend of [checkout, admin]) {
+    assert.equal(
+      frontend.spec.template.spec.containers[0].env.some((entry) =>
+        ['UPLOAD_MALWARE_SCANNER', 'CLAMAV_HOST', 'CLAMAV_PORT'].includes(entry.name),
+      ),
+      false,
+    );
+  }
+  assert.equal(
+    rendered.some(
+      (resource) =>
+        resource.kind === 'Secret' &&
+        JSON.stringify(resource).match(/UPLOAD_MALWARE_SCANNER|CLAMAV_HOST|CLAMAV_PORT/u),
+    ),
+    false,
+  );
   const ingress = rendered.find(
     (resource) =>
       resource.kind === 'NetworkPolicy' && resource.metadata.name.endsWith('public-ingress'),
@@ -319,6 +358,88 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     serviceEgress.spec.egress.slice(-2).map((rule) => rule.to[0].ipBlock.cidr),
     ['192.0.2.0/24', '2001:db8::/32'],
   );
+  assert.equal(
+    serviceEgress.spec.egress.some((rule) =>
+      rule.ports?.some((port) => port.port === 3310),
+    ),
+    false,
+  );
+  const scannerEgress = rendered.find(
+    (resource) =>
+      resource.kind === 'NetworkPolicy' &&
+      resource.metadata.name.endsWith('malware-scanner-egress'),
+  );
+  assert.deepEqual(scannerEgress.spec.podSelector.matchLabels, {
+    'app.kubernetes.io/name': 'tixkit',
+    'app.kubernetes.io/instance': 'tixkit',
+    'app.kubernetes.io/component': 'api',
+  });
+  assert.deepEqual(
+    scannerEgress.spec.egress.map((rule) => rule.to[0].ipBlock.cidr),
+    ['192.0.2.0/24', '2001:db8::/32'],
+  );
+  assert.deepEqual(
+    scannerEgress.spec.egress.map((rule) => rule.ports),
+    [
+      [{ protocol: 'TCP', port: 3310 }],
+      [{ protocol: 'TCP', port: 3310 }],
+    ],
+  );
+});
+
+test('Production requires a bounded external ClamAV scanner contract', () => {
+  for (const [override, message] of [
+    ['uploads.malwareScanner.host=', /requires uploads\.malwareScanner\.host/u],
+    [
+      'uploads.malwareScanner.host=https://clamav.example.test',
+      /must be a bounded hostname or IP address/u,
+    ],
+    ['uploads.malwareScanner.host=user@clamav.example.test', /must be a bounded hostname/u],
+    ['uploads.malwareScanner.host=clamav internal.example', /must be a bounded hostname/u],
+    ['uploads.malwareScanner.host=localhost', /must not be localhost/u],
+    ['uploads.malwareScanner.host=foo.localhost', /must not be localhost/u],
+    ['uploads.malwareScanner.host=127.0.0.1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=::1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=::0001', /must not be localhost/u],
+    ['uploads.malwareScanner.host=0:0:0:0:0:0:0:1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=0:0:0:0:0::0:1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=0:0:0::0:0:0:1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=::0:0:0:0:0:1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=::0:1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=0:0:0:0:0:0:0:0', /must not be localhost/u],
+    ['uploads.malwareScanner.host=2130706433', /must be a bounded hostname/u],
+    ['uploads.malwareScanner.host=0x7f000001', /must not be localhost/u],
+    ['uploads.malwareScanner.host=0X7F000001', /must not be localhost/u],
+    ['uploads.malwareScanner.host=0x7f.0.0.1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=0X7F.1', /must not be localhost/u],
+    ['uploads.malwareScanner.host=999.999.999.999', /must be a bounded hostname/u],
+    ['uploads.malwareScanner.host=1:::2', /must be a bounded hostname/u],
+  ]) {
+    assert.throws(() => render(production, [override]), message);
+  }
+
+  for (const host of ['192.0.2.10', '2001:db8::10'])
+    assert.doesNotThrow(() =>
+      render(production, [
+        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'secrets.name=tixkit-production-secrets',
+        `uploads.malwareScanner.host=${host}`,
+      ]),
+    );
+
+  for (const mode of ['', 'eicar', 'unknown']) {
+    assert.throws(
+      () => render(production, [`uploads.malwareScanner.mode=${mode}`]),
+      /requires uploads\.malwareScanner\.mode=clamav/u,
+    );
+  }
+
+  for (const port of ['0', '65536', '3310.5', 'not-a-number']) {
+    assert.throws(
+      () => render(production, [`uploads.malwareScanner.port=${port}`]),
+      /uploads\.malwareScanner\.port must be an integer from 1 through 65535/u,
+    );
+  }
 });
 
 test('Chart refuses Kubernetes versions without stable minDomains scheduling', () => {
@@ -420,11 +541,46 @@ test('Production rejects availability settings that permit a single-instance out
 });
 
 test('Evaluation render declares its runtime profile and MinIO-compatible encryption policy', () => {
-  const config = resources(render(evaluation)).find((resource) => resource.kind === 'ConfigMap');
+  const rendered = resources(render(evaluation));
+  const config = rendered.find((resource) => resource.kind === 'ConfigMap');
   assert.equal(config.data.NODE_ENV, 'production');
   assert.equal(config.data.TIXKIT_DEPLOYMENT_PROFILE, 'evaluation');
   assert.equal(config.data.S3_SERVER_SIDE_ENCRYPTION, 'none');
   assert.equal(config.data.TIXKIT_BUILD_REVISION, '0.1.0');
+  const api = rendered.find(
+    (resource) =>
+      resource.kind === 'Deployment' &&
+      resource.metadata.labels['app.kubernetes.io/component'] === 'api',
+  );
+  assert.deepEqual(api.spec.template.spec.containers[0].env, [
+    { name: 'PORT', value: '4000' },
+    { name: 'UPLOAD_MALWARE_SCANNER', value: '' },
+    { name: 'CLAMAV_HOST', value: '' },
+    { name: 'CLAMAV_PORT', value: '3310' },
+  ]);
+  assert.equal(
+    rendered.some(
+      (resource) =>
+        resource.kind === 'NetworkPolicy' &&
+        resource.metadata.name.endsWith('malware-scanner-egress'),
+    ),
+    false,
+  );
+});
+
+test('Evaluation networking keeps core policies while its scanner remains disabled', () => {
+  const rendered = resources(
+    render(evaluation, [
+      'networkPolicy.enabled=true',
+      'networkPolicy.externalEgressCidrs[0]=192.0.2.0/24',
+    ]),
+  );
+  const policyNames = rendered
+    .filter((resource) => resource.kind === 'NetworkPolicy')
+    .map((resource) => resource.metadata.name);
+  assert.ok(policyNames.some((name) => name.endsWith('public-ingress')));
+  assert.ok(policyNames.some((name) => name.endsWith('service-egress')));
+  assert.equal(policyNames.some((name) => name.endsWith('malware-scanner-egress')), false);
 });
 
 test('Production-like Helm profiles reject missing or placeholder build revisions', () => {
@@ -500,6 +656,8 @@ test('Production Helm render requires release-provided image digests', () => {
       ...productionNetwork.flatMap((value) => ['--set', value]),
       '--set',
       productionBuildRevision,
+      '--set',
+      productionScanner,
     ],
     { cwd: root, encoding: 'utf8' },
   );
@@ -526,6 +684,8 @@ test('Production Helm render requires bounded operator-selected egress CIDRs', (
         productionBuildRevision,
         '--set',
         'networkPolicy.databaseEgressCidrs[0]=198.51.100.0/24',
+        '--set',
+        productionScanner,
         ...(cidr ? ['--set', `networkPolicy.externalEgressCidrs[0]=${cidr}`] : []),
       ],
       { cwd: root, encoding: 'utf8' },

@@ -44,6 +44,57 @@
 {{- fail "secrets.s3ServerSideEncryption must be none or AES256" -}}
 {{- end -}}
 {{- if eq .Values.deploymentProfile "production" -}}
+{{- if ne .Values.uploads.malwareScanner.mode "clamav" -}}
+{{- fail "production profile requires uploads.malwareScanner.mode=clamav" -}}
+{{- end -}}
+{{- $scannerHost := toString .Values.uploads.malwareScanner.host -}}
+{{- if empty $scannerHost -}}
+{{- fail "production profile requires uploads.malwareScanner.host" -}}
+{{- end -}}
+{{- if gt (len $scannerHost) 253 -}}
+{{- fail "uploads.malwareScanner.host must be at most 253 characters" -}}
+{{- end -}}
+{{- $hostnamePattern := "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$" -}}
+{{- $ipv4Pattern := "^([0-9]{1,3}\\.){3}[0-9]{1,3}$" -}}
+{{- $isIpv4 := regexMatch $ipv4Pattern $scannerHost -}}
+{{- if $isIpv4 -}}
+{{- range $octet := splitList "." $scannerHost -}}
+{{- if or (gt (int $octet) 255) (and (gt (len $octet) 1) (hasPrefix "0" $octet)) -}}
+{{- $isIpv4 = false -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $looksLikeIpv4 := regexMatch "^[0-9.]+$" $scannerHost -}}
+{{- $isHostname := and (regexMatch $hostnamePattern $scannerHost) (not $looksLikeIpv4) (not (regexMatch "^[0-9]+$" $scannerHost)) -}}
+{{- $ipv6Pattern := "^(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,7}:|([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2}|([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3}|([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4}|([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:((:[0-9A-Fa-f]{1,4}){1,6})|:((:[0-9A-Fa-f]{1,4}){1,7}|:))$" -}}
+{{- $isIpv6 := regexMatch $ipv6Pattern $scannerHost -}}
+{{- if not (or $isHostname $isIpv4 $isIpv6) -}}
+{{- fail "uploads.malwareScanner.host must be a bounded hostname or IP address without a URL, credentials, or whitespace" -}}
+{{- end -}}
+{{- $scannerHostLower := lower $scannerHost -}}
+{{- if or
+  (eq $scannerHostLower "localhost")
+  (hasSuffix ".localhost" $scannerHostLower)
+  (regexMatch "^127\\." $scannerHostLower)
+  (eq $scannerHostLower "2130706433")
+  (regexMatch "(^|\\.)0x[0-9a-f]+(\\.|$)" $scannerHostLower)
+  (eq $scannerHostLower "::1")
+  (eq $scannerHostLower "0.0.0.0")
+  (regexMatch "^[0:]+$" $scannerHostLower)
+  (and $isIpv6 (regexMatch "^[0:]+1$" $scannerHostLower))
+  (regexMatch "^::0{0,3}1$" $scannerHostLower)
+  (regexMatch "^(0{1,4}:){7}0{0,3}1$" $scannerHostLower)
+  (regexMatch "^(0{1,4}:){1,6}:0{0,3}1$" $scannerHostLower) -}}
+{{- fail "uploads.malwareScanner.host must not be localhost, loopback, or an unspecified address" -}}
+{{- end -}}
+{{- $scannerPortText := toString .Values.uploads.malwareScanner.port -}}
+{{- if not (regexMatch "^[0-9]+$" $scannerPortText) -}}
+{{- fail "uploads.malwareScanner.port must be an integer from 1 through 65535" -}}
+{{- end -}}
+{{- $scannerPort := int .Values.uploads.malwareScanner.port -}}
+{{- if or (lt $scannerPort 1) (gt $scannerPort 65535) -}}
+{{- fail "uploads.malwareScanner.port must be an integer from 1 through 65535" -}}
+{{- end -}}
 {{- if ne .Values.secrets.s3ServerSideEncryption "AES256" -}}
 {{- fail "production profile requires secrets.s3ServerSideEncryption=AES256" -}}
 {{- end -}}

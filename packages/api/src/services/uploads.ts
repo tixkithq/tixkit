@@ -221,13 +221,248 @@ const IMAGE_MAGIC_BYTES: Record<string, (buf: Buffer) => boolean> = {
     buf[5] === 0x61,
 };
 
-function validateImageBytes(contentType: string, buffer: Buffer): void {
+function validateImageSignature(contentType: string, buffer: Buffer): void {
   const checker = IMAGE_MAGIC_BYTES[contentType];
   if (!checker) return;
   if (!checker(buffer)) {
     throw new ValidationError(
       `Uploaded image content does not match declared content type: ${contentType}`,
     );
+  }
+}
+
+const IMAGE_FORMAT_BY_CONTENT_TYPE = {
+  'image/jpeg': 'jpeg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+} as const;
+const GENERIC_IMAGE_MAX_TOTAL_PIXELS = 40_000_000;
+const GENERIC_IMAGE_MAX_PAGES = 20;
+const PNG_CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) === 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  return crc >>> 0;
+});
+
+function pngCrc32(buffer: Buffer, start: number, end: number): number {
+  let crc = 0xffffffff;
+  for (let offset = start; offset < end; offset += 1)
+    crc = PNG_CRC32_TABLE[(crc ^ buffer[offset]!) & 0xff]! ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function assertPngStructure(buffer: Buffer): void {
+  let offset = 8;
+  let chunkIndex = 0;
+  let sawHeader = false;
+  let sawImageData = false;
+  let imageDataEnded = false;
+  let sawEnd = false;
+  while (offset < buffer.length) {
+    if (buffer.length - offset < 12)
+      throw new ValidationError('Uploaded PNG contains a truncated chunk');
+    const length = buffer.readUInt32BE(offset);
+    const typeStart = offset + 4;
+    const dataStart = typeStart + 4;
+    const dataEnd = dataStart + length;
+    const chunkEnd = dataEnd + 4;
+    if (
+      !Number.isSafeInteger(dataEnd) ||
+      dataEnd < dataStart ||
+      chunkEnd < dataEnd ||
+      chunkEnd > buffer.length
+    )
+      throw new ValidationError('Uploaded PNG chunk length is invalid');
+    const type = buffer.toString('ascii', typeStart, dataStart);
+    if (!/^[A-Za-z]{4}$/.test(type))
+      throw new ValidationError('Uploaded PNG chunk type is invalid');
+    const expectedCrc = buffer.readUInt32BE(dataEnd);
+    if (pngCrc32(buffer, typeStart, dataEnd) !== expectedCrc)
+      throw new ValidationError('Uploaded PNG chunk checksum is invalid');
+
+    if (chunkIndex === 0 && (type !== 'IHDR' || length !== 13))
+      throw new ValidationError('Uploaded PNG must begin with one 13-byte IHDR chunk');
+    if (type === 'IHDR') {
+      if (sawHeader || chunkIndex !== 0 || length !== 13)
+        throw new ValidationError('Uploaded PNG IHDR chunk is duplicated or invalid');
+      sawHeader = true;
+    } else if (!sawHeader) {
+      throw new ValidationError('Uploaded PNG is missing its IHDR chunk');
+    }
+    if (type === 'IDAT') {
+      if (imageDataEnded) throw new ValidationError('Uploaded PNG IDAT chunks are not consecutive');
+      sawImageData = true;
+    } else if (sawImageData && type !== 'IEND') {
+      imageDataEnded = true;
+    }
+    if (type === 'IEND') {
+      if (sawEnd || length !== 0 || !sawImageData || chunkEnd !== buffer.length)
+        throw new ValidationError('Uploaded PNG IEND chunk is premature, duplicated, or invalid');
+      sawEnd = true;
+    }
+    offset = chunkEnd;
+    chunkIndex += 1;
+  }
+  if (!sawHeader || !sawImageData || !sawEnd)
+    throw new ValidationError('Uploaded PNG is missing required structural chunks');
+}
+
+function assertJpegStructure(buffer: Buffer): void {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8)
+    throw new ValidationError(
+      'Uploaded image content does not match declared content type: image/jpeg',
+    );
+  let offset = 2;
+  let sawFrame = false;
+  let sawScan = false;
+  let inEntropy = false;
+  while (offset < buffer.length) {
+    if (!inEntropy && buffer[offset] !== 0xff)
+      throw new ValidationError('Uploaded JPEG contains malformed marker boundaries');
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const markerStart = offset;
+    while (offset < buffer.length && buffer[offset] === 0xff) offset += 1;
+    if (offset >= buffer.length)
+      throw new ValidationError('Uploaded image is truncated or contains trailing data');
+    const marker = buffer[offset]!;
+    offset += 1;
+    if (inEntropy) {
+      if (marker === 0x00 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      inEntropy = false;
+      offset = markerStart;
+      continue;
+    }
+    if (marker === 0xd9) {
+      if (!sawFrame || !sawScan || offset !== buffer.length)
+        throw new ValidationError('Uploaded image is truncated or contains trailing data');
+      return;
+    }
+    if (marker === 0xd8 || marker === 0x00 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7))
+      throw new ValidationError('Uploaded JPEG contains an invalid standalone marker');
+    if (offset + 2 > buffer.length)
+      throw new ValidationError('Uploaded image is truncated or contains trailing data');
+    const segmentLength = buffer.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > buffer.length)
+      throw new ValidationError('Uploaded JPEG contains an invalid marker length');
+    if (
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf)
+    )
+      sawFrame = true;
+    offset += segmentLength;
+    if (marker === 0xda) {
+      sawScan = true;
+      inEntropy = true;
+    }
+  }
+  throw new ValidationError('Uploaded image is truncated or contains trailing data');
+}
+
+function assertImageContainerEndsAtBufferBoundary(contentType: string, buffer: Buffer): void {
+  if (contentType === 'image/jpeg') {
+    assertJpegStructure(buffer);
+    return;
+  }
+  if (contentType === 'image/png') {
+    assertPngStructure(buffer);
+    return;
+  }
+  if (contentType === 'image/webp') {
+    const declaredLength = buffer.length >= 8 ? buffer.readUInt32LE(4) + 8 : 0;
+    if (declaredLength !== buffer.length)
+      throw new ValidationError('Uploaded image is truncated or contains trailing data');
+    return;
+  }
+  if (contentType === 'image/gif' && buffer.at(-1) !== 0x3b)
+    throw new ValidationError('Uploaded image is truncated or contains trailing data');
+}
+
+async function inspectFullyDecodedImage(
+  contentType: string,
+  buffer: Buffer,
+  policy: { maxPages: number; maxTotalPixels: number },
+): Promise<{ width: number; height: number; format: 'jpeg' | 'png' | 'webp' | 'gif' }> {
+  validateImageSignature(contentType, buffer);
+  assertImageContainerEndsAtBufferBoundary(contentType, buffer);
+  const expectedFormat =
+    IMAGE_FORMAT_BY_CONTENT_TYPE[contentType as keyof typeof IMAGE_FORMAT_BY_CONTENT_TYPE];
+  if (!expectedFormat) throw new ValidationError(`Unsupported image content type: ${contentType}`);
+
+  try {
+    const image = sharp(buffer, {
+      animated: true,
+      failOn: 'warning',
+      limitInputPixels: policy.maxTotalPixels,
+      sequentialRead: true,
+    });
+    const metadata = await image.metadata();
+    const pages = metadata.pages ?? 1;
+    const pageHeight = metadata.pageHeight ?? metadata.height;
+    if (
+      metadata.format !== expectedFormat ||
+      !metadata.width ||
+      !metadata.height ||
+      !pageHeight ||
+      pages < 1 ||
+      pages > policy.maxPages ||
+      !Number.isSafeInteger(metadata.width) ||
+      !Number.isSafeInteger(pageHeight) ||
+      metadata.width * pageHeight * pages > policy.maxTotalPixels
+    ) {
+      throw new ValidationError('Uploaded image dimensions, frames, or format are unsupported');
+    }
+
+    // Metadata parsing alone can accept signature-only or truncated inputs. Decoding every
+    // selected page proves the immutable original is renderable while preserving its bytes.
+    const decoded = await image.clone().raw().toBuffer({ resolveWithObject: true });
+    if (
+      decoded.data.length === 0 ||
+      decoded.info.width !== metadata.width ||
+      decoded.info.height !== pageHeight * pages
+    ) {
+      throw new ValidationError('Uploaded image could not be decoded completely');
+    }
+    return {
+      width: metadata.width,
+      height: pageHeight,
+      format: expectedFormat,
+    };
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    throw new ValidationError('Uploaded image is malformed or exceeds decode limits');
+  }
+}
+
+async function sanitizeGenericImage(contentType: string, buffer: Buffer): Promise<Buffer> {
+  try {
+    const input = sharp(buffer, {
+      animated: true,
+      failOn: 'warning',
+      limitInputPixels: GENERIC_IMAGE_MAX_TOTAL_PIXELS,
+      sequentialRead: true,
+    }).autoOrient();
+    switch (contentType) {
+      case 'image/jpeg':
+        return await input.jpeg().toBuffer();
+      case 'image/png':
+        return await input.png().toBuffer();
+      case 'image/webp':
+        return await input.webp().toBuffer();
+      case 'image/gif':
+        return await input.gif().toBuffer();
+      default:
+        throw new ValidationError(`Unsupported image content type: ${contentType}`);
+    }
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    throw new ValidationError('Uploaded image could not be sanitized safely');
   }
 }
 
@@ -239,33 +474,593 @@ const EVENT_MEDIA_PURPOSES: ReadonlySet<UploadPurpose> = new Set([
 ]);
 const EVENT_MEDIA_MAX_INPUT_PIXELS = 40_000_000;
 
-async function inspectEventMediaImage(buffer: Buffer): Promise<{
+async function inspectEventMediaImage(
+  contentType: string,
+  buffer: Buffer,
+): Promise<{
   width: number;
   height: number;
   format: 'jpeg' | 'png' | 'webp';
 }> {
-  let metadata;
-  try {
-    metadata = await sharp(buffer, {
-      failOn: 'warning',
-      limitInputPixels: EVENT_MEDIA_MAX_INPUT_PIXELS,
-      sequentialRead: true,
-    }).metadata();
-  } catch {
-    throw new ValidationError('Event media image is malformed or exceeds the pixel limit');
-  }
-  if (
-    !metadata.width ||
-    !metadata.height ||
-    metadata.width * metadata.height > EVENT_MEDIA_MAX_INPUT_PIXELS ||
-    (metadata.format !== 'jpeg' && metadata.format !== 'png' && metadata.format !== 'webp')
-  )
-    throw new ValidationError('Event media image dimensions or format are unsupported');
+  const metadata = await inspectFullyDecodedImage(contentType, buffer, {
+    maxPages: 1,
+    maxTotalPixels: EVENT_MEDIA_MAX_INPUT_PIXELS,
+  });
   return {
     width: metadata.width,
     height: metadata.height,
-    format: metadata.format,
+    format: metadata.format as 'jpeg' | 'png' | 'webp',
   };
+}
+
+const PDF_MAX_PAGES = 500;
+const PDF_MAX_OBJECTS = 10_000;
+const PDF_MAX_STREAMS = 2_000;
+const PDF_MAX_LEXICAL_TOKENS = 200_000;
+const PDF_FORBIDDEN_NAMES = new Set([
+  'A',
+  'AA',
+  'Action',
+  'OpenAction',
+  'AcroForm',
+  'Annots',
+  'Annot',
+  'GoTo',
+  'GoToR',
+  'GoToE',
+  'Named',
+  'Sound',
+  'Movie',
+  'Hide',
+  'ResetForm',
+  'SetOCGState',
+  'Rendition',
+  'Trans',
+  'GoTo3DView',
+  'FileAttachment',
+  'Screen',
+  '3D',
+  'JS',
+  'JavaScript',
+  'Launch',
+  'EmbeddedFile',
+  'EmbeddedFiles',
+  'Filespec',
+  'RichMedia',
+  'URI',
+  'SubmitForm',
+  'ImportData',
+  'XFA',
+  'Encrypt',
+]);
+
+type PdfLexicalToken = {
+  kind: 'name' | 'word' | 'dict-open' | 'dict-close' | 'array-open' | 'array-close' | 'opaque';
+  value: string;
+};
+
+function isPdfWhitespaceCode(code: number): boolean {
+  return code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d || code === 0x20;
+}
+
+function isPdfDelimiter(character: string): boolean {
+  return '()<>[]{}/%'.includes(character);
+}
+
+function tokenizePdfSemanticSource(source: string): PdfLexicalToken[] {
+  const tokens: PdfLexicalToken[] = [];
+  const add = (token: PdfLexicalToken): void => {
+    tokens.push(token);
+    if (tokens.length > PDF_MAX_LEXICAL_TOKENS)
+      throw new ValidationError('Checkout PDF lexical structure exceeds safety limits');
+  };
+  let offset = 0;
+  while (offset < source.length) {
+    const character = source[offset]!;
+    const code = source.charCodeAt(offset);
+    if (isPdfWhitespaceCode(code)) {
+      offset += 1;
+      continue;
+    }
+    if (character === '%') {
+      while (offset < source.length && source[offset] !== '\r' && source[offset] !== '\n')
+        offset += 1;
+      continue;
+    }
+    if (character === '(') {
+      let depth = 1;
+      offset += 1;
+      while (offset < source.length && depth > 0) {
+        const stringCharacter = source[offset]!;
+        if (stringCharacter === '\\') {
+          offset += 1;
+          if (source[offset] === '\r' && source[offset + 1] === '\n') offset += 2;
+          else if (offset < source.length) offset += 1;
+        } else {
+          if (stringCharacter === '(') depth += 1;
+          else if (stringCharacter === ')') depth -= 1;
+          offset += 1;
+        }
+      }
+      if (depth !== 0) throw new ValidationError('Checkout PDF contains an unterminated string');
+      add({ kind: 'opaque', value: 'literal-string' });
+      continue;
+    }
+    if (character === '<' && source[offset + 1] !== '<') {
+      offset += 1;
+      let closed = false;
+      while (offset < source.length) {
+        const hexCharacter = source[offset]!;
+        if (hexCharacter === '>') {
+          offset += 1;
+          closed = true;
+          break;
+        }
+        if (!isPdfWhitespaceCode(source.charCodeAt(offset)) && !/[0-9a-fA-F]/.test(hexCharacter))
+          throw new ValidationError('Checkout PDF contains an invalid hex string');
+        offset += 1;
+      }
+      if (!closed) throw new ValidationError('Checkout PDF contains an unterminated hex string');
+      add({ kind: 'opaque', value: 'hex-string' });
+      continue;
+    }
+    if (source.startsWith('<<', offset)) {
+      add({ kind: 'dict-open', value: '<<' });
+      offset += 2;
+      continue;
+    }
+    if (source.startsWith('>>', offset)) {
+      add({ kind: 'dict-close', value: '>>' });
+      offset += 2;
+      continue;
+    }
+    if (character === '[' || character === ']') {
+      add({ kind: character === '[' ? 'array-open' : 'array-close', value: character });
+      offset += 1;
+      continue;
+    }
+    if (character === '/') {
+      const start = ++offset;
+      while (
+        offset < source.length &&
+        !isPdfWhitespaceCode(source.charCodeAt(offset)) &&
+        !isPdfDelimiter(source[offset]!)
+      )
+        offset += 1;
+      const name = source.slice(start, offset);
+      if (/#[0-9a-fA-F]{2}/.test(name))
+        throw new ValidationError(
+          'Checkout PDF uses encoded names that cannot be inspected safely',
+        );
+      add({ kind: 'name', value: name });
+      continue;
+    }
+    if (isPdfDelimiter(character))
+      throw new ValidationError('Checkout PDF contains an unsupported lexical delimiter');
+    const start = offset;
+    while (
+      offset < source.length &&
+      !isPdfWhitespaceCode(source.charCodeAt(offset)) &&
+      !isPdfDelimiter(source[offset]!)
+    )
+      offset += 1;
+    add({ kind: 'word', value: source.slice(start, offset) });
+  }
+  return tokens;
+}
+
+function assertSinglePdfDictionary(tokens: PdfLexicalToken[], label: string): void {
+  if (tokens[0]?.kind !== 'dict-open')
+    throw new ValidationError(`Checkout PDF ${label} must be one dictionary`);
+  let depth = 0;
+  let arrayDepth = 0;
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind === 'dict-open') depth += 1;
+    else if (token.kind === 'dict-close') depth -= 1;
+    else if (token.kind === 'array-open') arrayDepth += 1;
+    else if (token.kind === 'array-close') arrayDepth -= 1;
+    if (depth < 0 || arrayDepth < 0 || (depth === 0 && index !== tokens.length - 1))
+      throw new ValidationError(`Checkout PDF ${label} dictionary boundary is ambiguous`);
+  }
+  if (depth !== 0 || arrayDepth !== 0 || tokens.at(-1)?.kind !== 'dict-close')
+    throw new ValidationError(`Checkout PDF ${label} dictionary is unbalanced`);
+}
+
+function topLevelPdfNameIndexes(tokens: PdfLexicalToken[], name: string): number[] {
+  const indexes: number[] = [];
+  let depth = 0;
+  let arrayDepth = 0;
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind === 'dict-open') depth += 1;
+    else if (token.kind === 'dict-close') depth -= 1;
+    else if (token.kind === 'array-open') arrayDepth += 1;
+    else if (token.kind === 'array-close') arrayDepth -= 1;
+    else if (depth === 1 && arrayDepth === 0 && token.kind === 'name' && token.value === name)
+      indexes.push(index);
+  }
+  return indexes;
+}
+
+function pdfObjectBody(objectSource: string, objectNumber: number, generation: number): string {
+  const header = `${objectNumber} ${generation} obj`;
+  const endObjectOffset = objectSource.lastIndexOf('endobj');
+  if (!objectSource.startsWith(header) || endObjectOffset < header.length)
+    throw new ValidationError('Checkout PDF object body cannot be resolved safely');
+  return objectSource.slice(header.length, endObjectOffset).trim();
+}
+
+function countMatches(value: string, pattern: RegExp): number {
+  return [...value.matchAll(pattern)].length;
+}
+
+type ClassicPdfXrefEntry = {
+  objectNumber: number;
+  offset: number;
+  generation: number;
+  inUse: boolean;
+};
+
+function readPdfLine(source: string, offset: number): { line: string; next: number } {
+  const ending = /\r\n|\r|\n/g;
+  ending.lastIndex = offset;
+  const match = ending.exec(source);
+  if (!match) throw new ValidationError('Checkout PDF structure is invalid or incomplete');
+  return { line: source.slice(offset, match.index), next: match.index + match[0].length };
+}
+
+function isPdfWhitespaceOnly(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code !== 0x09 && code !== 0x0a && code !== 0x0c && code !== 0x0d && code !== 0x20)
+      return false;
+  }
+  return true;
+}
+
+function assertPdfObjectStructure(
+  source: string,
+  entry: ClassicPdfXrefEntry,
+  boundary: number,
+): string {
+  const objectSource = source.slice(entry.offset, boundary);
+  const header = `${entry.objectNumber} ${entry.generation} obj`;
+  if (!objectSource.startsWith(header) || !/^[\t\r\n ]/.test(objectSource.slice(header.length)))
+    throw new ValidationError('Checkout PDF xref entry does not point to its declared object');
+  if (countMatches(objectSource, /\bendobj\b/g) !== 1)
+    throw new ValidationError('Checkout PDF object boundary is ambiguous');
+
+  const streamOpenings = [...objectSource.matchAll(/(?:\r\n|\r|\n)stream(?:\r\n|\r|\n)/g)];
+  const streamClosings = [...objectSource.matchAll(/(?:\r\n|\r|\n)endstream\b/g)];
+  if (streamOpenings.length === 0 && streamClosings.length === 0) {
+    const endObjectOffset = objectSource.indexOf('endobj');
+    if (!isPdfWhitespaceOnly(objectSource.slice(endObjectOffset + 'endobj'.length)))
+      throw new ValidationError('Checkout PDF object has trailing content outside its boundary');
+    return objectSource;
+  }
+  if (streamOpenings.length !== 1 || streamClosings.length !== 1)
+    throw new ValidationError('Checkout PDF stream structure is unsupported or ambiguous');
+
+  const opening = streamOpenings[0]!;
+  const dictionary = objectSource.slice(header.length, opening.index);
+  const dictionaryTokens = tokenizePdfSemanticSource(dictionary);
+  assertSinglePdfDictionary(dictionaryTokens, 'stream object');
+  const lengthIndexes = topLevelPdfNameIndexes(dictionaryTokens, 'Length');
+  const lengthIndex = lengthIndexes[0];
+  const lengthToken = lengthIndex === undefined ? undefined : dictionaryTokens[lengthIndex + 1];
+  if (
+    lengthIndexes.length !== 1 ||
+    lengthToken?.kind !== 'word' ||
+    !/^\d+$/.test(lengthToken.value) ||
+    (dictionaryTokens[lengthIndex! + 2]?.kind === 'word' &&
+      /^\d+$/.test(dictionaryTokens[lengthIndex! + 2]!.value) &&
+      dictionaryTokens[lengthIndex! + 3]?.kind === 'word' &&
+      dictionaryTokens[lengthIndex! + 3]?.value === 'R')
+  )
+    throw new ValidationError('Checkout PDF stream must have one direct length');
+  const streamLength = Number(lengthToken.value);
+  const dataStart = opening.index! + opening[0].length;
+  const dataEnd = dataStart + streamLength;
+  if (!Number.isSafeInteger(streamLength) || streamLength < 0 || dataEnd > objectSource.length)
+    throw new ValidationError('Checkout PDF stream length is invalid');
+  const afterData = objectSource.slice(dataEnd);
+  const closing = /^(?:\r\n|\r|\n)endstream\b/.exec(afterData);
+  if (
+    !closing ||
+    dataEnd + closing[0].length !== streamClosings[0]!.index! + streamClosings[0]![0].length
+  )
+    throw new ValidationError('Checkout PDF stream length does not match its boundary');
+  const afterStream = afterData.slice(closing[0].length);
+  const endObject = /^[\t\r\n ]*endobj\b/.exec(afterStream);
+  if (!endObject || !isPdfWhitespaceOnly(afterStream.slice(endObject[0].length)))
+    throw new ValidationError('Checkout PDF stream is not followed by its object boundary');
+  return `${objectSource.slice(0, dataStart)}${afterStream}`;
+}
+
+function validateCheckoutPdf(buffer: Buffer): void {
+  const source = buffer.toString('latin1');
+  if (!/^%PDF-1\.[0-7](?:\r\n|\r|\n)/.test(source))
+    throw new ValidationError('Checkout PDF has an invalid signature');
+  if (!/%%EOF[\t\r\n ]*$/.test(source))
+    throw new ValidationError('Checkout PDF is truncated or contains trailing data');
+  if (
+    countMatches(source, /^xref[\t\r ]*$/gm) !== 1 ||
+    countMatches(source, /^trailer[\t\r ]*$/gm) !== 1 ||
+    countMatches(source, /^startxref[\t\r ]*$/gm) !== 1 ||
+    countMatches(source, /^%%EOF[\t\r ]*$/gm) !== 1 ||
+    countMatches(source, /^%PDF-1\.[0-7][\t\r ]*$/gm) !== 1
+  )
+    throw new ValidationError('Checkout PDF must contain exactly one classic revision');
+
+  const startXrefMatch = /^startxref\r?\n(\d+)\r?\n%%EOF[\t ]*(?:\r?\n)?[\t\r\n ]*$/m.exec(source);
+  const xrefOffset = startXrefMatch ? Number(startXrefMatch[1]) : Number.NaN;
+  if (
+    !Number.isSafeInteger(xrefOffset) ||
+    xrefOffset <= 0 ||
+    xrefOffset >= buffer.length ||
+    source.slice(xrefOffset, xrefOffset + 4) !== 'xref'
+  )
+    throw new ValidationError('Checkout PDF startxref is invalid');
+
+  let cursor = xrefOffset;
+  const xrefHeader = readPdfLine(source, cursor);
+  if (xrefHeader.line !== 'xref')
+    throw new ValidationError('Checkout PDF startxref does not point to a classic xref');
+  cursor = xrefHeader.next;
+  const entries = new Map<number, ClassicPdfXrefEntry>();
+  while (true) {
+    const headerLine = readPdfLine(source, cursor);
+    cursor = headerLine.next;
+    if (headerLine.line === 'trailer') break;
+    const subsection = /^(\d+) (\d+)$/.exec(headerLine.line);
+    if (!subsection) throw new ValidationError('Checkout PDF xref subsection header is invalid');
+    const firstObject = Number(subsection[1]);
+    const count = Number(subsection[2]);
+    if (
+      !Number.isSafeInteger(firstObject) ||
+      !Number.isSafeInteger(count) ||
+      count < 1 ||
+      entries.size + count > PDF_MAX_OBJECTS + 1
+    )
+      throw new ValidationError('Checkout PDF xref subsection exceeds safety limits');
+    for (let index = 0; index < count; index += 1) {
+      const row = readPdfLine(source, cursor);
+      cursor = row.next;
+      const parsed = /^(\d{10}) (\d{5}) ([nf]) ?$/.exec(row.line);
+      const objectNumber = firstObject + index;
+      if (!parsed || !Number.isSafeInteger(objectNumber) || entries.has(objectNumber))
+        throw new ValidationError('Checkout PDF xref row is invalid or duplicated');
+      entries.set(objectNumber, {
+        objectNumber,
+        offset: Number(parsed[1]),
+        generation: Number(parsed[2]),
+        inUse: parsed[3] === 'n',
+      });
+    }
+  }
+
+  const startXrefLineIndex = startXrefMatch!.index;
+  if (startXrefLineIndex < cursor) throw new ValidationError('Checkout PDF trailer is incomplete');
+  const trailerSource = source.slice(cursor, startXrefLineIndex).trim();
+  const trailerTokens = tokenizePdfSemanticSource(trailerSource);
+  assertSinglePdfDictionary(trailerTokens, 'trailer');
+  const sizeIndexes = topLevelPdfNameIndexes(trailerTokens, 'Size');
+  const rootIndexes = topLevelPdfNameIndexes(trailerTokens, 'Root');
+  if (sizeIndexes.length !== 1 || rootIndexes.length !== 1)
+    throw new ValidationError('Checkout PDF trailer must declare one size and root');
+  const sizeIndex = sizeIndexes[0]!;
+  const rootIndex = rootIndexes[0]!;
+  const sizeToken = trailerTokens[sizeIndex + 1];
+  const rootObjectToken = trailerTokens[rootIndex + 1];
+  const rootGenerationToken = trailerTokens[rootIndex + 2];
+  const rootReferenceToken = trailerTokens[rootIndex + 3];
+  if (
+    sizeToken?.kind !== 'word' ||
+    !/^\d+$/.test(sizeToken.value) ||
+    rootObjectToken?.kind !== 'word' ||
+    !/^\d+$/.test(rootObjectToken.value) ||
+    rootGenerationToken?.kind !== 'word' ||
+    !/^\d+$/.test(rootGenerationToken.value) ||
+    rootReferenceToken?.kind !== 'word' ||
+    rootReferenceToken.value !== 'R'
+  )
+    throw new ValidationError('Checkout PDF trailer size or root reference is invalid');
+  const declaredSize = Number(sizeToken.value);
+  const highestObject = Math.max(...entries.keys());
+  if (
+    !Number.isSafeInteger(declaredSize) ||
+    declaredSize < 2 ||
+    declaredSize > PDF_MAX_OBJECTS + 1 ||
+    declaredSize !== highestObject + 1 ||
+    entries.size !== declaredSize ||
+    Array.from({ length: declaredSize }, (_, objectNumber) => objectNumber).some(
+      (objectNumber) => !entries.has(objectNumber),
+    )
+  )
+    throw new ValidationError('Checkout PDF trailer size does not match its xref');
+  const rowZero = entries.get(0);
+  if (!rowZero || rowZero.inUse || rowZero.generation !== 65_535)
+    throw new ValidationError('Checkout PDF xref row zero is invalid');
+  for (const entry of entries.values()) {
+    if (entry.inUse) {
+      if (
+        entry.objectNumber === 0 ||
+        entry.generation >= 65_535 ||
+        entry.offset <= 0 ||
+        entry.offset >= xrefOffset
+      )
+        throw new ValidationError('Checkout PDF in-use xref row is out of range');
+    } else if (entry.objectNumber !== 0 && (entry.offset < 0 || entry.offset >= declaredSize)) {
+      throw new ValidationError('Checkout PDF free xref row is out of range');
+    }
+  }
+  const freeObjects = new Set(
+    [...entries.values()]
+      .filter((entry) => !entry.inUse && entry.objectNumber !== 0)
+      .map((entry) => entry.objectNumber),
+  );
+  const visitedFreeObjects = new Set<number>();
+  let nextFreeObject = rowZero.offset;
+  while (nextFreeObject !== 0) {
+    const freeEntry = entries.get(nextFreeObject);
+    if (!freeEntry || freeEntry.inUse || visitedFreeObjects.has(nextFreeObject))
+      throw new ValidationError('Checkout PDF xref free-list chain is invalid');
+    visitedFreeObjects.add(nextFreeObject);
+    nextFreeObject = freeEntry.offset;
+  }
+  if (
+    visitedFreeObjects.size !== freeObjects.size ||
+    [...freeObjects].some((objectNumber) => !visitedFreeObjects.has(objectNumber))
+  )
+    throw new ValidationError('Checkout PDF xref free-list chain is incomplete');
+
+  const inUseEntries = [...entries.values()]
+    .filter((entry) => entry.inUse)
+    .sort((left, right) => left.offset - right.offset);
+  if (inUseEntries.length < 1 || inUseEntries.length > PDF_MAX_OBJECTS)
+    throw new ValidationError('Checkout PDF object count exceeds safety limits');
+  const declaredHeaders = [...source.slice(0, xrefOffset).matchAll(/^(\d+) (\d+) obj\b/gm)];
+  if (declaredHeaders.length !== inUseEntries.length)
+    throw new ValidationError('Checkout PDF contains objects not uniquely bound by its xref');
+  const semanticObjects = new Map<number, string>();
+  for (const [index, entry] of inUseEntries.entries()) {
+    const boundary = inUseEntries[index + 1]?.offset ?? xrefOffset;
+    semanticObjects.set(entry.objectNumber, assertPdfObjectStructure(source, entry, boundary));
+  }
+  if (countMatches(source, /(?:^|[\r\n])stream(?:\r\n|\r|\n)/g) > PDF_MAX_STREAMS)
+    throw new ValidationError('Checkout PDF stream count exceeds safety limits');
+
+  const objectTokens = new Map<number, PdfLexicalToken[]>();
+  for (const [objectNumber, semanticObject] of semanticObjects)
+    objectTokens.set(objectNumber, tokenizePdfSemanticSource(semanticObject));
+  const allSemanticTokens = [trailerTokens, ...objectTokens.values()].flat();
+  if (
+    allSemanticTokens.some(
+      (token) =>
+        token.kind === 'name' &&
+        (PDF_FORBIDDEN_NAMES.has(token.value) ||
+          token.value === 'Prev' ||
+          token.value === 'XRefStm' ||
+          token.value === 'ObjStm' ||
+          token.value === 'XRef'),
+    )
+  )
+    throw new ValidationError(
+      'Checkout PDF contains an unsupported interactive or structural name',
+    );
+
+  const rootNumber = Number(rootObjectToken.value);
+  const rootGeneration = Number(rootGenerationToken.value);
+  const rootEntry = entries.get(rootNumber);
+  const rootObject = semanticObjects.get(rootNumber);
+  if (!rootEntry?.inUse || rootEntry.generation !== rootGeneration || !rootObject)
+    throw new ValidationError('Checkout PDF root does not resolve to its catalog object');
+  const rootBody = pdfObjectBody(rootObject, rootNumber, rootGeneration);
+  const rootTokens = tokenizePdfSemanticSource(rootBody);
+  assertSinglePdfDictionary(rootTokens, 'root object');
+  const rootTypeIndexes = topLevelPdfNameIndexes(rootTokens, 'Type');
+  if (
+    rootTypeIndexes.length !== 1 ||
+    rootTokens[rootTypeIndexes[0]! + 1]?.kind !== 'name' ||
+    rootTokens[rootTypeIndexes[0]! + 1]?.value !== 'Catalog'
+  )
+    throw new ValidationError('Checkout PDF root must declare exactly one top-level Catalog type');
+
+  let pageCount = 0;
+  for (const entry of inUseEntries) {
+    const semanticObject = semanticObjects.get(entry.objectNumber)!;
+    const bodyTokens = tokenizePdfSemanticSource(
+      pdfObjectBody(semanticObject, entry.objectNumber, entry.generation),
+    );
+    if (
+      bodyTokens[0]?.kind !== 'dict-open' ||
+      bodyTokens.some((token) => token.kind === 'word' && token.value === 'stream')
+    )
+      continue;
+    assertSinglePdfDictionary(bodyTokens, `object ${entry.objectNumber}`);
+    const typeIndexes = topLevelPdfNameIndexes(bodyTokens, 'Type');
+    if (
+      typeIndexes.length === 1 &&
+      bodyTokens[typeIndexes[0]! + 1]?.kind === 'name' &&
+      bodyTokens[typeIndexes[0]! + 1]?.value === 'Page'
+    )
+      pageCount += 1;
+  }
+  if (pageCount < 1 || pageCount > PDF_MAX_PAGES)
+    throw new ValidationError('Checkout PDF page count exceeds safety limits');
+}
+
+const CHECKOUT_TEXT_MAX_LINE_LENGTH = 16_384;
+
+function containsForbiddenTextControl(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    if (
+      codePoint <= 0x08 ||
+      codePoint === 0x0b ||
+      codePoint === 0x0c ||
+      (codePoint >= 0x0e && codePoint <= 0x1f) ||
+      (codePoint >= 0x7f && codePoint <= 0x9f)
+    )
+      return true;
+  }
+  return false;
+}
+
+function validateCheckoutText(buffer: Buffer): void {
+  if (
+    (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) ||
+    (buffer[0] === 0xff && buffer[1] === 0xfe) ||
+    (buffer[0] === 0xfe && buffer[1] === 0xff)
+  ) {
+    throw new ValidationError('Checkout text must be unmarked UTF-8');
+  }
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    throw new ValidationError('Checkout text is not valid UTF-8');
+  }
+  if (containsForbiddenTextControl(text) || text.includes('\uFEFF'))
+    throw new ValidationError('Checkout text contains binary or control characters');
+  if (text.split(/\r\n|\r|\n/u).some((line) => line.length > CHECKOUT_TEXT_MAX_LINE_LENGTH))
+    throw new ValidationError('Checkout text contains an excessively long line');
+}
+
+async function validateUploadContent(
+  purpose: UploadPurpose,
+  contentType: string,
+  buffer: Buffer,
+): Promise<{
+  persistedBuffer: Buffer;
+  eventMediaMetadata: null | {
+    width: number;
+    height: number;
+    format: 'jpeg' | 'png' | 'webp';
+  };
+}> {
+  if (contentType.startsWith('image/')) {
+    if (EVENT_MEDIA_PURPOSES.has(purpose)) {
+      return {
+        persistedBuffer: buffer,
+        eventMediaMetadata: await inspectEventMediaImage(contentType, buffer),
+      };
+    }
+    await inspectFullyDecodedImage(contentType, buffer, {
+      maxPages: GENERIC_IMAGE_MAX_PAGES,
+      maxTotalPixels: GENERIC_IMAGE_MAX_TOTAL_PIXELS,
+    });
+    // Generic public images have no original-preservation contract. Re-encoding in the
+    // declared format strips EXIF/GPS and other untrusted metadata before publication.
+    const persistedBuffer = await sanitizeGenericImage(contentType, buffer);
+    if (persistedBuffer.length > PURPOSE_LIMITS[purpose].maxSizeBytes)
+      throw new ValidationError('Sanitized image exceeds the upload byte limit');
+    return { persistedBuffer, eventMediaMetadata: null };
+  } else if (purpose === 'checkout_answer' && contentType === 'application/pdf') {
+    validateCheckoutPdf(buffer);
+  } else if (purpose === 'checkout_answer' && contentType === 'text/plain') {
+    validateCheckoutText(buffer);
+  }
+  return { persistedBuffer: buffer, eventMediaMetadata: null };
 }
 
 class UploadScannerUnavailableError extends Error {
@@ -959,39 +1754,31 @@ export async function completeUploadArtifact(
     throw new ValidationError(result);
   }
   const scan = await scanUploadBuffer(buffer);
-  const checksum = createHash('sha256').update(buffer).digest('hex');
+  const sourceChecksum = createHash('sha256').update(buffer).digest('hex');
   const now = new Date();
   if (!scan.clean) {
-    await rejectClaimedArtifact(scan.result, checksum);
+    await rejectClaimedArtifact(scan.result, sourceChecksum);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError('Uploaded file failed malware scan');
   }
 
+  let validatedContent: Awaited<ReturnType<typeof validateUploadContent>>;
   try {
-    validateImageBytes(artifact.content_type, buffer);
+    validatedContent = await validateUploadContent(
+      artifact.purpose as UploadPurpose,
+      artifact.content_type,
+      buffer,
+    );
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
-    const result = error.message;
-    await rejectClaimedArtifact(result, checksum);
+    await rejectClaimedArtifact(error.message, sourceChecksum);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
-    throw new ValidationError(result);
+    throw error;
   }
 
-  let eventMediaMetadata: {
-    width: number;
-    height: number;
-    format: 'jpeg' | 'png' | 'webp';
-  } | null = null;
-  if (EVENT_MEDIA_PURPOSES.has(artifact.purpose as UploadPurpose)) {
-    try {
-      eventMediaMetadata = await inspectEventMediaImage(buffer);
-    } catch (error) {
-      if (!(error instanceof ValidationError)) throw error;
-      await rejectClaimedArtifact(error.message);
-      await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
-      throw error;
-    }
-  }
+  const persistedBuffer = validatedContent.persistedBuffer;
+  const eventMediaMetadata = validatedContent.eventMediaMetadata;
+  const checksum = createHash('sha256').update(persistedBuffer).digest('hex');
 
   const finalObjectKey = finalObjectKeyFromStaging(stagingObjectKey, checksum);
   try {
@@ -999,9 +1786,9 @@ export async function completeUploadArtifact(
       new PutObjectCommand({
         Bucket: artifact.bucket,
         Key: finalObjectKey,
-        Body: buffer,
+        Body: persistedBuffer,
         ContentType: artifact.content_type,
-        ContentLength: buffer.length,
+        ContentLength: persistedBuffer.length,
         ChecksumSHA256: Buffer.from(checksum, 'hex').toString('base64'),
         ...s3PutEncryption(),
         IfNoneMatch: '*',
@@ -1014,9 +1801,9 @@ export async function completeUploadArtifact(
     const existing = await s3.send(
       new GetObjectCommand({ Bucket: artifact.bucket, Key: finalObjectKey }),
     );
-    const existingBuffer = await bodyToBuffer(existing.Body, artifact.size_bytes);
+    const existingBuffer = await bodyToBuffer(existing.Body, persistedBuffer.length);
     if (
-      existingBuffer.length !== buffer.length ||
+      existingBuffer.length !== persistedBuffer.length ||
       createHash('sha256').update(existingBuffer).digest('hex') !== checksum
     )
       throw new ValidationError('Immutable upload object conflicts with completion evidence');
@@ -1028,6 +1815,7 @@ export async function completeUploadArtifact(
       scan_status: 'clean',
       scan_result: scan.result,
       checksum_sha256: checksum,
+      size_bytes: persistedBuffer.length,
       object_key: finalObjectKey,
       metadata: eventMediaMetadata
         ? JSON.stringify({

@@ -39,6 +39,12 @@ spec:
           env:
             - name: PORT
               value: {{ .Values.api.port | quote }}
+            - name: UPLOAD_MALWARE_SCANNER
+              value: {{ .Values.uploads.malwareScanner.mode | quote }}
+            - name: CLAMAV_HOST
+              value: {{ .Values.uploads.malwareScanner.host | quote }}
+            - name: CLAMAV_PORT
+              value: {{ .Values.uploads.malwareScanner.port | quote }}
           envFrom:
             - configMapRef:
                 name: {{ include "tixkit.fullname" . }}-config

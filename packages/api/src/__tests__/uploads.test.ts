@@ -37,6 +37,90 @@ async function deterministicNoisePng(width = 1600, height = 1000): Promise<Buffe
     .toBuffer();
 }
 
+function animatedGif(frameCount: number): Buffer {
+  const header = Buffer.from([
+    0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xff, 0xff, 0xff,
+  ]);
+  const frame = Buffer.from([
+    0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01,
+    0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00,
+  ]);
+  return Buffer.concat([
+    header,
+    ...Array.from({ length: frameCount }, () => frame),
+    Buffer.from([0x3b]),
+  ]);
+}
+
+function buildClassicCheckoutPdf(objectBodies: string[], trailer = '/Size 4 /Root 1 0 R'): Buffer {
+  const header = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  let objects = header;
+  for (const body of objectBodies) {
+    offsets.push(Buffer.byteLength(objects, 'latin1'));
+    objects += body;
+  }
+  const xrefOffset = Buffer.byteLength(objects, 'latin1');
+  return Buffer.from(`${objects}xref
+0 ${objectBodies.length + 1}
+0000000000 65535 f
+${offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n`).join('\n')}
+trailer
+<< ${trailer} >>
+startxref
+${xrefOffset}
+%%EOF
+`);
+}
+
+function safeCheckoutPdf(extraCatalogEntries = ''): Buffer {
+  return buildClassicCheckoutPdf([
+    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R ${extraCatalogEntries} >>\nendobj\n`,
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n',
+  ]);
+}
+
+function checkoutPdfWithStream(length: string, boundary = '\nendstream'): Buffer {
+  return buildClassicCheckoutPdf(
+    [
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>\nendobj\n',
+      `4 0 obj\n<< /Length ${length} >>\nstream\nhello${boundary}\nendobj\n`,
+    ],
+    '/Size 5 /Root 1 0 R',
+  );
+}
+
+function checkoutPdfWithObjectTrailingPayload(): Buffer {
+  return buildClassicCheckoutPdf([
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\nTRAILING_PAYLOAD\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n',
+  ]);
+}
+
+function checkoutPdfWithRootDictionary(rootDictionary: string): Buffer {
+  return buildClassicCheckoutPdf([
+    `1 0 obj\n${rootDictionary}\nendobj\n`,
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n',
+  ]);
+}
+
+function mutatePdfXrefRow(pdf: Buffer, rowIndex: number, row: string): Buffer {
+  const source = pdf.toString('latin1');
+  const rows = [...source.matchAll(/^\d{10} \d{5} [nf]$/gm)];
+  const target = rows[rowIndex];
+  if (!target || row.length !== target[0].length) throw new Error('Invalid test xref mutation');
+  return Buffer.from(
+    `${source.slice(0, target.index)}${row}${source.slice(target.index! + target[0].length)}`,
+    'latin1',
+  );
+}
+
 vi.mock('@aws-sdk/client-s3', () => {
   class S3Client {
     constructor(options: unknown) {
@@ -1352,7 +1436,6 @@ describe('upload artifact service', () => {
   });
 
   it('rejects image uploads whose bytes do not match the declared content type', async () => {
-    const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const fakeBytes = Buffer.from('not a real image');
     for (const purpose of ['brand_logo', 'user_avatar', 'content_email_image'] as const) {
       const { db, tables } = createMockDb();
@@ -1386,7 +1469,11 @@ describe('upload artifact service', () => {
       );
     }
 
-    const validPng = Buffer.concat([pngMagic, Buffer.alloc(64)]);
+    const validPng = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: '#336699' },
+    })
+      .png()
+      .toBuffer();
     const { db, tables } = createMockDb();
     const validArtifact = await createUploadArtifact(db, {
       tenantId: 'tnt_1',
@@ -1415,27 +1502,23 @@ describe('upload artifact service', () => {
   });
 
   it('accepts valid JPEG, WebP, and GIF image bytes for content_email_image', async () => {
-    const jpegMagic = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
-    const webpMagic = Buffer.concat([
-      Buffer.from([0x52, 0x49, 0x46, 0x46]),
-      Buffer.alloc(4),
-      Buffer.from([0x57, 0x45, 0x42, 0x50]),
-    ]);
-    const gifMagic = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+    const image = sharp({
+      create: { width: 2, height: 2, channels: 4, background: '#336699' },
+    });
     const cases = [
       {
         name: 'jpeg',
-        bytes: Buffer.concat([jpegMagic, Buffer.alloc(64)]),
+        bytes: await image.clone().jpeg().toBuffer(),
         type: 'image/jpeg',
       },
       {
         name: 'webp',
-        bytes: Buffer.concat([webpMagic, Buffer.alloc(64)]),
+        bytes: await image.clone().webp().toBuffer(),
         type: 'image/webp',
       },
       {
         name: 'gif',
-        bytes: Buffer.concat([gifMagic, Buffer.alloc(64)]),
+        bytes: await image.clone().gif().toBuffer(),
         type: 'image/gif',
       },
     ];
@@ -1465,6 +1548,533 @@ describe('upload artifact service', () => {
         scanStatus: 'clean',
       });
       expect(tables.upload_artifacts[0]).toMatchObject({ status: 'uploaded' });
+    }
+  });
+
+  it('rejects signature-only, truncated, trailing-data, and excessive-frame images before publication', async () => {
+    const validPng = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: '#336699' },
+    })
+      .png()
+      .toBuffer();
+    const cases = [
+      {
+        name: 'signature-only JPEG',
+        type: 'image/jpeg',
+        bytes: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+      },
+      {
+        name: 'signature-only PNG',
+        type: 'image/png',
+        bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      },
+      {
+        name: 'signature-only WebP',
+        type: 'image/webp',
+        bytes: Buffer.from('RIFF\x04\x00\x00\x00WEBP', 'latin1'),
+      },
+      { name: 'signature-only GIF', type: 'image/gif', bytes: Buffer.from('GIF89a;', 'latin1') },
+      { name: 'truncated PNG', type: 'image/png', bytes: validPng.subarray(0, -12) },
+      {
+        name: 'PNG with trailing payload',
+        type: 'image/png',
+        bytes: Buffer.concat([validPng, Buffer.from('<script>payload</script>')]),
+      },
+      { name: 'excessive-frame GIF', type: 'image/gif', bytes: animatedGif(21) },
+    ] as const;
+
+    for (const testCase of cases) {
+      const { db, tables } = createMockDb();
+      const artifact = await createUploadArtifact(db, {
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+        purpose: 'content_email_image',
+        fileName: testCase.name,
+        contentType: testCase.type,
+        sizeBytes: testCase.bytes.length,
+      });
+      s3Send
+        .mockResolvedValueOnce({
+          ContentLength: testCase.bytes.length,
+          ContentType: testCase.type,
+        })
+        .mockResolvedValueOnce({
+          Body: { transformToByteArray: async () => new Uint8Array(testCase.bytes) },
+          ContentType: testCase.type,
+        })
+        .mockResolvedValueOnce({});
+
+      await expect(completeUploadArtifact(db, artifact.artifactId), testCase.name).rejects.toThrow(
+        /Uploaded (?:image|PNG)/u,
+      );
+      expect(tables.upload_artifacts[0], testCase.name).toMatchObject({
+        status: 'rejected',
+        scan_status: 'blocked',
+      });
+      expect(
+        s3Send.mock.calls.filter(([command]) => command.input.Body),
+        testCase.name,
+      ).toHaveLength(0);
+      s3Send.mockReset();
+    }
+  });
+
+  it('rejects images whose decoded pixel count exceeds the bounded policy', async () => {
+    const oversized = await sharp({
+      create: { width: 6500, height: 6500, channels: 3, background: '#000000' },
+    })
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+    const { db, tables } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      purpose: 'brand_logo',
+      fileName: 'oversized.png',
+      contentType: 'image/png',
+      sizeBytes: oversized.length,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: oversized.length, ContentType: 'image/png' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new Uint8Array(oversized) },
+        ContentType: 'image/png',
+      })
+      .mockResolvedValueOnce({});
+
+    await expect(completeUploadArtifact(db, artifact.artifactId)).rejects.toThrow(
+      'Uploaded image is malformed or exceeds decode limits',
+    );
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'rejected',
+      scan_status: 'blocked',
+    });
+  });
+
+  it('binds event media decoding to the declared image content type', async () => {
+    const webp = await sharp({
+      create: { width: 4, height: 3, channels: 3, background: '#336699' },
+    })
+      .webp()
+      .toBuffer();
+    const { db, tables } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'event_cover',
+      fileName: 'cover.jpg',
+      contentType: 'image/jpeg',
+      sizeBytes: webp.length,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: webp.length, ContentType: 'image/jpeg' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new Uint8Array(webp) },
+        ContentType: 'image/jpeg',
+      })
+      .mockResolvedValueOnce({});
+
+    await expect(completeUploadArtifact(db, artifact.artifactId)).rejects.toThrow(
+      'Uploaded image content does not match declared content type: image/jpeg',
+    );
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'rejected',
+      scan_status: 'blocked',
+    });
+  });
+
+  it('rejects an event JPEG with payload appended after its first structural EOI', async () => {
+    const jpeg = await sharp({
+      create: { width: 4, height: 3, channels: 3, background: '#336699' },
+    })
+      .jpeg({ progressive: true })
+      .toBuffer();
+    const hostile = Buffer.concat([
+      jpeg,
+      Buffer.from('<script>payload</script>'),
+      Buffer.from([0xff, 0xd9]),
+    ]);
+    const { db, tables } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'event_cover',
+      fileName: 'cover.jpg',
+      contentType: 'image/jpeg',
+      sizeBytes: hostile.length,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: hostile.length, ContentType: 'image/jpeg' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new Uint8Array(hostile) },
+        ContentType: 'image/jpeg',
+      })
+      .mockResolvedValueOnce({});
+
+    await expect(completeUploadArtifact(db, artifact.artifactId)).rejects.toThrow(
+      'Uploaded image is truncated or contains trailing data',
+    );
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'rejected',
+      scan_status: 'blocked',
+    });
+    expect(s3Send.mock.calls.filter(([command]) => command.input.Body)).toHaveLength(0);
+    expect(s3Send).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects event PNGs with copied-IEND payloads, invalid lengths, or corrupt chunk CRCs', async () => {
+    const png = await sharp({
+      create: { width: 4, height: 3, channels: 4, background: '#336699' },
+    })
+      .png()
+      .toBuffer();
+    const malformedLength = Buffer.from(png);
+    malformedLength.writeUInt32BE(0xffffffff, 8);
+    const corruptHeaderCrc = Buffer.from(png);
+    const headerCrcOffset = 8 + 4 + 4 + 13;
+    corruptHeaderCrc[headerCrcOffset] = corruptHeaderCrc[headerCrcOffset]! ^ 0xff;
+    const cases = [
+      {
+        name: 'payload followed by a copied IEND',
+        bytes: Buffer.concat([png, Buffer.from('arbitrary-payload'), png.subarray(-12)]),
+      },
+      { name: 'out-of-range chunk length', bytes: malformedLength },
+      { name: 'corrupt IHDR CRC', bytes: corruptHeaderCrc },
+    ];
+
+    for (const testCase of cases) {
+      const { db, tables } = createMockDb();
+      const artifact = await createUploadArtifact(db, {
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+        purpose: 'event_cover',
+        fileName: `${testCase.name}.png`,
+        contentType: 'image/png',
+        sizeBytes: testCase.bytes.length,
+      });
+      s3Send
+        .mockResolvedValueOnce({
+          ContentLength: testCase.bytes.length,
+          ContentType: 'image/png',
+        })
+        .mockResolvedValueOnce({
+          Body: { transformToByteArray: async () => new Uint8Array(testCase.bytes) },
+          ContentType: 'image/png',
+        })
+        .mockResolvedValueOnce({});
+
+      const completionResult = await completeUploadArtifact(db, artifact.artifactId).catch(
+        (error: unknown) => error,
+      );
+      expect(completionResult, testCase.name).toBeInstanceOf(Error);
+      expect((completionResult as Error).message, testCase.name).toMatch(/Uploaded PNG/u);
+      expect(tables.upload_artifacts[0], testCase.name).toMatchObject({
+        status: 'rejected',
+        scan_status: 'blocked',
+      });
+      expect(
+        s3Send.mock.calls.filter(([command]) => command.input.Body),
+        testCase.name,
+      ).toHaveLength(0);
+      expect(s3Send, testCase.name).toHaveBeenCalledTimes(3);
+      s3Send.mockReset();
+    }
+  });
+
+  it('strips metadata from generic public images and records the persisted byte evidence', async () => {
+    const original = await sharp({
+      create: { width: 4, height: 3, channels: 3, background: '#336699' },
+    })
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toBuffer();
+    expect((await sharp(original).metadata()).orientation).toBe(6);
+    const { db, tables } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      purpose: 'brand_logo',
+      fileName: 'logo.jpg',
+      contentType: 'image/jpeg',
+      sizeBytes: original.length,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: original.length, ContentType: 'image/jpeg' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new Uint8Array(original) },
+        ContentType: 'image/jpeg',
+      })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    await completeUploadArtifact(db, artifact.artifactId);
+    const persisted = s3Send.mock.calls[2]?.[0].input.Body as Buffer;
+    const persistedMetadata = await sharp(persisted).metadata();
+    expect(persistedMetadata.orientation).toBeUndefined();
+    expect(persistedMetadata).toMatchObject({ width: 3, height: 4 });
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      size_bytes: persisted.length,
+      checksum_sha256: createHash('sha256').update(persisted).digest('hex'),
+      status: 'uploaded',
+    });
+  });
+
+  it('preserves bounded GIF animation while sanitizing the public image', async () => {
+    const original = await sharp(Buffer.from([0xff, 0x00, 0x00, 0xff, 0x00, 0x00, 0xff, 0xff]), {
+      raw: { width: 1, height: 2, channels: 4, pageHeight: 1 },
+    })
+      .gif({ delay: [80, 240], loop: 3 })
+      .toBuffer();
+    const { db, tables } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'content_email_image',
+      fileName: 'animation.gif',
+      contentType: 'image/gif',
+      sizeBytes: original.length,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: original.length, ContentType: 'image/gif' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new Uint8Array(original) },
+        ContentType: 'image/gif',
+      })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    await completeUploadArtifact(db, artifact.artifactId);
+    const persisted = s3Send.mock.calls[2]?.[0].input.Body as Buffer;
+    expect(await sharp(persisted, { animated: true }).metadata()).toMatchObject({
+      format: 'gif',
+      pages: 2,
+      delay: [80, 240],
+      loop: 3,
+    });
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      size_bytes: persisted.length,
+      checksum_sha256: createHash('sha256').update(persisted).digest('hex'),
+      status: 'uploaded',
+    });
+  });
+
+  it('validates checkout PDFs conservatively and rejects active, compressed, or ambiguous structures', async () => {
+    const validPdf = safeCheckoutPdf();
+    const validSource = validPdf.toString('latin1');
+    const xrefRows = [...validSource.matchAll(/^\d{10} \d{5} [nf]$/gm)].map((match) => match[0]);
+    const firstObjectOffset = Number(xrefRows[1]!.slice(0, 10));
+    const hostilePdfs = [
+      { name: 'fake PDF', bytes: Buffer.from('not a pdf') },
+      { name: 'missing EOF', bytes: validPdf.subarray(0, validPdf.indexOf('%%EOF')) },
+      { name: 'encryption', bytes: safeCheckoutPdf('/Encrypt 4 0 R') },
+      {
+        name: 'JavaScript action',
+        bytes: safeCheckoutPdf('/OpenAction << /S /JavaScript /JS (x) >>'),
+      },
+      { name: 'embedded file', bytes: safeCheckoutPdf('/Names << /EmbeddedFiles 4 0 R >>') },
+      {
+        name: 'external URI',
+        bytes: safeCheckoutPdf('/OpenAction << /S /URI /URI (https://example.test) >>'),
+      },
+      { name: 'escaped JavaScript name', bytes: safeCheckoutPdf('/OpenAction << /S /J#53 >>') },
+      { name: 'compressed object stream', bytes: safeCheckoutPdf('/Type /ObjStm') },
+      {
+        name: 'misaligned in-use offset',
+        bytes: mutatePdfXrefRow(
+          validPdf,
+          1,
+          `${String(firstObjectOffset + 1).padStart(10, '0')} 00000 n`,
+        ),
+      },
+      {
+        name: 'out-of-range in-use offset',
+        bytes: mutatePdfXrefRow(validPdf, 1, '9999999999 00000 n'),
+      },
+      {
+        name: 'duplicate object offset',
+        bytes: mutatePdfXrefRow(validPdf, 2, xrefRows[1]!),
+      },
+      {
+        name: 'out-of-range free-list offset',
+        bytes: mutatePdfXrefRow(validPdf, 2, '9999999999 00000 f'),
+      },
+      {
+        name: 'wrong trailer size',
+        bytes: Buffer.from(validSource.replace('/Size 4', '/Size 5'), 'latin1'),
+      },
+      {
+        name: 'root is not a catalog',
+        bytes: Buffer.from(validSource.replace('/Root 1 0 R', '/Root 2 0 R'), 'latin1'),
+      },
+      {
+        name: 'root generation mismatch',
+        bytes: Buffer.from(validSource.replace('/Root 1 0 R', '/Root 1 1 R'), 'latin1'),
+      },
+      {
+        name: 'xref generation does not match object header',
+        bytes: mutatePdfXrefRow(validPdf, 1, `${xrefRows[1]!.slice(0, 11)}00001 n`),
+      },
+      {
+        name: 'multiple xref revision tokens',
+        bytes: Buffer.from(validSource.replace('trailer\n', 'xref\ntrailer\n'), 'latin1'),
+      },
+      {
+        name: 'multiple startxref revision tokens',
+        bytes: Buffer.from(
+          validSource.replace('startxref\n', 'startxref\n0\nstartxref\n'),
+          'latin1',
+        ),
+      },
+      {
+        name: 'incremental Prev pointer',
+        bytes: Buffer.from(validSource.replace('/Size 4', '/Prev 0 /Size 4'), 'latin1'),
+      },
+      { name: 'stream length too short', bytes: checkoutPdfWithStream('4') },
+      { name: 'stream length too long', bytes: checkoutPdfWithStream('6') },
+      { name: 'indirect stream length', bytes: checkoutPdfWithStream('5 0 R') },
+      { name: 'malformed stream boundary', bytes: checkoutPdfWithStream('5', 'endstream') },
+      { name: 'trailing payload after object', bytes: checkoutPdfWithObjectTrailingPayload() },
+      { name: 'annotations surface', bytes: safeCheckoutPdf('/Annots []') },
+      {
+        name: 'Named Print action',
+        bytes: safeCheckoutPdf('/Extension << /S /Named /N /Print >>'),
+      },
+      {
+        name: 'GoToE Rendition action',
+        bytes: safeCheckoutPdf('/Extension << /S /GoToE /Rendition 4 0 R >>'),
+      },
+      {
+        name: 'Catalog spoofed by a literal string',
+        bytes: checkoutPdfWithRootDictionary('<< /Pages 2 0 R /Note (/Type /Catalog) >>'),
+      },
+      {
+        name: 'Catalog spoofed by a comment',
+        bytes: checkoutPdfWithRootDictionary('<< /Pages 2 0 R % /Type /Catalog\n>>'),
+      },
+      {
+        name: 'Catalog spoofed by a nested dictionary',
+        bytes: checkoutPdfWithRootDictionary('<< /Pages 2 0 R /Metadata << /Type /Catalog >> >>'),
+      },
+      {
+        name: 'Catalog spoofed inside an array',
+        bytes: checkoutPdfWithRootDictionary('<< /Pages 2 0 R /Metadata [ /Type /Catalog ] >>'),
+      },
+      {
+        name: 'trailer garbage after dictionary',
+        bytes: Buffer.from(
+          validSource.replace('<< /Size 4 /Root 1 0 R >>', '<< /Size 4 /Root 1 0 R >> garbage'),
+          'latin1',
+        ),
+      },
+      {
+        name: 'multiple trailer dictionaries',
+        bytes: Buffer.from(
+          validSource.replace(
+            '<< /Size 4 /Root 1 0 R >>',
+            '<< /Size 4 /Root 1 0 R >> << /Extra /Dictionary >>',
+          ),
+          'latin1',
+        ),
+      },
+    ];
+
+    for (const testCase of [
+      { name: 'valid PDF', bytes: validPdf, valid: true },
+      { name: 'valid direct-length stream PDF', bytes: checkoutPdfWithStream('5'), valid: true },
+      {
+        name: 'valid PDF with inert lexical lookalikes',
+        bytes: safeCheckoutPdf(
+          '/Note (/Annots /JavaScript) /Hex <2f4f70656e416374696f6e> % /Rendition\n',
+        ),
+        valid: true,
+      },
+      ...hostilePdfs,
+    ]) {
+      const { db, tables } = createMockDb();
+      const artifact = await createUploadArtifact(db, {
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+        purpose: 'checkout_answer',
+        fileName: `${testCase.name}.pdf`,
+        contentType: 'application/pdf',
+        sizeBytes: testCase.bytes.length,
+      });
+      s3Send
+        .mockResolvedValueOnce({
+          ContentLength: testCase.bytes.length,
+          ContentType: 'application/pdf',
+        })
+        .mockResolvedValueOnce({
+          Body: { transformToByteArray: async () => new Uint8Array(testCase.bytes) },
+          ContentType: 'application/pdf',
+        });
+      if ('valid' in testCase) {
+        s3Send.mockResolvedValueOnce({}).mockResolvedValueOnce({});
+        await expect(completeUploadArtifact(db, artifact.artifactId)).resolves.toMatchObject({
+          status: 'uploaded',
+        });
+      } else {
+        s3Send.mockResolvedValueOnce({});
+        const completionResult = await completeUploadArtifact(db, artifact.artifactId).catch(
+          (error: unknown) => error,
+        );
+        expect(completionResult, testCase.name).toBeInstanceOf(Error);
+        expect((completionResult as Error).message, testCase.name).toMatch(/Checkout PDF/u);
+        expect(tables.upload_artifacts[0], testCase.name).toMatchObject({ status: 'rejected' });
+        expect(
+          s3Send.mock.calls.filter(([command]) => command.input.Body),
+          testCase.name,
+        ).toHaveLength(0);
+        expect(s3Send, testCase.name).toHaveBeenCalledTimes(3);
+      }
+      s3Send.mockReset();
+    }
+  });
+
+  it('accepts plain UTF-8 checkout text and rejects ambiguous or binary text', async () => {
+    const cases = [
+      {
+        name: 'valid UTF-8',
+        bytes: Buffer.from('Guest accessibility notes\nNo stairs.'),
+        valid: true,
+      },
+      { name: 'invalid UTF-8', bytes: Buffer.from([0xc3, 0x28]) },
+      { name: 'UTF-8 BOM', bytes: Buffer.from([0xef, 0xbb, 0xbf, 0x61]) },
+      { name: 'NUL', bytes: Buffer.from('hello\0world') },
+      { name: 'binary controls', bytes: Buffer.from([0x61, 0x01, 0x02, 0x62]) },
+      { name: 'pathological line', bytes: Buffer.from('x'.repeat(16_385)) },
+    ];
+
+    for (const testCase of cases) {
+      const { db, tables } = createMockDb();
+      const artifact = await createUploadArtifact(db, {
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+        purpose: 'checkout_answer',
+        fileName: `${testCase.name}.txt`,
+        contentType: 'text/plain',
+        sizeBytes: testCase.bytes.length,
+      });
+      s3Send
+        .mockResolvedValueOnce({ ContentLength: testCase.bytes.length, ContentType: 'text/plain' })
+        .mockResolvedValueOnce({
+          Body: { transformToByteArray: async () => new Uint8Array(testCase.bytes) },
+          ContentType: 'text/plain',
+        });
+      if (testCase.valid) {
+        s3Send.mockResolvedValueOnce({}).mockResolvedValueOnce({});
+        await expect(completeUploadArtifact(db, artifact.artifactId)).resolves.toMatchObject({
+          status: 'uploaded',
+        });
+      } else {
+        s3Send.mockResolvedValueOnce({});
+        await expect(
+          completeUploadArtifact(db, artifact.artifactId),
+          testCase.name,
+        ).rejects.toThrow(/Checkout text/u);
+        expect(tables.upload_artifacts[0], testCase.name).toMatchObject({ status: 'rejected' });
+      }
+      s3Send.mockReset();
     }
   });
 
@@ -3136,6 +3746,11 @@ describe('upload artifact routes', () => {
   });
 
   it('allows messages.write principals to complete and download scoped content email image artifacts', async () => {
+    const imageBytes = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: '#336699' },
+    })
+      .png()
+      .toBuffer();
     const { db } = createMockDb({
       upload_artifacts: [
         {
@@ -3151,7 +3766,7 @@ describe('upload artifact routes', () => {
           object_key: 'uploads/tnt_1/content-email-images/evt_1/staging/upl_email_pending.png',
           content_type: 'image/png',
           file_name: 'hero.png',
-          size_bytes: 12,
+          size_bytes: imageBytes.length,
           metadata: '{}',
           expires_at: new Date(Date.now() + 60_000),
         },
@@ -3162,13 +3777,10 @@ describe('upload artifact routes', () => {
       uploadRoutes,
       makePrincipal({ scopes: ['messages.write'] }),
     );
-    const imageBytes = new Uint8Array([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00,
-    ]);
     s3Send
-      .mockResolvedValueOnce({ ContentLength: 12, ContentType: 'image/png' })
+      .mockResolvedValueOnce({ ContentLength: imageBytes.length, ContentType: 'image/png' })
       .mockResolvedValueOnce({
-        Body: { transformToByteArray: async () => imageBytes },
+        Body: { transformToByteArray: async () => new Uint8Array(imageBytes) },
         ContentType: 'image/png',
       })
       .mockResolvedValueOnce({})

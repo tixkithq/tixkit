@@ -38,6 +38,12 @@ temporal:
 minio:
   enabled: false
 
+uploads:
+  malwareScanner:
+    mode: clamav
+    host: ''
+    port: 3310
+
 availability:
   rollingUpdate:
     maxUnavailable: 0

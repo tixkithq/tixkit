@@ -21,6 +21,12 @@ database:
 auth:
   provider: clerk
 
+uploads:
+  malwareScanner:
+    mode: ''
+    host: ''
+    port: 3310
+
 temporalConnection:
   mode: self-hosted-ha
 
