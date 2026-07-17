@@ -40,6 +40,12 @@ vi.mock('@/lib/api', () => {
       confirmSession: vi.fn(),
     },
     CheckoutApiError,
+    CURRENT_RESALE_TERMS_ACCEPTANCE: {
+      accepted: true,
+      termsVersion: '2026-07-16',
+      settlementModel: 'organizer_managed',
+      refundModel: 'manual_coordinated_resolution',
+    },
     userFacingMessage: (error: unknown) =>
       error instanceof Error ? error.message : 'Checkout is temporarily unavailable.',
   };
@@ -527,6 +533,8 @@ describe('CheckoutFlow buyer validation', () => {
       target: { value: 'buyer@example.com' },
     });
     fillRequiredDatesOfBirth(view);
+    fireEvent.click(view.getByLabelText(/^Accept resale purchase terms/));
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeEnabled());
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => {
@@ -535,6 +543,12 @@ describe('CheckoutFlow buyer validation', () => {
           eventId: 'evt_checkout',
           items: [{ resaleListingId: 'lst_1', quantity: 1 }],
           buyer: expect.objectContaining({ email: 'buyer@example.com' }),
+          resaleTermsAcceptance: {
+            accepted: true,
+            termsVersion: '2026-07-16',
+            settlementModel: 'organizer_managed',
+            refundModel: 'manual_coordinated_resolution',
+          },
           discountCode: undefined,
           accessCode: undefined,
           waitlistClaimToken: undefined,
@@ -608,6 +622,8 @@ describe('CheckoutFlow buyer validation', () => {
       target: { value: 'buyer@example.com' },
     });
     fillRequiredDatesOfBirth(view);
+    fireEvent.click(view.getByLabelText(/^Accept resale purchase terms/));
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeEnabled());
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => {
@@ -674,6 +690,8 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.change(view.getByLabelText(/Date of birth/), {
       target: { value: '2005-07-18' },
     });
+    fireEvent.click(view.getByLabelText(/^Accept resale purchase terms/));
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeEnabled());
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledOnce());

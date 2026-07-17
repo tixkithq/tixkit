@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { BrandFooter } from '@/components/checkout/brand-footer';
 import {
   checkoutApi,
+  CURRENT_RESALE_TERMS_ACCEPTANCE,
   isRetryable,
   publicApi,
   userFacingMessage,
@@ -54,6 +55,7 @@ type ResaleFormState = {
   price: string;
   idempotencyKey: string;
   loading: boolean;
+  termsAccepted: boolean;
   error?: string;
 };
 
@@ -316,6 +318,7 @@ export default function ConfirmationClient() {
             idempotencyKey:
               existing?.idempotencyKey || createResaleIdempotencyKey(sessionId, ticket.ticketId),
             loading: false,
+            termsAccepted: existing?.termsAccepted ?? false,
             error: undefined,
           },
         };
@@ -338,6 +341,12 @@ export default function ConfirmationClient() {
         });
         return;
       }
+      if (!form?.termsAccepted) {
+        setResaleForm(ticket.ticketId, {
+          error: 'Accept the organizer-managed settlement and refund terms to create a listing.',
+        });
+        return;
+      }
       const token = getSessionToken(sessionId);
       if (!token) {
         setResaleForm(ticket.ticketId, {
@@ -353,6 +362,7 @@ export default function ConfirmationClient() {
         const listing = await checkoutApi.createResaleListing(sessionId, ticket.ticketId, token, {
           priceCents,
           idempotencyKey,
+          termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
         });
         setWalletPasses((current) =>
           current.map((item) =>
@@ -366,6 +376,7 @@ export default function ConfirmationClient() {
           loading: false,
           error: undefined,
           idempotencyKey: createResaleIdempotencyKey(sessionId, ticket.ticketId),
+          termsAccepted: false,
         });
       } catch (err) {
         setResaleForm(ticket.ticketId, {
@@ -649,6 +660,33 @@ export default function ConfirmationClient() {
                               <p id={resaleHelpId} className="text-xs text-muted-foreground">
                                 Max {formatCurrency(ticket.resaleMaxPriceCents, ticket.currency)}
                               </p>
+                            </div>
+                            <div className="flex items-start gap-3 sm:col-span-2">
+                              <input
+                                id={`resale-terms-${ticket.ticketId}`}
+                                type="checkbox"
+                                checked={resaleForms[ticket.ticketId]?.termsAccepted ?? false}
+                                onChange={(checkboxEvent) =>
+                                  setResaleForm(ticket.ticketId, {
+                                    termsAccepted: checkboxEvent.target.checked,
+                                    error: undefined,
+                                  })
+                                }
+                                className="mt-0.5 size-4 rounded border-input"
+                              />
+                              <Label
+                                htmlFor={`resale-terms-${ticket.ticketId}`}
+                                className="space-y-1 font-normal"
+                              >
+                                <span className="block font-medium">
+                                  Accept organizer-managed settlement terms
+                                </span>
+                                <span className="block text-xs leading-relaxed text-muted-foreground">
+                                  The organizer records and pays the seller outside Tixkit. Buyer
+                                  refunds require coordinated manual resolution and may require
+                                  seller recovery.
+                                </span>
+                              </Label>
                             </div>
                             <Button
                               type="button"

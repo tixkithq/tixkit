@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CheckoutApiError,
   checkoutApi,
+  CURRENT_RESALE_TERMS_ACCEPTANCE,
   publicApi,
   isRetryable,
   userFacingMessage,
@@ -196,6 +197,7 @@ describe('checkoutApi.createResaleListing', () => {
     await checkoutApi.createResaleListing('cs_1', 'tkt_1', 'tok_1', {
       priceCents: 2500,
       idempotencyKey: 'resale_1',
+      termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -204,11 +206,52 @@ describe('checkoutApi.createResaleListing', () => {
     expect(init.method).toBe('POST');
     expect((init.headers as Record<string, string>)['X-Checkout-Session-Token']).toBe('tok_1');
     expect((init.headers as Record<string, string>)['Idempotency-Key']).toBe('resale_1');
-    expect(JSON.parse(String(init.body))).toEqual({ priceCents: 2500 });
+    expect(JSON.parse(String(init.body))).toEqual({
+      priceCents: 2500,
+      termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
+    });
   });
 });
 
 describe('checkoutApi.createSession', () => {
+  it('sends exact accepted terms with a resale checkout', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: 'cs_resale',
+            eventId: 'evt_1',
+            status: 'open',
+            currency: 'USD',
+            clientToken: 'tok_resale',
+            quote: {
+              totalCents: 2500,
+              subtotalCents: 2500,
+              discountCents: 0,
+              taxCents: 0,
+              feeCents: 0,
+            },
+            expiresAt: '2026-06-01T00:00:00.000Z',
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await checkoutApi.createSession({
+      eventId: 'evt_1',
+      items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+      buyer: { email: 'buyer@example.com' },
+      resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
+    });
+
+    const [_url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+      resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
+    });
+  });
+
   it('sends trackingId separately from affiliateCode', async () => {
     const fetchMock = vi.fn(
       async () =>

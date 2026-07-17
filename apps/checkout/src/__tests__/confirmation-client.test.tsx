@@ -30,6 +30,12 @@ vi.mock('@/lib/use-brand', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
+  CURRENT_RESALE_TERMS_ACCEPTANCE: {
+    accepted: true,
+    termsVersion: '2026-07-16',
+    settlementModel: 'organizer_managed',
+    refundModel: 'manual_coordinated_resolution',
+  },
   checkoutApi: {
     getSession: vi.fn(),
     getWalletPasses: vi.fn(),
@@ -174,6 +180,37 @@ describe('ConfirmationClient', () => {
 
     await waitFor(() => {
       expect(checkoutApiMock.createResaleListing).not.toHaveBeenCalled();
+    });
+  });
+
+  it('requires explicit seller terms and sends the exact accepted contract', async () => {
+    render(<ConfirmationClient />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'List for resale' }));
+    const terms = screen.getByLabelText(/^Accept organizer-managed settlement terms/);
+    expect(terms).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create listing' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Accept the organizer-managed settlement and refund terms to create a listing.',
+    );
+    expect(checkoutApiMock.createResaleListing).not.toHaveBeenCalled();
+
+    fireEvent.click(terms);
+    expect(terms).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Create listing' }));
+
+    await waitFor(() => {
+      expect(checkoutApiMock.createResaleListing).toHaveBeenCalledWith('cs_1', 'tkt_1', 'tok_1', {
+        idempotencyKey: expect.stringMatching(/^buyer_resale_cs_1_tkt_1_/),
+        priceCents: 5000,
+        termsAcceptance: {
+          accepted: true,
+          termsVersion: '2026-07-16',
+          settlementModel: 'organizer_managed',
+          refundModel: 'manual_coordinated_resolution',
+        },
+      });
     });
   });
 

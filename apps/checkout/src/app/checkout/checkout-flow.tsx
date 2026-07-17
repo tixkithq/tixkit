@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
+import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/empty-state';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { TicketSelection } from '@/components/checkout/ticket-selection';
@@ -28,6 +29,7 @@ import {
   publicApi,
   checkoutApi,
   CheckoutApiError,
+  CURRENT_RESALE_TERMS_ACCEPTANCE,
   userFacingMessage,
   type PublicEvent,
   type AvailabilityItem,
@@ -161,6 +163,7 @@ export default function CheckoutFlow({
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
   const [occurrences, setOccurrences] = useState<PublicEventOccurrence[]>([]);
   const [resaleListing, setResaleListing] = useState<CheckoutPublicResaleListing | null>(null);
+  const [resaleTermsAccepted, setResaleTermsAccepted] = useState(false);
   const [questions, setQuestions] = useState<QuestionsResponse | null>(null);
   const [questionsLoading, setQuestionsLoading] = useState(false);
   const [questionsError, setQuestionsError] = useState<string | null>(null);
@@ -537,7 +540,8 @@ export default function CheckoutFlow({
     !loading &&
     !questionsLoading &&
     !questionsError &&
-    questions,
+    questions &&
+    (!resaleListing || resaleTermsAccepted),
   );
 
   // Resolve an existing session once on mount when resuming via sessionId +
@@ -928,6 +932,10 @@ export default function CheckoutFlow({
 
   async function createSession() {
     if (!canCreateSession) return;
+    if (resaleListing && !resaleTermsAccepted) {
+      setValidationError('Accept the resale settlement and refund terms to continue.');
+      return;
+    }
     if (!validateEmail()) return;
 
     const cartError = validateCart();
@@ -968,6 +976,8 @@ export default function CheckoutFlow({
         waitlistClaimToken: resaleListing ? undefined : waitlistClaimToken || undefined,
         trackingId,
         affiliateCode,
+        resaleTermsAcceptance:
+          resaleListing && resaleTermsAccepted ? CURRENT_RESALE_TERMS_ACCEPTANCE : undefined,
         successUrl,
         cancelUrl: window.location.href,
       });
@@ -1215,7 +1225,7 @@ export default function CheckoutFlow({
                 </CardHeader>
                 <CardContent className="space-y-5">
                   {resaleListing ? (
-                    <div className="rounded-lg border bg-card p-4">
+                    <div className="space-y-4 rounded-lg border bg-card p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <p className="font-medium">
@@ -1230,6 +1240,25 @@ export default function CheckoutFlow({
                         <p className="font-semibold tabular-nums">
                           {formatCurrency(resaleListing.priceCents, resaleListing.currency)}
                         </p>
+                      </div>
+                      <div className="flex items-start gap-3 border-t pt-4">
+                        <input
+                          id="resale-terms-acceptance"
+                          type="checkbox"
+                          checked={resaleTermsAccepted}
+                          onChange={(checkboxEvent) =>
+                            setResaleTermsAccepted(checkboxEvent.target.checked)
+                          }
+                          className="mt-0.5 size-4 rounded border-input"
+                        />
+                        <Label htmlFor="resale-terms-acceptance" className="space-y-1 font-normal">
+                          <span className="block font-medium">Accept resale purchase terms</span>
+                          <span className="block text-xs leading-relaxed text-muted-foreground">
+                            The organizer manages seller payment and coordinates any buyer refund
+                            manually. Tixkit does not hold seller funds or promise an automatic
+                            resale refund.
+                          </span>
+                        </Label>
                       </div>
                     </div>
                   ) : visibleAvailability.length === 0 ? (

@@ -61,6 +61,15 @@ export type MarketingIntegration = {
   status: string;
 };
 
+export const CURRENT_RESALE_TERMS_ACCEPTANCE = {
+  accepted: true,
+  termsVersion: '2026-07-16',
+  settlementModel: 'organizer_managed',
+  refundModel: 'manual_coordinated_resolution',
+} as const;
+
+export type ResaleTermsAcceptance = typeof CURRENT_RESALE_TERMS_ACCEPTANCE;
+
 export type AvailabilityItem = {
   type?: 'ticket' | 'product' | 'resale';
   ticketTypeId?: string;
@@ -803,6 +812,7 @@ export const checkoutApi = {
     waitlistClaimToken?: string;
     successUrl?: string;
     cancelUrl?: string;
+    resaleTermsAcceptance?: ResaleTermsAcceptance;
   }): Promise<CheckoutSession> {
     return apiRequest<CheckoutSession>('/checkout/sessions', {
       method: 'POST',
@@ -845,7 +855,12 @@ export const checkoutApi = {
     sessionId: string,
     ticketId: string,
     sessionToken: string,
-    input: { priceCents: number; expiresAt?: string; idempotencyKey: string },
+    input: {
+      priceCents: number;
+      expiresAt?: string;
+      idempotencyKey: string;
+      termsAcceptance: ResaleTermsAcceptance;
+    },
   ): Promise<CheckoutResaleListing> {
     return apiRequest<CheckoutResaleListing>(
       `/checkout/sessions/${encodeURIComponent(sessionId)}/tickets/${encodeURIComponent(
@@ -858,6 +873,7 @@ export const checkoutApi = {
         body: JSON.stringify({
           priceCents: input.priceCents,
           expiresAt: input.expiresAt,
+          termsAcceptance: input.termsAcceptance,
         }),
       },
     );
