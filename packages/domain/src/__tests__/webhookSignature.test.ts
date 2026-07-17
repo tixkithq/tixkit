@@ -58,4 +58,65 @@ describe('webhook signatures', () => {
       }),
     ).toThrow(WebhookSignatureError);
   });
+
+  it('rejects timestamps with trailing characters instead of accepting a numeric prefix', () => {
+    const signature = signWebhookPayload({ payload: body, secret, timestamp }).replace(
+      `t=${timestamp}`,
+      `t=${timestamp}junk`,
+    );
+
+    expect(() =>
+      verifyWebhookSignature({
+        body,
+        signature,
+        secret,
+        nowSeconds: timestamp,
+      }),
+    ).toThrow(WebhookSignatureError);
+  });
+
+  it('rejects timestamps outside the safe integer range', () => {
+    expect(() =>
+      verifyWebhookSignature({
+        body,
+        signature: `t=9007199254740992,v1=${'0'.repeat(64)}`,
+        secret,
+        nowSeconds: timestamp,
+      }),
+    ).toThrow(WebhookSignatureError);
+  });
+
+  it.each([
+    ['trailing non-hex data', `${signWebhookPayload({ payload: body, secret, timestamp })}junk`],
+    ['odd-length digest', `t=${timestamp},v1=${'a'.repeat(63)}`],
+    ['non-hex digest', `t=${timestamp},v1=${'g'.repeat(64)}`],
+    ['truncated digest', `t=${timestamp},v1=${'a'.repeat(62)}`],
+    ['oversized digest', `t=${timestamp},v1=${'a'.repeat(66)}`],
+  ])('rejects a %s', (_label, signature) => {
+    expect(() =>
+      verifyWebhookSignature({
+        body,
+        signature,
+        secret,
+        nowSeconds: timestamp,
+      }),
+    ).toThrow(WebhookSignatureError);
+  });
+
+  it.each([
+    ['bare component', `t=${timestamp},v1=${'a'.repeat(64)},junk`],
+    ['leading unknown component', `junk=x,t=${timestamp},v1=${'a'.repeat(64)}`],
+    ['duplicate timestamp', `t=${timestamp},t=${timestamp},v1=${'a'.repeat(64)}`],
+    ['duplicate digest', `t=${timestamp},v1=${'a'.repeat(64)},v1=${'a'.repeat(64)}`],
+    ['reordered fields', `v1=${'a'.repeat(64)},t=${timestamp}`],
+  ])('rejects an ambiguous multipart header with a %s', (_label, signature) => {
+    expect(() =>
+      verifyWebhookSignature({
+        body,
+        signature,
+        secret,
+        nowSeconds: timestamp,
+      }),
+    ).toThrow(WebhookSignatureError);
+  });
 });

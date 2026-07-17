@@ -212,21 +212,21 @@ export function verifyWebhookSignature(input: {
   toleranceSeconds?: number;
   nowSeconds?: number;
 }): boolean {
-  const parts = new Map(
-    input.signature.split(',').map((part) => {
-      const [key, value] = part.split('=', 2);
-      return [key, value] as const;
-    }),
-  );
-  const timestampRaw = parts.get('t');
-  const signature = parts.get('v1');
-  if (!timestampRaw || !signature) {
+  const parts = /^t=([^,=]+),v1=([^,=]+)$/u.exec(input.signature);
+  if (!parts) {
     throw new WebhookSignatureError('Webhook signature must use t=...,v1=... format');
   }
+  const [, timestampRaw, signature] = parts;
 
-  const timestamp = Number.parseInt(timestampRaw, 10);
-  if (!Number.isFinite(timestamp)) {
+  if (!/^\d+$/.test(timestampRaw)) {
     throw new WebhookSignatureError('Webhook signature timestamp is invalid');
+  }
+  const timestamp = Number(timestampRaw);
+  if (!Number.isSafeInteger(timestamp)) {
+    throw new WebhookSignatureError('Webhook signature timestamp is invalid');
+  }
+  if (!/^[0-9a-fA-F]{64}$/u.test(signature)) {
+    throw new WebhookSignatureError('Webhook signature digest is invalid');
   }
 
   const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
