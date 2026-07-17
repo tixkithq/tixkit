@@ -95,6 +95,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'migration-job-read-route-authorization-db.integration.test.ts'),
   ],
   [
+    'migration-mapping-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'migration-mapping-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'order-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'order-route-authorization-db.integration.test.ts'),
   ],
@@ -219,6 +223,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getPortableMigrationRebindings'], {
     source: 'migration-job-read-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['createMigrationMapping'], {
+    source: 'migration-mapping-route-authorization-db.integration.test.ts',
+    persistenceSource: 'migration-mapping-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(
     [

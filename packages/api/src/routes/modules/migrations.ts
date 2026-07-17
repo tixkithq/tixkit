@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { AuditLogRepository, ImportRepository } from '@tixkit/db';
+import { AuditLogRepository, ImportRepository, OrganizationRepository } from '@tixkit/db';
 import {
   assertMigrationSecretReference,
   buildDryRunReport,
@@ -909,18 +909,37 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     requireMigrationPermission(principal, 'migrations.write');
     const body = parse(mappingSchema, request.body);
     assertMigrationMappingSafe(body.mapping);
+    const organization = await new OrganizationRepository(app.context.db).findById(
+      body.organizationId,
+    );
+    if (!organization) throw new NotFoundError('Organization', body.organizationId);
+    ClerkAuthService.requireResourceTenant(
+      principal,
+      organization,
+      'Organization',
+      body.organizationId,
+    );
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-    const mapping = await repo().saveMapping({
-      ...body,
-      tenantId: principal.tenantId,
-      createdBy: principal.id,
-    });
-    await writeAuditLog(new AuditLogRepository(app.context.db), request, principal, {
-      action: 'migration_mapping.created',
-      organizationId: body.organizationId,
-      resourceType: 'MigrationMapping',
-      resourceId: mapping.id,
-      diffSummary: { sourceSystem: body.sourceSystem, entityType: body.entityType },
+    const mapping = await app.context.db.transaction().execute(async (transaction) => {
+      const created = await new ImportRepository(transaction as typeof app.context.db).saveMapping({
+        ...body,
+        tenantId: principal.tenantId,
+        createdBy: principal.id,
+      });
+      await writeAuditLog(
+        new AuditLogRepository(transaction as typeof app.context.db),
+        request,
+        principal,
+        {
+          action: 'migration_mapping.created',
+          organizationId: body.organizationId,
+          resourceType: 'MigrationMapping',
+          resourceId: created.id,
+          diffSummary: { sourceSystem: body.sourceSystem, entityType: body.entityType },
+        },
+        { failClosed: true },
+      );
+      return created;
     });
     return reply.status(201).send({
       ...mapping,
