@@ -133,6 +133,13 @@ describe('API key route authorization contract', () => {
   it('is the exact executable source for the immutable C-123 contracts', () => {
     expect(API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toEqual([
       expect.objectContaining({
+        method: 'GET',
+        operationId: 'getApiKeys',
+        path: '/api-keys',
+        deniedBoundaries: ['organization'],
+        permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      }),
+      expect.objectContaining({
         method: 'POST',
         operationId: 'postApiKeys',
         path: '/api-keys',
@@ -154,13 +161,18 @@ describe('API key route authorization contract', () => {
     async (contract) => {
       const app = await testApp(principal({ scopes: ['events.read'] }));
       const response = await app.inject(
-        contract.method === 'POST'
+        contract.method === 'GET'
           ? {
-              method: 'POST',
-              url: '/api-keys',
-              payload: { organizationId, name: 'Denied', scopes: ['events.read'] },
+              method: 'GET',
+              url: `/api-keys?organizationId=${organizationId}`,
             }
-          : { method: 'DELETE', url: `/api-keys/${keyId}` },
+          : contract.method === 'POST'
+            ? {
+                method: 'POST',
+                url: '/api-keys',
+                payload: { organizationId, name: 'Denied', scopes: ['events.read'] },
+              }
+            : { method: 'DELETE', url: `/api-keys/${keyId}` },
       );
 
       expect(response.statusCode).toBe(403);
