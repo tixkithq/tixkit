@@ -222,12 +222,8 @@ function sourceMayContainDynamicModuleLoad(source) {
 
 function sourceMayContainClassifiedImport(source, classifiedDependencies) {
   const decoded = source
-    .replace(/\\x([0-9a-f]{2})/giu, (_match, hex) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
-    .replace(/\\u([0-9a-f]{4})/giu, (_match, hex) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
+    .replace(/\\x([0-9a-f]{2})/giu, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/\\u([0-9a-f]{4})/giu, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/\\u\{([0-9a-f]{1,6})\}/giu, (_match, hex) =>
       String.fromCodePoint(Number.parseInt(hex, 16)),
     );

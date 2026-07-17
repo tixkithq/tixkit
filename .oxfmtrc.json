@@ -9,6 +9,8 @@
     "infra/helm/tixkit/templates/**",
     "**/next-env.d.ts",
     "artifacts/api/**",
+    "artifacts/api-integration-skills/**",
+    "apps/checkout/public/tixkit-widget.js",
     "apps/docs/public/contracts/**",
     "apps/docs/public/openapi.json",
     "apps/docs/public/search-index.json",
