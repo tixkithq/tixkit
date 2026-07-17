@@ -179,6 +179,7 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'getEventsByEventIdLaunchReadiness',
       'getEventsByEventIdMedia',
       'getEventsByEventIdMessages',
+      'getEventsByEventIdOperationalHealth',
       'getEventsByEventIdQuestions',
       'getEventsByEventIdReportsSales',
       'getEventsByEventIdWaitlist',

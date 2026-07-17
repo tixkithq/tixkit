@@ -4,6 +4,9 @@ import {
   createDb,
   EventReadinessAcknowledgementRepository,
   EventRepository,
+  WebhookDeliveryRepository,
+  WebhookEndpointRepository,
+  WebhookEventRepository,
   type Database,
 } from '@tixkit/db';
 import { ALL_PERMISSIONS, humanAcknowledgementStepVersions, type Principal } from '@tixkit/domain';
@@ -28,8 +31,16 @@ import {
 import { EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
 
 const eventReadContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
-  (contract) => contract.method === 'GET',
+  (contract) =>
+    contract.method === 'GET' && contract.operationId !== 'getEventsByEventIdOperationalHealth',
 );
+const operationalHealthContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'getEventsByEventIdOperationalHealth',
+  );
+  if (!contract) throw new Error('operational-health authorization contract is not registered');
+  return contract;
+})();
 const eventMutationContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
   (contract) =>
     contract.method === 'POST' &&
@@ -77,6 +88,9 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
   let eventAScoped: string;
   let eventB: string;
   const createdEventIds: string[] = [];
+  const operationalEndpointIds: string[] = [];
+  const operationalWebhookEventIds: string[] = [];
+  const operationalExportIds: string[] = [];
   const acknowledgementSubject = vi.fn(
     async (_input: {
       tenantId: string;
@@ -254,6 +268,74 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     });
   }
 
+  async function seedOperationalHealthEvidence(): Promise<void> {
+    const endpointRepository = new WebhookEndpointRepository(db);
+    const eventRepository = new WebhookEventRepository(db);
+    const deliveryRepository = new WebhookDeliveryRepository(db);
+    const scopes = [
+      { tenantId: tenantA, organizationId: organizationA, label: 'authorized' },
+      { tenantId: tenantA, organizationId: organizationAScoped, label: 'scoped' },
+      { tenantId: tenantB, organizationId: organizationB, label: 'foreign' },
+    ] as const;
+    for (const scope of scopes) {
+      const endpoint = await endpointRepository.create({
+        tenantId: scope.tenantId,
+        organizationId: scope.organizationId,
+        url: `https://${scope.label}-${suffix}.example.test/webhooks`,
+        events: ['operational.health.test'],
+      });
+      const webhookEvent = await eventRepository.create({
+        tenantId: scope.tenantId,
+        organizationId: scope.organizationId,
+        type: 'operational.health.test',
+        payload: { label: scope.label },
+      });
+      operationalEndpointIds.push(endpoint.id);
+      operationalWebhookEventIds.push(webhookEvent.id);
+      const statuses =
+        scope.label === 'authorized' ? ['failed', 'dead_lettered', 'delivered'] : ['failed'];
+      for (const [index, status] of statuses.entries()) {
+        await deliveryRepository.create({
+          endpointId: endpoint.id,
+          eventId: webhookEvent.id,
+          attempt: index + 1,
+          status,
+          nextRetryAt: null,
+        });
+      }
+    }
+
+    const now = new Date('2026-07-17T12:00:00.000Z');
+    const exports = [
+      { eventId: eventA, tenantId: tenantA, status: 'failed' },
+      { eventId: eventA, tenantId: tenantA, status: 'completed' },
+      { eventId: eventAScoped, tenantId: tenantA, status: 'failed' },
+      { eventId: eventB, tenantId: tenantB, status: 'failed' },
+    ] as const;
+    await db
+      .insertInto('export_jobs')
+      .values(
+        exports.map((entry, index) => {
+          const id = `exp_auth_${index}_${suffix}`;
+          operationalExportIds.push(id);
+          return {
+            id,
+            tenant_id: entry.tenantId,
+            event_id: entry.eventId,
+            type: 'attendees',
+            format: 'csv',
+            status: entry.status,
+            file_url: null,
+            requested_by: basePrincipal.id,
+            filters: JSON.stringify({}),
+            created_at: now,
+            completed_at: entry.status === 'completed' ? now : null,
+          };
+        }),
+      )
+      .execute();
+  }
+
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -283,6 +365,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       scopes: [...ALL_PERMISSIONS],
     };
     principal = basePrincipal;
+    await seedOperationalHealthEvidence();
 
     app = Fastify({ logger: false });
     app.decorate('context', {
@@ -337,6 +420,21 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
               .deleteFrom('check_in_lists')
               .where('name', 'in', [authorizedCheckInListName, forbiddenCheckInListName])
               .execute(),
+          );
+          await attemptCleanup(() =>
+            db.deleteFrom('export_jobs').where('id', 'in', operationalExportIds).execute(),
+          );
+          await attemptCleanup(() =>
+            db
+              .deleteFrom('webhook_deliveries')
+              .where('event_id', 'in', operationalWebhookEventIds)
+              .execute(),
+          );
+          await attemptCleanup(() =>
+            db.deleteFrom('webhook_events').where('id', 'in', operationalWebhookEventIds).execute(),
+          );
+          await attemptCleanup(() =>
+            db.deleteFrom('webhook_endpoints').where('id', 'in', operationalEndpointIds).execute(),
           );
           await attemptCleanup(() =>
             db
@@ -437,6 +535,83 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         }
       });
     }
+  });
+
+  describe('operational-health authorization', () => {
+    function invokeOperationalHealth(targetEventId: string) {
+      return app.inject({
+        method: operationalHealthContract.method,
+        url: operationalHealthContract.path.replace('{eventId}', targetEventId),
+      });
+    }
+
+    it('allows the exact event principal to read only the scoped operational summary', async () => {
+      principal = basePrincipal;
+
+      const response = await invokeOperationalHealth(eventA);
+
+      expect(response.statusCode, response.body).toBe(
+        operationalHealthContract.authorizedControl.status,
+      );
+      const body = response.json();
+      expect(Object.keys(body).sort()).toEqual(
+        ['checkedAt', 'eventId', 'failedExports', 'organizationFailedWebhookDeliveries'].sort(),
+      );
+      const { checkedAt, ...summary } = body;
+      expect(summary).toEqual({
+        eventId: eventA,
+        organizationFailedWebhookDeliveries: 2,
+        failedExports: 1,
+      });
+      expect(Number.isNaN(Date.parse(checkedAt as string))).toBe(false);
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without returning operational data',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+
+        const response = await invokeOperationalHealth(targetEvent());
+
+        expect(response.statusCode).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        expect(response.body).not.toContain('organizationFailedWebhookDeliveries');
+        expect(response.body).not.toContain('failedExports');
+      },
+    );
   });
 
   it('allows matching principals to create covered resources with persistent evidence', async () => {
