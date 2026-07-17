@@ -11,7 +11,10 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
-import { MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+import {
+  MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  MIGRATION_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+} from './route-authorization-contracts.js';
 
 describeWithIntegrationDatabase('migration job read route authorization matrix', () => {
   let app: FastifyInstance;
@@ -28,6 +31,9 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
   let jobA: string;
   let jobAScoped: string;
   let jobB: string;
+  let mappingA: string;
+  let mappingAScoped: string;
+  let mappingB: string;
   const basePrincipal: Principal = {
     type: 'user',
     id: `usr_mread_${suffix}`,
@@ -85,6 +91,23 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
     return job.id;
   }
 
+  async function createMapping(
+    tenantId: string,
+    organizationId: string,
+    label: string,
+  ): Promise<string> {
+    const mapping = await new ImportRepository(db).saveMapping({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      name: `Mapping ${label}`,
+      entityType: 'event',
+      mapping: { title: `${label}_title` },
+      createdBy: basePrincipal.id,
+    });
+    return mapping.id;
+  }
+
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -96,6 +119,9 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
     jobA = await createJob(tenantA, organizationA, 'authorized');
     jobAScoped = await createJob(tenantA, organizationAScoped, 'scoped');
     jobB = await createJob(tenantB, organizationB, 'foreign');
+    mappingA = await createMapping(tenantA, organizationA, 'authorized');
+    mappingAScoped = await createMapping(tenantA, organizationAScoped, 'scoped');
+    mappingB = await createMapping(tenantB, organizationB, 'foreign');
 
     principal = basePrincipal;
     app = Fastify({ logger: false });
@@ -126,6 +152,12 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
     } finally {
       try {
         if (db) {
+          await attempt(() =>
+            db
+              .deleteFrom('import_mappings')
+              .where('id', 'in', [mappingA, mappingAScoped, mappingB])
+              .execute(),
+          );
           await attempt(() =>
             db.deleteFrom('import_jobs').where('id', 'in', [jobA, jobAScoped, jobB]).execute(),
           );
@@ -241,6 +273,101 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
         expect(response.body).not.toContain(organizationA);
         expect(response.body).not.toContain(organizationAScoped);
         expect(response.body).not.toContain(organizationB);
+      }
+    },
+  );
+
+  it.each(MIGRATION_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)(
+    'returns only the authorized migration collection for $path',
+    async (contract) => {
+      const url =
+        contract.operationId === 'listMigrationMappings'
+          ? `${contract.path}?organizationId=${organizationA}`
+          : contract.path;
+
+      const response = await app.inject({ method: contract.method, url });
+
+      expect(response.statusCode, response.body).toBe(contract.authorizedControl.status);
+      const body = response.json();
+      expect(body.items).toHaveLength(1);
+      if (contract.operationId === 'listMigrationJobs') {
+        expect(body.items[0]).toMatchObject({
+          id: jobA,
+          tenant_id: tenantA,
+          organization_id: organizationA,
+          configurationHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          credentialConfigured: false,
+        });
+        expect(body.items[0]).not.toHaveProperty('configuration');
+      } else {
+        expect(body.items[0]).toMatchObject({
+          id: mappingA,
+          tenant_id: tenantA,
+          organization_id: organizationA,
+          mapping: { title: 'authorized_title' },
+        });
+      }
+      for (const marker of [jobAScoped, jobB, mappingAScoped, mappingB]) {
+        expect(response.body).not.toContain(marker);
+      }
+    },
+  );
+
+  it.each(MIGRATION_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)(
+    'enforces every $path denial and filtered-collection boundary',
+    async (contract) => {
+      const cases: Array<{
+        principal: Principal;
+        organizationId: string;
+        status: 200 | 403 | 404;
+        code?: 'FORBIDDEN' | 'NOT_FOUND';
+      }> = [
+        {
+          principal: { ...basePrincipal, scopes: ['migrations.write'] },
+          organizationId: organizationA,
+          status: 403,
+          code: 'FORBIDDEN',
+        },
+        {
+          principal: { ...basePrincipal, brandIds: [`brd_mread_${suffix}`] },
+          organizationId: organizationA,
+          status: 403,
+          code: 'FORBIDDEN',
+        },
+        {
+          principal: { ...basePrincipal, eventIds: [`evt_mread_${suffix}`] },
+          organizationId: organizationA,
+          status: 403,
+          code: 'FORBIDDEN',
+        },
+        {
+          principal: basePrincipal,
+          organizationId: organizationAScoped,
+          status: 404,
+          code: 'NOT_FOUND',
+        },
+        {
+          principal: basePrincipal,
+          organizationId: organizationB,
+          status: 200,
+        },
+      ];
+
+      for (const denial of cases) {
+        principal = denial.principal;
+        const url = `${contract.path}?organizationId=${denial.organizationId}`;
+
+        const response = await app.inject({ method: contract.method, url });
+
+        expect(response.statusCode, response.body).toBe(denial.status);
+        if (denial.code) {
+          expect(response.json()).toMatchObject({ error: { code: denial.code } });
+        } else {
+          expect(response.json()).toEqual({ items: [] });
+        }
+        for (const marker of [jobA, jobAScoped, jobB, mappingA, mappingAScoped, mappingB]) {
+          expect(response.body).not.toContain(marker);
+        }
       }
     },
   );

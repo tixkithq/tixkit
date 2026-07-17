@@ -214,6 +214,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     ],
     { source: 'migration-job-read-route-authorization-db.integration.test.ts' },
   ),
+  ...evidenceBindings(['listMigrationJobs', 'listMigrationMappings'], {
+    source: 'migration-job-read-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'getOrganizationsByOrganizationIdReadiness',
