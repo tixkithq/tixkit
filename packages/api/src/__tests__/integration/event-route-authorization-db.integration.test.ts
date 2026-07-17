@@ -1,6 +1,11 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDb, EventRepository, type Database } from '@tixkit/db';
+import {
+  createDb,
+  EventReadinessAcknowledgementRepository,
+  EventRepository,
+  type Database,
+} from '@tixkit/db';
 import { ALL_PERMISSIONS, humanAcknowledgementStepVersions, type Principal } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import { registerErrorHandler, type AppContext } from '../../app.js';
@@ -99,7 +104,10 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
           'diff_summary',
         ])
         .where('actor_id', '=', basePrincipal.id)
-        .where('action', '=', 'event.readiness_acknowledged')
+        .where('action', 'in', [
+          'event.readiness_acknowledged',
+          'event.readiness_acknowledgement_removed',
+        ])
         .where('resource_id', 'in', createdEventIds)
         .orderBy('id', 'asc')
         .execute(),
@@ -117,7 +125,10 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     await db
       .deleteFrom('audit_logs')
       .where('actor_id', '=', basePrincipal.id)
-      .where('action', '=', 'event.readiness_acknowledged')
+      .where('action', 'in', [
+        'event.readiness_acknowledged',
+        'event.readiness_acknowledgement_removed',
+      ])
       .where('resource_id', 'in', createdEventIds)
       .execute();
   }
@@ -634,6 +645,137 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         const before = await readinessAcknowledgementSnapshot();
 
         const response = await invokeAcknowledgement(targetEvent());
+
+        expect(response.statusCode).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        await expect(readinessAcknowledgementSnapshot()).resolves.toEqual(before);
+        expect(acknowledgementSubject).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('launch-readiness acknowledgement removal authorization', () => {
+    async function seedAcknowledgements(): Promise<void> {
+      const repository = new EventReadinessAcknowledgementRepository(db);
+      for (const scope of [
+        {
+          tenantId: tenantA,
+          organizationId: organizationA,
+          brandId: brandA,
+          eventId: eventA,
+        },
+        {
+          tenantId: tenantA,
+          organizationId: organizationAScoped,
+          brandId: brandAScoped,
+          eventId: eventAScoped,
+        },
+        {
+          tenantId: tenantB,
+          organizationId: organizationB,
+          brandId: brandB,
+          eventId: eventB,
+        },
+      ]) {
+        await repository.acknowledge(scope, {
+          stepId: readinessStepId,
+          stepVersion: humanAcknowledgementStepVersions.preview_review,
+          subjectFingerprint: readinessSubjectFingerprint,
+          actorId: basePrincipal.id,
+        });
+      }
+    }
+
+    beforeEach(async () => {
+      principal = basePrincipal;
+      acknowledgementSubject.mockClear();
+      await clearReadinessAcknowledgementEvidence();
+      await seedAcknowledgements();
+    });
+
+    afterEach(clearReadinessAcknowledgementEvidence);
+
+    function invokeRemoval(targetEventId: string) {
+      return app.inject({
+        method: 'DELETE',
+        url: `/events/${targetEventId}/readiness-acknowledgements/${readinessStepId}`,
+      });
+    }
+
+    it('allows the exact event principal to remove one acknowledgement and records one audit', async () => {
+      const before = await readinessAcknowledgementSnapshot();
+      expect(before.acknowledgements).toHaveLength(3);
+
+      const response = await invokeRemoval(eventA);
+
+      expect(response.statusCode, response.body).toBe(204);
+      expect(response.body).toBe('');
+      expect(acknowledgementSubject).not.toHaveBeenCalled();
+      const after = await readinessAcknowledgementSnapshot();
+      expect(after.acknowledgements).toEqual(
+        before.acknowledgements.filter((row) => row.event_id !== eventA),
+      );
+      expect(after.audits).toHaveLength(1);
+      expect(after.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_type: 'user',
+        actor_id: basePrincipal.id,
+        action: 'event.readiness_acknowledgement_removed',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      const storedDiff = after.audits[0]!.diff_summary;
+      if (storedDiff === null) throw new Error('readiness removal audit omitted diff');
+      const diff =
+        typeof storedDiff === 'string'
+          ? (JSON.parse(storedDiff) as Record<string, unknown>)
+          : (storedDiff as Record<string, unknown>);
+      expect(diff).toEqual({ stepId: readinessStepId });
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without deleting any protected acknowledgement',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await readinessAcknowledgementSnapshot();
+        expect(before.acknowledgements).toHaveLength(3);
+
+        const response = await invokeRemoval(targetEvent());
 
         expect(response.statusCode).toBe(status);
         expect(response.json()).toMatchObject({ error: { code } });
