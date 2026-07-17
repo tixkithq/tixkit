@@ -1,5 +1,7 @@
 'use client';
 
+/* oxlint-disable jsx-a11y/prefer-tag-over-role -- Searchable virtualized multi-selects require the ARIA listbox pattern; native select/datalist cannot preserve the contract. */
+
 import * as React from 'react';
 import { Check, PlusCircle, Search } from 'lucide-react';
 import type {
@@ -98,6 +100,8 @@ function SelectFilterContent({
   const [searchValue, setSearchValue] = React.useState('');
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = React.useState(0);
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const listboxId = React.useId();
   const selectedValues = new Set(value?.type === 'select' ? value.values : []);
 
   const facetCounts = React.useMemo(() => {
@@ -120,6 +124,7 @@ function SelectFilterContent({
 
   React.useEffect(() => {
     setScrollTop(0);
+    setActiveIndex(0);
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [searchValue]);
 
@@ -136,6 +141,55 @@ function SelectFilterContent({
   const endIndex = Math.min(filteredOptions.length, startIndex + visibleCount);
   const visibleOptions = filteredOptions.slice(startIndex, endIndex);
   const topOffset = startIndex * SELECT_OPTION_ROW_HEIGHT;
+
+  const activateOption = (nextIndex: number) => {
+    if (filteredOptions.length === 0) return;
+    const index = Math.max(0, Math.min(nextIndex, filteredOptions.length - 1));
+    setActiveIndex(index);
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+    const optionTop = index * SELECT_OPTION_ROW_HEIGHT;
+    const optionBottom = optionTop + SELECT_OPTION_ROW_HEIGHT;
+    let nextScrollTop = viewport.scrollTop;
+    if (optionTop < viewport.scrollTop) nextScrollTop = optionTop;
+    else if (optionBottom > viewport.scrollTop + viewportHeight) {
+      nextScrollTop = optionBottom - viewportHeight;
+    }
+    if (nextScrollTop !== viewport.scrollTop) {
+      viewport.scrollTop = nextScrollTop;
+      setScrollTop(nextScrollTop);
+    }
+  };
+
+  const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    let nextIndex: number | undefined;
+    if (event.key === 'ArrowDown') nextIndex = activeIndex + 1;
+    else if (event.key === 'ArrowUp') nextIndex = activeIndex - 1;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = filteredOptions.length - 1;
+    else if (event.key === 'PageDown') nextIndex = activeIndex + SELECT_OPTION_MAX_VISIBLE_ROWS;
+    else if (event.key === 'PageUp') nextIndex = activeIndex - SELECT_OPTION_MAX_VISIBLE_ROWS;
+    else if (event.key === 'Enter' || event.key === ' ') {
+      const option = filteredOptions[activeIndex];
+      if (option !== undefined) toggleOption(option);
+      event.preventDefault();
+      return;
+    } else return;
+    event.preventDefault();
+    activateOption(nextIndex);
+  };
+
+  const handleListboxScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const nextScrollTop = event.currentTarget.scrollTop;
+    setScrollTop(nextScrollTop);
+    const firstVisibleIndex = Math.floor(nextScrollTop / SELECT_OPTION_ROW_HEIGHT);
+    const lastVisibleIndex = Math.min(
+      filteredOptions.length - 1,
+      firstVisibleIndex + SELECT_OPTION_MAX_VISIBLE_ROWS - 1,
+    );
+    if (activeIndex < firstVisibleIndex) setActiveIndex(firstVisibleIndex);
+    else if (activeIndex > lastVisibleIndex) setActiveIndex(lastVisibleIndex);
+  };
 
   const toggleOption = (option: string) => {
     const nextSelectedValues = new Set(selectedValues);
@@ -156,56 +210,80 @@ function SelectFilterContent({
           value={searchValue}
           onChange={(event) => setSearchValue(event.target.value)}
           placeholder={column.label}
+          aria-label={`Search ${column.label} options`}
           className="h-8 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
       {filteredOptions.length === 0 ? (
         <div className="py-6 text-center text-sm">No options found.</div>
       ) : (
-        <div
-          ref={scrollRef}
-          className="overflow-x-hidden overflow-y-auto p-1"
-          style={{ height: viewportHeight }}
-          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-        >
-          <div className="relative" style={{ height: totalHeight }}>
-            <div
-              className="absolute inset-x-0 top-0"
-              style={{ transform: `translateY(${topOffset}px)` }}
-            >
-              {visibleOptions.map((option) => {
-                const isSelected = selectedValues.has(option);
-                const count = facetCounts.get(option);
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
-                    style={{ height: SELECT_OPTION_ROW_HEIGHT }}
-                    onClick={() => toggleOption(option)}
-                  >
-                    <div
-                      className={cn(
-                        'flex size-4 items-center justify-center rounded-[4px] border',
-                        isSelected
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'opacity-50',
-                      )}
-                    >
-                      {isSelected && <Check className="size-3.5" />}
-                    </div>
-                    <span className="truncate capitalize">{formatOptionLabel(option)}</span>
-                    {count !== undefined && (
-                      <span className="ms-auto flex size-4 shrink-0 items-center justify-center font-mono text-xs">
-                        {count}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+        <>
+          <div
+            ref={scrollRef}
+            id={listboxId}
+            role="listbox"
+            aria-label={`${column.label} options`}
+            aria-multiselectable="true"
+            aria-activedescendant={`${listboxId}_option_${activeIndex}`}
+            tabIndex={0}
+            className="overflow-x-hidden overflow-y-auto p-1"
+            style={{ height: viewportHeight }}
+            onScroll={handleListboxScroll}
+            onKeyDown={handleListboxKeyDown}
+            onFocus={() => activateOption(activeIndex)}
+          >
+            <div className="relative" style={{ height: totalHeight }}>
+              <div
+                className="absolute inset-x-0 top-0"
+                style={{ transform: `translateY(${topOffset}px)` }}
+              >
+                {visibleOptions.map((option, visibleIndex) => {
+                  const isSelected = selectedValues.has(option);
+                  const count = facetCounts.get(option);
+                  const optionIndex = startIndex + visibleIndex;
+                  return (
+                    <React.Fragment key={option}>
+                      <button
+                        id={`${listboxId}_option_${optionIndex}`}
+                        type="button"
+                        role="option"
+                        tabIndex={-1}
+                        className={cn(
+                          'flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground',
+                          optionIndex === activeIndex && 'bg-accent text-accent-foreground',
+                        )}
+                        style={{ height: SELECT_OPTION_ROW_HEIGHT }}
+                        aria-selected={isSelected}
+                        data-active={optionIndex === activeIndex ? '' : undefined}
+                        onClick={() => {
+                          setActiveIndex(optionIndex);
+                          toggleOption(option);
+                        }}
+                      >
+                        <div
+                          className={cn(
+                            'flex size-4 items-center justify-center rounded-[4px] border',
+                            isSelected
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'opacity-50',
+                          )}
+                        >
+                          {isSelected && <Check className="size-3.5" />}
+                        </div>
+                        <span className="truncate capitalize">{formatOptionLabel(option)}</span>
+                        {count !== undefined && (
+                          <span className="ms-auto flex size-4 shrink-0 items-center justify-center font-mono text-xs">
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
       {selectedValues.size > 0 && (
         <>
@@ -288,6 +366,7 @@ function BooleanOption({
     <button
       type="button"
       onClick={onSelect}
+      aria-pressed={isSelected}
       className={cn(
         'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent',
         isSelected && 'bg-accent',

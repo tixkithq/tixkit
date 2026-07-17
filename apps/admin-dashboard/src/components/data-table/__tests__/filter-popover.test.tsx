@@ -49,12 +49,41 @@ describe('DataTableFilterPopover', () => {
 
     await waitFor(() => expect(screen.getByText('option 0')).toBeInTheDocument());
     expect(screen.queryByText('option 199')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /option/i }).length).toBeLessThan(40);
+    expect(screen.getAllByRole('option', { name: /option/i }).length).toBeLessThan(40);
 
-    fireEvent.change(screen.getByPlaceholderText('Status'), { target: { value: '199' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search Status options' }), {
+      target: { value: '199' },
+    });
 
     await waitFor(() => expect(screen.getByText('option 199')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('option 199'));
+    const option = screen.getByRole('option', { name: /option 199/i });
+    expect(option).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(option);
+
+    expect(onChange).toHaveBeenCalledWith({ type: 'select', values: ['option_199'] });
+  });
+
+  it('navigates and selects across a virtualization boundary with the keyboard', async () => {
+    const onChange = vi.fn();
+    render(
+      <DataTableFilterPopover
+        schema={schema}
+        column={selectColumn}
+        value={undefined}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by Status' }));
+    const listbox = await screen.findByRole('listbox', { name: 'Status options' });
+    listbox.focus();
+    expect(screen.getByRole('option', { name: /option 0/i })).toHaveClass('bg-accent');
+    fireEvent.keyDown(listbox, { key: 'End' });
+
+    const lastOption = await screen.findByRole('option', { name: /option 199/i });
+    expect(listbox).toHaveAttribute('aria-activedescendant', lastOption.id);
+    expect(lastOption).toHaveClass('bg-accent');
+    fireEvent.keyDown(listbox, { key: 'Enter' });
 
     expect(onChange).toHaveBeenCalledWith({ type: 'select', values: ['option_199'] });
   });
