@@ -1924,6 +1924,25 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         approvalId,
         revokedBy: principal.id,
         reason: body.reason,
+        onCreated: async ({ db, revocation: createdRevocation }) => {
+          await writeAuditLog(
+            new AuditLogRepository(db),
+            request,
+            principal,
+            {
+              action: 'migration_job.portable_revoked',
+              organizationId,
+              resourceType: 'MigrationJob',
+              resourceId: jobId,
+              diffSummary: {
+                approvalId,
+                revocationId: createdRevocation.id,
+                reason: body.reason,
+              },
+            },
+            { failClosed: true },
+          );
+        },
       });
     } catch (error) {
       if (error instanceof Error && error.message === 'PORTABLE_IMPORT_APPROVAL_NOT_FOUND')
@@ -1938,11 +1957,6 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       request.log.error({ err: error, jobId, approvalId }, 'Portable approval revocation failed');
       throw new PortableDryRunAttestationUnavailableError();
     }
-    await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_revoked', {
-      approvalId,
-      revocationId: revocation.id,
-      reason: body.reason,
-    });
     return { approvalId, revoked: true, revokedAt: revocation.created_at };
   });
 

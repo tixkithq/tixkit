@@ -930,6 +930,22 @@ export class ImportRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  findLatestPortableImportApproval(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+  }) {
+    return this.db
+      .selectFrom('portable_import_approvals')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
+      .executeTakeFirst();
+  }
+
   findPortableImportApproval(input: {
     tenantId: string;
     organizationId: string;

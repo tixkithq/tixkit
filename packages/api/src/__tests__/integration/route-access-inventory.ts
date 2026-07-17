@@ -276,6 +276,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'portable-import-control.integration.test.ts',
     persistenceSource: 'portable-import-control.integration.test.ts',
   }),
+  ...evidenceBindings(['revokePortableMigrationApproval'], {
+    source: 'portable-import-control.integration.test.ts',
+    persistenceSource: 'portable-import-control.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'getOrganizationsByOrganizationIdReadiness',

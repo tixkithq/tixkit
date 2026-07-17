@@ -857,6 +857,78 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       idempotencyKey: 'portable-approval-02',
       now: new Date('2026-07-12T21:07:00.000Z'),
     });
+    const sameSecond = new Date('2026-07-12T21:08:00.000Z');
+    const sameSecondInitial = await approvePortableImport({
+      ...approvalRequest,
+      idempotencyKey: 'portable-approval-same-second-initial',
+      now: sameSecond,
+    });
+    await revokePortableImportApproval({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      approvalId: sameSecondInitial.id,
+      revokedBy: 'user_approver',
+      reason: 'Deterministic same-second renewal proof',
+      now: sameSecond,
+    });
+    const sameSecondRenewalRequest = {
+      ...approvalRequest,
+      idempotencyKey: 'portable-approval-same-second-renewal',
+      now: sameSecond,
+    };
+    const sameSecondRenewed = await approvePortableImport(sameSecondRenewalRequest);
+    expect(sameSecondRenewed.id).not.toBe(sameSecondInitial.id);
+    expect(sameSecondRenewed.approval_digest).not.toBe(sameSecondInitial.approval_digest);
+    await expect(approvePortableImport(sameSecondRenewalRequest)).resolves.toEqual(
+      sameSecondRenewed,
+    );
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: `commit:${job.id}:${sameSecondInitial.id}:${sameSecondInitial.approval_digest}`,
+        attestation: request.attestation,
+        now: sameSecond,
+      }),
+    ).rejects.toThrow(/APPROVAL_REQUIRED/u);
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: `commit:${job.id}:${sameSecondRenewed.id}:${sameSecondRenewed.approval_digest}`,
+        attestation: request.attestation,
+        now: sameSecond,
+      }),
+    ).resolves.toEqual(sameSecondRenewed);
+    const forgedApproval = {
+      ...sameSecondRenewed,
+      id: `pia_forged_${driver}`,
+      approval_digest: 'e'.repeat(64),
+      idempotency_key_sha256: createHash('sha256')
+        .update(`forged-approval-${driver}`)
+        .digest('hex'),
+      request_fingerprint: createHash('sha256').update(`forged-request-${driver}`).digest('hex'),
+      created_at: new Date('2026-07-12T21:09:00.000Z'),
+      expires_at: new Date('2026-07-12T21:19:00.000Z'),
+    };
+    await db.insertInto('portable_import_approvals').values(forgedApproval).execute();
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: `commit:${job.id}:${forgedApproval.id}:${forgedApproval.approval_digest}`,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:10:00.000Z'),
+      }),
+    ).rejects.toThrow(/APPROVAL_EVIDENCE_INVALID/u);
     await expect(
       validatePortableImportApproval({
         db,
@@ -1092,7 +1164,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       payload: {},
     });
     expect(approvedResponse.statusCode, approvedResponse.body).toBe(201);
-    const approvedBody = approvedResponse.json<{
+    let approvedBody = approvedResponse.json<{
       approvalId: string;
       approvalDigest: string;
       expiresAt: string;
@@ -1135,7 +1207,131 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     expect(serializedApprovalDiff).not.toContain(routeHeaders['idempotency-key']);
     expect(serializedApprovalDiff).not.toContain(routeHeaders['x-tixkit-confirmation']);
     expect(serializedApprovalDiff).not.toContain(approvedBody.commitConfirmation);
-    const persistedApproval = await repository.findPortableImportApproval({
+    let persistedApproval = await repository.findPortableImportApproval({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      approvalId: approvedBody.approvalId,
+    });
+    expect(persistedApproval).toBeDefined();
+    const revocationEffects = async () => ({
+      jobs: await db
+        .selectFrom('import_jobs')
+        .selectAll()
+        .where('id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      approvals: await db
+        .selectFrom('portable_import_approvals')
+        .selectAll()
+        .where('import_job_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      revocations: await db
+        .selectFrom('portable_import_approval_revocations')
+        .selectAll()
+        .where('import_job_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      audits: await db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('action', '=', 'migration_job.portable_revoked')
+        .where('resource_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+    });
+    const invokeRevocation = (revokedJobId = job.id) =>
+      app.inject({
+        method: 'POST',
+        url: `/migration-jobs/${revokedJobId}/portable-approvals/${approvedBody.approvalId}/revoke`,
+        headers: { 'x-tixkit-confirmation': `revoke:${approvedBody.approvalId}` },
+        payload: { reason: 'Route pre-execution revocation proof' },
+      });
+    const expectRevocationDenial = async (
+      expectedStatus: 403 | 404,
+      expectedCode: 'FORBIDDEN' | 'NOT_FOUND',
+      revokedJobId = job.id,
+    ) => {
+      const before = await revocationEffects();
+      const response = await invokeRevocation(revokedJobId);
+      expect(response.statusCode, response.body).toBe(expectedStatus);
+      expect(response.json()).toMatchObject({ error: { code: expectedCode } });
+      expect(await revocationEffects()).toEqual(before);
+    };
+    activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
+    await expectRevocationDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      scopes: ['migrations.commit'],
+      brandIds: ['brand_scoped_revoke_01'],
+    };
+    await expectRevocationDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      brandIds: undefined,
+      eventIds: ['event_scoped_revoke_01'],
+    };
+    await expectRevocationDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      eventIds: undefined,
+      organizationIds: ['organization_outside_scope'],
+    };
+    await expectRevocationDenial(404, 'NOT_FOUND');
+    activePrincipal = { ...activePrincipal, organizationIds: [foreignOrganizationId] };
+    await expectRevocationDenial(404, 'NOT_FOUND', foreignJob.id);
+    activePrincipal = { ...activePrincipal, organizationIds: [organizationId] };
+    const beforeRevocationAuditFailure = await revocationEffects();
+    vi.spyOn(AuditLogRepository.prototype, 'create').mockRejectedValueOnce(
+      new Error('injected portable revocation audit failure'),
+    );
+    const revocationAuditFailure = await invokeRevocation();
+    expect(revocationAuditFailure.statusCode, revocationAuditFailure.body).toBe(503);
+    expect(await revocationEffects()).toEqual(beforeRevocationAuditFailure);
+    vi.restoreAllMocks();
+    const revokedResponse = await invokeRevocation();
+    expect(revokedResponse.statusCode, revokedResponse.body).toBe(200);
+    const revokedBody = revokedResponse.json<{
+      approvalId: string;
+      revoked: true;
+      revokedAt: string;
+    }>();
+    expect(revokedBody).toMatchObject({ approvalId: approvedBody.approvalId, revoked: true });
+    const revocationReplay = await invokeRevocation();
+    expect(revocationReplay.statusCode, revocationReplay.body).toBe(200);
+    expect(revocationReplay.json()).toEqual(revokedBody);
+    const revocationState = await revocationEffects();
+    const routeRevocations = revocationState.revocations.filter(
+      ({ approval_id: approvalId }) => approvalId === approvedBody.approvalId,
+    );
+    expect(routeRevocations).toHaveLength(1);
+    const routeRevocationAudits = revocationState.audits.filter(
+      ({ resource_id: resourceId }) => resourceId === job.id,
+    );
+    expect(routeRevocationAudits).toHaveLength(1);
+    const revocationDiffValue = routeRevocationAudits[0]!.diff_summary as unknown;
+    const revocationDiff =
+      typeof revocationDiffValue === 'string'
+        ? JSON.parse(revocationDiffValue)
+        : revocationDiffValue;
+    expect(revocationDiff).toEqual({
+      approvalId: approvedBody.approvalId,
+      reason: 'Route pre-execution revocation proof',
+      revocationId: routeRevocations[0]!.id,
+    });
+    expect(JSON.stringify(revocationDiff)).not.toMatch(
+      /confirmation|receipt|idempotency|fingerprint/iu,
+    );
+    const renewedApprovalResponse = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/portable-approval`,
+      headers: { ...routeHeaders, 'idempotency-key': 'portable-approval-route-02' },
+      payload: {},
+    });
+    expect(renewedApprovalResponse.statusCode, renewedApprovalResponse.body).toBe(201);
+    approvedBody = renewedApprovalResponse.json<typeof approvedBody>();
+    persistedApproval = await repository.findPortableImportApproval({
       tenantId,
       organizationId,
       jobId: job.id,

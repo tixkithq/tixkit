@@ -572,12 +572,20 @@ function portableApprovalDigest(input: {
   inputSha256: string;
   receiptSha256: string;
   rebindingsSha256: string;
+  idempotencyKeySha256?: string;
   approvedBy: string;
   approvedAt: string;
   expiresAt: string;
 }): string {
+  const { idempotencyKeySha256, ...approval } = input;
   return createHash('sha256')
-    .update(canonicalPortableJson({ action: 'portable-import.commit', ...input }))
+    .update(
+      canonicalPortableJson({
+        action: 'portable-import.commit',
+        ...approval,
+        ...(idempotencyKeySha256 ? { idempotencyKeySha256 } : {}),
+      }),
+    )
     .digest('hex');
 }
 
@@ -694,7 +702,20 @@ export async function approvePortableImport(input: {
             return replay;
           }
           const requestedNow = input.now ?? new Date();
-          const now = new Date(Math.floor(requestedNow.getTime() / 1000) * 1000);
+          const latestApproval = await repository.findLatestPortableImportApproval({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+          });
+          const latestRevocation = latestApproval
+            ? await repository.findPortableImportApprovalRevocation({
+                tenantId: input.tenantId,
+                organizationId: input.organizationId,
+                jobId: input.jobId,
+                approvalId: latestApproval.id,
+              })
+            : undefined;
+          const now = new Date(Math.floor(requestedNow.getTime() / 1_000) * 1_000);
           const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
           approvalDigest = portableApprovalDigest({
             tenantId: input.tenantId,
@@ -706,6 +727,7 @@ export async function approvePortableImport(input: {
             inputSha256: typedReceipt.inputSha256,
             receiptSha256: storedReceipt.receipt_sha256,
             rebindingsSha256,
+            ...(latestRevocation ? { idempotencyKeySha256 } : {}),
             approvedBy: input.approvedBy,
             approvedAt: now.toISOString(),
             expiresAt: expiresAt.toISOString(),
@@ -830,7 +852,7 @@ async function validatePortableImportApprovalFromDatabase(input: {
     attestation: input.attestation,
   });
   const typedReceipt = receipt as PortableDryRunReceipt;
-  const expectedDigest = portableApprovalDigest({
+  const expectedDigestInput = {
     tenantId: input.tenantId,
     organizationId: input.organizationId,
     jobId: input.jobId,
@@ -843,9 +865,16 @@ async function validatePortableImportApprovalFromDatabase(input: {
     approvedBy: approval.approved_by,
     approvedAt: new Date(approval.created_at).toISOString(),
     expiresAt: new Date(approval.expires_at).toISOString(),
-  });
+  };
+  const expectedDigests = [
+    portableApprovalDigest(expectedDigestInput),
+    portableApprovalDigest({
+      ...expectedDigestInput,
+      idempotencyKeySha256: approval.idempotency_key_sha256,
+    }),
+  ];
   if (
-    expectedDigest !== approval.approval_digest ||
+    !expectedDigests.includes(approval.approval_digest) ||
     typedReceipt.operationId !== approval.operation_id ||
     typedReceipt.manifestSha256 !== approval.manifest_sha256 ||
     typedReceipt.artifactSha256 !== approval.artifact_sha256 ||
@@ -1360,6 +1389,10 @@ export async function revokePortableImportApproval(input: {
   approvalId: string;
   revokedBy: string;
   reason?: string;
+  onCreated?: (input: {
+    db: Database;
+    revocation: Awaited<ReturnType<ImportRepository['revokePortableImportApproval']>>;
+  }) => Promise<void>;
   now?: Date;
 }) {
   return input.db
@@ -1381,7 +1414,7 @@ export async function revokePortableImportApproval(input: {
           throw new Error('PORTABLE_IMPORT_APPROVAL_REVOCATION_CONFLICT');
         return existing;
       }
-      return repository.revokePortableImportApproval({
+      const revocation = await repository.revokePortableImportApproval({
         tenantId: input.tenantId,
         organizationId: input.organizationId,
         jobId: input.jobId,
@@ -1390,5 +1423,7 @@ export async function revokePortableImportApproval(input: {
         reason: input.reason,
         now: input.now ?? new Date(),
       });
+      await input.onCreated?.({ db: transaction as Database, revocation });
+      return revocation;
     });
 }
