@@ -258,6 +258,10 @@ export async function bindPortableImportDestination(input: {
   portableId: string;
   destinationReference: string;
   boundBy: string;
+  onBound?: (input: {
+    db: Database;
+    rebinding: Awaited<ReturnType<ImportRepository['upsertPortableImportRebinding']>>;
+  }) => Promise<void>;
   now?: Date;
 }) {
   if (
@@ -267,51 +271,92 @@ export async function bindPortableImportDestination(input: {
     isSecretLikeDestinationReference(input.destinationReference)
   )
     throw new Error('PORTABLE_IMPORT_REBINDING_REFERENCE_INVALID');
-  const repository = new ImportRepository(input.db);
-  const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
-  if (!job || job.source_system !== 'tixkit-portable' || job.status !== 'ready')
-    throw new Error('PORTABLE_IMPORT_REBINDING_JOB_NOT_READY');
-  const preflight = await repository.findPortablePreflight(
-    input.tenantId,
-    input.organizationId,
-    input.jobId,
-  );
-  if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
-  const declarations = parsedJson(preflight.required_rebindings);
-  if (!Array.isArray(declarations)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
-  const rebinding = declarations.find(
-    (candidate): candidate is { portableId: string; kind: string; required: boolean } =>
-      !!candidate &&
-      typeof candidate === 'object' &&
-      (candidate as { portableId?: unknown }).portableId === input.portableId &&
-      typeof (candidate as { kind?: unknown }).kind === 'string' &&
-      typeof (candidate as { required?: unknown }).required === 'boolean',
-  );
-  if (!rebinding || !PORTABLE_REBINDING_KINDS.has(rebinding.kind))
-    throw new Error('PORTABLE_IMPORT_REBINDING_NOT_REQUIRED');
-  const destination = await repository.findPortableDestinationResource({
-    tenantId: input.tenantId,
-    organizationId: input.organizationId,
-    kind: rebinding.kind,
-    resourceId: input.destinationReference,
-  });
-  if (!destination) throw new Error('PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND');
-  const provenanceSha256 = portableRebindingProvenanceSha256({
-    kind: rebinding.kind as Parameters<typeof portableRebindingProvenanceSha256>[0]['kind'],
-    portableId: input.portableId,
-    destinationReference: destination.resource_id,
-  });
-  return repository.upsertPortableImportRebinding({
-    tenantId: input.tenantId,
-    organizationId: input.organizationId,
-    jobId: input.jobId,
-    portableId: input.portableId,
-    kind: rebinding.kind,
-    destinationReference: destination.resource_id,
-    provenanceSha256,
-    boundBy: input.boundBy,
-    now: input.now,
-  });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await input.db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (transaction) => {
+          const transactionDb = transaction as Database;
+          const repository = new ImportRepository(transactionDb);
+          const job = await repository.findJobForUpdate(
+            input.tenantId,
+            input.organizationId,
+            input.jobId,
+          );
+          if (!job || job.source_system !== 'tixkit-portable' || job.status !== 'ready')
+            throw new Error('PORTABLE_IMPORT_REBINDING_JOB_NOT_READY');
+          const preflight = await repository.findPortablePreflight(
+            input.tenantId,
+            input.organizationId,
+            input.jobId,
+          );
+          if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
+          const declarations = parsedJson(preflight.required_rebindings);
+          if (!Array.isArray(declarations))
+            throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+          const rebinding = declarations.find(
+            (candidate): candidate is { portableId: string; kind: string; required: boolean } =>
+              !!candidate &&
+              typeof candidate === 'object' &&
+              (candidate as { portableId?: unknown }).portableId === input.portableId &&
+              typeof (candidate as { kind?: unknown }).kind === 'string' &&
+              typeof (candidate as { required?: unknown }).required === 'boolean',
+          );
+          if (!rebinding || !PORTABLE_REBINDING_KINDS.has(rebinding.kind))
+            throw new Error('PORTABLE_IMPORT_REBINDING_NOT_REQUIRED');
+          const destination = await repository.findPortableDestinationResource({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            kind: rebinding.kind,
+            resourceId: input.destinationReference,
+          });
+          if (!destination) throw new Error('PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND');
+          const provenanceSha256 = portableRebindingProvenanceSha256({
+            kind: rebinding.kind as Parameters<typeof portableRebindingProvenanceSha256>[0]['kind'],
+            portableId: input.portableId,
+            destinationReference: destination.resource_id,
+          });
+          const persisted = await repository.upsertPortableImportRebinding({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            portableId: input.portableId,
+            kind: rebinding.kind,
+            destinationReference: destination.resource_id,
+            provenanceSha256,
+            boundBy: input.boundBy,
+            now: input.now,
+          });
+          await input.onBound?.({ db: transactionDb, rebinding: persisted });
+          return persisted;
+        });
+    } catch (error) {
+      const databaseError = error as {
+        code?: string;
+        number?: number;
+        errno?: number;
+        cause?: { code?: string; number?: number; errno?: number };
+      };
+      const code = databaseError.code ?? databaseError.cause?.code;
+      const number = databaseError.number ?? databaseError.cause?.number;
+      const errno = databaseError.errno ?? databaseError.cause?.errno;
+      const retryable =
+        code === '40001' ||
+        code === '40P01' ||
+        code === '23505' ||
+        code === 'ER_LOCK_DEADLOCK' ||
+        code === 'ER_LOCK_WAIT_TIMEOUT' ||
+        code === 'ER_DUP_ENTRY' ||
+        errno === 1213 ||
+        errno === 1205 ||
+        errno === 1062 ||
+        number === 2601 ||
+        number === 2627;
+      if (!retryable || attempt === 4) throw error;
+    }
+  }
+  throw new Error('PORTABLE_IMPORT_REBINDING_RETRY_EXHAUSTED');
 }
 
 export async function portableImportRebindingStatus(input: {

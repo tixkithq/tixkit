@@ -1801,6 +1801,26 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         portableId,
         destinationReference: body.destinationReference,
         boundBy: principal.id,
+        onBound: async ({ db, rebinding: persistedRebinding }) => {
+          await writeAuditLog(
+            new AuditLogRepository(db),
+            request,
+            principal,
+            {
+              action: 'migration_job.portable_rebound',
+              organizationId,
+              resourceType: 'MigrationJob',
+              resourceId: jobId,
+              diffSummary: {
+                portableId,
+                kind: persistedRebinding.kind,
+                destinationReference: persistedRebinding.destination_reference,
+                provenanceSha256: persistedRebinding.provenance_sha256,
+              },
+            },
+            { failClosed: true },
+          );
+        },
       });
     } catch (error) {
       if (
@@ -1814,12 +1834,6 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         throw new ConflictError('Portable destination rebindings require a ready dry-run');
       throw error;
     }
-    await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_rebound', {
-      portableId,
-      kind: rebinding.kind,
-      destinationReference: rebinding.destination_reference,
-      provenanceSha256: rebinding.provenance_sha256,
-    });
     return {
       portableId: rebinding.portable_id,
       kind: rebinding.kind,

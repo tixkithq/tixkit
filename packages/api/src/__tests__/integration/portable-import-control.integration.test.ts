@@ -1115,6 +1115,67 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       ...activePrincipal,
       organizationIds: [organizationId],
     };
+    const rebindingEffects = async () => ({
+      jobs: await db
+        .selectFrom('import_jobs')
+        .selectAll()
+        .where('id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      rebindings: await db
+        .selectFrom('portable_import_rebindings')
+        .selectAll()
+        .where('import_job_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      audits: await db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('action', '=', 'migration_job.portable_rebound')
+        .where('resource_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+    });
+    const invokeRebinding = (reboundJobId = job.id, destinationReference = 'acct_destination_01') =>
+      app.inject({
+        method: 'PUT',
+        url: `/migration-jobs/${reboundJobId}/portable-rebindings/provider_stripe`,
+        payload: { destinationReference },
+      });
+    const expectRebindingDenial = async (
+      expectedStatus: 403 | 404,
+      expectedCode: 'FORBIDDEN' | 'NOT_FOUND',
+      reboundJobId = job.id,
+    ) => {
+      const before = await rebindingEffects();
+      const response = await invokeRebinding(reboundJobId);
+      expect(response.statusCode, response.body).toBe(expectedStatus);
+      expect(response.json()).toMatchObject({ error: { code: expectedCode } });
+      expect(await rebindingEffects()).toEqual(before);
+    };
+    activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
+    await expectRebindingDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      scopes: ['migrations.write'],
+      brandIds: ['brand_scoped_rebinding_01'],
+    };
+    await expectRebindingDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      brandIds: undefined,
+      eventIds: ['event_scoped_rebinding_01'],
+    };
+    await expectRebindingDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      eventIds: undefined,
+      organizationIds: ['organization_outside_scope'],
+    };
+    await expectRebindingDenial(404, 'NOT_FOUND');
+    activePrincipal = { ...activePrincipal, organizationIds: [foreignOrganizationId] };
+    await expectRebindingDenial(404, 'NOT_FOUND', foreignJob.id);
+    activePrincipal = { ...activePrincipal, organizationIds: [organizationId] };
     activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
     const rebindingStatus = await app.inject({
       method: 'GET',
@@ -1123,15 +1184,153 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     expect(rebindingStatus.statusCode, rebindingStatus.body).toBe(200);
     expect(rebindingStatus.json()).toMatchObject({ complete: true });
     activePrincipal = { ...activePrincipal, scopes: ['migrations.write'] };
-    const routeRebinding = await app.inject({
-      method: 'PUT',
-      url: `/migration-jobs/${job.id}/portable-rebindings/provider_stripe`,
-      payload: { destinationReference: 'acct_destination_01' },
-    });
+    const beforeRebindingAuditFailure = await rebindingEffects();
+    vi.spyOn(AuditLogRepository.prototype, 'create').mockRejectedValueOnce(
+      new Error('injected portable rebinding audit failure'),
+    );
+    const rebindingAuditFailure = await invokeRebinding();
+    expect(rebindingAuditFailure.statusCode, rebindingAuditFailure.body).toBe(500);
+    expect(await rebindingEffects()).toEqual(beforeRebindingAuditFailure);
+    vi.restoreAllMocks();
+    const routeRebinding = await invokeRebinding();
     expect(routeRebinding.statusCode, routeRebinding.body).toBe(200);
-    expect(routeRebinding.json()).toMatchObject({
+    const routeRebindingBody = routeRebinding.json();
+    expect(routeRebindingBody).toMatchObject({
       portableId: 'provider_stripe',
       destinationReference: 'acct_destination_01',
+    });
+    const routeRebindingAudits = (await rebindingEffects()).audits.filter(
+      ({ resource_id: resourceId }) => resourceId === job.id,
+    );
+    expect(routeRebindingAudits).toHaveLength(1);
+    const routeRebindingDiffValue = routeRebindingAudits[0]!.diff_summary as unknown;
+    const routeRebindingDiff =
+      typeof routeRebindingDiffValue === 'string'
+        ? JSON.parse(routeRebindingDiffValue)
+        : routeRebindingDiffValue;
+    expect(routeRebindingDiff).toEqual({
+      portableId: routeRebindingBody.portableId,
+      kind: routeRebindingBody.kind,
+      destinationReference: routeRebindingBody.destinationReference,
+      provenanceSha256: routeRebindingBody.provenanceSha256,
+    });
+    expect(JSON.stringify(routeRebindingDiff)).not.toMatch(/secret|token|credential|receipt/iu);
+    const replayedRebinding = await invokeRebinding();
+    expect(replayedRebinding.statusCode, replayedRebinding.body).toBe(200);
+    expect(replayedRebinding.json()).toEqual({
+      ...routeRebindingBody,
+      updatedAt: expect.any(String),
+    });
+    expect(
+      (await rebindingEffects()).audits.filter(
+        ({ resource_id: resourceId }) => resourceId === job.id,
+      ),
+    ).toHaveLength(2);
+
+    const originalFindJobForUpdate = ImportRepository.prototype.findJobForUpdate;
+    const originalCreateAudit = AuditLogRepository.prototype.create;
+    const runForcedConcurrentRebindings = async (input: {
+      firstDestination: string;
+      secondDestination: string;
+      failFirstAudit: boolean;
+    }) => {
+      let enteredJobLocks = 0;
+      let signalSecondLockEntered!: () => void;
+      const secondLockEntered = new Promise<void>((resolve) => {
+        signalSecondLockEntered = resolve;
+      });
+      vi.spyOn(ImportRepository.prototype, 'findJobForUpdate').mockImplementation(function (
+        this: ImportRepository,
+        ...arguments_: Parameters<ImportRepository['findJobForUpdate']>
+      ) {
+        enteredJobLocks += 1;
+        if (enteredJobLocks === 2) signalSecondLockEntered();
+        return originalFindJobForUpdate.apply(this, arguments_);
+      });
+      let auditCalls = 0;
+      let signalFirstAuditEntered!: () => void;
+      const firstAuditEntered = new Promise<void>((resolve) => {
+        signalFirstAuditEntered = resolve;
+      });
+      let releaseFirstAudit!: () => void;
+      const firstAuditMayFinish = new Promise<void>((resolve) => {
+        releaseFirstAudit = resolve;
+      });
+      vi.spyOn(AuditLogRepository.prototype, 'create').mockImplementation(async function (
+        this: AuditLogRepository,
+        ...arguments_: Parameters<AuditLogRepository['create']>
+      ) {
+        auditCalls += 1;
+        if (auditCalls === 1) {
+          signalFirstAuditEntered();
+          await firstAuditMayFinish;
+          if (input.failFirstAudit) throw new Error('injected concurrent rebinding audit failure');
+        }
+        return originalCreateAudit.apply(this, arguments_);
+      });
+      const before = await rebindingEffects();
+      const first = invokeRebinding(job.id, input.firstDestination);
+      await firstAuditEntered;
+      const second = invokeRebinding(job.id, input.secondDestination);
+      await secondLockEntered;
+      releaseFirstAudit();
+      const responses = await Promise.all([first, second]);
+      vi.restoreAllMocks();
+      return { before, responses, after: await rebindingEffects() };
+    };
+
+    const competing = await runForcedConcurrentRebindings({
+      firstDestination: 'acct_destination_01',
+      secondDestination: 'acct_destination_changed',
+      failFirstAudit: false,
+    });
+    expect(competing.responses.map(({ statusCode }) => statusCode)).toEqual([200, 200]);
+    expect(competing.after.rebindings).toHaveLength(competing.before.rebindings.length);
+    expect(
+      competing.after.rebindings.find(
+        ({ import_job_id: importJobId, portable_id: portableId }) =>
+          importJobId === job.id && portableId === 'provider_stripe',
+      ),
+    ).toMatchObject({ destination_reference: 'acct_destination_changed' });
+    const competingAudits = competing.after.audits.slice(competing.before.audits.length);
+    expect(competingAudits).toHaveLength(2);
+    expect(
+      competingAudits.map(({ diff_summary: diffSummary }) => {
+        const parsed = typeof diffSummary === 'string' ? JSON.parse(diffSummary) : diffSummary;
+        return parsed.destinationReference;
+      }),
+    ).toEqual(['acct_destination_01', 'acct_destination_changed']);
+
+    const failedConcurrent = await runForcedConcurrentRebindings({
+      firstDestination: 'acct_destination_changed',
+      secondDestination: 'acct_destination_01',
+      failFirstAudit: true,
+    });
+    expect(failedConcurrent.responses.map(({ statusCode }) => statusCode)).toEqual([500, 200]);
+    expect(failedConcurrent.after.rebindings).toHaveLength(
+      failedConcurrent.before.rebindings.length,
+    );
+    const finalConcurrentRebinding = failedConcurrent.after.rebindings.find(
+      ({ import_job_id: importJobId, portable_id: portableId }) =>
+        importJobId === job.id && portableId === 'provider_stripe',
+    );
+    expect(finalConcurrentRebinding).toMatchObject({
+      destination_reference: 'acct_destination_01',
+    });
+    const failedConcurrentAudits = failedConcurrent.after.audits.slice(
+      failedConcurrent.before.audits.length,
+    );
+    expect(failedConcurrentAudits).toHaveLength(1);
+    const failedConcurrentAuditDiffValue = failedConcurrentAudits[0]!.diff_summary as unknown;
+    const failedConcurrentAuditDiff =
+      typeof failedConcurrentAuditDiffValue === 'string'
+        ? JSON.parse(failedConcurrentAuditDiffValue)
+        : failedConcurrentAuditDiffValue;
+    expect(failedConcurrentAuditDiff).toEqual({
+      portableId: 'provider_stripe',
+      kind: 'provider_account',
+      destinationReference: 'acct_destination_01',
+      provenanceSha256: finalConcurrentRebinding!.provenance_sha256,
     });
     activePrincipal = { ...activePrincipal, scopes: ['migrations.commit'] };
     expect(
