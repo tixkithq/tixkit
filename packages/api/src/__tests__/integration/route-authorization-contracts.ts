@@ -23,7 +23,7 @@ export type RouteAuthorizationDenialContract = Readonly<{
     status: 404;
   }>;
   deniedBoundaries: readonly AuthorizationBoundary[];
-  method: 'DELETE' | 'GET' | 'PATCH' | 'POST';
+  method: 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
   operationId: string;
   path: string;
   permissionDenialResponse?: Readonly<{
@@ -137,6 +137,19 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     persistenceSource: 'event-route-authorization-db.integration.test.ts',
     resourceParameters: ['eventId', 'stepId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'event-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'PUT',
+    operationId: 'putEventsByEventIdSetupSection',
+    path: '/events/{eventId}/setup-section',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'event-route-authorization-db.integration.test.ts',
+    resourceParameters: ['eventId'],
     sideEffectAssertions: ['persistence'],
     source: 'event-route-authorization-db.integration.test.ts',
   }),

@@ -35,6 +35,13 @@ const eventMutationContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter
     contract.method === 'POST' &&
     contract.operationId !== 'postEventsByEventIdReadinessAcknowledgementsByStepId',
 );
+const setupSectionContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'putEventsByEventIdSetupSection',
+  );
+  if (!contract) throw new Error('setup-section authorization contract is not registered');
+  return contract;
+})();
 
 type AuthorizationScenario = {
   name: string;
@@ -129,6 +136,52 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         'event.readiness_acknowledged',
         'event.readiness_acknowledgement_removed',
       ])
+      .where('resource_id', 'in', createdEventIds)
+      .execute();
+  }
+
+  async function setupSectionSnapshot() {
+    const [events, audits] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select(['id', 'last_setup_section'])
+        .where('id', 'in', createdEventIds)
+        .orderBy('id', 'asc')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .select([
+          'id',
+          'tenant_id',
+          'organization_id',
+          'brand_id',
+          'actor_type',
+          'actor_id',
+          'action',
+          'resource_type',
+          'resource_id',
+          'diff_summary',
+        ])
+        .where('actor_id', '=', basePrincipal.id)
+        .where('action', '=', 'event.setup_section.update')
+        .where('resource_id', 'in', createdEventIds)
+        .orderBy('id', 'asc')
+        .execute(),
+    ]);
+    return { events, audits };
+  }
+
+  async function clearSetupSectionEvidence(): Promise<void> {
+    if (createdEventIds.length === 0) return;
+    await db
+      .updateTable('events')
+      .set({ last_setup_section: null })
+      .where('id', 'in', createdEventIds)
+      .execute();
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', basePrincipal.id)
+      .where('action', '=', 'event.setup_section.update')
       .where('resource_id', 'in', createdEventIds)
       .execute();
   }
@@ -278,6 +331,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       try {
         if (db) {
           await attemptCleanup(clearReadinessAcknowledgementEvidence);
+          await attemptCleanup(clearSetupSectionEvidence);
           await attemptCleanup(() =>
             db
               .deleteFrom('check_in_lists')
@@ -529,6 +583,103 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         .executeTakeFirstOrThrow(),
     };
     expect(after).toEqual(before);
+  });
+
+  describe('setup-section authorization', () => {
+    beforeEach(async () => {
+      principal = basePrincipal;
+      await clearSetupSectionEvidence();
+    });
+
+    afterEach(clearSetupSectionEvidence);
+
+    function invokeSetupSection(targetEventId: string, section = 'media') {
+      return app.inject({
+        method: setupSectionContract.method,
+        url: setupSectionContract.path.replace('{eventId}', targetEventId),
+        payload: { section },
+      });
+    }
+
+    it('allows the exact event principal to persist one bounded section and audit', async () => {
+      const response = await invokeSetupSection(eventA);
+
+      expect(response.statusCode, response.body).toBe(
+        setupSectionContract.authorizedControl.status,
+      );
+      expect(response.json()).toEqual({ eventId: eventA, section: 'media' });
+      const snapshot = await setupSectionSnapshot();
+      expect(snapshot.events).toEqual(
+        [...createdEventIds]
+          .sort()
+          .map((id) => ({ id, last_setup_section: id === eventA ? 'media' : null })),
+      );
+      expect(snapshot.audits).toHaveLength(1);
+      expect(snapshot.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_type: 'user',
+        actor_id: basePrincipal.id,
+        action: 'event.setup_section.update',
+        resource_type: 'event',
+        resource_id: eventA,
+      });
+      const storedDiff = snapshot.audits[0]!.diff_summary;
+      if (storedDiff === null) throw new Error('setup-section audit omitted diff');
+      const diff =
+        typeof storedDiff === 'string'
+          ? (JSON.parse(storedDiff) as Record<string, unknown>)
+          : (storedDiff as Record<string, unknown>);
+      expect(diff).toEqual({ section: 'media' });
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without changing any section or audit',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await setupSectionSnapshot();
+
+        const response = await invokeSetupSection(targetEvent(), 'marketing-fields');
+
+        expect(response.statusCode).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        await expect(setupSectionSnapshot()).resolves.toEqual(before);
+      },
+    );
   });
 
   describe('launch-readiness acknowledgement authorization', () => {
