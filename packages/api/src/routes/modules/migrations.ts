@@ -1396,58 +1396,68 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     );
     let portableDryRunReceipt: unknown;
     let portableDryRunReceiptSha256: string | undefined;
-    if (accepted && job.source_system === 'tixkit-portable') {
-      try {
-        const attested = await attestPortableDryRun({
-          db: app.context.db,
-          tenantId: principal.tenantId,
-          organizationId,
-          jobId,
-          inputSha256: inputHash,
-          createdBy: principal.id,
-          attestation: portableAttestation(),
-        });
-        portableDryRunReceipt = attested.receipt;
-        portableDryRunReceiptSha256 = attested.receiptSha256;
-      } catch (error) {
-        if (error instanceof Error && error.message === 'PORTABLE_IMPORT_DRY_RUN_INPUT_CHANGED') {
-          throw new ConflictError(
-            'Portable migration input changed after its immutable dry-run receipt; create a new migration job',
-          );
+    await app.context.db.transaction().execute(async (transaction) => {
+      const transactionDb = transaction as typeof app.context.db;
+      const changed = await new ImportRepository(transactionDb).transitionJob({
+        tenantId: principal.tenantId,
+        organizationId,
+        jobId,
+        from: [job.status as never],
+        to: accepted ? 'ready' : 'failed',
+        summary,
+      });
+      if (!changed) throw new ConflictError('Migration status changed concurrently');
+      if (accepted && job.source_system === 'tixkit-portable') {
+        try {
+          const attested = await attestPortableDryRun({
+            db: transactionDb,
+            tenantId: principal.tenantId,
+            organizationId,
+            jobId,
+            inputSha256: inputHash,
+            createdBy: principal.id,
+            attestation: portableAttestation(),
+          });
+          portableDryRunReceipt = attested.receipt;
+          portableDryRunReceiptSha256 = attested.receiptSha256;
+        } catch (error) {
+          if (error instanceof Error && error.message === 'PORTABLE_IMPORT_DRY_RUN_INPUT_CHANGED') {
+            throw new ConflictError(
+              'Portable migration input changed after its immutable dry-run receipt; create a new migration job',
+            );
+          }
+          request.log.error({ err: error, jobId }, 'Portable dry-run attestation failed');
+          throw new PortableDryRunAttestationUnavailableError();
         }
-        request.log.error({ err: error, jobId }, 'Portable dry-run attestation failed');
-        throw new PortableDryRunAttestationUnavailableError();
       }
-    }
-    const changed = await repository.transitionJob({
-      tenantId: principal.tenantId,
-      organizationId,
-      jobId,
-      from: [job.status as never],
-      to: accepted ? 'ready' : 'failed',
-      summary,
+      await writeAuditLog(
+        new AuditLogRepository(transactionDb),
+        request,
+        principal,
+        {
+          action: accepted ? 'migration_job.dry_run_completed' : 'migration_job.dry_run_failed',
+          organizationId,
+          resourceType: 'MigrationJob',
+          resourceId: jobId,
+          diffSummary: {
+            accepted,
+            counts: summary.counts,
+            severityCounts: summary.severityCounts,
+            issueCodes: Array.isArray(summary.issues)
+              ? [
+                  ...new Set(
+                    summary.issues
+                      .map((issue) => (issue as { code?: string }).code)
+                      .filter(Boolean),
+                  ),
+                ]
+              : [],
+            ...(portableDryRunReceiptSha256 ? { portableDryRunReceiptSha256 } : {}),
+          },
+        },
+        { failClosed: true },
+      );
     });
-    if (!changed) throw new ConflictError('Migration status changed concurrently');
-    await auditMutation(
-      app,
-      request,
-      organizationId,
-      jobId,
-      accepted ? 'migration_job.dry_run_completed' : 'migration_job.dry_run_failed',
-      {
-        accepted,
-        counts: summary.counts,
-        severityCounts: summary.severityCounts,
-        issueCodes: Array.isArray(summary.issues)
-          ? [
-              ...new Set(
-                summary.issues.map((issue) => (issue as { code?: string }).code).filter(Boolean),
-              ),
-            ]
-          : [],
-        ...(portableDryRunReceiptSha256 ? { portableDryRunReceiptSha256 } : {}),
-      },
-    );
     return {
       status: accepted ? 'ready' : 'failed',
       report: summary,
