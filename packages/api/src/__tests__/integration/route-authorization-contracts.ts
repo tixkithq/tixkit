@@ -281,6 +281,22 @@ export const CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postEventsByEventIdBoxOfficeOrders',
+    path: '/events/{eventId}/box-office/orders',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'box-office-orders-db.integration.test.ts',
+    resourceParameters: ['eventId'],
+    sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'box-office-routes.test.ts',
+  }),
+]);
+
 export const RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -370,5 +386,6 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

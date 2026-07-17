@@ -44,6 +44,14 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
+import { BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+
+const boxOfficeAuthorizationContract = BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+  (contract) => contract.operationId === 'postEventsByEventIdBoxOfficeOrders',
+);
+if (!boxOfficeAuthorizationContract) {
+  throw new Error('Missing box-office order authorization contract');
+}
 
 type TemporalStartInput = {
   checkoutSessionId: string;
@@ -87,7 +95,7 @@ const defaultIdentity: RouteIdentity = {
   operatorId: OPERATOR_ID,
 };
 
-function makePrincipal(identity: RouteIdentity): Principal {
+function makePrincipal(identity: RouteIdentity, overrides: Partial<Principal> = {}): Principal {
   return {
     type: 'user',
     id: identity.operatorId,
@@ -96,6 +104,7 @@ function makePrincipal(identity: RouteIdentity): Principal {
     brandIds: [identity.brandId],
     eventIds: [identity.eventId],
     scopes: ['events.read', 'orders.read', 'orders.write', 'checkins.write'],
+    ...overrides,
   };
 }
 
@@ -242,6 +251,7 @@ async function createTicketType(
 async function setupRouteApp(
   database: Database,
   identity: RouteIdentity = defaultIdentity,
+  principalOverrides: Partial<Principal> = {},
 ): Promise<FastifyInstance> {
   const routeApp = Fastify();
   const pricingEngine = new PricingEngine();
@@ -254,7 +264,7 @@ async function setupRouteApp(
     authService: {
       isLocalDevMode: vi.fn(() => true),
       authenticateLocalDev: vi.fn(async () => ({
-        principal: makePrincipal(identity),
+        principal: makePrincipal(identity, principalOverrides),
       })),
     },
     temporalClient: {
@@ -277,7 +287,7 @@ async function setupRouteApp(
     },
   } as unknown as AppContext);
   routeApp.addHook('preHandler', async (request) => {
-    request.principal = makePrincipal(identity);
+    request.principal = makePrincipal(identity, principalOverrides);
   });
   registerErrorHandler(routeApp);
   await routeApp.register(checkoutRoutes);
@@ -307,6 +317,94 @@ describeWithIntegrationDatabase(
     beforeEach(async () => {
       await resetMutableState(db);
     });
+
+    it('binds real PostgreSQL/MySQL persistence controls to the box-office authorization contract', async () => {
+      expect(boxOfficeAuthorizationContract).toMatchObject({
+        operationId: 'postEventsByEventIdBoxOfficeOrders',
+        persistenceSource: 'box-office-orders-db.integration.test.ts',
+        sideEffectAssertions: ['persistence', 'workflow'],
+      });
+    });
+
+    it('denies every declared box-office boundary with zero real persistence or workflow effects', async () => {
+      const cases: Array<{
+        boundary: string;
+        code: 'FORBIDDEN' | 'NOT_FOUND';
+        principal: Partial<Principal>;
+        status: 403 | 404;
+      }> = [
+        {
+          boundary: 'permission',
+          code: 'FORBIDDEN',
+          principal: { scopes: ['events.read', 'orders.read'] },
+          status: 403,
+        },
+        {
+          boundary: 'tenant',
+          code: 'NOT_FOUND',
+          principal: { tenantId: `tnt_other_${RUN_ID}` },
+          status: 404,
+        },
+        {
+          boundary: 'organization',
+          code: 'NOT_FOUND',
+          principal: { organizationIds: [`org_other_${RUN_ID}`] },
+          status: 404,
+        },
+        {
+          boundary: 'brand',
+          code: 'NOT_FOUND',
+          principal: { brandIds: [`brd_other_${RUN_ID}`] },
+          status: 404,
+        },
+        {
+          boundary: 'event',
+          code: 'NOT_FOUND',
+          principal: { eventIds: [`evt_other_${RUN_ID}`] },
+          status: 404,
+        },
+      ];
+
+      for (const testCase of cases) {
+        await resetMutableState(db);
+        const poolId = await createPool(db, 3);
+        const ticketTypeId = await createTicketType(db, poolId, 2500);
+        const denialApp = await setupRouteApp(db, defaultIdentity, testCase.principal);
+        const before = await db.transaction().execute(async (trx) => ({
+          checkoutSessions: await trx.selectFrom('checkout_sessions').selectAll().execute(),
+          idempotencyRecords: await trx.selectFrom('idempotency_records').selectAll().execute(),
+          inventoryPools: await trx.selectFrom('inventory_pools').selectAll().execute(),
+          orders: await trx.selectFrom('orders').selectAll().execute(),
+        }));
+
+        try {
+          const response = await denialApp.inject({
+            method: 'POST',
+            url: `/events/${EVENT_ID}/box-office/orders`,
+            headers: { 'Idempotency-Key': `pos_db_denial_${testCase.boundary}_${RUN_ID}` },
+            payload: {
+              tenderType: 'manual_card',
+              amountCents: 2500,
+              items: [{ ticketTypeId, quantity: 1 }],
+            },
+          });
+
+          expect(response.statusCode).toBe(testCase.status);
+          expect(response.json().error.code).toBe(testCase.code);
+          expect(
+            await db.transaction().execute(async (trx) => ({
+              checkoutSessions: await trx.selectFrom('checkout_sessions').selectAll().execute(),
+              idempotencyRecords: await trx.selectFrom('idempotency_records').selectAll().execute(),
+              inventoryPools: await trx.selectFrom('inventory_pools').selectAll().execute(),
+              orders: await trx.selectFrom('orders').selectAll().execute(),
+            })),
+          ).toEqual(before);
+          expect(finalizedOrderCount).toBe(0);
+        } finally {
+          await denialApp.close();
+        }
+      }
+    }, 30_000);
 
     it('persists an authenticated manual-card POS order with real DB idempotency and inventory conversion', async () => {
       const poolId = await createPool(db, 3);

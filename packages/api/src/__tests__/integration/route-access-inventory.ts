@@ -131,6 +131,11 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'checkin-scan-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'checkin-scan-route-authorization-db.integration.test.ts'),
   ],
+  ['box-office-routes.test.ts', resolve(import.meta.dirname, 'box-office-routes.test.ts')],
+  [
+    'box-office-orders-db.integration.test.ts',
+    resolve(import.meta.dirname, 'box-office-orders-db.integration.test.ts'),
+  ],
 ]);
 
 type AuthorizationEvidenceBinding = Readonly<{
@@ -230,6 +235,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['postCheckInsScan'], {
     source: 'checkin-scan-route-authorization-db.integration.test.ts',
     persistenceSource: 'checkin-scan-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postEventsByEventIdBoxOfficeOrders'], {
+    source: 'box-office-routes.test.ts',
+    persistenceSource: 'box-office-orders-db.integration.test.ts',
   }),
 ]);
 

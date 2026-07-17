@@ -2,8 +2,16 @@ import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
-import type { AppContext } from '../../app.js';
+import { registerErrorHandler, type AppContext } from '../../app.js';
 import { checkoutRoutes } from '../../routes/modules/checkout.js';
+import { BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+
+const boxOfficeAuthorizationContract = BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+  (contract) => contract.operationId === 'postEventsByEventIdBoxOfficeOrders',
+);
+if (!boxOfficeAuthorizationContract) {
+  throw new Error('Missing box-office order authorization contract');
+}
 
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
@@ -283,11 +291,23 @@ async function setupApp(input: {
         })),
       } as unknown),
   } as unknown as AppContext);
+  registerErrorHandler(app);
   await app.register(checkoutRoutes);
   return { app, reserveCart, startCheckoutSession };
 }
 
 describe('box-office order route', () => {
+  it('binds the executable box-office denial matrix to persistence and workflow proof', () => {
+    expect(boxOfficeAuthorizationContract).toMatchObject({
+      authorizedControl: { required: true, status: 201 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      persistenceSource: 'box-office-orders-db.integration.test.ts',
+      sideEffectAssertions: ['persistence', 'workflow'],
+      source: 'box-office-routes.test.ts',
+    });
+  });
+
   it('rejects unauthenticated POS order requests before inventory or workflow side effects', async () => {
     const reserveCart = vi.fn();
     const startCheckoutSession = vi.fn();
@@ -513,7 +533,6 @@ describe('box-office order route', () => {
     const tables = baseTables();
     const reserveCart = vi.fn();
     const { app, startCheckoutSession } = await setupApp({ tables, reserveCart });
-
     const response = await app.inject({
       method: 'POST',
       url: '/events/evt_box/box-office/orders',
@@ -567,7 +586,9 @@ describe('box-office order route', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().message).toBe('Box-office sales are disabled for this organization');
+    expect(response.json().error.message).toBe(
+      'Box-office sales are disabled for this organization',
+    );
     expect(reserveCart).not.toHaveBeenCalled();
     expect(startCheckoutSession).not.toHaveBeenCalled();
     expect(tables.idempotency_records).toHaveLength(0);
@@ -609,7 +630,7 @@ describe('box-office order route', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().message).toBe(
+    expect(response.json().error.message).toBe(
       'Box-office tender type manual_card is not enabled for this organization',
     );
     expect(reserveCart).not.toHaveBeenCalled();
@@ -653,7 +674,7 @@ describe('box-office order route', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().message).toBe('Buyer email is required for box-office sales');
+    expect(response.json().error.message).toBe('Buyer email is required for box-office sales');
     expect(reserveCart).not.toHaveBeenCalled();
     expect(startCheckoutSession).not.toHaveBeenCalled();
     expect(tables.idempotency_records).toHaveLength(0);
@@ -705,6 +726,11 @@ describe('box-office order route', () => {
     });
     const reserveCart = vi.fn();
     const { app, startCheckoutSession } = await setupApp({ tables, reserveCart });
+    const before = structuredClone({
+      checkoutSessions: tables.checkout_sessions,
+      idempotencyRecords: tables.idempotency_records,
+      orders: tables.orders,
+    });
 
     const response = await app.inject({
       method: 'POST',
@@ -718,6 +744,75 @@ describe('box-office order route', () => {
     });
 
     expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('NOT_FOUND');
+    expect({
+      checkoutSessions: tables.checkout_sessions,
+      idempotencyRecords: tables.idempotency_records,
+      orders: tables.orders,
+    }).toEqual(before);
+    expect(reserveCart).not.toHaveBeenCalled();
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      boundary: 'permission',
+      principal: makePrincipal({ scopes: ['events.read', 'orders.read'] }),
+      code: 'FORBIDDEN',
+      status: 403,
+    },
+    {
+      boundary: 'organization',
+      principal: makePrincipal({ organizationIds: ['org_other'] }),
+      code: 'NOT_FOUND',
+      status: 404,
+    },
+    {
+      boundary: 'brand',
+      principal: makePrincipal({ brandIds: ['brd_other'] }),
+      code: 'NOT_FOUND',
+      status: 404,
+    },
+    {
+      boundary: 'event',
+      principal: makePrincipal({ eventIds: ['evt_other'] }),
+      code: 'NOT_FOUND',
+      status: 404,
+    },
+  ])('denies the $boundary boundary before persistence or workflow effects', async (testCase) => {
+    const tables = baseTables();
+    const reserveCart = vi.fn();
+    const startCheckoutSession = vi.fn();
+    const before = structuredClone({
+      checkoutSessions: tables.checkout_sessions,
+      idempotencyRecords: tables.idempotency_records,
+      orders: tables.orders,
+    });
+    const { app } = await setupApp({
+      tables,
+      principal: testCase.principal,
+      reserveCart,
+      startCheckoutSession,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/events/evt_box/box-office/orders',
+      headers: { 'idempotency-key': `box-denial-${testCase.boundary}` },
+      payload: {
+        tenderType: 'cash',
+        amountCents: 2500,
+        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(testCase.status);
+    expect(response.json().error.code).toBe(testCase.code);
+    expect({
+      checkoutSessions: tables.checkout_sessions,
+      idempotencyRecords: tables.idempotency_records,
+      orders: tables.orders,
+    }).toEqual(before);
     expect(reserveCart).not.toHaveBeenCalled();
     expect(startCheckoutSession).not.toHaveBeenCalled();
   });

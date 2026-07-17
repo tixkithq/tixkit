@@ -325,11 +325,11 @@ describeWithIntegrationDatabase(
         expect(response.json()).toMatchObject({
           id: attendeeId,
           firstName: 'Augusta Ada',
-          lastName: null,
           email: 'augusta@example.test',
           phone: '+15555550101',
           status: 'confirmed',
         });
+        expect(response.json()).not.toHaveProperty('lastName');
         const state = await persistedState();
         expect(state.attendee).toMatchObject({
           first_name: 'Augusta Ada',
