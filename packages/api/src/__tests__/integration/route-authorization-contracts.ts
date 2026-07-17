@@ -698,6 +698,41 @@ export const API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['organization'],
+    method: 'POST',
+    operationId: 'postOauthApplications',
+    path: '/oauth-applications',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyDeniedBoundaries: ['brand', 'event'],
+    persistenceSource: 'oauth-application-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'oauth-application-route-authorization.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 204 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'DELETE',
+    operationId: 'deleteOauthApplicationsByAppId',
+    path: '/oauth-applications/{appId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyDeniedBoundaries: ['brand', 'event'],
+    persistenceSource: 'oauth-application-route-authorization-db.integration.test.ts',
+    resourceParameters: ['appId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'oauth-application-route-authorization.test.ts',
+  }),
+]);
+
 export const SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -1030,6 +1065,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...PORTABLE_MIGRATION_ACTIVATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

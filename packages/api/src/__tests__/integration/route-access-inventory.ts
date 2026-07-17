@@ -154,6 +154,14 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'api-key-route-authorization-db.integration.test.ts'),
   ],
   [
+    'oauth-application-route-authorization.test.ts',
+    resolve(import.meta.dirname, '../oauth-application-route-authorization.test.ts'),
+  ],
+  [
+    'oauth-application-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'oauth-application-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'scanner-device-route-authorization.test.ts',
     resolve(import.meta.dirname, '../scanner-device-route-authorization.test.ts'),
   ],
@@ -345,6 +353,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'api-key-route-authorization.test.ts',
     persistenceSource: 'api-key-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['postOauthApplications', 'deleteOauthApplicationsByAppId'], {
+    source: 'oauth-application-route-authorization.test.ts',
+    persistenceSource: 'oauth-application-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['postScannerDevices', 'postScannerDevicesByDeviceIdRevoke'], {
     source: 'scanner-device-route-authorization.test.ts',
     persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',
@@ -454,6 +466,7 @@ const delegatedAuthorizationGuards = new Set([
   'requireHistoricalAuthorizationPrincipal',
   'requireMigrationPermission',
   'requireOrganizationScopedPermission',
+  'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
   'requireReportEventAccess',
   'requireUploadArtifactAccess',
@@ -470,6 +483,7 @@ const eventScopeGuards = new Set([
   'loadAuthorizedEvent',
   'loadSettlementScope',
   'requireEventAccess',
+  'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
   'requireReportEventAccess',
   'report',
@@ -478,6 +492,7 @@ const eventScopeGuards = new Set([
 const organizationWideScopeGuards = new Set([
   'report',
   'requireMigrationPermission',
+  'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
 ]);
 const scopedJobAuthorizationOperations = new Set([

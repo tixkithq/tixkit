@@ -612,31 +612,39 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const id = `oapp_${ulid()}`;
     const now = new Date();
 
-    await db
-      .insertInto('oauth_applications')
-      .values({
-        id,
-        tenant_id: principal.tenantId,
-        organization_id: body.organizationId,
-        name: body.name,
-        client_id: clientId,
-        client_secret_hash: clientSecretHash,
-        redirect_uris: JSON.stringify(body.redirectUris),
-        scopes: JSON.stringify(body.scopes),
-        subject_type: 'resource_owner',
-        agent_principal_id: null,
-        status: 'active',
-        created_at: now,
-        updated_at: now,
-      })
-      .execute();
-
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'oauth_app.created',
-      organizationId: body.organizationId,
-      resourceType: 'OAuthApplication',
-      resourceId: id,
-      diffSummary: { name: body.name, clientId },
+    await db.transaction().execute(async (transaction) => {
+      await assertCredentialOrganization(principal, body.organizationId, transaction);
+      await transaction
+        .insertInto('oauth_applications')
+        .values({
+          id,
+          tenant_id: principal.tenantId,
+          organization_id: body.organizationId,
+          name: body.name,
+          client_id: clientId,
+          client_secret_hash: clientSecretHash,
+          redirect_uris: JSON.stringify(body.redirectUris),
+          scopes: JSON.stringify(body.scopes),
+          subject_type: 'resource_owner',
+          agent_principal_id: null,
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'oauth_app.created',
+          organizationId: body.organizationId,
+          resourceType: 'OAuthApplication',
+          resourceId: id,
+          diffSummary: { name: body.name, clientId },
+        },
+        { failClosed: true },
+      );
     });
 
     return reply.status(201).send({
@@ -707,26 +715,47 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'developers.write');
     requireOrganizationWideOAuthApplicationPrincipal(principal);
     const { appId } = request.params as { appId: string };
-    const oauthApp = await db
-      .selectFrom('oauth_applications')
-      .selectAll()
-      .where('id', '=', appId)
-      .where('subject_type', '=', 'resource_owner')
-      .executeTakeFirst();
-    if (!oauthApp) throw new NotFoundError('OAuthApplication', appId);
-    ClerkAuthService.requireResourceTenant(principal, oauthApp, 'OAuthApplication', appId);
-    ClerkAuthService.requireOrganizationScope(principal, oauthApp.organization_id);
-
-    await db
-      .updateTable('oauth_applications')
-      .set({ status: 'revoked', updated_at: new Date() })
-      .where('id', '=', appId)
-      .execute();
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'oauth_app.revoked',
-      organizationId: oauthApp.organization_id,
-      resourceType: 'OAuthApplication',
-      resourceId: appId,
+    await db.transaction().execute(async (transaction) => {
+      let oauthAppQuery = transaction
+        .selectFrom('oauth_applications')
+        .selectAll()
+        .where('id', '=', appId)
+        .where('tenant_id', '=', principal.tenantId)
+        .where('subject_type', '=', 'resource_owner');
+      if (principal.type !== 'system') {
+        if (principal.organizationIds.length === 0) {
+          throw new NotFoundError('OAuthApplication', appId);
+        }
+        oauthAppQuery = oauthAppQuery.where('organization_id', 'in', principal.organizationIds);
+      }
+      const oauthApp = await oauthAppQuery.executeTakeFirst();
+      if (!oauthApp || oauthApp.status !== 'active') {
+        throw new NotFoundError('OAuthApplication', appId);
+      }
+      const revoked = await transaction
+        .updateTable('oauth_applications')
+        .set({ status: 'revoked', updated_at: new Date() })
+        .where('id', '=', oauthApp.id)
+        .where('tenant_id', '=', principal.tenantId)
+        .where('organization_id', '=', oauthApp.organization_id)
+        .where('subject_type', '=', 'resource_owner')
+        .where('status', '=', 'active')
+        .executeTakeFirst();
+      if (Number(revoked.numUpdatedRows) !== 1) {
+        throw new NotFoundError('OAuthApplication', appId);
+      }
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'oauth_app.revoked',
+          organizationId: oauthApp.organization_id,
+          resourceType: 'OAuthApplication',
+          resourceId: appId,
+        },
+        { failClosed: true },
+      );
     });
     return reply.status(204).send();
   });
