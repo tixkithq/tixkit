@@ -4,6 +4,7 @@ import {
   TixkitScannerClient,
   createTixkitReactNativeComponents,
   checkoutHandoffUrl,
+  qrHashForPayload,
   scanBarcodePayload,
   type ScanResult,
   type OfflineManifest,
@@ -38,17 +39,31 @@ declare global {
   var __TIXKIT_SCANNER_CREDENTIALS__: NativeScannerCredentials | undefined;
 }
 
-function scannerClient() {
+let activeScannerSession:
+  | { credentials: NativeScannerCredentials; client: TixkitScannerClient }
+  | undefined;
+
+function scannerClient(): TixkitScannerClient {
   const credentials = globalThis.__TIXKIT_SCANNER_CREDENTIALS__;
   if (!credentials) {
     throw new Error('Enroll this device through the native secure credential bridge first.');
   }
-  return new TixkitScannerClient({
+  if (
+    activeScannerSession &&
+    activeScannerSession.credentials.deviceId === credentials.deviceId &&
+    activeScannerSession.credentials.deviceSecret === credentials.deviceSecret &&
+    activeScannerSession.credentials.manifestSigningKey === credentials.manifestSigningKey
+  ) {
+    return activeScannerSession.client;
+  }
+  const client = new TixkitScannerClient({
     ...credentials,
     apiBaseUrl: 'http://localhost:4000/v1',
     checkoutBaseUrl: 'http://localhost:3000',
     storage: demoStorage,
   });
+  activeScannerSession = { credentials: { ...credentials }, client };
+  return client;
 }
 
 // --- Create SDK UI components ---
@@ -178,10 +193,17 @@ function ScannerTab() {
   const handleScan = useCallback(async () => {
     setScanning(true);
     try {
+      const scanStartedAt = new Date();
+      const checkInListId = 'cil_demo';
+      const qrPayload = 'demo-ticket-payload-001';
+      const client = scannerClient();
+      await client.restoreOfflineScans();
       const r = await scanBarcodePayload({
-        client: scannerClient(),
-        checkInListId: 'cil_demo',
-        qrPayload: 'demo-ticket-payload-001',
+        client,
+        checkInListId,
+        qrPayload,
+        idempotencyKey: `scan:${checkInListId}:${scanStartedAt.getTime()}:${qrHashForPayload(qrPayload).slice(0, 32)}`,
+        scannedAt: scanStartedAt.toISOString(),
         mode: 'auto',
       });
       setResult(r);
@@ -233,7 +255,9 @@ function SyncTab() {
     setBusy(true);
     setStatus('Syncing offline scans...');
     try {
-      const result = await scannerClient().syncScans('cil_demo');
+      const client = scannerClient();
+      await client.restoreOfflineScans();
+      const result = await client.syncScans('cil_demo');
       setStatus(
         `Sync complete: ${result.accepted} accepted, ${result.duplicates} duplicates, ${result.invalid} invalid`,
       );
