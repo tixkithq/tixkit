@@ -85,4 +85,30 @@ test('generates Lighthouse reports and enforces performance budgets', async ({
     cwd: process.cwd(),
     stdio: 'inherit',
   });
+  const gitSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  }).trim();
+  if (!/^[a-f0-9]{40}$/u.test(gitSha)) {
+    throw new Error('Lighthouse evidence requires an exact lowercase 40-hex HEAD revision');
+  }
+  if (process.env.GITHUB_SHA !== undefined && process.env.GITHUB_SHA !== gitSha) {
+    throw new Error('GITHUB_SHA must exactly match git rev-parse HEAD for Lighthouse evidence');
+  }
+  execFileSync(
+    'node',
+    [
+      'scripts/performance-lighthouse-evidence.mjs',
+      'generate',
+      '--root',
+      process.cwd(),
+      '--config',
+      'performance-budgets.lighthouse.json',
+      '--output',
+      'artifacts/performance/lighthouse/evidence.json',
+      '--git-sha',
+      gitSha,
+    ],
+    { cwd: process.cwd(), stdio: 'inherit' },
+  );
 });

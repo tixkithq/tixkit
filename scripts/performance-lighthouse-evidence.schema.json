@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tixkit.com/performance/lighthouse-evidence-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "claimScope",
+    "denials",
+    "integrityModel",
+    "gitSha",
+    "config",
+    "reports",
+    "evidenceSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "tixkit-performance-lighthouse-evidence-v1" },
+    "claimScope": { "const": "browser-lighthouse-budget-regression" },
+    "denials": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "prefixItems": [
+        { "const": "representative real-user monitoring" },
+        { "const": "Production capacity" },
+        { "const": "Compact capacity" },
+        { "const": "Cloud capacity" },
+        { "const": "soak stability" },
+        { "const": "fault tolerance" },
+        { "const": "SLA or SLO attainment" }
+      ]
+    },
+    "integrityModel": { "const": "checksums-not-signatures" },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "reports": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/report" }
+    },
+    "evidenceSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "path",
+        "sha256",
+        "bytes",
+        "requestedUrl",
+        "finalDisplayedUrl",
+        "lighthouseVersion",
+        "fetchTime",
+        "performanceScore",
+        "audits"
+      ],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 20971520 },
+        "requestedUrl": { "type": "string", "minLength": 1 },
+        "finalDisplayedUrl": { "type": "string", "minLength": 1 },
+        "lighthouseVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "fetchTime": { "type": "string", "format": "date-time" },
+        "performanceScore": {
+          "oneOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "type": "null" }]
+        },
+        "audits": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/audit" }
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "numericValue", "unit"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "numericValue": { "type": "number" },
+        "unit": { "oneOf": [{ "type": "string" }, { "type": "null" }] }
+      }
+    }
+  }
+}
