@@ -1,25 +1,30 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
 import { sql } from 'kysely';
+import { getDriver } from '../client.js';
+
+function eventPublicRevisionExpression(revision: Date) {
+  const driver = getDriver();
+  const databaseRevision =
+    driver === 'mysql' ? new Date((Math.floor(revision.getTime() / 1_000) + 1) * 1_000) : revision;
+  return driver === 'mysql'
+    ? sql<Date>`case when public_revision is null or public_revision < ${databaseRevision} then ${databaseRevision} else timestampadd(second, 1, public_revision) end`
+    : driver === 'mssql'
+      ? sql<Date>`case when public_revision is null or public_revision < ${revision} then ${revision} else dateadd(millisecond, 1, public_revision) end`
+      : sql<Date>`case when public_revision is null or public_revision < ${revision} then ${revision} else public_revision + interval '1 millisecond' end`;
+}
 
 export async function bumpEventPublicRevision(
   db: { updateTable: (table: 'events') => any },
   eventId: string,
   revision: Date = new Date(),
 ): Promise<void> {
-  const databaseRevision =
-    process.env.DB_DRIVER === 'mysql'
-      ? new Date((Math.floor(revision.getTime() / 1_000) + 1) * 1_000)
-      : revision;
-  const nextRevision =
-    process.env.DB_DRIVER === 'mysql'
-      ? sql<Date>`case when public_revision is null or public_revision < ${databaseRevision} then ${databaseRevision} else timestampadd(second, 1, public_revision) end`
-      : process.env.DB_DRIVER === 'mssql'
-        ? sql<Date>`case when public_revision is null or public_revision < ${revision} then ${revision} else dateadd(millisecond, 1, public_revision) end`
-        : sql<Date>`case when public_revision is null or public_revision < ${revision} then ${revision} else public_revision + interval '1 millisecond' end`;
   await db
     .updateTable('events')
-    .set({ public_revision: nextRevision, version: sql`version + 1` })
+    .set({
+      public_revision: eventPublicRevisionExpression(revision),
+      version: sql`version + 1`,
+    })
     .where('id', '=', eventId)
     .execute();
 }
@@ -139,7 +144,7 @@ export class EventRepository extends BaseRepository {
     return this.updateReturning('events', id, {
       ...input,
       version: sql`version + 1`,
-      public_revision: now,
+      public_revision: eventPublicRevisionExpression(now),
       updated_at: now,
     });
   }
@@ -149,7 +154,7 @@ export class EventRepository extends BaseRepository {
     return this.updateReturning('events', id, {
       status,
       version: sql`version + 1`,
-      public_revision: now,
+      public_revision: eventPublicRevisionExpression(now),
       updated_at: now,
     });
   }
@@ -161,7 +166,7 @@ export class EventRepository extends BaseRepository {
       .set({
         ...input,
         version: sql`version + 1`,
-        public_revision: now,
+        public_revision: eventPublicRevisionExpression(now),
         updated_at: now,
       })
       .where('id', '=', id)
@@ -178,7 +183,7 @@ export class EventRepository extends BaseRepository {
       .set({
         status: 'published',
         version: sql`version + 1`,
-        public_revision: now,
+        public_revision: eventPublicRevisionExpression(now),
         updated_at: now,
       })
       .where('id', '=', id)

@@ -168,6 +168,26 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     sideEffectAssertions: ['persistence'],
     source: 'event-route-authorization-db.integration.test.ts',
   }),
+  ...(
+    [
+      ['/events/{eventId}/pause', 'postEventsByEventIdPause'],
+      ['/events/{eventId}/archive', 'postEventsByEventIdArchive'],
+    ] as const
+  ).map(([path, operationId]) =>
+    denialContract({
+      authorizedControl: { required: true, status: 200 },
+      denialResponse: { code: 'NOT_FOUND', status: 404 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      method: 'POST',
+      operationId,
+      path,
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      persistenceSource: 'event-route-authorization-db.integration.test.ts',
+      resourceParameters: ['eventId'],
+      sideEffectAssertions: ['persistence'],
+      source: 'event-route-authorization-db.integration.test.ts',
+    }),
+  ),
 ]);
 
 export const EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([

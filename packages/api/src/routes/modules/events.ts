@@ -19,7 +19,7 @@ import {
   type AdminTableQuery,
   type AdminTablePage,
 } from '@tixkit/admin-table-core';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import { ConflictError, NotFoundError, ValidationError } from '@tixkit/domain';
 import { SCANNER_CONTRACT_VERSION, DEFAULT_CODE_FORMAT } from '@tixkit/domain';
 import type { CodeFormat } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
@@ -1927,14 +1927,39 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
     const result = await db.transaction().execute(async (trx) => {
+      const locked = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!locked) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, locked, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, locked.organization_id);
+      ClerkAuthService.requireBrandScope(principal, locked.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      if (locked.status === 'paused') return locked;
+      if (locked.status !== 'published') {
+        throw new ConflictError('Only published events can be paused', {
+          currentStatus: locked.status,
+          requestedStatus: 'paused',
+        });
+      }
       const updated = await new EventRepository(trx as typeof db).updateStatus(eventId, 'paused');
-      await writeAuditLog(new AuditLogRepository(trx as typeof db), request, principal, {
-        action: 'event.paused',
-        organizationId: existing.organization_id,
-        brandId: existing.brand_id,
-        resourceType: 'Event',
-        resourceId: eventId,
-      });
+      await writeAuditLog(
+        new AuditLogRepository(trx as typeof db),
+        request,
+        principal,
+        {
+          action: 'event.paused',
+          organizationId: locked.organization_id,
+          brandId: locked.brand_id,
+          resourceType: 'Event',
+          resourceId: eventId,
+          diffSummary: { previousStatus: locked.status, newStatus: 'paused' },
+        },
+        { failClosed: true },
+      );
       return updated;
     });
     return serializeEvent(result);
@@ -1952,14 +1977,33 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
     const result = await db.transaction().execute(async (trx) => {
+      const locked = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!locked) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, locked, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, locked.organization_id);
+      ClerkAuthService.requireBrandScope(principal, locked.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      if (locked.status === 'archived') return locked;
       const updated = await new EventRepository(trx as typeof db).updateStatus(eventId, 'archived');
-      await writeAuditLog(new AuditLogRepository(trx as typeof db), request, principal, {
-        action: 'event.archived',
-        organizationId: existing.organization_id,
-        brandId: existing.brand_id,
-        resourceType: 'Event',
-        resourceId: eventId,
-      });
+      await writeAuditLog(
+        new AuditLogRepository(trx as typeof db),
+        request,
+        principal,
+        {
+          action: 'event.archived',
+          organizationId: locked.organization_id,
+          brandId: locked.brand_id,
+          resourceType: 'Event',
+          resourceId: eventId,
+          diffSummary: { previousStatus: locked.status, newStatus: 'archived' },
+        },
+        { failClosed: true },
+      );
       return updated;
     });
     return serializeEvent(result);

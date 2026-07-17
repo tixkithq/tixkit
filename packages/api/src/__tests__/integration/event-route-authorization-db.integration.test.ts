@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  AuditLogRepository,
   createDb,
   EventReadinessAcknowledgementRepository,
   EventRepository,
@@ -24,6 +25,7 @@ import { waitlistRoutes } from '../../routes/modules/waitlist.js';
 import { InventoryService } from '../../services/inventory.js';
 import {
   describeWithIntegrationDatabase,
+  integrationDatabaseDriver,
   integrationDatabaseUrl,
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
@@ -46,8 +48,12 @@ const operationalHealthContract = (() => {
 })();
 const eventMutationContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
   (contract) =>
-    contract.method === 'POST' &&
-    contract.operationId !== 'postEventsByEventIdReadinessAcknowledgementsByStepId',
+    contract.operationId === 'postEventsByEventIdCheckInLists' ||
+    contract.operationId === 'postEventsByEventIdProductCategories' ||
+    contract.operationId === 'postEventsByEventIdQuestions',
+);
+const lifecycleContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter((contract) =>
+  ['postEventsByEventIdPause', 'postEventsByEventIdArchive'].includes(contract.operationId),
 );
 const setupSectionContract = (() => {
   const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
@@ -207,6 +213,41 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       .deleteFrom('audit_logs')
       .where('actor_id', '=', basePrincipal.id)
       .where('action', '=', 'event.setup_section.update')
+      .where('resource_id', 'in', createdEventIds)
+      .execute();
+  }
+
+  async function lifecycleSnapshot() {
+    const [events, audits] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select(['id', 'status', 'version', 'public_revision'])
+        .where('id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('actor_id', '=', basePrincipal.id)
+        .where('action', 'in', ['event.paused', 'event.archived'])
+        .where('resource_id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+    ]);
+    return { events, audits };
+  }
+
+  async function clearLifecycleEvidence(): Promise<void> {
+    if (createdEventIds.length === 0) return;
+    await db
+      .updateTable('events')
+      .set({ status: 'published', public_revision: new Date('2020-01-01T00:00:00.000Z') })
+      .where('id', 'in', createdEventIds)
+      .execute();
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', basePrincipal.id)
+      .where('action', 'in', ['event.paused', 'event.archived'])
       .where('resource_id', 'in', createdEventIds)
       .execute();
   }
@@ -1249,6 +1290,286 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         expect(response.json()).toMatchObject({ error: { code } });
         await expect(readinessAcknowledgementSnapshot()).resolves.toEqual(before);
         expect(acknowledgementSubject).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('pause and archive authorization', () => {
+    beforeEach(async () => {
+      principal = basePrincipal;
+      await clearLifecycleEvidence();
+    });
+
+    afterEach(clearLifecycleEvidence);
+
+    function auditDiff(value: unknown): unknown {
+      return typeof value === 'string' ? JSON.parse(value) : value;
+    }
+
+    function invokeLifecycle(operationId: string, targetEventId: string) {
+      const contract = lifecycleContracts.find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      if (!contract) throw new Error(`Missing lifecycle contract: ${operationId}`);
+      return app.inject({
+        method: contract.method,
+        url: contract.path.replace('{eventId}', targetEventId),
+      });
+    }
+
+    it('pauses then archives the exact event with monotonic public revisions and atomic audits', async () => {
+      expect(lifecycleContracts).toHaveLength(2);
+      const before = await lifecycleSnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA);
+
+      const pausedResponse = await invokeLifecycle('postEventsByEventIdPause', eventA);
+      expect(pausedResponse.statusCode, pausedResponse.body).toBe(200);
+      expect(pausedResponse.json()).toMatchObject({ id: eventA, status: 'paused' });
+      const paused = await lifecycleSnapshot();
+      const pausedEvent = paused.events.find((event) => event.id === eventA);
+      expect(pausedEvent?.status).toBe('paused');
+      expect(pausedEvent?.version).toBeGreaterThan(eventBefore?.version ?? 0);
+      expect(pausedEvent?.public_revision?.getTime()).toBeGreaterThan(
+        eventBefore?.public_revision?.getTime() ?? 0,
+      );
+      expect(paused.audits).toHaveLength(1);
+      expect(paused.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_type: 'user',
+        actor_id: basePrincipal.id,
+        action: 'event.paused',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      expect(auditDiff(paused.audits[0]!.diff_summary)).toEqual({
+        previousStatus: 'published',
+        newStatus: 'paused',
+      });
+      const repeatedPause = await invokeLifecycle('postEventsByEventIdPause', eventA);
+      expect(repeatedPause.statusCode, repeatedPause.body).toBe(200);
+      await expect(lifecycleSnapshot()).resolves.toEqual(paused);
+
+      const archivedResponse = await invokeLifecycle('postEventsByEventIdArchive', eventA);
+      expect(archivedResponse.statusCode, archivedResponse.body).toBe(200);
+      expect(archivedResponse.json()).toMatchObject({ id: eventA, status: 'archived' });
+      const archived = await lifecycleSnapshot();
+      const archivedEvent = archived.events.find((event) => event.id === eventA);
+      expect(archivedEvent?.status).toBe('archived');
+      expect(archivedEvent?.version).toBeGreaterThan(pausedEvent?.version ?? 0);
+      expect(archivedEvent?.public_revision?.getTime()).toBeGreaterThan(
+        pausedEvent?.public_revision?.getTime() ?? 0,
+      );
+      expect(archived.audits.map((audit) => audit.action)).toEqual([
+        'event.paused',
+        'event.archived',
+      ]);
+      expect(archived.audits[1]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_type: 'user',
+        actor_id: basePrincipal.id,
+        action: 'event.archived',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      expect(auditDiff(archived.audits[1]!.diff_summary)).toEqual({
+        previousStatus: 'paused',
+        newStatus: 'archived',
+      });
+      const repeatedArchive = await invokeLifecycle('postEventsByEventIdArchive', eventA);
+      expect(repeatedArchive.statusCode, repeatedArchive.body).toBe(200);
+      await expect(lifecycleSnapshot()).resolves.toEqual(archived);
+      const forbiddenResume = await invokeLifecycle('postEventsByEventIdPause', eventA);
+      expect(forbiddenResume.statusCode).toBe(409);
+      expect(forbiddenResume.json()).toMatchObject({
+        error: {
+          code: 'CONFLICT',
+          details: { currentStatus: 'archived', requestedStatus: 'paused' },
+        },
+      });
+      await expect(lifecycleSnapshot()).resolves.toEqual(archived);
+    });
+
+    it('rejects pausing a draft event without state, revision, or audit changes', async () => {
+      await db.updateTable('events').set({ status: 'draft' }).where('id', '=', eventA).execute();
+      const before = await lifecycleSnapshot();
+
+      const response = await invokeLifecycle('postEventsByEventIdPause', eventA);
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'CONFLICT',
+          details: { currentStatus: 'draft', requestedStatus: 'paused' },
+        },
+      });
+      await expect(lifecycleSnapshot()).resolves.toEqual(before);
+    });
+
+    it.each(lifecycleContracts)(
+      'rolls back $operationId when its required audit cannot persist',
+      async (contract) => {
+        const before = await lifecycleSnapshot();
+        const auditFailure = vi
+          .spyOn(AuditLogRepository.prototype, 'create')
+          .mockRejectedValueOnce(new Error('injected lifecycle audit failure'));
+
+        const response = await invokeLifecycle(contract.operationId, eventA);
+
+        expect(response.statusCode).toBe(500);
+        await expect(lifecycleSnapshot()).resolves.toEqual(before);
+        auditFailure.mockRestore();
+      },
+    );
+
+    it('advances every event repository update path monotonically at database precision', async () => {
+      const repo = new EventRepository(db);
+      const revisions: number[] = [];
+      const versions: number[] = [];
+      const record = async () => {
+        const event = await repo.findById(eventA);
+        if (!event?.public_revision) throw new Error('event public revision is missing');
+        revisions.push(event.public_revision.getTime());
+        versions.push(Number(event.version));
+        return event;
+      };
+
+      let event = await record();
+      await repo.update(eventA, { title: event.title });
+      event = await record();
+      await repo.updateIfVersion(eventA, Number(event.version), { title: event.title });
+      event = await record();
+      await repo.publishIfVersion(eventA, Number(event.version));
+      await record();
+      await repo.updateStatus(eventA, 'paused');
+      await record();
+
+      expect(revisions).toHaveLength(5);
+      expect(
+        revisions.every((revision, index) => index === 0 || revision > revisions[index - 1]!),
+      ).toBe(true);
+      expect(versions).toEqual(versions.map((_version, index) => versions[0]! + index));
+    });
+
+    it('serializes concurrent repository revisions into two exact dialect quanta', async () => {
+      const repo = new EventRepository(db);
+      const revisionQuantum = integrationDatabaseDriver() === 'mysql' ? 1_000 : 1;
+      const futureRevision = new Date(
+        Math.ceil((Date.now() + 60_000) / revisionQuantum) * revisionQuantum,
+      );
+      await db
+        .updateTable('events')
+        .set({ public_revision: futureRevision })
+        .where('id', '=', eventA)
+        .execute();
+      const before = await repo.findById(eventA);
+      if (!before?.public_revision) throw new Error('event public revision is missing');
+
+      await Promise.all([
+        repo.updateStatus(eventA, 'paused'),
+        repo.updateStatus(eventA, 'archived'),
+      ]);
+      const finalEvent = await repo.findById(eventA);
+      expect(Number(finalEvent?.version)).toBe(Number(before.version) + 2);
+      expect(finalEvent?.public_revision?.getTime()).toBe(
+        before.public_revision.getTime() + 2 * revisionQuantum,
+      );
+      expect(['paused', 'archived']).toContain(finalEvent?.status);
+    });
+
+    it('serializes concurrent lifecycle routes without leaving the archived terminal state', async () => {
+      const repo = new EventRepository(db);
+      const revisionQuantum = integrationDatabaseDriver() === 'mysql' ? 1_000 : 1;
+      const futureRevision = new Date(
+        Math.ceil((Date.now() + 60_000) / revisionQuantum) * revisionQuantum,
+      );
+      await db
+        .updateTable('events')
+        .set({ public_revision: futureRevision })
+        .where('id', '=', eventA)
+        .execute();
+      const before = await repo.findById(eventA);
+      if (!before?.public_revision) throw new Error('event public revision is missing');
+
+      const [pauseResponse, archiveResponse] = await Promise.all([
+        invokeLifecycle('postEventsByEventIdPause', eventA),
+        invokeLifecycle('postEventsByEventIdArchive', eventA),
+      ]);
+      expect([200, 409]).toContain(pauseResponse.statusCode);
+      expect(archiveResponse.statusCode).toBe(200);
+
+      const after = await lifecycleSnapshot();
+      const finalEvent = after.events.find((event) => event.id === eventA);
+      const committedTransitions = pauseResponse.statusCode === 200 ? 2 : 1;
+      expect(finalEvent?.status).toBe('archived');
+      expect(Number(finalEvent?.version)).toBe(Number(before.version) + committedTransitions);
+      expect(finalEvent?.public_revision?.getTime()).toBe(
+        before.public_revision.getTime() + committedTransitions * revisionQuantum,
+      );
+      expect(after.audits).toHaveLength(committedTransitions);
+      const transitions = after.audits.map(
+        (audit) => auditDiff(audit.diff_summary) as { previousStatus: string; newStatus: string },
+      );
+      const first = transitions.find((transition) => transition.previousStatus === 'published');
+      if (!first) throw new Error('concurrent lifecycle audit chain has no published transition');
+      if (transitions.length === 1) {
+        expect(first).toEqual({ previousStatus: 'published', newStatus: 'archived' });
+      } else {
+        const second = transitions.find((transition) => transition !== first);
+        expect(first).toEqual({ previousStatus: 'published', newStatus: 'paused' });
+        expect(second).toEqual({ previousStatus: 'paused', newStatus: 'archived' });
+      }
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary before pause/archive state or audit mutation',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await lifecycleSnapshot();
+
+        for (const contract of lifecycleContracts) {
+          const response = await invokeLifecycle(contract.operationId, targetEvent());
+          expect(response.statusCode, response.body).toBe(status);
+          expect(response.json()).toMatchObject({ error: { code } });
+        }
+
+        await expect(lifecycleSnapshot()).resolves.toEqual(before);
       },
     );
   });
