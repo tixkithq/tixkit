@@ -323,7 +323,7 @@ function serializeMigrationFile(file: Record<string, unknown>) {
     id: file.id,
     jobId: file.import_job_id,
     mediaType: file.media_type,
-    byteSize: file.byte_size,
+    byteSize: Number(file.byte_size),
     sha256: file.sha256,
     status: file.status,
     createdAt: file.created_at,
@@ -905,6 +905,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         );
       }
     }
+    const registeredAt = new Date();
     const artifact = await app.context.db
       .selectFrom('upload_artifacts')
       .select([
@@ -922,8 +923,9 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       .where('purpose', '=', 'migration_import')
       .where('status', '=', 'uploaded')
       .where('scan_status', '=', 'clean')
+      .where('expires_at', '>', registeredAt)
       .executeTakeFirst();
-    if (!artifact?.checksum_sha256) {
+    if (!artifact?.checksum_sha256 || !/^[a-f0-9]{64}$/u.test(artifact.checksum_sha256)) {
       throw new NotFoundError('MigrationUploadArtifact', body.uploadArtifactId);
     }
     const artifactSha256 = artifact.checksum_sha256;
@@ -938,7 +940,6 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         'Portable migration uploads require application/vnd.tixkit.portable+json',
       );
     }
-    const registeredAt = new Date();
     const file = await app.context.db.transaction().execute(async (transaction) => {
       const consumption = await transaction
         .updateTable('upload_artifacts')
@@ -958,6 +959,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         .where('status', '=', 'uploaded')
         .where('scan_status', '=', 'clean')
         .where('consumed_at', 'is', null)
+        .where('expires_at', '>', registeredAt)
         .executeTakeFirst();
       if (Number(consumption.numUpdatedRows) !== 1) {
         throw new ConflictError('Migration upload artifact was already registered');
