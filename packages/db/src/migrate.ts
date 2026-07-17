@@ -93,6 +93,7 @@ import { ResaleSettlementsMigration } from './migrations/0089_resale_settlements
 import { WebhookReplayRequestsMigration } from './migrations/0090_webhook_replay_requests.js';
 import { MigrationLifecycleCommandsMigration } from './migrations/0091_migration_lifecycle_commands.js';
 import { MigrationLifecycleCommandOutcomesMigration } from './migrations/0092_migration_lifecycle_command_outcomes.js';
+import { PaymentAccountRefreshGenerationMigration } from './migrations/0093_payment_account_refresh_generation.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -367,6 +368,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0090_webhook_replay_requests': WebhookReplayRequestsMigration,
       '0091_migration_lifecycle_commands': MigrationLifecycleCommandsMigration,
       '0092_migration_lifecycle_command_outcomes': MigrationLifecycleCommandOutcomesMigration,
+      '0093_payment_account_refresh_generation': PaymentAccountRefreshGenerationMigration,
     };
   }
 }

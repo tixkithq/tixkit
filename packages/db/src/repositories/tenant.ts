@@ -460,6 +460,114 @@ export class PaymentAccountRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async reserveRefreshGeneration(input: {
+    id: string;
+    tenantId: string;
+    organizationId: string;
+    provider: string;
+  }) {
+    return this.db.transaction().execute(async (trx) => {
+      const control = await trx
+        .selectFrom('payment_account_refresh_control')
+        .select(['id', 'maintenance'])
+        .where('id', '=', 'singleton')
+        .forUpdate()
+        .executeTakeFirst();
+      if (!control) {
+        throw new ConflictError('Payment account refresh control is unavailable');
+      }
+      if (Number(control.maintenance) !== 0) {
+        throw new ConflictError('Payment account refreshes are paused for maintenance');
+      }
+      const account = await trx
+        .selectFrom('payment_accounts')
+        .selectAll()
+        .where('id', '=', input.id)
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('provider', '=', input.provider)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!account) return undefined;
+      const currentGeneration = Number(account.refresh_generation);
+      const refreshGeneration = currentGeneration + 1;
+      const reserved = await trx
+        .updateTable('payment_accounts')
+        .set({ refresh_generation: refreshGeneration })
+        .where('id', '=', account.id)
+        .where('refresh_generation', '=', currentGeneration)
+        .executeTakeFirst();
+      if (Number(reserved.numUpdatedRows) !== 1) {
+        throw new ConflictError('Payment account refresh generation changed during reservation');
+      }
+      return { ...account, refresh_generation: refreshGeneration };
+    });
+  }
+
+  async claimRefreshCompletion(input: {
+    id: string;
+    tenantId: string;
+    organizationId: string;
+    provider: string;
+    refreshGeneration: number;
+  }) {
+    return this.db
+      .selectFrom('payment_accounts')
+      .selectAll()
+      .where('id', '=', input.id)
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('provider', '=', input.provider)
+      .where('refresh_generation', '=', input.refreshGeneration)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
+  async completeRefreshGeneration(
+    input: {
+      id: string;
+      tenantId: string;
+      organizationId: string;
+      provider: string;
+      refreshGeneration: number;
+    },
+    update: {
+      status: string;
+      defaultCurrency: string;
+      detailsSubmitted: boolean;
+      chargesEnabled: boolean;
+      payoutsEnabled: boolean;
+      requirements: Record<string, unknown>;
+      disabledReason: string | null;
+    },
+  ) {
+    const result = await this.db
+      .updateTable('payment_accounts')
+      .set({
+        status: update.status,
+        default_currency: update.defaultCurrency,
+        details_submitted: update.detailsSubmitted,
+        charges_enabled: update.chargesEnabled,
+        payouts_enabled: update.payoutsEnabled,
+        requirements: JSON.stringify(update.requirements),
+        disabled_reason: update.disabledReason,
+        updated_at: new Date(),
+      })
+      .where('id', '=', input.id)
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('provider', '=', input.provider)
+      .where('refresh_generation', '=', input.refreshGeneration)
+      .executeTakeFirst();
+    if (Number(result.numUpdatedRows) !== 1) return undefined;
+    return this.db
+      .selectFrom('payment_accounts')
+      .selectAll()
+      .where('id', '=', input.id)
+      .where('refresh_generation', '=', input.refreshGeneration)
+      .executeTakeFirst();
+  }
+
   async update(id: string, input: Record<string, unknown>) {
     return this.updateReturning('payment_accounts', id, {
       ...input,

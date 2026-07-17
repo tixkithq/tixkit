@@ -1627,7 +1627,14 @@ export interface PaymentAccountTable {
   payouts_enabled: boolean;
   requirements: string | null;
   disabled_reason: string | null;
+  refresh_generation: Generated<number>;
   created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface PaymentAccountRefreshControlTable {
+  id: string;
+  maintenance: number;
   updated_at: Timestamp;
 }
 
@@ -2409,6 +2416,7 @@ export interface DB {
   dashboard_action_revisions: DashboardActionRevisionTable;
   export_job_events: ExportJobEventTable;
   payment_accounts: PaymentAccountTable;
+  payment_account_refresh_control: PaymentAccountRefreshControlTable;
   tax_registrations: TaxRegistrationTable;
   wallet_credentials: WalletCredentialTable;
   sender_identities: SenderIdentityTable;

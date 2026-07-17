@@ -18,6 +18,7 @@ import type { Database } from '@tixkit/db';
 import {
   ForbiddenError,
   ConflictError,
+  NotFoundError,
   ValidationError,
   isDoorOnlyPermissionSet,
   permissionsForRole,
@@ -62,6 +63,7 @@ type PaymentAccountRow = {
   payouts_enabled?: boolean | number | null;
   requirements?: string | Record<string, unknown> | null;
   disabled_reason?: string | null;
+  refresh_generation: number;
   created_at: Date;
   updated_at: Date;
 };
@@ -225,6 +227,18 @@ function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: str
     updatedAt:
       account.updated_at instanceof Date ? account.updated_at.toISOString() : account.updated_at,
     ...(onboardingUrl ? { onboardingUrl } : {}),
+  };
+}
+
+function paymentAccountMaterialState(account: PaymentAccountRow) {
+  return {
+    status: account.status,
+    defaultCurrency: account.default_currency,
+    detailsSubmitted: boolValue(account.details_submitted),
+    chargesEnabled: boolValue(account.charges_enabled),
+    payoutsEnabled: boolValue(account.payouts_enabled),
+    requirements: parseJsonObject(account.requirements),
+    disabledReason: account.disabled_reason ?? null,
   };
 }
 
@@ -1151,7 +1165,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     const { organizationId } = request.params as { organizationId: string };
     const organization = await new OrganizationRepository(db).findById(organizationId);
-    if (!organization) throw new ValidationError('Organization not found');
+    if (!organization) throw new NotFoundError('Organization', organizationId);
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
     await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
 
@@ -1299,7 +1313,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         paymentAccountId: string;
       };
       const organization = await new OrganizationRepository(db).findById(organizationId);
-      if (!organization) throw new ValidationError('Organization not found');
+      if (!organization) throw new NotFoundError('Organization', organizationId);
       ClerkAuthService.requireResourceTenant(
         principal,
         organization,
@@ -1312,19 +1326,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       );
 
       const paymentAccounts = new PaymentAccountRepository(db);
-      const account = await paymentAccounts.findById(paymentAccountId);
-      if (!account) throw new ValidationError('Payment account not found');
-      ClerkAuthService.requireResourceTenant(
-        principal,
-        account,
-        'PaymentAccount',
-        paymentAccountId,
-      );
-      if (account.organization_id !== organizationId) {
-        throw new ValidationError('Payment account does not belong to the organization');
-      }
-      if (account.provider !== 'stripe_connect') {
-        throw new ValidationError('Payment account is not a Stripe Connect account');
+      const account = await paymentAccounts.reserveRefreshGeneration({
+        id: paymentAccountId,
+        tenantId: principal.tenantId,
+        organizationId,
+        provider: 'stripe_connect',
+      });
+      if (!account) {
+        throw new NotFoundError('PaymentAccount', paymentAccountId);
       }
 
       const stripe = stripeGatewayFromContext(
@@ -1338,40 +1347,70 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         );
       }
 
-      const previousStatus = account.status;
-      const previousDefaultCurrency = account.default_currency;
       const stripeAccount = await stripe
         .retrieveConnectAccount(account.provider_account_id)
         .catch(stripeConnectProviderError);
       const stripeState = stripeAccountState(stripeAccount);
-      const updated = await paymentAccounts.update(account.id, {
-        status: stripeState.status,
-        default_currency: stripeState.defaultCurrency ?? account.default_currency,
-        details_submitted: stripeState.detailsSubmitted,
-        charges_enabled: stripeState.chargesEnabled,
-        payouts_enabled: stripeState.payoutsEnabled,
-        requirements: JSON.stringify(stripeState.requirements),
-        disabled_reason: stripeState.disabledReason,
-      });
-
-      if (
-        updated.status !== previousStatus ||
-        updated.default_currency !== previousDefaultCurrency
-      ) {
-        await writeAuditLog(audit(), request, principal, {
-          action: 'payment_account.refreshed',
+      const updated = await db.transaction().execute(async (trx) => {
+        const transactionalAccounts = new PaymentAccountRepository(trx);
+        const completionClaim = {
+          id: account.id,
+          tenantId: principal.tenantId,
           organizationId,
-          resourceType: 'PaymentAccount',
-          resourceId: updated.id,
-          diffSummary: {
-            providerAccountId: updated.provider_account_id,
-            previousStatus,
-            status: updated.status,
-            previousDefaultCurrency,
-            defaultCurrency: updated.default_currency,
+          provider: 'stripe_connect',
+          refreshGeneration: account.refresh_generation,
+        };
+        const persistedAccount =
+          await transactionalAccounts.claimRefreshCompletion(completionClaim);
+        if (!persistedAccount) {
+          throw new ConflictError('A newer payment account refresh superseded this response');
+        }
+        const previousState = paymentAccountMaterialState(account);
+        const persistedState = paymentAccountMaterialState(persistedAccount);
+        if (hashRequest(persistedState) !== hashRequest(previousState)) {
+          throw new ConflictError(
+            'Payment account changed while Stripe status was being refreshed',
+          );
+        }
+        const nextState = {
+          status: stripeState.status,
+          defaultCurrency: stripeState.defaultCurrency ?? persistedAccount.default_currency,
+          detailsSubmitted: stripeState.detailsSubmitted,
+          chargesEnabled: stripeState.chargesEnabled,
+          payoutsEnabled: stripeState.payoutsEnabled,
+          requirements: stripeState.requirements,
+          disabledReason: stripeState.disabledReason,
+        };
+        if (hashRequest(nextState) === hashRequest(persistedState)) {
+          return persistedAccount;
+        }
+        const refreshedAccount = await transactionalAccounts.completeRefreshGeneration(
+          completionClaim,
+          nextState,
+        );
+        if (!refreshedAccount) {
+          throw new ConflictError('A newer payment account refresh superseded this response');
+        }
+
+        await writeAuditLog(
+          new AuditLogRepository(trx),
+          request,
+          principal,
+          {
+            action: 'payment_account.refreshed',
+            organizationId,
+            resourceType: 'PaymentAccount',
+            resourceId: refreshedAccount.id,
+            diffSummary: {
+              providerAccountId: refreshedAccount.provider_account_id,
+              before: persistedState,
+              after: paymentAccountMaterialState(refreshedAccount),
+            },
           },
-        });
-      }
+          { failClosed: true },
+        );
+        return refreshedAccount;
+      });
 
       const accountLink = await stripe
         .createAccountLink({

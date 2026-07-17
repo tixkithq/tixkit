@@ -241,7 +241,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0092_migration_lifecycle_command_outcomes');
+    expect(Object.keys(migrations).at(-1)).toBe('0093_payment_account_refresh_generation');
     expect(migrations).toHaveProperty('0089_resale_settlements');
     expect(migrations['0071_portable_import_approvals']).toBe(PortableImportApprovalsMigration);
     expect(migrations['0072_portable_import_rebindings']).toBe(PortableImportRebindingsMigration);
