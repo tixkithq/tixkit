@@ -1,0 +1,247 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
+import { createDb, ImportRepository, type Database } from '@tixkit/db';
+import type { Principal } from '@tixkit/domain';
+import { ulid } from 'ulid';
+import { registerErrorHandler, type AppContext } from '../../app.js';
+import { migrationRoutes } from '../../routes/modules/migrations.js';
+import {
+  describeWithIntegrationDatabase,
+  integrationDatabaseUrl,
+  restoreDatabaseDriver,
+  setIntegrationDatabaseDriver,
+} from './integration-database.js';
+import { MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+
+describeWithIntegrationDatabase('migration job read route authorization matrix', () => {
+  let app: FastifyInstance;
+  let db: Database;
+  let previousDriver: string | undefined;
+  let principal: Principal;
+
+  const suffix = ulid().slice(-10).toLowerCase();
+  const tenantA = `tnt_mread_a_${suffix}`;
+  const tenantB = `tnt_mread_b_${suffix}`;
+  const organizationA = `org_mread_a_${suffix}`;
+  const organizationAScoped = `org_mread_scope_${suffix}`;
+  const organizationB = `org_mread_b_${suffix}`;
+  let jobA: string;
+  let jobAScoped: string;
+  let jobB: string;
+  const basePrincipal: Principal = {
+    type: 'user',
+    id: `usr_mread_${suffix}`,
+    tenantId: tenantA,
+    organizationIds: [organizationA, organizationB],
+    scopes: ['migrations.read'],
+  };
+
+  async function insertTenant(id: string, name: string): Promise<void> {
+    const now = new Date();
+    await db
+      .insertInto('tenants')
+      .values({ id, name, status: 'active', plan: 'test', created_at: now, updated_at: now })
+      .execute();
+  }
+
+  async function insertOrganization(id: string, tenantId: string, name: string): Promise<void> {
+    const now = new Date();
+    await db
+      .insertInto('organizations')
+      .values({
+        id,
+        tenant_id: tenantId,
+        name,
+        slug: `${id}-slug`,
+        clerk_organization_id: null,
+        box_office_settings: JSON.stringify({
+          enabled: true,
+          allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+          requireBuyerEmail: false,
+          receiptMode: 'email',
+        }),
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+  }
+
+  async function createJob(
+    tenantId: string,
+    organizationId: string,
+    label: string,
+  ): Promise<string> {
+    const job = await new ImportRepository(db).createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      adapterVersion: 'rfc4180-v1',
+      mode: 'dry-run',
+      idempotencyKey: `mread-${label}-${suffix}`,
+      requestedBy: basePrincipal.id,
+      configuration: { label },
+    });
+    return job.id;
+  }
+
+  beforeAll(async () => {
+    previousDriver = setIntegrationDatabaseDriver();
+    db = createDb(integrationDatabaseUrl());
+    await insertTenant(tenantA, 'Migration read tenant A');
+    await insertTenant(tenantB, 'Migration read tenant B');
+    await insertOrganization(organizationA, tenantA, 'Migration read organization A');
+    await insertOrganization(organizationAScoped, tenantA, 'Migration read scoped organization');
+    await insertOrganization(organizationB, tenantB, 'Migration read organization B');
+    jobA = await createJob(tenantA, organizationA, 'authorized');
+    jobAScoped = await createJob(tenantA, organizationAScoped, 'scoped');
+    jobB = await createJob(tenantB, organizationB, 'foreign');
+
+    principal = basePrincipal;
+    app = Fastify({ logger: false });
+    app.decorate('context', { db } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    registerErrorHandler(app);
+    await app.register(migrationRoutes);
+    await app.ready();
+  });
+
+  beforeEach(() => {
+    principal = basePrincipal;
+  });
+
+  afterAll(async () => {
+    const cleanupErrors: unknown[] = [];
+    const attempt = async (cleanup: () => Promise<unknown>): Promise<void> => {
+      try {
+        await cleanup();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    };
+    try {
+      if (app) await attempt(() => app.close());
+    } finally {
+      try {
+        if (db) {
+          await attempt(() =>
+            db.deleteFrom('import_jobs').where('id', 'in', [jobA, jobAScoped, jobB]).execute(),
+          );
+          for (const id of [organizationA, organizationAScoped, organizationB]) {
+            await attempt(() => db.deleteFrom('organizations').where('id', '=', id).execute());
+          }
+          for (const id of [tenantA, tenantB]) {
+            await attempt(() => db.deleteFrom('tenants').where('id', '=', id).execute());
+          }
+        }
+      } finally {
+        try {
+          if (db) await attempt(() => db.destroy());
+        } finally {
+          restoreDatabaseDriver(previousDriver);
+        }
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, 'Failed to clean up migration read fixtures');
+    }
+  });
+
+  function invoke(path: string, jobId: string, organizationId?: string) {
+    const route = path.replace('{jobId}', jobId);
+    return app.inject({
+      method: 'GET',
+      url: organizationId ? `${route}?organizationId=${organizationId}` : route,
+    });
+  }
+
+  it.each(MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)(
+    'returns only the authorized job projection for $path',
+    async (contract) => {
+      const response = await invoke(contract.path, jobA);
+
+      expect(response.statusCode, response.body).toBe(contract.authorizedControl.status);
+      if (contract.operationId === 'getMigrationJob') {
+        expect(response.json()).toMatchObject({
+          id: jobA,
+          tenant_id: tenantA,
+          organization_id: organizationA,
+          configurationHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          credentialConfigured: false,
+          summary: null,
+        });
+        expect(response.json()).not.toHaveProperty('configuration');
+      } else if (contract.operationId === 'assessMigrationRollback') {
+        expect(response.json()).toEqual({ eligible: true, mode: 'cancel', blockers: [] });
+      } else {
+        expect(response.json()).toEqual({ items: [] });
+      }
+      expect(response.body).not.toContain(jobAScoped);
+      expect(response.body).not.toContain(jobB);
+    },
+  );
+
+  it.each(MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)(
+    'denies every protected $path boundary without job disclosure',
+    async (contract) => {
+      const cases: Array<{
+        principal: Principal;
+        jobId: string;
+        organizationId?: string;
+        status: 403 | 404;
+        code: 'FORBIDDEN' | 'NOT_FOUND';
+      }> = [
+        {
+          principal: { ...basePrincipal, scopes: ['migrations.write'] },
+          jobId: jobA,
+          status: 403,
+          code: 'FORBIDDEN',
+        },
+        {
+          principal: { ...basePrincipal, brandIds: [`brd_mread_${suffix}`] },
+          jobId: jobA,
+          status: 403,
+          code: 'FORBIDDEN',
+        },
+        {
+          principal: { ...basePrincipal, eventIds: [`evt_mread_${suffix}`] },
+          jobId: jobA,
+          status: 403,
+          code: 'FORBIDDEN',
+        },
+        {
+          principal: basePrincipal,
+          jobId: jobAScoped,
+          status: 404,
+          code: 'NOT_FOUND',
+        },
+        {
+          principal: basePrincipal,
+          jobId: jobB,
+          organizationId: organizationB,
+          status: 404,
+          code: 'NOT_FOUND',
+        },
+      ];
+
+      for (const denial of cases) {
+        principal = denial.principal;
+
+        const response = await invoke(contract.path, denial.jobId, denial.organizationId);
+
+        expect(response.statusCode, response.body).toBe(denial.status);
+        expect(response.json()).toMatchObject({ error: { code: denial.code } });
+        for (const protectedJobId of [jobA, jobAScoped, jobB]) {
+          if (protectedJobId !== denial.jobId) {
+            expect(response.body).not.toContain(protectedJobId);
+          }
+        }
+        expect(response.body).not.toContain(organizationA);
+        expect(response.body).not.toContain(organizationAScoped);
+        expect(response.body).not.toContain(organizationB);
+      }
+    },
+  );
+});

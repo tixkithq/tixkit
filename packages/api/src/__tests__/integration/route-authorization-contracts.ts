@@ -315,6 +315,35 @@ export const MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
   }),
 ]);
 
+export const MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze(
+  (
+    [
+      ['/migration-jobs/{jobId}', 'getMigrationJob'],
+      ['/migration-jobs/{jobId}/files', 'listMigrationJobFiles'],
+      ['/migration-jobs/{jobId}/rows', 'listMigrationJobRows'],
+      ['/migration-jobs/{jobId}/conflicts', 'listMigrationJobConflicts'],
+      ['/migration-jobs/{jobId}/events', 'listMigrationJobEvents'],
+      ['/migration-jobs/{jobId}/rollback-assessment', 'assessMigrationRollback'],
+    ] as const
+  ).map(([path, operationId]) =>
+    denialContract({
+      authorizedControl: { required: true, status: 200 },
+      denialResponse: { code: 'NOT_FOUND', status: 404 },
+      deniedBoundaries: ['tenant', 'organization'],
+      method: 'GET',
+      operationId,
+      path,
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyDeniedBoundaries: ['brand', 'event'],
+      resourceParameters: ['jobId'],
+      sideEffectAssertions: [],
+      source: 'migration-job-read-route-authorization-db.integration.test.ts',
+    }),
+  ),
+);
+
 export const MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -662,6 +691,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

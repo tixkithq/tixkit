@@ -13,6 +13,7 @@ import {
   CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -99,6 +100,7 @@ describe('API route access inventory (C-123)', () => {
     expect(ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
+    expect(MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(6);
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
     expect(PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
@@ -111,7 +113,7 @@ describe('API route access inventory (C-123)', () => {
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(52);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(58);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -127,33 +129,39 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(52);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(178);
+    expect(coveredRoutes).toHaveLength(58);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(208);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
         .flatMap((route) => route.negativeAuthorizationEvidence)
         .filter((evidence) => evidence.denialKind === 'policy'),
     ).toHaveLength(3);
+    const policyConditions = inventory.routes
+      .flatMap((route) => route.negativeAuthorizationEvidence)
+      .filter((evidence) => evidence.denialKind === 'policy')
+      .map((evidence) => JSON.stringify(evidence.condition));
+    expect(policyConditions).toHaveLength(24);
     expect(
-      inventory.routes
-        .flatMap((route) => route.negativeAuthorizationEvidence)
-        .filter((evidence) => evidence.denialKind === 'policy')
-        .map((evidence) => evidence.condition),
-    ).toEqual([
-      { discriminator: 'principal-scope', value: 'no-event-scope' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-      { discriminator: 'purpose', value: 'user_avatar' },
-      { discriminator: 'purpose', value: 'user_avatar' },
-      { discriminator: 'purpose', value: 'user_avatar' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-      { discriminator: 'principal-scope', value: 'organization-wide' },
-    ]);
+      policyConditions.filter(
+        (condition) =>
+          condition === JSON.stringify({ discriminator: 'purpose', value: 'user_avatar' }),
+      ),
+    ).toHaveLength(3);
+    expect(
+      policyConditions.filter(
+        (condition) =>
+          condition ===
+          JSON.stringify({ discriminator: 'principal-scope', value: 'organization-wide' }),
+      ),
+    ).toHaveLength(20);
+    expect(
+      policyConditions.filter(
+        (condition) =>
+          condition ===
+          JSON.stringify({ discriminator: 'principal-scope', value: 'no-event-scope' }),
+      ),
+    ).toHaveLength(1);
     expect(
       inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,
     ).toEqual([]);
@@ -342,6 +350,10 @@ describe('API route access inventory (C-123)', () => {
     const noEventScopePolicyRoute = inventory.routes.find(
       (candidate) => candidate.operationId === noEventScopePolicy.operationId,
     )!;
+    const scopedJobContract = MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const scopedJobRoute = inventory.routes.find(
+      (candidate) => candidate.operationId === scopedJobContract.operationId,
+    )!;
     const invalidFixtures: Array<{
       contracts: readonly RouteAuthorizationDenialContract[];
       message: RegExp;
@@ -397,6 +409,16 @@ describe('API route access inventory (C-123)', () => {
             guardEvidence: noEventScopePolicyRoute.guardEvidence.filter(
               (guard) => guard !== 'ClerkAuthService.requireNoEventScope',
             ),
+          },
+        ],
+      },
+      {
+        contracts: [scopedJobContract],
+        message: /organization boundary is not enforced by scopedJob/,
+        routes: [
+          {
+            ...scopedJobRoute,
+            guardEvidence: scopedJobRoute.guardEvidence.filter((guard) => guard !== 'scopedJob'),
           },
         ],
       },

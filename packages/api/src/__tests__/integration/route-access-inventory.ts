@@ -91,6 +91,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'tenant-list-route-authorization-db.integration.test.ts'),
   ],
   [
+    'migration-job-read-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'migration-job-read-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'order-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'order-route-authorization-db.integration.test.ts'),
   ],
@@ -199,6 +203,17 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['listMigrationAdapters'], {
     source: 'migration-credential-route-authorization.test.ts',
   }),
+  ...evidenceBindings(
+    [
+      'getMigrationJob',
+      'listMigrationJobFiles',
+      'listMigrationJobRows',
+      'listMigrationJobConflicts',
+      'listMigrationJobEvents',
+      'assessMigrationRollback',
+    ],
+    { source: 'migration-job-read-route-authorization-db.integration.test.ts' },
+  ),
   ...evidenceBindings(
     [
       'getOrganizationsByOrganizationIdReadiness',
@@ -363,6 +378,14 @@ const eventScopeGuards = new Set([
 const organizationWideScopeGuards = new Set([
   'requireMigrationPermission',
   'requireOrganizationWideWebhookEndpointPrincipal',
+]);
+const scopedJobAuthorizationOperations = new Set([
+  'assessMigrationRollback',
+  'getMigrationJob',
+  'listMigrationJobConflicts',
+  'listMigrationJobEvents',
+  'listMigrationJobFiles',
+  'listMigrationJobRows',
 ]);
 const delegatedPermissionContracts = new Map<
   string,
@@ -679,6 +702,7 @@ function boundariesFor(
   if (guardEvidence.some((guard) => organizationWideScopeGuards.has(guard))) {
     boundaries.push('brand', 'event');
   }
+  if (guardEvidence.includes('scopedJob')) boundaries.push('organization');
   if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');
   if (guardEvidence.includes('requireHumanUserPrincipal')) boundaries.push('principal-type');
   if (guardEvidence.includes('requireUploadArtifactAccess')) {
@@ -736,6 +760,13 @@ export function negativeAuthorizationEvidenceForRoutes(
       if (!route.boundaries.includes(`resource-parameter:${parameter}`)) {
         throw contractError(contract, `inventory omits resource parameter ${parameter}`);
       }
+    }
+    if (
+      scopedJobAuthorizationOperations.has(contract.operationId) &&
+      contract.deniedBoundaries.includes('organization') &&
+      !route.guardEvidence.includes('scopedJob')
+    ) {
+      throw contractError(contract, 'organization boundary is not enforced by scopedJob');
     }
     if (contract.denialResponse.status !== 404 || contract.denialResponse.code !== 'NOT_FOUND') {
       throw contractError(contract, 'denial must be indistinguishable 404 NOT_FOUND');
