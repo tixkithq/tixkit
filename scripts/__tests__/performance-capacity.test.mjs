@@ -21,6 +21,10 @@ import { canonicalJson, sha256 } from '../performance-evidence.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const committed = JSON.parse(readFileSync(resolve(root, 'performance-capacity.trusted.json')));
 const workflow = readFileSync(resolve(root, '.github/workflows/performance-capacity.yml'), 'utf8');
+const performanceReference = readFileSync(
+  resolve(root, 'docs/public/reference/performance.mdx'),
+  'utf8',
+);
 const runnerFingerprint = probeRunnerFingerprint({
   platform: 'linux',
   architecture: 'x64',
@@ -765,4 +769,13 @@ test('weekly/manual trusted workflow is default-branch-only, serial, pinned, pri
     );
     assert.equal(profile.runnerLabel, 'tixkit-epyc-trusted');
   }
+});
+
+test('public methodology describes the enforced privacy-minimized runner identity contract', () => {
+  assert.match(performanceReference, /topology-sensitive, privacy-minimized hardware fingerprint/u);
+  assert.match(
+    performanceReference,
+    /expected fingerprint digest is configured outside the repository/u,
+  );
+  assert.doesNotMatch(performanceReference, /hardware is not fingerprinted/u);
 });
