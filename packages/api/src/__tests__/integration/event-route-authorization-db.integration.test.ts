@@ -28,7 +28,10 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
-import { EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+import {
+  EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+} from './route-authorization-contracts.js';
 
 const eventReadContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
   (contract) =>
@@ -100,6 +103,14 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       stepId: string;
     }) => readinessSubjectFingerprint,
   );
+  const getWorkspaceReadiness = vi.fn(async () => ({
+    complete: false,
+    steps: [{ id: 'workspace-proof', status: 'incomplete' }],
+  }));
+  const getDashboardActions = vi.fn(async () => ({
+    actions: [{ id: 'dashboard-proof' }],
+    nextCursor: null,
+  }));
 
   async function readinessAcknowledgementSnapshot() {
     const [acknowledgements, audits] = await Promise.all([
@@ -379,8 +390,10 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
             }
             return { launchable: false, requiredBlockers: [], steps: [] };
           },
+          getWorkspaceReadiness,
           acknowledgementSubject,
         }) as never,
+      dashboardActionServiceFactory: () => ({ getFeed: getDashboardActions }) as never,
     } as unknown as AppContext);
     app.addHook('onRequest', async (request) => {
       request.principal = principal;
@@ -610,6 +623,135 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         expect(response.json()).toMatchObject({ error: { code } });
         expect(response.body).not.toContain('organizationFailedWebhookDeliveries');
         expect(response.body).not.toContain('failedExports');
+      },
+    );
+  });
+
+  describe('organization readiness authorization', () => {
+    const endpoints = ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.map(
+      (contract) => ({
+        contract,
+        invoke: (organizationId: string, brandId: string) =>
+          app.inject({
+            method: contract.method,
+            url: `${contract.path.replace('{organizationId}', organizationId)}?brandId=${brandId}`,
+          }),
+        service:
+          contract.operationId === 'getOrganizationsByOrganizationIdReadiness'
+            ? getWorkspaceReadiness
+            : getDashboardActions,
+        expectedResponse:
+          contract.operationId === 'getOrganizationsByOrganizationIdReadiness'
+            ? {
+                complete: false,
+                steps: [{ id: 'workspace-proof', status: 'incomplete' }],
+              }
+            : {
+                actions: [{ id: 'dashboard-proof' }],
+                nextCursor: null,
+              },
+      }),
+    );
+
+    beforeEach(() => {
+      getWorkspaceReadiness.mockClear();
+      getDashboardActions.mockClear();
+    });
+
+    it.each(endpoints)(
+      'authorizes $contract.path for the exact organization and brand',
+      async ({ contract, invoke, service, expectedResponse }) => {
+        principal = basePrincipal;
+
+        const response = await invoke(organizationA, brandA);
+
+        expect(response.statusCode, response.body).toBe(contract.authorizedControl.status);
+        expect(service).toHaveBeenCalledOnce();
+        expect(service).toHaveBeenCalledWith({
+          tenantId: tenantA,
+          organizationId: organizationA,
+          brandId: brandA,
+          permissions: new Set(ALL_PERMISSIONS),
+        });
+        expect(response.json()).toEqual(expectedResponse);
+      },
+    );
+
+    it.each(endpoints)(
+      'denies every $contract.path boundary before evaluating protected data',
+      async ({ invoke, service }) => {
+        const cases: Array<{
+          principal: Principal;
+          organizationId: string;
+          brandId: string;
+          status: 403 | 404;
+          code: 'FORBIDDEN' | 'NOT_FOUND';
+        }> = [
+          {
+            principal: { ...basePrincipal, scopes: [] },
+            organizationId: organizationA,
+            brandId: brandA,
+            status: 403,
+            code: 'FORBIDDEN',
+          },
+          {
+            principal: {
+              ...basePrincipal,
+              organizationIds: [organizationB],
+              brandIds: [brandB],
+            },
+            organizationId: organizationB,
+            brandId: brandB,
+            status: 404,
+            code: 'NOT_FOUND',
+          },
+          {
+            principal: {
+              ...basePrincipal,
+              organizationIds: [organizationA],
+              brandIds: [brandAScoped],
+            },
+            organizationId: organizationAScoped,
+            brandId: brandAScoped,
+            status: 404,
+            code: 'NOT_FOUND',
+          },
+          {
+            principal: {
+              ...basePrincipal,
+              organizationIds: [organizationA],
+              brandIds: [brandAScoped],
+            },
+            organizationId: organizationA,
+            brandId: brandAScoped,
+            status: 404,
+            code: 'NOT_FOUND',
+          },
+          {
+            principal: {
+              ...basePrincipal,
+              organizationIds: [organizationA],
+              brandIds: [brandAScoped],
+            },
+            organizationId: organizationA,
+            brandId: brandA,
+            status: 404,
+            code: 'NOT_FOUND',
+          },
+        ];
+
+        for (const denial of cases) {
+          principal = denial.principal;
+          service.mockClear();
+
+          const response = await invoke(denial.organizationId, denial.brandId);
+
+          expect(response.statusCode, response.body).toBe(denial.status);
+          expect(response.json()).toMatchObject({ error: { code: denial.code } });
+          expect(response.body).not.toContain('workspace-proof');
+          expect(response.body).not.toContain('dashboard-proof');
+          expect(service).not.toHaveBeenCalled();
+        }
       },
     );
   });

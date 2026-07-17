@@ -13,6 +13,7 @@ import {
   CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -93,6 +94,7 @@ describe('API route access inventory (C-123)', () => {
 
     expect(inventory.schemaVersion).toBe(4);
     expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(17);
+    expect(ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
     expect(PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
@@ -105,7 +107,7 @@ describe('API route access inventory (C-123)', () => {
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(47);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(49);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -121,8 +123,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(47);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(164);
+    expect(coveredRoutes).toHaveLength(49);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(172);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))

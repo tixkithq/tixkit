@@ -188,6 +188,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ),
   ...evidenceBindings(
     [
+      'getOrganizationsByOrganizationIdReadiness',
+      'getOrganizationsByOrganizationIdDashboardActions',
+    ],
+    { source: 'event-route-authorization-db.integration.test.ts' },
+  ),
+  ...evidenceBindings(
+    [
       'postEventsByEventIdCheckInLists',
       'postEventsByEventIdProductCategories',
       'postEventsByEventIdQuestions',

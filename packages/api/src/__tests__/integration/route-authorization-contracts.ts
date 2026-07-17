@@ -167,6 +167,31 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze(
+  (
+    [
+      ['/organizations/{organizationId}/readiness', 'getOrganizationsByOrganizationIdReadiness'],
+      [
+        '/organizations/{organizationId}/dashboard-actions',
+        'getOrganizationsByOrganizationIdDashboardActions',
+      ],
+    ] as const
+  ).map(([path, operationId]) =>
+    denialContract({
+      authorizedControl: { required: true, status: 200 },
+      denialResponse: { code: 'NOT_FOUND', status: 404 },
+      deniedBoundaries: ['tenant', 'organization', 'brand'],
+      method: 'GET',
+      operationId,
+      path,
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      resourceParameters: ['organizationId'],
+      sideEffectAssertions: [],
+      source: 'event-route-authorization-db.integration.test.ts',
+    }),
+  ),
+);
+
 export const ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...(
     [
@@ -581,6 +606,7 @@ export const WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
 
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
