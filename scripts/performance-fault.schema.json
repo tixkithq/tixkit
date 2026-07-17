@@ -156,6 +156,7 @@
       "required": [
         "gitSha",
         "runnerLabel",
+        "runnerFingerprint",
         "profile",
         "database",
         "workloadSha256",
@@ -164,6 +165,15 @@
       "properties": {
         "gitSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
         "runnerLabel": { "type": "string", "minLength": 1 },
+        "runnerFingerprint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "sha256"],
+          "properties": {
+            "version": { "const": "tixkit-runner-fingerprint-v2" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
         "profile": { "type": "string", "minLength": 1 },
         "database": { "$ref": "#/$defs/database" },
         "workloadSha256": { "$ref": "#/$defs/sha256" },
@@ -185,7 +195,7 @@
         "evidenceSha256"
       ],
       "properties": {
-        "schemaVersion": { "const": "tixkit-performance-fault-evidence-v1" },
+        "schemaVersion": { "const": "tixkit-performance-fault-evidence-v2" },
         "claimScope": {
           "const": "trusted-single-host-database-dependency-fault"
         },

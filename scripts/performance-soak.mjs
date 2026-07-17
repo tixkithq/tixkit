@@ -17,11 +17,15 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import schema from './performance-soak.schema.json' with { type: 'json' };
+import {
+  assertExpectedRunnerFingerprint,
+  probeRunnerFingerprint,
+} from './performance-capacity.mjs';
 import { canonicalJson, sha256 } from './performance-evidence.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_VERSION = 'tixkit-performance-soak-config-v1';
-const EVIDENCE_VERSION = 'tixkit-performance-soak-evidence-v1';
+const EVIDENCE_VERSION = 'tixkit-performance-soak-evidence-v2';
 const CLAIM_SCOPE = 'trusted-single-host-continuous-integration-soak';
 const COMMAND =
   'cd packages/api && bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1 && cd ../.. && bun run --cwd packages/workflows test:unit -- export-activity.test.ts';
@@ -197,8 +201,20 @@ function median(values) {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
-export function createSoakEvidence({ config, profile, gitSha, budgetBytes, samples }) {
+export function createSoakEvidence({
+  config,
+  profile,
+  gitSha,
+  budgetBytes,
+  samples,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
+}) {
   validateSoakConfig(config);
+  const verifiedRunnerFingerprint = assertExpectedRunnerFingerprint(
+    expectedRunnerFingerprintSha256,
+    runnerFingerprint,
+  );
   const configured = config.profiles.find(({ id }) => id === profile?.id);
   if (!configured || canonicalJson(configured) !== canonicalJson(profile)) {
     throw new Error('soak profile must exactly match its config entry');
@@ -328,6 +344,7 @@ export function createSoakEvidence({ config, profile, gitSha, budgetBytes, sampl
       workloadSha256: sha256(canonicalJson(workload)),
       configSha256: sha256(canonicalJson(config)),
       budgetSha256: sha256(Buffer.from(budgetBytes)),
+      runnerFingerprint: verifiedRunnerFingerprint,
     },
     controls: {
       requiredDurationSeconds: profile.durationSeconds,
@@ -350,7 +367,13 @@ export function createSoakEvidence({ config, profile, gitSha, budgetBytes, sampl
   return evidence;
 }
 
-export function validateSoakEvidence({ config, evidence, budgetBytes, samples }) {
+export function validateSoakEvidence({
+  config,
+  evidence,
+  budgetBytes,
+  samples,
+  expectedRunnerFingerprintSha256,
+}) {
   schemaViolation(evidence, 'soak evidence');
   const profile = config?.profiles?.find(({ id }) => id === evidence.identity.profile);
   if (!profile) throw new Error('soak evidence profile is absent from config');
@@ -360,6 +383,8 @@ export function validateSoakEvidence({ config, evidence, budgetBytes, samples })
     gitSha: evidence.identity.gitSha,
     budgetBytes,
     samples,
+    runnerFingerprint: evidence.identity.runnerFingerprint,
+    expectedRunnerFingerprintSha256,
   });
   if (canonicalJson(expected) !== canonicalJson(evidence)) {
     throw new Error('soak evidence does not match config, budget, samples, ordering, or checksums');
@@ -367,7 +392,12 @@ export function validateSoakEvidence({ config, evidence, budgetBytes, samples })
   return evidence;
 }
 
-export function validateSoakEvidenceDirectory({ config, outputDirectory, budgetBytes }) {
+export function validateSoakEvidenceDirectory({
+  config,
+  outputDirectory,
+  budgetBytes,
+  expectedRunnerFingerprintSha256,
+}) {
   const evidencePath = path.join(outputDirectory, 'evidence.json');
   const rawDirectory = path.join(outputDirectory, 'raw');
   const sealedDirectory = path.join(outputDirectory, 'sealed');
@@ -425,7 +455,13 @@ export function validateSoakEvidenceDirectory({ config, outputDirectory, budgetB
       rawBytes,
     };
   });
-  return validateSoakEvidence({ config, evidence, budgetBytes, samples });
+  return validateSoakEvidence({
+    config,
+    evidence,
+    budgetBytes,
+    samples,
+    expectedRunnerFingerprintSha256,
+  });
 }
 
 function signalProcessGroup(child, signal) {
@@ -470,7 +506,15 @@ export function soakChildEnvironment(profile, metricsPath, environment = process
   return { ...inherited, ...declared };
 }
 
-export function executeSoakIteration({ profile, metricsPath, processGroupPath, signal }) {
+export function executeSoakIteration({
+  profile,
+  metricsPath,
+  processGroupPath,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
+  signal,
+}) {
+  assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, runnerFingerprint);
   if (signal.aborted) return Promise.reject(new Error('performance soak interrupted'));
   return new Promise((resolve, reject) => {
     const child = spawn(profile.command.executable, profile.command.args, {
@@ -595,6 +639,8 @@ async function runSoakBody({
   wallNow = () => Date.now(),
   iterationLimit = profile.maximumIterations,
   signal = new AbortController().signal,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
 }) {
   validateSoakConfig(config);
   const configured = config.profiles.find(({ id }) => id === profile?.id);
@@ -655,6 +701,8 @@ async function runSoakBody({
       metricsPath,
       processGroupPath,
       iterationNumber: number,
+      runnerFingerprint,
+      expectedRunnerFingerprintSha256,
       signal,
     });
     const completedMonotonicMs = monotonicNow();
@@ -684,7 +732,15 @@ async function runSoakBody({
     });
   }
   rmdirSync(stagingDirectory);
-  const evidence = createSoakEvidence({ config, profile, gitSha, budgetBytes, samples });
+  const evidence = createSoakEvidence({
+    config,
+    profile,
+    gitSha,
+    budgetBytes,
+    samples,
+    runnerFingerprint,
+    expectedRunnerFingerprintSha256,
+  });
   for (const iteration of evidence.iterations) {
     const sealedPath = path.join(
       sealedDirectory,
@@ -704,7 +760,12 @@ async function runSoakBody({
     flag: 'wx',
     mode: 0o600,
   });
-  validateSoakEvidenceDirectory({ config, outputDirectory, budgetBytes });
+  validateSoakEvidenceDirectory({
+    config,
+    outputDirectory,
+    budgetBytes,
+    expectedRunnerFingerprintSha256,
+  });
   return evidence;
 }
 
@@ -726,20 +787,27 @@ export function writeSoakFailure({
   profile,
   gitSha,
   budgetBytes,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
   error,
   now = Date.now(),
 }) {
   if (!existsSync(outputDirectory)) return null;
+  const verifiedRunnerFingerprint = assertExpectedRunnerFingerprint(
+    expectedRunnerFingerprintSha256,
+    runnerFingerprint,
+  );
   const target = path.join(outputDirectory, 'failure.json');
   if (existsSync(target)) return JSON.parse(readFileSync(target, 'utf8'));
   const payload = {
-    schemaVersion: 'tixkit-performance-soak-failure-v1',
+    schemaVersion: 'tixkit-performance-soak-failure-v2',
     status: 'failed',
     claimScope: CLAIM_SCOPE,
     profile: typeof profile?.id === 'string' ? profile.id.slice(0, 63) : 'unknown',
     gitSha: /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(gitSha || '') ? gitSha : null,
     configSha256: config ? sha256(canonicalJson(config)) : null,
     budgetSha256: budgetBytes ? sha256(Buffer.from(budgetBytes)) : null,
+    runnerFingerprint: verifiedRunnerFingerprint,
     failureCode: failureCode(error),
     failedAt: new Date(now).toISOString(),
     integrityModel: 'checksums-not-signatures',
@@ -750,24 +818,32 @@ export function writeSoakFailure({
 }
 
 export async function runSoak(input) {
+  const runnerFingerprint = assertExpectedRunnerFingerprint(
+    input.expectedRunnerFingerprintSha256,
+    (input.probeRunner ?? probeRunnerFingerprint)(),
+  );
+  const verifiedInput = { ...input, runnerFingerprint };
   const outputExisted = existsSync(input.outputDirectory);
   try {
-    return await runSoakBody(input);
+    return await runSoakBody(verifiedInput);
   } catch (error) {
-    if (!outputExisted) writeSoakFailure({ ...input, error });
+    if (!outputExisted) writeSoakFailure({ ...verifiedInput, error });
     throw error;
   }
 }
 
-function options(argv) {
+export function options(argv) {
   const result = {};
+  if (argv.length % 2 !== 0) throw new Error('every soak option requires exactly one value');
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
     const value = argv[index + 1];
     if (!name?.startsWith('--') || !value || value.startsWith('--')) {
       throw new Error(`invalid option ${name || '<missing>'}`);
     }
-    result[name.slice(2).replaceAll(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+    const key = name.slice(2).replaceAll(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    if (Object.hasOwn(result, key)) throw new Error(`duplicate option ${name}`);
+    result[key] = value;
   }
   return result;
 }
@@ -790,6 +866,7 @@ export async function main(argv = process.argv.slice(2)) {
       outputDirectory: path.resolve(input.output || ''),
       gitSha: input.gitSha,
       budgetBytes: readFileSync(path.resolve(root, profile.budgets)),
+      expectedRunnerFingerprintSha256: input.expectedRunnerFingerprint,
       signal: controller.signal,
     });
   } finally {

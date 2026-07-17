@@ -112,9 +112,35 @@ test('runner fingerprint is stable, privacy-minimized, versioned, and fail-close
   assert.equal(normalized.version, RUNNER_FINGERPRINT_VERSION);
   assert.match(normalized.sha256, /^[a-f0-9]{64}$/u);
   assert.equal(JSON.stringify(normalized).includes('AMD'), false);
-  assert.equal(
-    assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, normalized),
-    normalized,
+  const verified = assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, normalized);
+  assert.notEqual(verified, normalized);
+  assert.deepEqual(verified, normalized);
+  assert.equal(Object.isFrozen(verified), true);
+
+  const mutable = { version: normalized.version, sha256: normalized.sha256 };
+  const snapshot = assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, mutable);
+  mutable.sha256 = '0'.repeat(64);
+  assert.equal(snapshot.sha256, expectedRunnerFingerprintSha256);
+
+  let getterReads = 0;
+  const accessorBacked = {
+    version: normalized.version,
+    get sha256() {
+      getterReads += 1;
+      return normalized.sha256;
+    },
+  };
+  assert.throws(
+    () => assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, accessorBacked),
+    /runner fingerprint must contain/u,
+  );
+  assert.equal(getterReads, 0);
+  const customPrototype = Object.create({ inherited: true });
+  customPrototype.version = normalized.version;
+  customPrototype.sha256 = normalized.sha256;
+  assert.throws(
+    () => assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, customPrototype),
+    /runner fingerprint must contain/u,
   );
 
   const mostlyA = probeRunnerFingerprint({

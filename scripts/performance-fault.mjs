@@ -8,12 +8,16 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import schema from './performance-fault.schema.json' with { type: 'json' };
+import {
+  assertExpectedRunnerFingerprint,
+  probeRunnerFingerprint,
+} from './performance-capacity.mjs';
 import { canonicalJson, sha256 } from './performance-evidence.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const execFileAsync = promisify(execFile);
 const CONFIG_VERSION = 'tixkit-performance-fault-config-v1';
-const EVIDENCE_VERSION = 'tixkit-performance-fault-evidence-v1';
+const EVIDENCE_VERSION = 'tixkit-performance-fault-evidence-v2';
 const CLAIM_SCOPE = 'trusted-single-host-database-dependency-fault';
 const AUTHORIZATION =
   'I authorize controlled database service interruption on the dedicated trusted runner';
@@ -192,7 +196,19 @@ function validateMetrics(metrics, profile) {
   return metrics;
 }
 
-export function createFaultEvidence({ config, profile, gitSha, rawMetrics, faultProof }) {
+export function createFaultEvidence({
+  config,
+  profile,
+  gitSha,
+  rawMetrics,
+  faultProof,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
+}) {
+  const verifiedRunnerFingerprint = assertExpectedRunnerFingerprint(
+    expectedRunnerFingerprintSha256,
+    runnerFingerprint,
+  );
   validateFaultConfig(config);
   const configured = config.profiles.find(({ id }) => id === profile?.id);
   if (!configured || canonicalJson(configured) !== canonicalJson(profile)) {
@@ -235,6 +251,7 @@ export function createFaultEvidence({ config, profile, gitSha, rawMetrics, fault
     identity: {
       gitSha,
       runnerLabel: profile.runnerLabel,
+      runnerFingerprint: verifiedRunnerFingerprint,
       profile: profile.id,
       database: profile.database,
       workloadSha256: sha256(canonicalJson(workload)),
@@ -254,7 +271,12 @@ export function createFaultEvidence({ config, profile, gitSha, rawMetrics, fault
   return evidence;
 }
 
-export function validateFaultEvidence({ config, evidence, rawMetrics }) {
+export function validateFaultEvidence({
+  config,
+  evidence,
+  rawMetrics,
+  expectedRunnerFingerprintSha256,
+}) {
   schemaViolation(evidence, 'fault evidence');
   const profile = config?.profiles?.find(({ id }) => id === evidence.identity.profile);
   if (!profile) throw new Error('fault evidence profile is absent from config');
@@ -264,6 +286,8 @@ export function validateFaultEvidence({ config, evidence, rawMetrics }) {
     gitSha: evidence.identity.gitSha,
     rawMetrics,
     faultProof: evidence.faultProof,
+    runnerFingerprint: evidence.identity.runnerFingerprint,
+    expectedRunnerFingerprintSha256,
   });
   if (canonicalJson(expected) !== canonicalJson(evidence)) {
     throw new Error('fault evidence does not match config, raw metrics, or derived relations');
@@ -383,8 +407,11 @@ export async function executeFaultScenario({
   containerId,
   controlDirectory,
   metricsPath,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
   signal,
 }) {
+  assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, runnerFingerprint);
   if (signal.aborted) throw new Error('fault characterization interrupted');
   const replacements = {
     controlDirectory,
@@ -600,9 +627,15 @@ export async function runFaultCharacterization({
   gitSha,
   containerId,
   authorization,
+  expectedRunnerFingerprintSha256,
+  probeRunner = probeRunnerFingerprint,
   executeScenario = executeFaultScenario,
   signal = new AbortController().signal,
 }) {
+  const runnerFingerprint = assertExpectedRunnerFingerprint(
+    expectedRunnerFingerprintSha256,
+    probeRunner(),
+  );
   validateFaultConfig(config);
   const configured = config.profiles.find(({ id }) => id === profile?.id);
   if (!configured || canonicalJson(configured) !== canonicalJson(profile)) {
@@ -636,6 +669,8 @@ export async function runFaultCharacterization({
     containerId,
     controlDirectory,
     metricsPath,
+    runnerFingerprint,
+    expectedRunnerFingerprintSha256,
     signal,
   });
   const bytes = Buffer.from(result.rawMetrics);
@@ -648,6 +683,8 @@ export async function runFaultCharacterization({
     gitSha,
     rawMetrics: bytes,
     faultProof: result.faultProof,
+    runnerFingerprint,
+    expectedRunnerFingerprintSha256,
   });
   const evidencePath = path.join(outputDirectory, 'evidence.json');
   writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
@@ -658,24 +695,44 @@ export async function runFaultCharacterization({
     config,
     evidence: JSON.parse(readFileSync(evidencePath)),
     rawMetrics: bytes,
+    expectedRunnerFingerprintSha256,
   });
   return evidence;
 }
 
-function options(argv) {
+const CLI_OPTIONS = new Set([
+  'config',
+  'profile',
+  'output',
+  'git-sha',
+  'container-id',
+  'authorization',
+  'expected-runner-fingerprint',
+]);
+
+export function parseFaultOptions(argv) {
   const result = {};
+  const seen = new Set();
+  if (argv.length % 2 !== 0) throw new Error('fault options require a value for every flag');
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
     const value = argv[index + 1];
     if (!name?.startsWith('--') || !value || value.startsWith('--'))
       throw new Error(`invalid option ${name || '<missing>'}`);
-    result[name.slice(2).replaceAll(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+    const flag = name.slice(2);
+    if (!CLI_OPTIONS.has(flag)) throw new Error(`unknown fault option --${flag}`);
+    if (seen.has(flag)) throw new Error(`duplicate fault option --${flag}`);
+    seen.add(flag);
+    result[flag.replaceAll(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+  }
+  for (const required of CLI_OPTIONS) {
+    if (!seen.has(required)) throw new Error(`missing required fault option --${required}`);
   }
   return result;
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const input = options(argv);
+  const input = parseFaultOptions(argv);
   const config = validateFaultConfig(
     JSON.parse(readFileSync(path.resolve(input.config || ''), 'utf8')),
   );
@@ -693,6 +750,7 @@ export async function main(argv = process.argv.slice(2)) {
       gitSha: input.gitSha,
       containerId: input.containerId,
       authorization: input.authorization,
+      expectedRunnerFingerprintSha256: input.expectedRunnerFingerprint,
       signal: controller.signal,
     });
   } finally {

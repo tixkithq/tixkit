@@ -24,6 +24,12 @@
 /scripts/validate-staged-public-release.mjs @tixkit/maintainers
 /scripts/validate-widget-release-pins.mjs @tixkit/maintainers
 /scripts/export-oss.mjs @tixkit/maintainers
+/scripts/performance-*.mjs @tixkit/maintainers
+/scripts/performance-*.schema.json @tixkit/maintainers
+/scripts/__tests__/performance-*.test.mjs @tixkit/maintainers
+/performance-*.json @tixkit/maintainers
+/infra/compact/ @tixkit/maintainers
+/infra/helm/tixkit/ @tixkit/maintainers
 /docs/ @tixkit/maintainers
 /packages/openapi/ @tixkit/maintainers
 /packages/sdk-js/ @tixkit/maintainers

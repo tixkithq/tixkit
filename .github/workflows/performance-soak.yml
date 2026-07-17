@@ -85,6 +85,12 @@ jobs:
         uses: ./.github/actions/setup-js
       - id: install
         run: bun install --frozen-lockfile
+      - name: Verify trusted runner fingerprint
+        id: identity
+        env:
+          EXPECTED_RUNNER_FINGERPRINT_SHA256: ${{ vars.TIXKIT_EPYC_RUNNER_FINGERPRINT_SHA256 }}
+        run: |
+          node --input-type=module -e "import { appendFileSync } from 'node:fs'; import { assertExpectedRunnerFingerprint, probeRunnerFingerprint } from './scripts/performance-capacity.mjs'; const fingerprint=probeRunnerFingerprint(); appendFileSync(process.env.GITHUB_ENV, 'RUNNER_FINGERPRINT_VERSION='+fingerprint.version+'\nRUNNER_FINGERPRINT_SHA256='+fingerprint.sha256+'\n'); assertExpectedRunnerFingerprint(process.env.EXPECTED_RUNNER_FINGERPRINT_SHA256, fingerprint);"
       - name: Validate soak contracts
         id: contracts
         run: node --test scripts/__tests__/performance-soak.test.mjs
@@ -106,7 +112,8 @@ jobs:
             --config performance-soak.trusted.json \
             --profile "${{ matrix.profile }}" \
             --output "${EVIDENCE_ROOT}/run" \
-            --git-sha "${GITHUB_SHA}"
+            --git-sha "${GITHUB_SHA}" \
+            --expected-runner-fingerprint "${RUNNER_FINGERPRINT_SHA256}"
       - name: Recover process group and verify selected database
         id: recovery
         if: always()
@@ -137,11 +144,12 @@ jobs:
           SETUP_OUTCOME: ${{ steps.setup.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           CONTRACTS_OUTCOME: ${{ steps.contracts.outcome }}
+          IDENTITY_OUTCOME: ${{ steps.identity.outcome }}
           MIGRATION_OUTCOME: ${{ steps.migration.outcome }}
           SOAK_OUTCOME: ${{ steps.soak.outcome }}
           RECOVERY_OUTCOME: ${{ steps.recovery.outcome }}
         run: |
-          node -e "const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path'); const names=['invocation','checkout','setup','install','contracts','migration','soak','recovery']; const outcomes=Object.fromEntries(names.map(name=>[name,process.env[name.toUpperCase()+'_OUTCOME']||'skipped'])); const phase=names.find(name=>['failure','cancelled'].includes(outcomes[name]))||'workflow'; const payload={schemaVersion:'tixkit-performance-soak-workflow-failure-v1',status:'failed',claimScope:'trusted-single-host-continuous-integration-soak',profile:process.env.PROFILE,runnerLabel:'tixkit-epyc-trusted',gitSha:process.env.GITHUB_SHA,phase,outcomes,failedAt:new Date().toISOString(),integrityModel:'checksums-not-signatures'}; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const failure={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.FAILURE_ROOT,'workflow-failure.json'),JSON.stringify(failure,null,2)+'\n',{flag:'wx',mode:0o600});"
+          node -e "const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path'); const names=['invocation','checkout','setup','install','identity','contracts','migration','soak','recovery']; const outcomes=Object.fromEntries(names.map(name=>[name,process.env[name.toUpperCase()+'_OUTCOME']||'skipped'])); const phase=names.find(name=>['failure','cancelled'].includes(outcomes[name]))||'workflow'; const digest=/^[a-f0-9]{64}$/.test(process.env.RUNNER_FINGERPRINT_SHA256||'')?process.env.RUNNER_FINGERPRINT_SHA256:null; const version=process.env.RUNNER_FINGERPRINT_VERSION==='tixkit-runner-fingerprint-v2'?process.env.RUNNER_FINGERPRINT_VERSION:null; const runnerFingerprint=digest&&version?{version,sha256:digest}:null; const payload={schemaVersion:'tixkit-performance-soak-workflow-failure-v2',status:'failed',claimScope:'trusted-single-host-continuous-integration-soak',profile:process.env.PROFILE,runnerLabel:'tixkit-epyc-trusted',runnerFingerprint,gitSha:process.env.GITHUB_SHA,phase,outcomes,failedAt:new Date().toISOString(),integrityModel:'checksums-not-signatures'}; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const failure={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.FAILURE_ROOT,'workflow-failure.json'),JSON.stringify(failure,null,2)+'\n',{flag:'wx',mode:0o600});"
       - name: Upload successful soak evidence
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

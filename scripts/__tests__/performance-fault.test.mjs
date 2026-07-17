@@ -18,10 +18,12 @@ import schema from '../performance-fault.schema.json' with { type: 'json' };
 import {
   createFaultEvidence,
   executeFaultScenario,
+  parseFaultOptions,
   runFaultCharacterization,
   validateFaultConfig,
   validateFaultEvidence,
 } from '../performance-fault.mjs';
+import { probeRunnerFingerprint } from '../performance-capacity.mjs';
 import { canonicalJson, sha256 } from '../performance-evidence.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -29,6 +31,21 @@ const committed = JSON.parse(readFileSync(resolve(root, 'performance-faults.trus
 const workflow = readFileSync(resolve(root, '.github/workflows/performance-fault.yml'), 'utf8');
 const authorization =
   'I authorize controlled database service interruption on the dedicated trusted runner';
+const runnerFingerprint = probeRunnerFingerprint({
+  platform: 'linux',
+  architecture: 'x64',
+  cpuModels: ['AMD EPYC test', 'AMD EPYC test'],
+  logicalCpuCount: 2,
+  totalMemoryBytes: 64 * 1024 * 1024 * 1024,
+});
+const expectedRunnerFingerprintSha256 = runnerFingerprint.sha256;
+
+function identityInput() {
+  return {
+    runnerFingerprint,
+    expectedRunnerFingerprintSha256,
+  };
+}
 
 function configFixture() {
   return structuredClone(committed);
@@ -136,6 +153,7 @@ else process.exit(9);
     statePath,
     descendantPath,
     metricsPath: join(temporaryRoot, 'metrics.json'),
+    ...identityInput(),
     cleanup() {
       process.env.PATH = previousPath;
       if (previousDockerHost === undefined) delete process.env.DOCKER_HOST;
@@ -171,8 +189,14 @@ test('schema accepts committed config and fully derived evidence', () => {
     gitSha: 'a'.repeat(40),
     rawMetrics: metrics(profile),
     faultProof: proof(profile),
+    ...identityInput(),
   });
   assert.equal(validate(evidence), true, JSON.stringify(validate.errors));
+  assert.equal(evidence.schemaVersion, 'tixkit-performance-fault-evidence-v2');
+  assert.equal(
+    validate({ ...evidence, schemaVersion: 'tixkit-performance-fault-evidence-v1' }),
+    false,
+  );
   assert.deepEqual(evidence.denials, [
     'Production availability',
     'Production fault tolerance',
@@ -193,15 +217,44 @@ test('evidence binds config, workload, raw metrics, orchestration, and payload c
     gitSha: 'b'.repeat(40),
     rawMetrics,
     faultProof: proof(profile),
+    ...identityInput(),
   });
   assert.equal(evidence.identity.configSha256, sha256(canonicalJson(committed)));
+  assert.deepEqual(evidence.identity.runnerFingerprint, runnerFingerprint);
   assert.equal(evidence.rawSha256, sha256(rawMetrics));
   const { evidenceSha256, ...payload } = evidence;
   assert.equal(evidenceSha256, sha256(canonicalJson(payload)));
-  assert.equal(validateFaultEvidence({ config: committed, evidence, rawMetrics }), evidence);
+  assert.equal(
+    validateFaultEvidence({
+      config: committed,
+      evidence,
+      rawMetrics,
+      expectedRunnerFingerprintSha256,
+    }),
+    evidence,
+  );
   const tampered = structuredClone(evidence);
   tampered.metrics.reconciliation.activeHeldQuantity -= 1;
-  assert.throws(() => validateFaultEvidence({ config: committed, evidence: tampered, rawMetrics }));
+  assert.throws(() =>
+    validateFaultEvidence({
+      config: committed,
+      evidence: tampered,
+      rawMetrics,
+      expectedRunnerFingerprintSha256,
+    }),
+  );
+  const tamperedRunner = structuredClone(evidence);
+  tamperedRunner.identity.runnerFingerprint.sha256 = '0'.repeat(64);
+  assert.throws(
+    () =>
+      validateFaultEvidence({
+        config: committed,
+        evidence: tamperedRunner,
+        rawMetrics,
+        expectedRunnerFingerprintSha256,
+      }),
+    /does not match/u,
+  );
 });
 
 test('fault and replay phase categories, identity sets, and reconciliation fail closed', () => {
@@ -229,6 +282,7 @@ test('fault and replay phase categories, identity sets, and reconciliation fail 
         gitSha: 'c'.repeat(40),
         rawMetrics: Buffer.from(JSON.stringify(value)),
         faultProof: proof(profile),
+        ...identityInput(),
       }),
     );
   }
@@ -253,6 +307,7 @@ test('ordering, same-container recovery, duration, and recovery threshold proof 
         gitSha: 'd'.repeat(40),
         rawMetrics: metrics(profile),
         faultProof: candidate,
+        ...identityInput(),
       }),
     );
   }
@@ -275,6 +330,97 @@ test('config rejects scope, schema, authorization, workload, env, and duplicate 
   }
 });
 
+test('runner identity fails before output creation or scenario execution', async () => {
+  const temporaryRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tixkit-fault-identity-')));
+  const profile = committed.profiles[0];
+  let executions = 0;
+  try {
+    for (const expected of [undefined, 'not-a-digest', '0'.repeat(64)]) {
+      const outputDirectory = join(temporaryRoot, `evidence-${executions}`);
+      await assert.rejects(
+        runFaultCharacterization({
+          config: committed,
+          profile,
+          outputDirectory,
+          gitSha: 'e'.repeat(40),
+          containerId: 'a'.repeat(64),
+          authorization,
+          expectedRunnerFingerprintSha256: expected,
+          probeRunner: () => runnerFingerprint,
+          executeScenario: async () => {
+            executions += 1;
+            assert.fail('scenario must not execute before runner identity validation');
+          },
+        }),
+        expected === '0'.repeat(64) ? /does not match/u : /lowercase SHA-256 digest/u,
+      );
+      assert.throws(() => statSync(outputDirectory), /ENOENT/u);
+    }
+    assert.equal(executions, 0);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('CLI requires one well-formed value for every supported fault option', () => {
+  const argv = [
+    '--config',
+    'performance-faults.trusted.json',
+    '--profile',
+    'postgresql-trusted-host-database-loss',
+    '--output',
+    '/tmp/fault-evidence',
+    '--git-sha',
+    'a'.repeat(40),
+    '--container-id',
+    'b'.repeat(64),
+    '--authorization',
+    authorization,
+    '--expected-runner-fingerprint',
+    'c'.repeat(64),
+  ];
+  assert.deepEqual(parseFaultOptions(argv), {
+    config: 'performance-faults.trusted.json',
+    profile: 'postgresql-trusted-host-database-loss',
+    output: '/tmp/fault-evidence',
+    gitSha: 'a'.repeat(40),
+    containerId: 'b'.repeat(64),
+    authorization,
+    expectedRunnerFingerprint: 'c'.repeat(64),
+  });
+  assert.throws(
+    () => parseFaultOptions(argv.slice(0, -2)),
+    /missing required fault option --expected-runner-fingerprint/u,
+  );
+  assert.throws(
+    () => parseFaultOptions([...argv, '--profile', 'mysql-trusted-host-database-loss']),
+    /duplicate fault option/u,
+  );
+  assert.throws(() => parseFaultOptions([...argv, '--unknown', 'value']), /unknown fault option/u);
+  assert.throws(() => parseFaultOptions(argv.slice(0, -1)), /require a value for every flag/u);
+});
+
+test('low-level executor rejects runner drift before launching or injecting a fault', async () => {
+  const runtime = fakeRuntime({
+    bunSource: `throw new Error('fault harness must not launch');`,
+  });
+  try {
+    await assert.rejects(
+      executeFaultScenario({
+        ...runtime,
+        expectedRunnerFingerprintSha256: '0'.repeat(64),
+        signal: new AbortController().signal,
+      }),
+      /does not match/u,
+    );
+    const state = JSON.parse(readFileSync(runtime.statePath));
+    assert.deepEqual(state.operations, []);
+    assert.equal(state.running, true);
+  } finally {
+    runtime.cleanup();
+  }
+});
+
 test('runner requires exact authorization, private exclusive output, and source-identical metrics', async () => {
   const profile = committed.profiles[0];
   const temporaryRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tixkit-fault-')));
@@ -288,6 +434,8 @@ test('runner requires exact authorization, private exclusive output, and source-
         gitSha: 'e'.repeat(40),
         containerId: 'a'.repeat(64),
         authorization: 'wrong',
+        expectedRunnerFingerprintSha256,
+        probeRunner: () => runnerFingerprint,
         executeScenario: async () => assert.fail('must not execute without authorization'),
       }),
       /authorization/,
@@ -304,6 +452,8 @@ test('runner requires exact authorization, private exclusive output, and source-
       gitSha: 'e'.repeat(40),
       containerId: 'a'.repeat(64),
       authorization,
+      expectedRunnerFingerprintSha256,
+      probeRunner: () => runnerFingerprint,
       executeScenario,
     });
     assert.equal(evidence.metrics.replayPhase.successes, 64);
@@ -318,6 +468,8 @@ test('runner requires exact authorization, private exclusive output, and source-
         gitSha: 'e'.repeat(40),
         containerId: 'a'.repeat(64),
         authorization,
+        expectedRunnerFingerprintSha256,
+        probeRunner: () => runnerFingerprint,
         executeScenario,
       }),
     );
@@ -346,12 +498,26 @@ test('workflow is serial, trusted, default-branch-only, digest-pinned, authorize
   assert.match(workflow, /DATABASE_CONTAINER_ID: \$\{\{ job\.services\.database\.id \}\}/);
   assert.match(workflow, /database did not recover healthy within 90 seconds/);
   assert.match(workflow, /RECOVERY_OUTCOME: \$\{\{ steps\.recovery\.outcome \}\}/);
+  assert.match(
+    workflow,
+    /EXPECTED_RUNNER_FINGERPRINT_SHA256: \$\{\{ vars\.TIXKIT_EPYC_RUNNER_FINGERPRINT_SHA256 \}\}/u,
+  );
+  assert.match(workflow, /probeRunnerFingerprint/u);
+  assert.match(workflow, /assertExpectedRunnerFingerprint/u);
+  assert.match(workflow, /RUNNER_FINGERPRINT_SHA256=\$\{actual\.sha256\}/u);
+  assert.match(workflow, /--expected-runner-fingerprint/u);
+  assert.match(workflow, /IDENTITY_OUTCOME: \$\{\{ steps\.identity\.outcome \}\}/u);
+  assert.match(
+    workflow,
+    /runnerFingerprint=runnerFingerprintSha256\?\{version:'tixkit-runner-fingerprint-v2',sha256:runnerFingerprintSha256\}:null/u,
+  );
+  assert.match(workflow, /schemaVersion:'tixkit-performance-fault-failure-v2'/u);
   assert.doesNotMatch(workflow, /pull_request|push:/);
 });
 
 test(
   'a stop command that fails after stopping still restores healthy and terminates the child',
-  { timeout: 10_000 },
+  { timeout: 15_000 },
   async () => {
     const temporaryRoot = mkdtempSync(join(tmpdir(), 'tixkit-fault-runtime-'));
     const bin = join(temporaryRoot, 'bin');
@@ -359,7 +525,7 @@ test(
     const statePath = join(temporaryRoot, 'docker-state.json');
     mkdirSync(bin, { mode: 0o700 });
     mkdirSync(controlDirectory, { mode: 0o700 });
-    const profile = { ...committed.profiles[0], timeoutSeconds: 3, markerTimeoutSeconds: 1 };
+    const profile = { ...committed.profiles[0], timeoutSeconds: 6, markerTimeoutSeconds: 3 };
     const containerId = 'a'.repeat(64);
     writeFileSync(
       statePath,
@@ -415,6 +581,7 @@ setInterval(()=>{},1000);
           containerId,
           controlDirectory,
           metricsPath: join(temporaryRoot, 'metrics.json'),
+          ...identityInput(),
           signal: new AbortController().signal,
         }),
       );
@@ -488,6 +655,7 @@ const wait=async name=>{while(!fs.existsSync(path.join(dir,name)))await new Prom
           containerId,
           controlDirectory,
           metricsPath: join(temporaryRoot, 'metrics.json'),
+          ...identityInput(),
           signal: new AbortController().signal,
         }),
         /timeout/,

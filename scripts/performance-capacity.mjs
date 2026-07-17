@@ -94,17 +94,35 @@ export function validateCapacityConfig(config) {
 }
 
 function validateRunnerFingerprint(fingerprint) {
+  const descriptors =
+    fingerprint && typeof fingerprint === 'object'
+      ? Object.getOwnPropertyDescriptors(fingerprint)
+      : undefined;
+  const ownKeys =
+    fingerprint && typeof fingerprint === 'object' ? Reflect.ownKeys(fingerprint) : [];
+  const versionDescriptor = descriptors?.version;
+  const sha256Descriptor = descriptors?.sha256;
   if (
     !fingerprint ||
     typeof fingerprint !== 'object' ||
     Array.isArray(fingerprint) ||
-    canonicalJson(Object.keys(fingerprint).sort()) !== canonicalJson(['sha256', 'version']) ||
-    fingerprint.version !== RUNNER_FINGERPRINT_VERSION ||
-    !SHA256_PATTERN.test(fingerprint.sha256)
+    Object.getPrototypeOf(fingerprint) !== Object.prototype ||
+    ownKeys.length !== 2 ||
+    ownKeys.some((key) => typeof key !== 'string') ||
+    canonicalJson([...ownKeys].sort()) !== canonicalJson(['sha256', 'version']) ||
+    !versionDescriptor ||
+    !sha256Descriptor ||
+    !Object.hasOwn(versionDescriptor, 'value') ||
+    !Object.hasOwn(sha256Descriptor, 'value') ||
+    versionDescriptor.value !== RUNNER_FINGERPRINT_VERSION ||
+    !SHA256_PATTERN.test(sha256Descriptor.value)
   ) {
     throw new Error('runner fingerprint must contain the supported version and a SHA-256 digest');
   }
-  return fingerprint;
+  return Object.freeze({
+    version: versionDescriptor.value,
+    sha256: sha256Descriptor.value,
+  });
 }
 
 export function probeRunnerFingerprint(system) {

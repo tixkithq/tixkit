@@ -54,6 +54,7 @@ jobs:
     env:
       DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
       DATABASE_URL_MYSQL: mysql://tixkit:tixkit@localhost:3306/tixkit
+      EXPECTED_RUNNER_FINGERPRINT_SHA256: ${{ vars.TIXKIT_EPYC_RUNNER_FINGERPRINT_SHA256 }}
     steps:
       - name: Create private exclusive evidence root
         run: |
@@ -82,6 +83,27 @@ jobs:
         uses: ./.github/actions/setup-js
       - id: install
         run: bun install --frozen-lockfile
+      - name: Verify privacy-minimized trusted runner identity
+        id: identity
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import {
+            assertExpectedRunnerFingerprint,
+            probeRunnerFingerprint,
+          } from './scripts/performance-capacity.mjs';
+
+          const actual = probeRunnerFingerprint();
+          appendFileSync(
+            process.env.GITHUB_ENV,
+            `RUNNER_FINGERPRINT_SHA256=${actual.sha256}\n`,
+          );
+          assertExpectedRunnerFingerprint(
+            process.env.EXPECTED_RUNNER_FINGERPRINT_SHA256,
+            actual,
+          );
+          NODE
       - name: Validate fault contracts
         id: contracts
         run: node --test scripts/__tests__/performance-fault.test.mjs
@@ -105,6 +127,7 @@ jobs:
             --output "${EVIDENCE_ROOT}/database-fault" \
             --git-sha "${GITHUB_SHA}" \
             --container-id "${{ job.services.database.id }}" \
+            --expected-runner-fingerprint "${EXPECTED_RUNNER_FINGERPRINT_SHA256}" \
             --authorization "I authorize controlled database service interruption on the dedicated trusted runner"
       - name: Always restore and verify the exact database service
         id: recovery
@@ -123,12 +146,13 @@ jobs:
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           SETUP_OUTCOME: ${{ steps.setup.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          IDENTITY_OUTCOME: ${{ steps.identity.outcome }}
           CONTRACTS_OUTCOME: ${{ steps.contracts.outcome }}
           MIGRATION_OUTCOME: ${{ steps.migration.outcome }}
           FAULT_OUTCOME: ${{ steps.fault.outcome }}
           RECOVERY_OUTCOME: ${{ steps.recovery.outcome }}
         run: |
-          node -e "const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'); const names=['invocation','checkout','setup','install','contracts','migration','fault','recovery']; const outcomes=Object.fromEntries(names.map(name=>[name,process.env[name.toUpperCase()+'_OUTCOME']||'skipped'])); const phase=names.find(name=>['failure','cancelled'].includes(outcomes[name]))||'workflow'; const configPath=path.join(process.env.GITHUB_WORKSPACE||process.cwd(),'performance-faults.trusted.json'); const configSha256=outcomes.checkout==='success'&&fs.existsSync(configPath)?crypto.createHash('sha256').update(fs.readFileSync(configPath)).digest('hex'):null; const payload={schemaVersion:'tixkit-performance-fault-failure-v1',status:'failed',phase,outcomes,profile:process.env.PROFILE,runnerLabel:'tixkit-epyc-trusted',databaseImage:process.env.DATABASE_IMAGE,configSha256,gitSha:process.env.GITHUB_SHA,failedAt:new Date().toISOString(),integrityModel:'checksums-not-signatures'}; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const artifact={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.EVIDENCE_ROOT,'workflow-failure.json'),JSON.stringify(artifact,null,2)+'\n',{flag:'wx',mode:0o600});"
+          node -e "const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'); const names=['invocation','checkout','setup','install','identity','contracts','migration','fault','recovery']; const outcomes=Object.fromEntries(names.map(name=>[name,process.env[name.toUpperCase()+'_OUTCOME']||'skipped'])); const phase=names.find(name=>['failure','cancelled'].includes(outcomes[name]))||'workflow'; const configPath=path.join(process.env.GITHUB_WORKSPACE||process.cwd(),'performance-faults.trusted.json'); const configSha256=outcomes.checkout==='success'&&fs.existsSync(configPath)?crypto.createHash('sha256').update(fs.readFileSync(configPath)).digest('hex'):null; const runnerFingerprintSha256=/^[a-f0-9]{64}$/.test(process.env.RUNNER_FINGERPRINT_SHA256||'')?process.env.RUNNER_FINGERPRINT_SHA256:null; const runnerFingerprint=runnerFingerprintSha256?{version:'tixkit-runner-fingerprint-v2',sha256:runnerFingerprintSha256}:null; const payload={schemaVersion:'tixkit-performance-fault-failure-v2',status:'failed',phase,outcomes,profile:process.env.PROFILE,runnerLabel:'tixkit-epyc-trusted',runnerFingerprint,databaseImage:process.env.DATABASE_IMAGE,configSha256,gitSha:process.env.GITHUB_SHA,failedAt:new Date().toISOString(),integrityModel:'checksums-not-signatures'}; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const artifact={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.EVIDENCE_ROOT,'workflow-failure.json'),JSON.stringify(artifact,null,2)+'\n',{flag:'wx',mode:0o600});"
       - name: Upload complete or failure evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

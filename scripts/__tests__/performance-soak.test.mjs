@@ -17,26 +17,60 @@ import test from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
 import schema from '../performance-soak.schema.json' with { type: 'json' };
 import {
-  createSoakEvidence,
+  createSoakEvidence as createSoakEvidenceRaw,
   executeSoakIteration,
-  runSoak,
+  options,
+  runSoak as runSoakRaw,
   soakChildEnvironment,
   validateSoakConfig,
-  validateSoakEvidence,
-  validateSoakEvidenceDirectory,
-  writeSoakFailure,
+  validateSoakEvidence as validateSoakEvidenceRaw,
+  validateSoakEvidenceDirectory as validateSoakEvidenceDirectoryRaw,
+  writeSoakFailure as writeSoakFailureRaw,
 } from '../performance-soak.mjs';
+import { probeRunnerFingerprint } from '../performance-capacity.mjs';
 import { canonicalJson, sha256 } from '../performance-evidence.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const committed = JSON.parse(readFileSync(resolve(root, 'performance-soak.trusted.json')));
 const budgetBytes = readFileSync(resolve(root, 'performance-budgets.integration.json'));
 const workflow = readFileSync(resolve(root, '.github/workflows/performance-soak.yml'), 'utf8');
+const runnerFingerprint = probeRunnerFingerprint({
+  platform: 'linux',
+  architecture: 'x64',
+  cpuModels: Array.from({ length: 16 }, () => 'AMD EPYC test fixture'),
+  logicalCpuCount: 16,
+  totalMemoryBytes: 64 * 1024 ** 3,
+});
+const expectedRunnerFingerprintSha256 = runnerFingerprint.sha256;
+const withRunner = (input) => ({
+  ...input,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
+});
+const createSoakEvidence = (input) => createSoakEvidenceRaw(withRunner(input));
+const validateSoakEvidence = (input) =>
+  validateSoakEvidenceRaw({ ...input, expectedRunnerFingerprintSha256 });
+const validateSoakEvidenceDirectory = (input) =>
+  validateSoakEvidenceDirectoryRaw({ ...input, expectedRunnerFingerprintSha256 });
+const runSoak = (input) =>
+  runSoakRaw({
+    ...input,
+    expectedRunnerFingerprintSha256,
+    probeRunner: () => runnerFingerprint,
+  });
+const writeSoakFailure = (input) =>
+  writeSoakFailureRaw({
+    ...input,
+    runnerFingerprint,
+    expectedRunnerFingerprintSha256,
+  });
 
 function assertSoakWorkflowContract(candidate) {
   const invocation = candidate.indexOf('      - name: Reject non-default or untrusted invocation');
   const checkout = candidate.indexOf('      - id: checkout');
   const migration = candidate.indexOf('      - name: Migrate only the selected database');
+  const identity = candidate.indexOf('      - name: Verify trusted runner fingerprint');
+  const contracts = candidate.indexOf('      - name: Validate soak contracts');
   const soak = candidate.indexOf('      - name: Run four-hour continuous integration soak');
   const recovery = candidate.indexOf(
     '      - name: Recover process group and verify selected database',
@@ -48,6 +82,9 @@ function assertSoakWorkflowContract(candidate) {
     invocation >= 0 &&
       invocation < checkout &&
       checkout < migration &&
+      identity >= 0 &&
+      identity < contracts &&
+      contracts < migration &&
       migration < soak &&
       soak < recovery &&
       recovery < workflowFailure &&
@@ -130,10 +167,16 @@ test('schema accepts committed config and fully derived evidence', () => {
     samples: samples(profile),
   });
   assert.equal(validate(evidence), true, JSON.stringify(validate.errors));
+  assert.equal(evidence.schemaVersion, 'tixkit-performance-soak-evidence-v2');
+  assert.equal(
+    validate({ ...evidence, schemaVersion: 'tixkit-performance-soak-evidence-v1' }),
+    false,
+  );
   assert.equal(evidence.status, 'passed');
   assert.equal(evidence.controls.actualDurationMs, 14_400_000);
   assert.equal(evidence.controls.actualIterations, 24);
   assert.equal(evidence.identity.budgetSha256, sha256(budgetBytes));
+  assert.deepEqual(evidence.identity.runnerFingerprint, runnerFingerprint);
   assert.equal(evidence.metricSummary.length, profile.metrics.length);
   assert.ok(
     evidence.iterations.every(({ sealedSampleSha256 }) =>
@@ -342,6 +385,7 @@ test('evidence verification detects raw tampering, sample reordering, and sealed
     (value) => (value.iterations[0].metrics.checkoutReservationP50Ms += 1),
     (value) => value.iterations.reverse(),
     (value) => (value.iterations[0].sealedSampleSha256 = '0'.repeat(64)),
+    (value) => (value.identity.runnerFingerprint.sha256 = '0'.repeat(64)),
     (value) => (value.evidenceSha256 = '0'.repeat(64)),
   ];
   for (const mutate of mutations) {
@@ -440,6 +484,87 @@ test('fake monotonic clock runs 24 fresh iterations without executing the real w
   } finally {
     rmSync(output, { recursive: true, force: true });
   }
+});
+
+test('runner fingerprint gate rejects missing, malformed, and mismatched identity before output or workload', async () => {
+  const profile = committed.profiles[0];
+  for (const expected of [undefined, 'not-a-digest', '0'.repeat(64)]) {
+    const output = join(mkdtempSync(join(tmpdir(), 'tixkit-soak-identity-')), 'run');
+    let workloadCalls = 0;
+    let probeCalls = 0;
+    try {
+      await assert.rejects(
+        runSoakRaw({
+          config: committed,
+          profile,
+          outputDirectory: output,
+          gitSha: 'a'.repeat(40),
+          budgetBytes,
+          expectedRunnerFingerprintSha256: expected,
+          probeRunner: () => {
+            probeCalls += 1;
+            return runnerFingerprint;
+          },
+          executeIteration: async () => {
+            workloadCalls += 1;
+            throw new Error('workload must not launch');
+          },
+        }),
+        /expected runner fingerprint|does not match/,
+      );
+      assert.equal(probeCalls, 1);
+      assert.equal(workloadCalls, 0);
+      assert.equal(existsSync(output), false);
+    } finally {
+      rmSync(resolve(output, '..'), { recursive: true, force: true });
+    }
+  }
+});
+
+test('low-level iteration executor rejects runner drift before launching a child', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-soak-low-level-identity-'));
+  const markerPath = join(directory, 'launched');
+  const profile = structuredClone(committed.profiles[0]);
+  profile.command = {
+    executable: process.execPath,
+    args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'launched')`],
+    env: {},
+  };
+  const input = {
+    profile,
+    metricsPath: join(directory, 'metrics.json'),
+    processGroupPath: join(directory, 'active-process-group'),
+    expectedRunnerFingerprintSha256,
+    signal: new AbortController().signal,
+  };
+  try {
+    for (const candidate of [
+      undefined,
+      { ...runnerFingerprint, sha256: '0'.repeat(64) },
+      { ...runnerFingerprint, extra: true },
+    ]) {
+      assert.throws(() => executeSoakIteration({ ...input, runnerFingerprint: candidate }));
+      assert.equal(existsSync(markerPath), false);
+      assert.equal(existsSync(input.metricsPath), false);
+      assert.equal(existsSync(input.processGroupPath), false);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('CLI parser rejects runner fingerprint option multiplicity and missing values', () => {
+  assert.throws(
+    () =>
+      options([
+        '--expected-runner-fingerprint',
+        runnerFingerprint.sha256,
+        '--expected-runner-fingerprint',
+        runnerFingerprint.sha256,
+      ]),
+    /duplicate option/,
+  );
+  assert.throws(() => options(['--expected-runner-fingerprint']), /requires exactly one value/);
 });
 
 test('runtime fails the first malformed or over-budget iteration before another launch', async () => {
@@ -565,8 +690,10 @@ test('finite injected iteration limit fails instead of idling before four hours'
       /maximumIterations reached/,
     );
     const failure = JSON.parse(readFileSync(join(output, 'failure.json'), 'utf8'));
+    assert.equal(failure.schemaVersion, 'tixkit-performance-soak-failure-v2');
     assert.equal(failure.failureCode, 'iteration-limit-before-duration');
     assert.equal(failure.status, 'failed');
+    assert.deepEqual(failure.runnerFingerprint, runnerFingerprint);
     assert.doesNotMatch(JSON.stringify(failure), /maximumIterations|Error|stack/);
     assert.equal(statSync(join(output, 'failure.json')).mode & 0o777, 0o600);
     const retained = writeSoakFailure({
@@ -579,6 +706,17 @@ test('finite injected iteration limit fails instead of idling before four hours'
       now: Date.UTC(2030, 0, 1),
     });
     assert.deepEqual(retained, failure);
+    assert.throws(() =>
+      writeSoakFailureRaw({
+        outputDirectory: output,
+        config: committed,
+        profile,
+        gitSha: '4'.repeat(40),
+        budgetBytes,
+        runnerFingerprint: { ...runnerFingerprint, extra: true },
+        error: new Error('malformed runner identity'),
+      }),
+    );
   } finally {
     rmSync(output, { recursive: true, force: true });
   }
@@ -687,7 +825,7 @@ test('timeout, abort, and nonzero parent exit kill SIGTERM-resistant descendants
     const directory = mkdtempSync(join(tmpdir(), `tixkit-soak-process-${mode}-`));
     const profile = structuredClone(committed.profiles[0]);
     const descendantPath = join(directory, 'descendant.pid');
-    profile.iterationTimeoutSeconds = mode === 'timeout' ? 0.2 : 10;
+    profile.iterationTimeoutSeconds = mode === 'timeout' ? 1 : 10;
     profile.command = {
       executable: process.execPath,
       args: [
@@ -707,9 +845,16 @@ test('timeout, abort, and nonzero parent exit kill SIGTERM-resistant descendants
       profile,
       metricsPath,
       processGroupPath,
+      runnerFingerprint,
+      expectedRunnerFingerprintSha256,
       signal: controller.signal,
     });
-    if (mode === 'abort') setTimeout(() => controller.abort(), 200);
+    if (mode === 'abort') {
+      for (let attempt = 0; attempt < 100 && !existsSync(descendantPath); attempt += 1) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+      controller.abort();
+    }
     await assert.rejects(execution, /timeout|interrupted|exit 7/);
     const descendantPid = Number(readFileSync(descendantPath, 'utf8'));
     for (let attempt = 0; attempt < 50 && processAlive(descendantPid); attempt += 1) {
@@ -733,6 +878,7 @@ test('trusted workflow is serial, selected-database-only, recoverable, and uploa
   assert.match(workflow, /if: always\(\)/);
   assert.match(workflow, /always\(\) && job\.status != 'success'/);
   assert.match(workflow, /active-process-group/);
+  assert.match(workflow, /schemaVersion:'tixkit-performance-soak-workflow-failure-v2'/u);
   assert.match(workflow, /Upload failure evidence/);
   assert.match(workflow, /github\.event\.repository\.default_branch/);
   assert.match(
@@ -748,6 +894,9 @@ test('trusted workflow is serial, selected-database-only, recoverable, and uploa
   assert.match(workflow, /mkdir -m 700/);
   assert.match(workflow, /performance-soak\.test\.mjs/);
   assert.match(workflow, /performance-soak\.trusted\.json/);
+  assert.match(workflow, /vars\.TIXKIT_EPYC_RUNNER_FINGERPRINT_SHA256/);
+  assert.match(workflow, /--expected-runner-fingerprint/);
+  assert.match(workflow, /Verify trusted runner fingerprint/);
   assert.match(workflow, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
   assert.doesNotMatch(workflow, /pull_request/);
 
