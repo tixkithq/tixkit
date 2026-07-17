@@ -7,9 +7,19 @@ export async function bumpEventPublicRevision(
   eventId: string,
   revision: Date = new Date(),
 ): Promise<void> {
+  const databaseRevision =
+    process.env.DB_DRIVER === 'mysql'
+      ? new Date((Math.floor(revision.getTime() / 1_000) + 1) * 1_000)
+      : revision;
+  const nextRevision =
+    process.env.DB_DRIVER === 'mysql'
+      ? sql<Date>`case when public_revision is null or public_revision < ${databaseRevision} then ${databaseRevision} else timestampadd(second, 1, public_revision) end`
+      : process.env.DB_DRIVER === 'mssql'
+        ? sql<Date>`case when public_revision is null or public_revision < ${revision} then ${revision} else dateadd(millisecond, 1, public_revision) end`
+        : sql<Date>`case when public_revision is null or public_revision < ${revision} then ${revision} else public_revision + interval '1 millisecond' end`;
   await db
     .updateTable('events')
-    .set({ public_revision: revision, version: sql`version + 1` })
+    .set({ public_revision: nextRevision, version: sql`version + 1` })
     .where('id', '=', eventId)
     .execute();
 }

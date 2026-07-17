@@ -131,6 +131,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'order-route-authorization-db.integration.test.ts'),
   ],
   [
+    'event-media-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'event-media-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'provider-incident-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'provider-incident-route-authorization-db.integration.test.ts'),
   ],
@@ -289,6 +293,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       persistenceSource: 'migration-lifecycle-route-authorization-db.integration.test.ts',
     },
   ),
+  ...evidenceBindings(['putEventsByEventIdMediaByRole', 'deleteEventsByEventIdMediaByRole'], {
+    source: 'event-media-route-authorization-db.integration.test.ts',
+    persistenceSource: 'event-media-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['runMigrationDryRun'], {
     source: 'migration-dry-run-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-dry-run-route-authorization-db.integration.test.ts',

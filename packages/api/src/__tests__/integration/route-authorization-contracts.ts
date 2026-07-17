@@ -170,6 +170,35 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'PUT',
+    operationId: 'putEventsByEventIdMediaByRole',
+    path: '/events/{eventId}/media/{role}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'event-media-route-authorization-db.integration.test.ts',
+    resourceParameters: ['eventId', 'role'],
+    sideEffectAssertions: ['persistence'],
+    source: 'event-media-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 204 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'DELETE',
+    operationId: 'deleteEventsByEventIdMediaByRole',
+    path: '/events/{eventId}/media/{role}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'event-media-route-authorization-db.integration.test.ts',
+    resourceParameters: ['eventId', 'role'],
+    sideEffectAssertions: ['persistence'],
+    source: 'event-media-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze(
   (
     [
@@ -1043,6 +1072,7 @@ export const WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
 
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
