@@ -120,11 +120,6 @@ export function validateHighCareLedger(markdown) {
     if (!ALLOWED_STATUSES.has(row.status)) {
       errors.push(`${row.backlog}: invalid Summary status ${row.status}`);
     }
-    if (row.status !== 'Covered') {
-      errors.push(
-        `${row.backlog}: high-care Summary status must be Covered or the backlog must be reopened`,
-      );
-    }
     if (!DATE_PATTERN.test(row.evidenceDate)) {
       errors.push(`${row.backlog}: Summary evidence date must be YYYY-MM-DD`);
     }
@@ -186,6 +181,15 @@ export function validateHighCareLedger(markdown) {
   for (const id of EXPECTED_BACKLOG_IDS) {
     const summary = summaryById.get(id);
     const detail = detailById.get(id);
+    if (
+      summary &&
+      detail &&
+      ALLOWED_STATUSES.has(summary.status) &&
+      summary.status !== 'Covered' &&
+      /^none\.?$/iu.test(detail.currentBlocker.trim())
+    ) {
+      errors.push(`${id}: non-Covered Summary status requires a concrete current blocker`);
+    }
     if (summary && detail && summary.nextAction !== detail.nextAction) {
       errors.push(`${id}: Summary next action does not match Surface Details next action`);
     }

@@ -2,10 +2,8 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   AccessRuleRepository,
-  AttendeeRepository,
   EventOccurrenceRepository,
   EventRepository,
-  OrderRepository,
   TicketTypeRepository,
   TicketRepository,
   TicketListingRepository,
@@ -20,18 +18,14 @@ import {
   ValidationError,
   normalizeEmailDomainAccessRuleValue,
   validateResalePrice,
-  evaluateDateOfBirthEligibility,
-  requiresDateOfBirthVerification,
 } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
-import { ulid } from 'ulid';
 import {
   pageEnvelope,
   parsePagination,
   pickAllowedFields,
   serializeResalePolicy,
   serializeTicketListing,
-  serializeTicketResaleCompletion,
   serializeInventoryPool,
   serializeAccessRule,
   serializeProduct,
@@ -50,7 +44,6 @@ import {
   updateProductSchema,
   resalePolicySchema,
   createResaleListingSchema,
-  completeResaleListingSchema,
   parseBody,
 } from '../../http/schemas.js';
 
@@ -457,196 +450,18 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
   app.post('/ticket-listings/:listingId/complete', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'tickets.write');
-    const { listingId } = request.params as { listingId: string };
-    const body = parseBody(completeResaleListingSchema, request.body);
-    const idempotencyKey = requireIdempotencyKey(request, 'resale completion');
-
-    const listingRepo = new TicketListingRepository(db);
-    const listing = await listingRepo.findById(listingId);
-    if (!listing) throw new NotFoundError('TicketListing', listingId);
-    if (listing.tenant_id !== principal.tenantId) {
-      throw new NotFoundError('TicketListing', listingId);
-    }
-    const event = await loadEvent(listing.event_id as string);
-    requireEventAccess(principal, event, listing.event_id as string);
-    const requiresDateOfBirth = requiresDateOfBirthVerification(event.minimum_age);
-
-    const requestHash = hashRequest({
-      listingId,
-      buyerId: body.buyerId,
-      buyerEmail: body.buyerEmail,
-      buyerFirstName: body.buyerFirstName ?? null,
-      buyerLastName: body.buyerLastName ?? null,
-      buyerPhone: body.buyerPhone ?? null,
-      buyerDateOfBirth: requiresDateOfBirth ? body.buyerDateOfBirth : undefined,
-      externalPaymentReference: body.externalPaymentReference ?? null,
-    });
-
-    const result = await withIdempotency(
-      db,
-      { key: idempotencyKey, tenantId: principal.tenantId, requestHash },
-      async () => {
-        const completed = await db.transaction().execute(async (trx) => {
-          const txDb = trx as typeof db;
-          const txListingRepo = new TicketListingRepository(txDb);
-          const txTicketRepo = new TicketRepository(txDb);
-          const txAttendeeRepo = new AttendeeRepository(txDb);
-          const txOrderRepo = new OrderRepository(txDb);
-          const now = new Date();
-
-          const currentListing = await txListingRepo.findById(listingId);
-          if (!currentListing || currentListing.tenant_id !== principal.tenantId) {
-            throw new NotFoundError('TicketListing', listingId);
-          }
-          if (currentListing.status !== 'listed') {
-            throw new ValidationError(`Ticket listing ${listingId} is not listed`);
-          }
-          if (
-            currentListing.expires_at &&
-            new Date(currentListing.expires_at as Date | string).getTime() <= now.getTime()
-          ) {
-            await txListingRepo.expire(listingId);
-            return { expired: true as const };
-          }
-          if (currentListing.seller_id === body.buyerId) {
-            throw new ValidationError('Buyer cannot be the resale listing seller');
-          }
-
-          const sellerTicket = await txTicketRepo.findById(currentListing.ticket_id as string);
-          if (
-            !sellerTicket ||
-            sellerTicket.tenant_id !== principal.tenantId ||
-            sellerTicket.event_id !== currentListing.event_id
-          ) {
-            throw new ValidationError(
-              `Ticket listing ${listingId} is not attached to a valid ticket`,
-            );
-          }
-          if (sellerTicket.status !== 'valid') {
-            throw new ValidationError(
-              `Ticket status is ${sellerTicket.status}, cannot complete resale`,
-            );
-          }
-          const occurrence = sellerTicket.event_occurrence_id
-            ? await new EventOccurrenceRepository(txDb).findById(sellerTicket.event_occurrence_id)
-            : undefined;
-          if (requiresDateOfBirth) {
-            const eligibility = evaluateDateOfBirthEligibility({
-              dateOfBirth: body.buyerDateOfBirth,
-              minimumAge: event.minimum_age,
-              participationAt: occurrence?.starts_at ?? event.starts_at,
-              timezone: occurrence?.timezone ?? event.timezone,
-            });
-            if (!eligibility.eligible) {
-              throw new ValidationError(`Resale buyer: ${eligibility.message}`, {
-                code: eligibility.code,
-                field: 'buyerDateOfBirth',
-              });
-            }
-          }
-
-          const sellerAttendee = await txAttendeeRepo.findById(sellerTicket.attendee_id as string);
-          if (
-            !sellerAttendee ||
-            sellerAttendee.tenant_id !== principal.tenantId ||
-            sellerAttendee.event_id !== sellerTicket.event_id
-          ) {
-            throw new ValidationError(
-              `Ticket listing ${listingId} is not attached to a valid seller attendee`,
-            );
-          }
-
-          const buyerAttendee = await txAttendeeRepo.create({
-            tenantId: principal.tenantId,
-            orderId: sellerTicket.order_id as string,
-            eventId: sellerTicket.event_id as string,
-            ticketTypeId: sellerTicket.ticket_type_id as string,
-            eventOccurrenceId: (sellerTicket.event_occurrence_id as string | null) ?? undefined,
-            email: body.buyerEmail,
-            firstName: body.buyerFirstName ?? undefined,
-            lastName: body.buyerLastName ?? undefined,
-            phone: body.buyerPhone ?? undefined,
-            dateOfBirth: requiresDateOfBirth ? body.buyerDateOfBirth : undefined,
-            customAnswers: {
-              resaleListingId: listingId,
-              resaleSellerAttendeeId: sellerAttendee.id,
-              externalPaymentReference: body.externalPaymentReference ?? null,
-            },
-          });
-
-          const buyerTicketId = `tkt_${ulid()}`;
-          const qr = app.context.qrService.generate(buyerTicketId);
-          const buyerTicket = await txTicketRepo.create({
-            id: buyerTicketId,
-            tenantId: principal.tenantId,
-            orderId: sellerTicket.order_id as string,
-            attendeeId: buyerAttendee.id as string,
-            eventId: sellerTicket.event_id as string,
-            ticketTypeId: sellerTicket.ticket_type_id as string,
-            eventOccurrenceId: (sellerTicket.event_occurrence_id as string | null) ?? undefined,
-            code: qr.code,
-            qrPayload: qr.payload,
-            qrHash: qr.hash,
-          });
-          const confirmedBuyerAttendee = await txAttendeeRepo.update(buyerAttendee.id as string, {
-            ticket_id: buyerTicket.id,
-            status: 'confirmed',
-          });
-
-          const sellerTransferred = await txTicketRepo.transferIfValid(
-            sellerTicket.id as string,
-            body.buyerEmail,
-            now,
-          );
-          if (!sellerTransferred) {
-            const currentSellerTicket = await txTicketRepo.findById(sellerTicket.id as string);
-            throw new ValidationError(
-              `Ticket status is ${currentSellerTicket?.status ?? sellerTicket.status}, cannot complete resale`,
-            );
-          }
-
-          await txDb
-            .updateTable('wallet_passes')
-            .set({ status: 'revoked', revoked_at: now, updated_at: now })
-            .where('ticket_id', '=', sellerTicket.id as string)
-            .where('status', '=', 'active')
-            .execute();
-
-          const transferredSellerTicket = await txTicketRepo.findById(sellerTicket.id as string);
-          const soldListing = await txListingRepo.markSold(listingId, body.buyerId);
-          await txOrderRepo.addTimelineEvent(
-            sellerTicket.order_id as string,
-            'ticket.resale_completed',
-            `Ticket ${sellerTicket.id} resold to ${body.buyerEmail}`,
-            {
-              listingId,
-              sellerTicketId: sellerTicket.id,
-              buyerTicketId: buyerTicket.id,
-              buyerAttendeeId: confirmedBuyerAttendee.id,
-              buyerId: body.buyerId,
-              externalPaymentReference: body.externalPaymentReference ?? null,
-            },
-            principal.id,
-          );
-
-          return {
-            listing: soldListing,
-            sellerTicket: transferredSellerTicket!,
-            buyerTicket,
-            buyerAttendee: confirmedBuyerAttendee,
-          };
-        });
-        if ('expired' in completed) {
-          throw new ValidationError(`Ticket listing ${listingId} has expired`);
-        }
-        return {
-          status: 200,
-          body: serializeTicketResaleCompletion(completed),
-        };
-      },
-    );
-
-    return reply.status(result.status).send(result.body);
+    return reply
+      .header('Deprecation', '@1784160000')
+      .header('Link', '</v1/checkout/sessions>; rel="successor-version"')
+      .status(410)
+      .send({
+        error: {
+          code: 'RESALE_COMPLETION_RETIRED',
+          message:
+            'Provider-delegated resale completion is retired. Reserve the listing in a checkout session and confirm that session so payment, buyer order creation, ticket transfer and compensation use the shared checkout workflow.',
+          requestId: request.id,
+        },
+      });
   });
 
   app.post('/events/:eventId/ticket-types', async (request, reply) => {

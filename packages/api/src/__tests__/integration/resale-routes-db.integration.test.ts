@@ -123,6 +123,17 @@ async function setupRouteApp(
   return routeApp;
 }
 
+async function expectNoIdempotencyRecords(keys: string[]): Promise<void> {
+  expect(
+    await db
+      .selectFrom('idempotency_records')
+      .select('key')
+      .where('tenant_id', '=', TENANT_ID)
+      .where('key', 'in', keys)
+      .execute(),
+  ).toEqual([]);
+}
+
 async function seedTenantGraph(database: Database): Promise<void> {
   const now = new Date();
   await database.transaction().execute(async (trx) => {
@@ -2055,7 +2066,7 @@ describeWithIntegrationDatabase(
       }
     });
 
-    it('completes a listed resale once and replays buyer ticket issuance', async () => {
+    it('retires arbitrary provider-delegated completion without mutating resale state', async () => {
       const listed = await app.inject({
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
@@ -2064,6 +2075,15 @@ describeWithIntegrationDatabase(
       });
       expect(listed.statusCode).toBe(201);
       const listingId = listed.json().id as string;
+      const deniedApp = await setupRouteApp(db, makePrincipal({ scopes: ['events.read'] }));
+      const denied = await deniedApp.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/complete`,
+        payload: { externalPaymentReference: `untrusted_${RUN_ID}` },
+      });
+      await deniedApp.close();
+      expect(denied.statusCode).toBe(403);
+
       const payload = {
         buyerId: `usr_resale_buyer_${RUN_ID}`,
         buyerEmail: `buyer-${RUN_ID}@example.com`,
@@ -2084,81 +2104,54 @@ describeWithIntegrationDatabase(
         headers: { 'Idempotency-Key': `resale_db_complete_${RUN_ID}` },
         payload,
       });
-
-      expect(first.statusCode).toBe(200);
-      expect(replay.statusCode).toBe(200);
-      expect(replay.json()).toEqual(first.json());
-
-      const body = first.json();
-      expect(body.listing).toMatchObject({
-        id: listingId,
-        status: 'sold',
-        soldToId: payload.buyerId,
-      });
-      expect(body.sellerTicket).toMatchObject({
-        id: TICKET_ID,
-        status: 'transferred',
-        transferredToEmail: payload.buyerEmail,
-      });
-      expect(body.buyerTicket).toMatchObject({
-        status: 'valid',
-        attendeeId: body.buyerAttendee.id,
-        eventId: EVENT_ID,
-        ticketTypeId: TICKET_TYPE_ID,
-      });
-      expect(body.buyerAttendee).toMatchObject({
-        email: payload.buyerEmail,
-        status: 'confirmed',
-        ticketId: body.buyerTicket.id,
-      });
-      const buyerAttendeeRow = await db
-        .selectFrom('attendees')
-        .select('date_of_birth')
-        .where('id', '=', body.buyerAttendee.id)
-        .executeTakeFirstOrThrow();
-      expect(buyerAttendeeRow.date_of_birth).toBeNull();
-
-      const qr = new QrService('resale-db-test-secret').getQrPayload(body.buyerTicket.qrPayload);
-      expect(qr).toMatchObject({ valid: true, ticketId: body.buyerTicket.id });
-
-      const rows = await db
-        .selectFrom('tickets')
-        .selectAll()
-        .where('tenant_id', '=', TENANT_ID)
-        .execute();
-      expect(rows.filter((row) => row.id === TICKET_ID)).toHaveLength(1);
-      expect(rows.filter((row) => row.status === 'valid')).toHaveLength(1);
-
-      const walletPass = await db
-        .selectFrom('wallet_passes')
-        .selectAll()
-        .where('id', '=', WALLET_PASS_ID)
-        .executeTakeFirstOrThrow();
-      expect(walletPass.status).toBe('revoked');
-      expect(walletPass.revoked_at).toBeTruthy();
-
-      const timeline = await db
-        .selectFrom('order_timeline_events')
-        .selectAll()
-        .where('order_id', '=', ORDER_ID)
-        .where('type', '=', 'ticket.resale_completed')
-        .execute();
-      expect(timeline).toHaveLength(1);
-
-      const duplicate = await app.inject({
+      const malformed = await app.inject({
         method: 'POST',
         url: `/ticket-listings/${listingId}/complete`,
-        headers: { 'Idempotency-Key': `resale_db_complete_again_${RUN_ID}` },
-        payload: {
-          ...payload,
-          buyerId: `usr_resale_buyer_again_${RUN_ID}`,
-          buyerEmail: `buyer-again-${RUN_ID}@example.com`,
-        },
       });
-      expect(duplicate.statusCode).toBe(400);
+
+      expect(first.statusCode).toBe(410);
+      expect(replay.statusCode).toBe(410);
+      expect(malformed.statusCode).toBe(410);
+      expect(first.headers.deprecation).toBe('@1784160000');
+      expect(first.headers.link).toBe('</v1/checkout/sessions>; rel="successor-version"');
+      expect(first.json().error).toMatchObject({ code: 'RESALE_COMPLETION_RETIRED' });
+      expect(replay.json().error).toMatchObject({ code: 'RESALE_COMPLETION_RETIRED' });
+      expect(malformed.json().error).toMatchObject({ code: 'RESALE_COMPLETION_RETIRED' });
+      await expectNoIdempotencyRecords([`resale_db_complete_${RUN_ID}`]);
+      expect(
+        await db
+          .selectFrom('ticket_listings')
+          .select(['id', 'status', 'sold_to_id'])
+          .where('id', '=', listingId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ id: listingId, status: 'listed', sold_to_id: null });
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: TICKET_ID, status: 'valid' }]);
+      expect(
+        await db.selectFrom('attendees').select('id').where('tenant_id', '=', TENANT_ID).execute(),
+      ).toEqual([{ id: ATTENDEE_ID }]);
+      expect(
+        await db
+          .selectFrom('wallet_passes')
+          .select(['id', 'status'])
+          .where('id', '=', WALLET_PASS_ID)
+          .execute(),
+      ).toEqual([{ id: WALLET_PASS_ID, status: 'active' }]);
+      expect(
+        await db
+          .selectFrom('order_timeline_events')
+          .select('id')
+          .where('order_id', '=', ORDER_ID)
+          .execute(),
+      ).toEqual([]);
     });
 
-    it('allows only one resale completion under concurrent buyer attempts', async () => {
+    it('rejects every concurrent legacy completion attempt without mutating resale state', async () => {
       const listed = await app.inject({
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
@@ -2187,39 +2180,41 @@ describeWithIntegrationDatabase(
       );
 
       const statuses = attempts.map((response) => response.statusCode);
-      expect(statuses.filter((status) => status === 200)).toHaveLength(1);
-      expect(statuses.filter((status) => status === 400)).toHaveLength(7);
+      expect(statuses).toEqual(Array.from({ length: 8 }, () => 410));
+      for (const response of attempts) {
+        expect(response.json().error).toMatchObject({ code: 'RESALE_COMPLETION_RETIRED' });
+      }
+      await expectNoIdempotencyRecords(
+        Array.from({ length: 8 }, (_, index) => `resale_db_complete_race_${RUN_ID}_${index}`),
+      );
 
-      const soldListing = await db
+      const persistedListing = await db
         .selectFrom('ticket_listings')
-        .selectAll()
+        .select(['id', 'status', 'sold_to_id'])
         .where('id', '=', listingId)
         .executeTakeFirstOrThrow();
-      expect(soldListing.status).toBe('sold');
-      expect(soldListing.sold_to_id).toBeTruthy();
+      expect(persistedListing).toEqual({ id: listingId, status: 'listed', sold_to_id: null });
 
       const tickets = await db
         .selectFrom('tickets')
-        .selectAll()
+        .select(['id', 'status'])
         .where('tenant_id', '=', TENANT_ID)
         .execute();
-      expect(tickets.filter((ticket) => ticket.id === TICKET_ID)).toHaveLength(1);
-      expect(tickets.filter((ticket) => ticket.status === 'valid')).toHaveLength(1);
-      expect(tickets.filter((ticket) => ticket.status === 'transferred')).toHaveLength(1);
+      expect(tickets).toEqual([{ id: TICKET_ID, status: 'valid' }]);
 
       const attendees = await db
         .selectFrom('attendees')
-        .selectAll()
+        .select('id')
         .where('tenant_id', '=', TENANT_ID)
         .execute();
-      expect(attendees.filter((attendee) => attendee.status === 'confirmed')).toHaveLength(2);
+      expect(attendees).toEqual([{ id: ATTENDEE_ID }]);
 
       const walletPass = await db
         .selectFrom('wallet_passes')
-        .selectAll()
+        .select(['id', 'status'])
         .where('id', '=', WALLET_PASS_ID)
         .executeTakeFirstOrThrow();
-      expect(walletPass.status).toBe('revoked');
+      expect(walletPass).toEqual({ id: WALLET_PASS_ID, status: 'active' });
 
       const timeline = await db
         .selectFrom('order_timeline_events')
@@ -2227,10 +2222,10 @@ describeWithIntegrationDatabase(
         .where('order_id', '=', ORDER_ID)
         .where('type', '=', 'ticket.resale_completed')
         .execute();
-      expect(timeline).toHaveLength(1);
+      expect(timeline).toHaveLength(0);
     });
 
-    it('expires stale resale listings without issuing buyer credentials', async () => {
+    it('does not let the retired completion route mutate an expired resale listing', async () => {
       const listed = await app.inject({
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
@@ -2253,7 +2248,9 @@ describeWithIntegrationDatabase(
           buyerDateOfBirth: '1990-01-01',
         },
       });
-      expect(expired.statusCode).toBe(400);
+      expect(expired.statusCode).toBe(410);
+      expect(expired.json().error).toMatchObject({ code: 'RESALE_COMPLETION_RETIRED' });
+      await expectNoIdempotencyRecords([`resale_db_expired_complete_${RUN_ID}`]);
 
       const row = await db
         .selectFrom('ticket_listings')
@@ -2261,9 +2258,9 @@ describeWithIntegrationDatabase(
         .where('id', '=', listingId)
         .executeTakeFirstOrThrow();
       expect(row).toMatchObject({
-        status: 'expired',
+        status: 'listed',
         sold_to_id: null,
-        active_listing_key: listingId,
+        active_listing_key: TICKET_ID,
       });
 
       const tickets = await db
@@ -2301,7 +2298,7 @@ describeWithIntegrationDatabase(
       expect(timeline).toHaveLength(0);
     });
 
-    it('keeps resale discovery stable while completion is under bounded mixed load', async () => {
+    it('keeps resale discovery stable while rejecting legacy completion under bounded mixed load', async () => {
       const listed = await app.inject({
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
@@ -2358,14 +2355,20 @@ describeWithIntegrationDatabase(
             eventId: EVENT_ID,
             ticketId: TICKET_ID,
           });
-          expect(['listed', 'sold']).toContain(item.status);
+          expect(item.status).toBe('listed');
         }
       }
 
       const completionStatuses = completionResponses.map((response) => response.statusCode);
-      expect(completionStatuses.filter((status) => status === 200)).toHaveLength(1);
-      expect(completionStatuses.filter((status) => status === 400)).toHaveLength(
-        completionCount - 1,
+      expect(completionStatuses).toEqual(Array.from({ length: completionCount }, () => 410));
+      for (const response of completionResponses) {
+        expect(response.json().error).toMatchObject({ code: 'RESALE_COMPLETION_RETIRED' });
+      }
+      await expectNoIdempotencyRecords(
+        Array.from(
+          { length: completionCount },
+          (_, index) => `resale_db_load_complete_${RUN_ID}_${index}`,
+        ),
       );
       expect(percentile(readDurations, 0.95)).toBeLessThan(2_500);
       expect(durationMs).toBeLessThan(15_000);
@@ -2378,8 +2381,8 @@ describeWithIntegrationDatabase(
       expect(listings).toHaveLength(1);
       expect(listings[0]).toMatchObject({
         id: listingId,
-        status: 'sold',
-        active_listing_key: listingId,
+        status: 'listed',
+        active_listing_key: TICKET_ID,
       });
 
       const tickets = await db
@@ -2387,16 +2390,16 @@ describeWithIntegrationDatabase(
         .selectAll()
         .where('tenant_id', '=', TENANT_ID)
         .execute();
-      expect(tickets.filter((ticket) => ticket.id === TICKET_ID)).toHaveLength(1);
-      expect(tickets.filter((ticket) => ticket.status === 'transferred')).toHaveLength(1);
-      expect(tickets.filter((ticket) => ticket.status === 'valid')).toHaveLength(1);
+      expect(tickets).toHaveLength(1);
+      expect(tickets[0]).toMatchObject({ id: TICKET_ID, status: 'valid' });
 
       const attendees = await db
         .selectFrom('attendees')
         .selectAll()
         .where('tenant_id', '=', TENANT_ID)
         .execute();
-      expect(attendees.filter((attendee) => attendee.status === 'confirmed')).toHaveLength(2);
+      expect(attendees).toHaveLength(1);
+      expect(attendees[0]).toMatchObject({ id: ATTENDEE_ID, status: 'confirmed' });
 
       const timeline = await db
         .selectFrom('order_timeline_events')
@@ -2404,7 +2407,7 @@ describeWithIntegrationDatabase(
         .where('order_id', '=', ORDER_ID)
         .where('type', '=', 'ticket.resale_completed')
         .execute();
-      expect(timeline).toHaveLength(1);
+      expect(timeline).toHaveLength(0);
     });
 
     it('enforces persisted resale policy before inserting a listing', async () => {

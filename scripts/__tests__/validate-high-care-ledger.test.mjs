@@ -14,6 +14,7 @@ function makeLedger(overrides = {}) {
       owners: overrides[`${id}:owners`] ?? 'WS0, WS9',
       nextAction,
       detailNextAction: overrides[`${id}:detailNextAction`] ?? nextAction,
+      detailBlocker: overrides[`${id}:detailBlocker`] ?? 'None.',
     };
   });
 
@@ -29,7 +30,7 @@ ${rows.map((row) => `| ${row.id} | ${row.surface} | ${row.status} | ${row.date} 
 
 | Backlog | Current invariant | Primary failure modes | Required proof layers | Current blocker | Next action |
 | ------- | ----------------- | --------------------- | --------------------- | --------------- | ----------- |
-${rows.map((row) => `| ${row.id} | Invariant. | Failure mode. | Unit and browser proof. | None. | ${row.detailNextAction} |`).join('\n')}
+${rows.map((row) => `| ${row.id} | Invariant. | Failure mode. | Unit and browser proof. | ${row.detailBlocker} | ${row.detailNextAction} |`).join('\n')}
 `;
 }
 
@@ -39,19 +40,33 @@ test('validateHighCareLedger accepts complete C-091..C-098 coverage rows', () =>
   assert.equal(result.summaryRows.length, 8);
 });
 
-test('validateHighCareLedger rejects stale statuses and malformed dates', () => {
+test('validateHighCareLedger accepts explicit partial status and rejects malformed metadata', () => {
   const result = validateHighCareLedger(
     makeLedger({
       'C-093:status': 'Partial',
+      'C-093:detailBlocker': 'Provider-backed settlement proof remains open.',
       'C-094:date': 'June 30',
       'C-095:owners': 'none',
     }),
   );
 
   assert.deepEqual(result.errors, [
-    'C-093: high-care Summary status must be Covered or the backlog must be reopened',
     'C-094: Summary evidence date must be YYYY-MM-DD',
     'C-095: Summary owner workstreams must list WS### owners',
+  ]);
+});
+
+test('validateHighCareLedger rejects unknown status and non-Covered rows without a blocker', () => {
+  const result = validateHighCareLedger(
+    makeLedger({
+      'C-092:status': 'Unknown',
+      'C-093:status': 'Partial',
+    }),
+  );
+
+  assert.deepEqual(result.errors, [
+    'C-092: invalid Summary status Unknown',
+    'C-093: non-Covered Summary status requires a concrete current blocker',
   ]);
 });
 
