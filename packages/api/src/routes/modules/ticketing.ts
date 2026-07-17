@@ -322,37 +322,78 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const result = await withIdempotency(
       db,
-      { key: idempotencyKey, tenantId, requestHash },
+      {
+        key: idempotencyKey,
+        tenantId,
+        requestHash,
+        discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
+      },
       async () => {
-        const listingRepo = new TicketListingRepository(db);
-        const active = await listingRepo.findActiveByTicket(tenantId, ticketId);
-        if (active) {
-          throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
-        }
-        const faceValueCents = Number(ticketType.price_cents);
-        try {
-          validateResalePrice(body.priceCents, faceValueCents, serializeResalePolicy(event));
-        } catch (error) {
-          toResaleValidationError(error);
-        }
-        try {
-          const listing = await listingRepo.create({
-            tenantId,
-            eventId: ticket.event_id as string,
-            ticketId,
-            sellerId: ticket.order_id as string,
-            priceCents: body.priceCents,
-            currency: String(ticketType.currency),
-            faceValueCents,
-            expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
-          });
-          return { status: 201, body: serializeTicketListing(listing) };
-        } catch (error) {
-          if (isUniqueViolation(error)) {
+        return db.transaction().execute(async (transaction) => {
+          const currentEvent = await loadAuthorizedEventForUpdate(
+            transaction,
+            principal,
+            ticket.event_id as string,
+          );
+          const currentTicket = await new TicketRepository(transaction).findByIdForUpdate(ticketId);
+          if (
+            !currentTicket ||
+            currentTicket.tenant_id !== tenantId ||
+            currentTicket.event_id !== currentEvent.id
+          ) {
+            throw new NotFoundError('Ticket', ticketId);
+          }
+          if (currentTicket.status !== 'valid') {
+            throw new ValidationError(
+              `Ticket status is ${currentTicket.status}, cannot list for resale`,
+            );
+          }
+          if (!currentTicket.order_id) {
+            throw new ValidationError(`Ticket ${ticketId} is not attached to an order`);
+          }
+          const currentTicketType = await transaction
+            .selectFrom('ticket_types')
+            .selectAll()
+            .where('id', '=', currentTicket.ticket_type_id as string)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!currentTicketType || currentTicketType.event_id !== currentTicket.event_id) {
+            throw new NotFoundError('TicketType', currentTicket.ticket_type_id as string);
+          }
+          const listingRepo = new TicketListingRepository(transaction);
+          const active = await listingRepo.findActiveByTicket(tenantId, ticketId);
+          if (active) {
             throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
           }
-          throw error;
-        }
+          const faceValueCents = Number(currentTicketType.price_cents);
+          try {
+            validateResalePrice(
+              body.priceCents,
+              faceValueCents,
+              serializeResalePolicy(currentEvent),
+            );
+          } catch (error) {
+            toResaleValidationError(error);
+          }
+          try {
+            const listing = await listingRepo.create({
+              tenantId,
+              eventId: currentTicket.event_id as string,
+              ticketId,
+              sellerId: currentTicket.order_id as string,
+              priceCents: body.priceCents,
+              currency: String(currentTicketType.currency),
+              faceValueCents,
+              expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+            });
+            return { status: 201, body: serializeTicketListing(listing) };
+          } catch (error) {
+            if (isUniqueViolation(error)) {
+              throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
+            }
+            throw error;
+          }
+        });
       },
     );
     return reply.status(result.status).send(result.body);
@@ -809,7 +850,49 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         updateData.event_occurrence_id as string | null,
       );
     }
-    return serializeTicketType(await repo.update(ticketTypeId, updateData));
+    return db.transaction().execute(async (transaction) => {
+      const currentEvent = await loadAuthorizedEventForUpdate(
+        transaction,
+        principal,
+        existing.event_id,
+      );
+      const currentTicketType = await transaction
+        .selectFrom('ticket_types')
+        .selectAll()
+        .where('id', '=', ticketTypeId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentTicketType || currentTicketType.event_id !== currentEvent.id) {
+        throw new NotFoundError('TicketType', ticketTypeId);
+      }
+      if (updateData.inventory_pool_id) {
+        const pool = await new InventoryPoolRepository(transaction).findById(
+          updateData.inventory_pool_id as string,
+        );
+        if (!pool || pool.event_id !== currentEvent.id) {
+          throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
+        }
+        await assertInventoryPoolReassignmentAllowed(transaction, {
+          ticketTypeId,
+          currentInventoryPoolId: currentTicketType.inventory_pool_id,
+          nextInventoryPoolId: updateData.inventory_pool_id,
+        });
+      }
+      if ('event_occurrence_id' in updateData) {
+        const occurrenceId = updateData.event_occurrence_id as string | null;
+        if (occurrenceId) {
+          const occurrence = await new EventOccurrenceRepository(transaction).findById(
+            occurrenceId,
+          );
+          if (!occurrence || occurrence.event_id !== currentEvent.id) {
+            throw new NotFoundError('EventOccurrence', occurrenceId);
+          }
+        }
+      }
+      return serializeTicketType(
+        await new TicketTypeRepository(transaction).update(ticketTypeId, updateData),
+      );
+    });
   });
 
   app.patch('/ticket-types/:ticketTypeId/batch', async (request) => {
@@ -839,6 +922,16 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const result = await db.transaction().execute(async (trx) => {
       const txDb = trx as typeof db;
+      const currentEvent = await loadAuthorizedEventForUpdate(txDb, principal, existing.event_id);
+      const currentTicketType = await txDb
+        .selectFrom('ticket_types')
+        .selectAll()
+        .where('id', '=', ticketTypeId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentTicketType || currentTicketType.event_id !== currentEvent.id) {
+        throw new NotFoundError('TicketType', ticketTypeId);
+      }
       const accessRuleRepo = new AccessRuleRepository(txDb);
       await assertNoExistingAccessRuleDuplicates(ticketTypeId, accessRules, accessRuleRepo);
 
@@ -886,6 +979,20 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           existing.event_id,
           updateData.event_occurrence_id as string | null,
         );
+      }
+
+      if (updateData.inventory_pool_id) {
+        const pool = await new InventoryPoolRepository(txDb).findById(
+          updateData.inventory_pool_id as string,
+        );
+        if (!pool || pool.event_id !== currentEvent.id) {
+          throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
+        }
+        await assertInventoryPoolReassignmentAllowed(txDb, {
+          ticketTypeId,
+          currentInventoryPoolId: currentTicketType.inventory_pool_id,
+          nextInventoryPoolId: updateData.inventory_pool_id,
+        });
       }
 
       const ticketType =

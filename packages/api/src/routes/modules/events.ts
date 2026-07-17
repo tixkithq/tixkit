@@ -1005,28 +1005,49 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
-    const repo = new EventOccurrenceRepository(db);
-    const existing = await repo.findById(occurrenceId);
-    if (!existing || existing.event_id !== eventId)
-      throw new NotFoundError('EventOccurrence', occurrenceId);
+    return db.transaction().execute(async (transaction) => {
+      const currentEvent = await transaction
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentEvent) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, currentEvent, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, currentEvent.organization_id);
+      ClerkAuthService.requireBrandScope(principal, currentEvent.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
 
-    const startsAt = body.startsAt ? new Date(body.startsAt) : new Date(existing.starts_at);
-    const endsAt = body.endsAt ? new Date(body.endsAt) : new Date(existing.ends_at);
-    if (endsAt <= startsAt) {
-      throw new ValidationError('Occurrence end time must be after start time');
-    }
+      const existing = await transaction
+        .selectFrom('event_occurrences')
+        .selectAll()
+        .where('id', '=', occurrenceId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!existing || existing.event_id !== eventId) {
+        throw new NotFoundError('EventOccurrence', occurrenceId);
+      }
+      const startsAt = body.startsAt ? new Date(body.startsAt) : new Date(existing.starts_at);
+      const endsAt = body.endsAt ? new Date(body.endsAt) : new Date(existing.ends_at);
+      if (endsAt <= startsAt) {
+        throw new ValidationError('Occurrence end time must be after start time');
+      }
 
-    const updateData: Record<string, unknown> = {};
-    if (body.title !== undefined) updateData.title = body.title;
-    if (body.startsAt !== undefined) updateData.starts_at = startsAt;
-    if (body.endsAt !== undefined) updateData.ends_at = endsAt;
-    if (body.timezone !== undefined) updateData.timezone = body.timezone;
-    if (body.venue !== undefined) updateData.venue = body.venue ? JSON.stringify(body.venue) : null;
-    if (body.capacity !== undefined) updateData.capacity = body.capacity;
-    if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
-    if (body.status !== undefined) updateData.status = body.status;
+      const updateData: Record<string, unknown> = {};
+      if (body.title !== undefined) updateData.title = body.title;
+      if (body.startsAt !== undefined) updateData.starts_at = startsAt;
+      if (body.endsAt !== undefined) updateData.ends_at = endsAt;
+      if (body.timezone !== undefined) updateData.timezone = body.timezone;
+      if (body.venue !== undefined)
+        updateData.venue = body.venue ? JSON.stringify(body.venue) : null;
+      if (body.capacity !== undefined) updateData.capacity = body.capacity;
+      if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
+      if (body.status !== undefined) updateData.status = body.status;
 
-    return serializeEventOccurrence(await repo.update(occurrenceId, updateData));
+      return serializeEventOccurrence(
+        await new EventOccurrenceRepository(transaction).update(occurrenceId, updateData),
+      );
+    });
   });
 
   app.patch('/events/:eventId', async (request, reply) => {

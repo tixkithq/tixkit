@@ -1,11 +1,13 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { createDb, TicketListingRepository, type Database } from '@tixkit/db';
+import { createDb, TicketListingRepository, TicketRepository, type Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import type { AppContext } from '../../app.js';
 import { registerErrorHandler } from '../../app.js';
 import { checkoutRoutes } from '../../routes/modules/checkout.js';
+import { checkInRoutes } from '../../routes/modules/checkin.js';
+import { eventRoutes } from '../../routes/modules/events.js';
 import { publicRoutes } from '../../routes/modules/public.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import { QrService } from '../../services/qr.js';
@@ -45,6 +47,41 @@ function deferred() {
   return { promise, resolve };
 }
 
+function isNowaitLockError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
+    const record = current as { cause?: unknown; code?: unknown; errno?: unknown };
+    if (record.code === '55P03' || record.code === 'ER_LOCK_NOWAIT' || record.errno === 3572) {
+      return true;
+    }
+    current = record.cause;
+  }
+  return false;
+}
+
+async function waitForEventWriteLock(database: Database, eventId: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- NOWAIT polling proves the production writer owns the event lock.
+      await database.transaction().execute(async (transaction) => {
+        await transaction
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', eventId)
+          .forUpdate()
+          .noWait()
+          .executeTakeFirstOrThrow();
+      });
+    } catch (error) {
+      if (isNowaitLockError(error)) return;
+      throw error;
+    }
+    // eslint-disable-next-line no-await-in-loop -- bounded wait for the production writer to acquire the lock.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out waiting for event ${eventId} write lock`);
+}
+
 function makePrincipal(overrides: Partial<Principal> = {}): Principal {
   return {
     type: 'user',
@@ -53,7 +90,7 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
     organizationIds: [ORG_ID],
     brandIds: [BRAND_ID],
     eventIds: [EVENT_ID],
-    scopes: ['events.read', 'tickets.write'],
+    scopes: ['attendees.write', 'events.read', 'events.write', 'tickets.write'],
     ...overrides,
   };
 }
@@ -79,6 +116,8 @@ async function setupRouteApp(
     request.principal = principal;
   });
   await routeApp.register(ticketingRoutes);
+  await routeApp.register(checkInRoutes);
+  await routeApp.register(eventRoutes);
   await routeApp.register(publicRoutes);
   await routeApp.register(checkoutRoutes);
   return routeApp;
@@ -394,6 +433,7 @@ async function resetListings(database: Database): Promise<void> {
       status: 'valid',
       transferred_to_email: null,
       transferred_at: null,
+      event_occurrence_id: null,
       wallet_pass_id: WALLET_PASS_ID,
       updated_at: new Date(),
     })
@@ -420,12 +460,18 @@ async function resetListings(database: Database): Promise<void> {
     .set({
       organization_id: ORG_ID,
       brand_id: BRAND_ID,
+      minimum_age: null,
       resale_enabled: true,
       resale_max_multiplier: 1.2,
       resale_max_absolute_cents: null,
       updated_at: new Date(),
     })
     .where('id', '=', EVENT_ID)
+    .execute();
+  await database
+    .updateTable('ticket_types')
+    .set({ price_cents: 5000, currency: 'USD', updated_at: new Date() })
+    .where('id', '=', TICKET_TYPE_ID)
     .execute();
 }
 
@@ -536,7 +582,7 @@ describeWithIntegrationDatabase(
       expect(delisted.active_listing_key).toBe(listingId);
     });
 
-    it('denies every staff delisting boundary without persistence', async () => {
+    it('denies every staff create, delist and transfer boundary without persistence', async () => {
       const denialPrincipals: Array<{
         expectedStatus: number;
         label: string;
@@ -570,6 +616,42 @@ describeWithIntegrationDatabase(
       ];
       for (const denial of denialPrincipals) {
         await resetListings(db);
+        const deniedApp = await setupRouteApp(db, denial.principal);
+        const transferIdempotencyKey = `resale_auth_transfer_${denial.label}_${RUN_ID}`;
+        const deniedTransfer = await deniedApp.inject({
+          method: 'POST',
+          url: `/tickets/${TICKET_ID}/transfer`,
+          headers: { 'Idempotency-Key': transferIdempotencyKey },
+          payload: { toEmail: `denied-${denial.label}-${RUN_ID}@example.com` },
+        });
+        expect(deniedTransfer.statusCode, `${denial.label}: ${deniedTransfer.body}`).toBe(
+          denial.expectedStatus,
+        );
+        const createIdempotencyKey = `resale_auth_create_${denial.label}_${RUN_ID}`;
+        const deniedCreate = await deniedApp.inject({
+          method: 'POST',
+          url: `/tickets/${TICKET_ID}/resale-listings`,
+          headers: { 'Idempotency-Key': createIdempotencyKey },
+          payload: { priceCents: 5500 },
+        });
+        expect(deniedCreate.statusCode, `${denial.label}: ${deniedCreate.body}`).toBe(
+          denial.expectedStatus,
+        );
+        expect(
+          await db
+            .selectFrom('idempotency_records')
+            .select('id')
+            .where('key', 'in', [createIdempotencyKey, transferIdempotencyKey])
+            .execute(),
+        ).toEqual([]);
+        expect(
+          await db
+            .selectFrom('ticket_listings')
+            .select('id')
+            .where('tenant_id', '=', TENANT_ID)
+            .execute(),
+        ).toEqual([]);
+
         const listed = await app.inject({
           method: 'POST',
           url: `/tickets/${TICKET_ID}/resale-listings`,
@@ -579,7 +661,6 @@ describeWithIntegrationDatabase(
         expect(listed.statusCode, listed.body).toBe(201);
         const listingId = listed.json().id as string;
         const idempotencyKey = `resale_auth_delist_${denial.label}_${RUN_ID}`;
-        const deniedApp = await setupRouteApp(db, denial.principal);
         const response = await deniedApp.inject({
           method: 'POST',
           url: `/ticket-listings/${listingId}/delist`,
@@ -1419,6 +1500,559 @@ describeWithIntegrationDatabase(
         status: 'listed',
         active_listing_key: TICKET_ID,
       });
+    });
+
+    it('transfers an unlisted ticket with atomic recipient, wallet and timeline state', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/transfer`,
+        headers: { 'Idempotency-Key': `resale_transfer_control_${RUN_ID}` },
+        payload: { toEmail: `control-${RUN_ID}@example.com` },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .orderBy('id', 'asc')
+          .execute(),
+      ).toEqual(
+        [
+          { id: TICKET_ID, status: 'transferred' },
+          { id: response.json().id, status: 'valid' },
+        ].sort((left, right) => left.id.localeCompare(right.id)),
+      );
+      expect(
+        await db.selectFrom('attendees').select('id').where('tenant_id', '=', TENANT_ID).execute(),
+      ).toHaveLength(2);
+      expect(
+        await db
+          .selectFrom('wallet_passes')
+          .select(['id', 'status'])
+          .where('id', '=', WALLET_PASS_ID)
+          .execute(),
+      ).toEqual([{ id: WALLET_PASS_ID, status: 'revoked' }]);
+      expect(
+        await db
+          .selectFrom('order_timeline_events')
+          .select('type')
+          .where('order_id', '=', ORDER_ID)
+          .execute(),
+      ).toEqual([{ type: 'ticket.transferred' }]);
+    });
+
+    it('rejects a direct ticket transfer while an active resale listing exists', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_transfer_guard_seed_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode, listed.body).toBe(201);
+
+      const transferred = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/transfer`,
+        headers: { 'Idempotency-Key': `resale_transfer_guard_${RUN_ID}` },
+        payload: { toEmail: `recipient-${RUN_ID}@example.com` },
+      });
+      expect(transferred.statusCode, transferred.body).toBe(400);
+      const replay = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/transfer`,
+        headers: { 'Idempotency-Key': `resale_transfer_guard_${RUN_ID}` },
+        payload: { toEmail: `recipient-${RUN_ID}@example.com` },
+      });
+      expect(replay.statusCode).toBe(400);
+      expect(replay.json()).toEqual({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: `Ticket ${TICKET_ID} has an active resale listing`,
+        },
+      });
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: TICKET_ID, status: 'valid' }]);
+      expect(
+        await db
+          .selectFrom('ticket_listings')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: listed.json().id, status: 'listed' }]);
+      expect(
+        await db.selectFrom('attendees').select('id').where('tenant_id', '=', TENANT_ID).execute(),
+      ).toEqual([{ id: ATTENDEE_ID }]);
+      expect(
+        await db
+          .selectFrom('wallet_passes')
+          .select(['id', 'status'])
+          .where('id', '=', WALLET_PASS_ID)
+          .execute(),
+      ).toEqual([{ id: WALLET_PASS_ID, status: 'active' }]);
+      expect(
+        await db
+          .selectFrom('order_timeline_events')
+          .select('id')
+          .where('order_id', '=', ORDER_ID)
+          .execute(),
+      ).toEqual([]);
+    });
+
+    it('rejects a direct transfer after a concurrent listing creation commits', async () => {
+      const listingEntered = deferred();
+      const releaseListing = deferred();
+      const listing = db.transaction().execute(async (transaction) => {
+        await transaction
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', EVENT_ID)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        await new TicketRepository(transaction).findByIdForUpdate(TICKET_ID);
+        const created = await new TicketListingRepository(transaction).create({
+          tenantId: TENANT_ID,
+          eventId: EVENT_ID,
+          ticketId: TICKET_ID,
+          sellerId: ORDER_ID,
+          priceCents: 5500,
+          currency: 'USD',
+          faceValueCents: 5000,
+        });
+        listingEntered.resolve();
+        await releaseListing.promise;
+        return created;
+      });
+      await listingEntered.promise;
+
+      const idempotencyKey = `resale_listing_race_transfer_${RUN_ID}`;
+      const transfer = app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/transfer`,
+        headers: { 'Idempotency-Key': idempotencyKey },
+        payload: { toEmail: `loser-${RUN_ID}@example.com` },
+      });
+      let reservationObserved = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop -- bounded polling proves transfer reached idempotency before the listing lock is released.
+        const reservation = await db
+          .selectFrom('idempotency_records')
+          .select('id')
+          .where('tenant_id', '=', TENANT_ID)
+          .where('key', '=', idempotencyKey)
+          .executeTakeFirst();
+        if (reservation) {
+          reservationObserved = true;
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop -- wait for the in-flight transfer to reserve its key.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(reservationObserved).toBe(true);
+      releaseListing.resolve();
+      const [created, response] = await Promise.all([listing, transfer]);
+
+      expect(response.statusCode, response.body).toBe(400);
+      expect(
+        await db
+          .selectFrom('ticket_listings')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: created.id, status: 'listed' }]);
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: TICKET_ID, status: 'valid' }]);
+      expect(
+        await db.selectFrom('attendees').select('id').where('tenant_id', '=', TENANT_ID).execute(),
+      ).toEqual([{ id: ATTENDEE_ID }]);
+      expect(
+        await db
+          .selectFrom('wallet_passes')
+          .select(['id', 'status'])
+          .where('id', '=', WALLET_PASS_ID)
+          .execute(),
+      ).toEqual([{ id: WALLET_PASS_ID, status: 'active' }]);
+      expect(
+        await db
+          .selectFrom('order_timeline_events')
+          .select('id')
+          .where('order_id', '=', ORDER_ID)
+          .execute(),
+      ).toEqual([]);
+    });
+
+    it('rejects staff and buyer listing creation after a concurrent transfer commits', async () => {
+      const transferEntered = deferred();
+      const releaseTransfer = deferred();
+      const transfer = db.transaction().execute(async (transaction) => {
+        await transaction
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', EVENT_ID)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        const ticketRepo = new TicketRepository(transaction);
+        await ticketRepo.findByIdForUpdate(TICKET_ID);
+        await ticketRepo.transferIfValid(TICKET_ID, `winner-${RUN_ID}@example.com`, new Date());
+        transferEntered.resolve();
+        await releaseTransfer.promise;
+      });
+      await transferEntered.promise;
+
+      const requests = [
+        app.inject({
+          method: 'POST',
+          url: `/tickets/${TICKET_ID}/resale-listings`,
+          headers: { 'Idempotency-Key': `resale_transfer_race_staff_${RUN_ID}` },
+          payload: { priceCents: 5500 },
+        }),
+        app.inject({
+          method: 'POST',
+          url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/tickets/${TICKET_ID}/resale-listing`,
+          headers: {
+            'X-Checkout-Session-Token': `client_${RUN_ID}`,
+            'Idempotency-Key': `resale_transfer_race_buyer_${RUN_ID}`,
+          },
+          payload: { priceCents: 5500 },
+        }),
+      ];
+      let reservationsObserved = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop -- bounded polling proves both listing requests reached the serialized mutation boundary.
+        const reservations = await db
+          .selectFrom('idempotency_records')
+          .select('id')
+          .where('tenant_id', '=', TENANT_ID)
+          .where('key', 'in', [
+            `resale_transfer_race_staff_${RUN_ID}`,
+            `resale_transfer_race_buyer_${RUN_ID}`,
+          ])
+          .execute();
+        if (reservations.length === 2) {
+          reservationsObserved = true;
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop -- wait for both in-flight requests to reserve their keys.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(reservationsObserved).toBe(true);
+      releaseTransfer.resolve();
+      await transfer;
+      const responses = await Promise.all(requests);
+
+      expect(responses.map((response) => response.statusCode)).toEqual([400, 400]);
+      expect(
+        await db
+          .selectFrom('ticket_listings')
+          .select('id')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([]);
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: TICKET_ID, status: 'transferred' }]);
+      expect(
+        await db
+          .selectFrom('idempotency_records')
+          .select(['key', 'status', 'response_status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .where('key', 'in', [
+            `resale_transfer_race_staff_${RUN_ID}`,
+            `resale_transfer_race_buyer_${RUN_ID}`,
+          ])
+          .orderBy('key', 'asc')
+          .execute(),
+      ).toEqual([
+        {
+          key: `resale_transfer_race_buyer_${RUN_ID}`,
+          status: 'completed',
+          response_status: 400,
+        },
+        {
+          key: `resale_transfer_race_staff_${RUN_ID}`,
+          status: 'completed',
+          response_status: 400,
+        },
+      ]);
+      expect(
+        await db.selectFrom('attendees').select('id').where('tenant_id', '=', TENANT_ID).execute(),
+      ).toEqual([{ id: ATTENDEE_ID }]);
+      expect(
+        await db
+          .selectFrom('wallet_passes')
+          .select(['id', 'status'])
+          .where('id', '=', WALLET_PASS_ID)
+          .execute(),
+      ).toEqual([{ id: WALLET_PASS_ID, status: 'active' }]);
+      expect(
+        await db
+          .selectFrom('order_timeline_events')
+          .select('id')
+          .where('order_id', '=', ORDER_ID)
+          .execute(),
+      ).toEqual([]);
+    });
+
+    it.each([
+      { label: 'single', path: `/ticket-types/${TICKET_TYPE_ID}`, payload: { priceCents: 4000 } },
+      {
+        label: 'batch',
+        path: `/ticket-types/${TICKET_TYPE_ID}/batch`,
+        payload: { ticketType: { priceCents: 4000 } },
+      },
+    ])(
+      'serializes $label ticket-type pricing writes before listing policy reads',
+      async ({ label, path, payload }) => {
+        const typeLockEntered = deferred();
+        const releaseTypeLock = deferred();
+        const typeBlocker = db.transaction().execute(async (transaction) => {
+          await transaction
+            .selectFrom('ticket_types')
+            .select('id')
+            .where('id', '=', TICKET_TYPE_ID)
+            .forUpdate()
+            .executeTakeFirstOrThrow();
+          typeLockEntered.resolve();
+          await releaseTypeLock.promise;
+        });
+        await typeLockEntered.promise;
+
+        const writer = app.inject({ method: 'PATCH', url: path, payload });
+        await waitForEventWriteLock(db, EVENT_ID);
+        const keys = [
+          `resale_price_${label}_staff_${RUN_ID}`,
+          `resale_price_${label}_buyer_${RUN_ID}`,
+        ];
+        const requests = [
+          app.inject({
+            method: 'POST',
+            url: `/tickets/${TICKET_ID}/resale-listings`,
+            headers: { 'Idempotency-Key': keys[0] },
+            payload: { priceCents: 5500 },
+          }),
+          app.inject({
+            method: 'POST',
+            url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/tickets/${TICKET_ID}/resale-listing`,
+            headers: {
+              'X-Checkout-Session-Token': `client_${RUN_ID}`,
+              'Idempotency-Key': keys[1],
+            },
+            payload: { priceCents: 5500 },
+          }),
+        ];
+        let reservationsObserved = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          // eslint-disable-next-line no-await-in-loop -- proves both listing requests wait behind the production writer.
+          const reservations = await db
+            .selectFrom('idempotency_records')
+            .select('id')
+            .where('tenant_id', '=', TENANT_ID)
+            .where('key', 'in', keys)
+            .execute();
+          if (reservations.length === 2) {
+            reservationsObserved = true;
+            break;
+          }
+          // eslint-disable-next-line no-await-in-loop -- bounded wait for both reservations.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        releaseTypeLock.resolve();
+        await typeBlocker;
+        const [writerResponse, responses] = await Promise.all([writer, Promise.all(requests)]);
+
+        expect(reservationsObserved).toBe(true);
+        expect(writerResponse.statusCode, writerResponse.body).toBe(200);
+        expect(responses.map((response) => response.statusCode)).toEqual([400, 400]);
+        expect(
+          await db
+            .selectFrom('ticket_listings')
+            .select('id')
+            .where('tenant_id', '=', TENANT_ID)
+            .execute(),
+        ).toEqual([]);
+      },
+    );
+
+    it('revalidates a stricter event age policy after the transfer preflight', async () => {
+      const policyLocked = deferred();
+      const releasePolicy = deferred();
+      const policyChange = db.transaction().execute(async (transaction) => {
+        await transaction
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', EVENT_ID)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        policyLocked.resolve();
+        await releasePolicy.promise;
+        await transaction
+          .updateTable('events')
+          .set({ minimum_age: 18, updated_at: new Date() })
+          .where('id', '=', EVENT_ID)
+          .execute();
+      });
+      await policyLocked.promise;
+
+      const idempotencyKey = `resale_transfer_age_race_${RUN_ID}`;
+      const transfer = app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/transfer`,
+        headers: { 'Idempotency-Key': idempotencyKey },
+        payload: { toEmail: `age-race-${RUN_ID}@example.com` },
+      });
+      let reservationObserved = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop -- bounded polling proves preflight used the old policy before the committed change.
+        const reservation = await db
+          .selectFrom('idempotency_records')
+          .select('id')
+          .where('tenant_id', '=', TENANT_ID)
+          .where('key', '=', idempotencyKey)
+          .executeTakeFirst();
+        if (reservation) {
+          reservationObserved = true;
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop -- wait for the transfer to reach its transaction boundary.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(reservationObserved).toBe(true);
+      releasePolicy.resolve();
+      await policyChange;
+      const response = await transfer;
+
+      expect(response.statusCode, response.body).toBe(400);
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: TICKET_ID, status: 'valid' }]);
+      expect(
+        await db.selectFrom('attendees').select('id').where('tenant_id', '=', TENANT_ID).execute(),
+      ).toEqual([{ id: ATTENDEE_ID }]);
+    });
+
+    it('revalidates the locked occurrence after a concurrent schedule change commits', async () => {
+      const occurrenceId = `occ_transfer_race_${RUN_ID}`;
+      const now = new Date();
+      await db
+        .insertInto('event_occurrences')
+        .values({
+          id: occurrenceId,
+          event_id: EVENT_ID,
+          title: 'Transfer eligibility',
+          starts_at: new Date('2030-07-10T18:00:00.000Z'),
+          ends_at: new Date('2030-07-10T21:00:00.000Z'),
+          timezone: 'UTC',
+          venue: null,
+          capacity: null,
+          sort_order: 0,
+          status: 'scheduled',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await db
+        .updateTable('events')
+        .set({ minimum_age: 18, updated_at: now })
+        .where('id', '=', EVENT_ID)
+        .execute();
+      await db
+        .updateTable('tickets')
+        .set({ event_occurrence_id: occurrenceId, updated_at: now })
+        .where('id', '=', TICKET_ID)
+        .execute();
+
+      try {
+        const occurrenceLockEntered = deferred();
+        const releaseOccurrenceLock = deferred();
+        const occurrenceBlocker = db.transaction().execute(async (transaction) => {
+          await transaction
+            .selectFrom('event_occurrences')
+            .select('id')
+            .where('id', '=', occurrenceId)
+            .forUpdate()
+            .executeTakeFirstOrThrow();
+          occurrenceLockEntered.resolve();
+          await releaseOccurrenceLock.promise;
+        });
+        await occurrenceLockEntered.promise;
+
+        const writer = app.inject({
+          method: 'PATCH',
+          url: `/events/${EVENT_ID}/occurrences/${occurrenceId}`,
+          payload: {
+            startsAt: '2028-07-10T18:00:00.000Z',
+            endsAt: '2028-07-10T21:00:00.000Z',
+          },
+        });
+        await waitForEventWriteLock(db, EVENT_ID);
+
+        const idempotencyKey = `resale_transfer_occurrence_race_${RUN_ID}`;
+        const transfer = app.inject({
+          method: 'POST',
+          url: `/tickets/${TICKET_ID}/transfer`,
+          headers: { 'Idempotency-Key': idempotencyKey },
+          payload: {
+            toEmail: `occurrence-race-${RUN_ID}@example.com`,
+            dateOfBirth: '2011-07-10',
+          },
+        });
+        let reservationObserved = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          // eslint-disable-next-line no-await-in-loop -- proves preflight completed against the old occurrence.
+          const reservation = await db
+            .selectFrom('idempotency_records')
+            .select('id')
+            .where('tenant_id', '=', TENANT_ID)
+            .where('key', '=', idempotencyKey)
+            .executeTakeFirst();
+          if (reservation) {
+            reservationObserved = true;
+            break;
+          }
+          // eslint-disable-next-line no-await-in-loop -- bounded wait for the transfer reservation.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        releaseOccurrenceLock.resolve();
+        await occurrenceBlocker;
+        const writerResponse = await writer;
+        expect(reservationObserved).toBe(true);
+        expect(writerResponse.statusCode, writerResponse.body).toBe(200);
+        const response = await transfer;
+
+        expect(response.statusCode, response.body).toBe(400);
+        expect(
+          await db
+            .selectFrom('tickets')
+            .select(['id', 'status'])
+            .where('tenant_id', '=', TENANT_ID)
+            .execute(),
+        ).toEqual([{ id: TICKET_ID, status: 'valid' }]);
+      } finally {
+        await db
+          .updateTable('tickets')
+          .set({ event_occurrence_id: null, updated_at: new Date() })
+          .where('id', '=', TICKET_ID)
+          .execute();
+        await db.deleteFrom('event_occurrences').where('id', '=', occurrenceId).execute();
+      }
     });
 
     it('completes a listed resale once and replays buyer ticket issuance', async () => {

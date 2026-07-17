@@ -56,6 +56,16 @@ export class TicketRepository extends BaseRepository {
     return this.db.selectFrom('tickets').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
+  async findByIdForUpdate(id: string) {
+    assertTransactionOwned(this.db);
+    return this.db
+      .selectFrom('tickets')
+      .selectAll()
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
   async findByCode(code: string) {
     return this.db.selectFrom('tickets').selectAll().where('code', '=', code).executeTakeFirst();
   }

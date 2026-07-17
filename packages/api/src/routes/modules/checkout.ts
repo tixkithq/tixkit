@@ -2252,39 +2252,86 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
 
       const result = await withIdempotency(
         db,
-        { key: idempotencyKey, tenantId: session.tenant_id, requestHash },
+        {
+          key: idempotencyKey,
+          tenantId: session.tenant_id,
+          requestHash,
+          discardErrorCodes: ['NOT_FOUND'],
+        },
         async () => {
-          const listingRepo = new TicketListingRepository(db);
-          const active = await listingRepo.findActiveByTicket(session.tenant_id, ticketId);
-          if (active) {
-            throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
-          }
-
-          const faceValueCents = Number(ticketType.price_cents);
-          try {
-            validateResalePrice(body.priceCents, faceValueCents, serializeResalePolicy(event));
-          } catch (error) {
-            toResaleValidationError(error);
-          }
-
-          try {
-            const listing = await listingRepo.create({
-              tenantId: session.tenant_id,
-              eventId: ticket.event_id,
+          return db.transaction().execute(async (transaction) => {
+            const currentEvent = await transaction
+              .selectFrom('events')
+              .selectAll()
+              .where('id', '=', ticket.event_id)
+              .forUpdate()
+              .executeTakeFirst();
+            if (!currentEvent || currentEvent.tenant_id !== session.tenant_id) {
+              throw new NotFoundError('Event', ticket.event_id);
+            }
+            const currentTicket = await new TicketRepository(transaction).findByIdForUpdate(
               ticketId,
-              sellerId: session.order_id as string,
-              priceCents: body.priceCents,
-              currency: String(ticketType.currency),
-              faceValueCents,
-              expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
-            });
-            return { status: 201, body: serializeTicketListing(listing) };
-          } catch (error) {
-            if (isUniqueViolation(error)) {
+            );
+            if (
+              !currentTicket ||
+              currentTicket.tenant_id !== session.tenant_id ||
+              currentTicket.order_id !== session.order_id ||
+              currentTicket.event_id !== currentEvent.id
+            ) {
+              throw new NotFoundError('Ticket', ticketId);
+            }
+            if (currentTicket.status !== 'valid') {
+              throw new ValidationError(
+                `Ticket status is ${currentTicket.status}, cannot list for resale`,
+              );
+            }
+            const currentTicketType = await transaction
+              .selectFrom('ticket_types')
+              .selectAll()
+              .where('id', '=', currentTicket.ticket_type_id)
+              .forUpdate()
+              .executeTakeFirst();
+            if (!currentTicketType || currentTicketType.event_id !== currentTicket.event_id) {
+              throw new NotFoundError('TicketType', currentTicket.ticket_type_id);
+            }
+            const listingRepo = new TicketListingRepository(transaction);
+            const active = await listingRepo.findActiveByTicket(session.tenant_id, ticketId);
+            if (active) {
               throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
             }
-            throw error;
-          }
+
+            const faceValueCents = Number(currentTicketType.price_cents);
+            try {
+              validateResalePrice(
+                body.priceCents,
+                faceValueCents,
+                serializeResalePolicy(currentEvent),
+              );
+            } catch (error) {
+              toResaleValidationError(error);
+            }
+
+            try {
+              const listing = await listingRepo.create({
+                tenantId: session.tenant_id,
+                eventId: currentTicket.event_id,
+                ticketId,
+                sellerId: session.order_id as string,
+                priceCents: body.priceCents,
+                currency: String(currentTicketType.currency),
+                faceValueCents,
+                expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+              });
+              return { status: 201, body: serializeTicketListing(listing) };
+            } catch (error) {
+              if (isUniqueViolation(error)) {
+                throw new ValidationError(
+                  `Ticket ${ticketId} already has an active resale listing`,
+                );
+              }
+              throw error;
+            }
+          });
         },
       );
 

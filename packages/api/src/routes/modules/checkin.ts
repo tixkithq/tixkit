@@ -7,6 +7,7 @@ import {
   type Database,
   EventRepository,
   TicketRepository,
+  TicketListingRepository,
   CheckInListRepository,
   ScanLogRepository,
   AttendeeRepository,
@@ -587,8 +588,9 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         requestHash: hashRequest({
           ticketId,
           toEmail: body.toEmail,
-          dateOfBirth: requiresDateOfBirth ? body.dateOfBirth : undefined,
+          dateOfBirth: body.dateOfBirth ?? null,
         }),
+        discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
       },
       async () => {
         const reissuedTicket = await db.transaction().execute(async (trx) => {
@@ -598,16 +600,64 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
           const txOrderRepo = new OrderRepository(txDb);
           const now = new Date();
 
-          const sourceTicket = await txTicketRepo.findById(ticketId);
+          const currentEvent = await txDb
+            .selectFrom('events')
+            .selectAll()
+            .where('id', '=', ticket.event_id)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!currentEvent) throw new NotFoundError('Event', ticket.event_id);
+          requireEventAccess(principal, currentEvent, ticket.event_id);
+
+          const sourceTicket = await txTicketRepo.findByIdForUpdate(ticketId);
           if (
             !sourceTicket ||
             sourceTicket.tenant_id !== principal.tenantId ||
-            sourceTicket.event_id !== ticket.event_id
+            sourceTicket.event_id !== currentEvent.id
           ) {
             throw new NotFoundError('Ticket', ticketId);
           }
           if (sourceTicket.status !== 'valid') {
             throw new ValidationError(`Ticket status is ${sourceTicket.status}, cannot transfer`);
+          }
+          const activeListing = await new TicketListingRepository(txDb).findActiveByTicket(
+            principal.tenantId,
+            ticketId,
+          );
+          if (activeListing) {
+            throw new ValidationError(`Ticket ${ticketId} has an active resale listing`);
+          }
+
+          const currentOccurrence = sourceTicket.event_occurrence_id
+            ? await txDb
+                .selectFrom('event_occurrences')
+                .selectAll()
+                .where('id', '=', sourceTicket.event_occurrence_id)
+                .forUpdate()
+                .executeTakeFirst()
+            : undefined;
+          if (
+            sourceTicket.event_occurrence_id &&
+            (!currentOccurrence || currentOccurrence.event_id !== currentEvent.id)
+          ) {
+            throw new NotFoundError('EventOccurrence', sourceTicket.event_occurrence_id);
+          }
+          const currentRequiresDateOfBirth = requiresDateOfBirthVerification(
+            currentEvent.minimum_age,
+          );
+          if (currentRequiresDateOfBirth) {
+            const eligibility = evaluateDateOfBirthEligibility({
+              dateOfBirth: body.dateOfBirth,
+              minimumAge: currentEvent.minimum_age,
+              participationAt: currentOccurrence?.starts_at ?? currentEvent.starts_at,
+              timezone: currentOccurrence?.timezone ?? currentEvent.timezone,
+            });
+            if (!eligibility.eligible) {
+              throw new ValidationError(`Transfer recipient: ${eligibility.message}`, {
+                code: eligibility.code,
+                field: 'dateOfBirth',
+              });
+            }
           }
 
           const sourceAttendee = await txAttendeeRepo.findById(sourceTicket.attendee_id as string);
@@ -626,7 +676,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
             ticketTypeId: sourceTicket.ticket_type_id as string,
             eventOccurrenceId: (sourceTicket.event_occurrence_id as string | null) ?? undefined,
             email: body.toEmail,
-            dateOfBirth: requiresDateOfBirth ? body.dateOfBirth : undefined,
+            dateOfBirth: currentRequiresDateOfBirth ? body.dateOfBirth : undefined,
             customAnswers: {
               transferSourceTicketId: sourceTicket.id,
               transferSourceAttendeeId: sourceAttendee.id,

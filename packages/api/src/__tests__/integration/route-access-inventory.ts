@@ -183,10 +183,17 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'scanner-device-route-authorization.test.ts',
     persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',
   }),
-  ...evidenceBindings(['postTicketListingsByListingIdDelist'], {
-    source: 'resale-routes-db.integration.test.ts',
-    persistenceSource: 'resale-routes-db.integration.test.ts',
-  }),
+  ...evidenceBindings(
+    [
+      'postTicketsByTicketIdResaleListings',
+      'postTicketListingsByListingIdDelist',
+      'postTicketsByTicketIdTransfer',
+    ],
+    {
+      source: 'resale-routes-db.integration.test.ts',
+      persistenceSource: 'resale-routes-db.integration.test.ts',
+    },
+  ),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
