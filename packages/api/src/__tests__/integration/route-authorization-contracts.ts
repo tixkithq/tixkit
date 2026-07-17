@@ -172,6 +172,7 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     [
       ['/events/{eventId}/pause', 'postEventsByEventIdPause'],
       ['/events/{eventId}/archive', 'postEventsByEventIdArchive'],
+      ['/events/{eventId}/publish', 'postEventsByEventIdPublish'],
     ] as const
   ).map(([path, operationId]) =>
     denialContract({

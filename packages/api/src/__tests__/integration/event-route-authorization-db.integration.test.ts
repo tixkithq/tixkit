@@ -62,6 +62,13 @@ const setupSectionContract = (() => {
   if (!contract) throw new Error('setup-section authorization contract is not registered');
   return contract;
 })();
+const publishContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'postEventsByEventIdPublish',
+  );
+  if (!contract) throw new Error('publish authorization contract is not registered');
+  return contract;
+})();
 
 type AuthorizationScenario = {
   name: string;
@@ -117,6 +124,11 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     actions: [{ id: 'dashboard-proof' }],
     nextCursor: null,
   }));
+  let publishReadinessLaunchable = false;
+  const recordLaunchReadiness = vi.fn(
+    (_input: { tenantId: string; organizationId: string; brandId: string; eventId: string }) =>
+      undefined,
+  );
 
   async function readinessAcknowledgementSnapshot() {
     const [acknowledgements, audits] = await Promise.all([
@@ -250,6 +262,43 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       .where('action', 'in', ['event.paused', 'event.archived'])
       .where('resource_id', 'in', createdEventIds)
       .execute();
+  }
+
+  async function publishSnapshot() {
+    const [events, audits] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select(['id', 'status', 'version', 'public_revision'])
+        .where('id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('actor_id', '=', basePrincipal.id)
+        .where('action', 'in', ['event.published', 'event.archived'])
+        .where('resource_id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+    ]);
+    return { events, audits };
+  }
+
+  async function clearPublishEvidence(): Promise<void> {
+    if (createdEventIds.length === 0) return;
+    await db
+      .updateTable('events')
+      .set({ status: 'draft', public_revision: new Date('2020-01-01T00:00:00.000Z') })
+      .where('id', 'in', createdEventIds)
+      .execute();
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', basePrincipal.id)
+      .where('action', 'in', ['event.published', 'event.archived'])
+      .where('resource_id', 'in', createdEventIds)
+      .execute();
+    publishReadinessLaunchable = false;
+    recordLaunchReadiness.mockClear();
   }
 
   async function insertTenant(id: string, name: string) {
@@ -423,13 +472,25 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     app.decorate('context', {
       db,
       inventoryService: new InventoryService(db),
-      readinessServiceFactory: () =>
+      readinessServiceFactory: (database: Database) =>
         ({
           getEventLaunchReadiness: async (input: { eventId: string }) => {
             if (input.eventId !== eventA) {
               throw new Error('readiness service must not run for a denied event');
             }
-            return { launchable: false, requiredBlockers: [], steps: [] };
+            recordLaunchReadiness(input as never);
+            const event = await database
+              .selectFrom('events')
+              .select('version')
+              .where('id', '=', input.eventId)
+              .executeTakeFirstOrThrow();
+            return {
+              launchable: publishReadinessLaunchable,
+              eventVersion: Number(event.version),
+              requiredBlockers: [],
+              recommendedWarnings: [],
+              steps: [],
+            };
           },
           getWorkspaceReadiness,
           acknowledgementSubject,
@@ -469,6 +530,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         if (db) {
           await attemptCleanup(clearReadinessAcknowledgementEvidence);
           await attemptCleanup(clearSetupSectionEvidence);
+          await attemptCleanup(clearPublishEvidence);
           await attemptCleanup(() =>
             db
               .deleteFrom('check_in_lists')
@@ -1292,6 +1354,207 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         expect(acknowledgementSubject).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('publish authorization and terminal-state safety', () => {
+    beforeEach(async () => {
+      principal = basePrincipal;
+      await clearPublishEvidence();
+    });
+
+    afterEach(clearPublishEvidence);
+
+    function invokePublish(targetEventId: string) {
+      return app.inject({
+        method: publishContract.method,
+        url: publishContract.path.replace('{eventId}', targetEventId),
+      });
+    }
+
+    function storedAuditDiff(value: unknown): Record<string, unknown> {
+      return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
+    }
+
+    it('publishes the exact ready event atomically and replays without a second mutation or audit', async () => {
+      publishReadinessLaunchable = true;
+      const before = await publishSnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA);
+
+      const response = await invokePublish(eventA);
+
+      expect(response.statusCode, response.body).toBe(publishContract.authorizedControl.status);
+      expect(response.json()).toMatchObject({ id: eventA, status: 'published' });
+      expect(recordLaunchReadiness).toHaveBeenCalledOnce();
+      const published = await publishSnapshot();
+      const publishedEvent = published.events.find((event) => event.id === eventA);
+      expect(publishedEvent?.status).toBe('published');
+      expect(publishedEvent?.version).toBeGreaterThan(eventBefore?.version ?? 0);
+      expect(publishedEvent?.public_revision?.getTime()).toBeGreaterThan(
+        eventBefore?.public_revision?.getTime() ?? 0,
+      );
+      expect(published.audits).toHaveLength(1);
+      expect(published.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_type: 'user',
+        actor_id: basePrincipal.id,
+        action: 'event.published',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      expect(storedAuditDiff(published.audits[0]!.diff_summary)).toEqual({
+        previousStatus: 'draft',
+        newStatus: 'published',
+        previousVersion: eventBefore?.version,
+        newVersion: publishedEvent?.version,
+      });
+
+      const replay = await invokePublish(eventA);
+      expect(replay.statusCode, replay.body).toBe(200);
+      expect(replay.json()).toMatchObject({ id: eventA, status: 'published' });
+      expect(recordLaunchReadiness).toHaveBeenCalledOnce();
+      await expect(publishSnapshot()).resolves.toEqual(published);
+    });
+
+    it('keeps a readiness-blocked draft unchanged and unaudited', async () => {
+      const before = await publishSnapshot();
+
+      const response = await invokePublish(eventA);
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ error: { code: 'launch_readiness_failed' } });
+      expect(recordLaunchReadiness).toHaveBeenCalledOnce();
+      await expect(publishSnapshot()).resolves.toEqual(before);
+    });
+
+    it('keeps archived events terminal without evaluating readiness', async () => {
+      await db.updateTable('events').set({ status: 'archived' }).where('id', '=', eventA).execute();
+      const before = await publishSnapshot();
+
+      const response = await invokePublish(eventA);
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ error: { code: 'event_archived' } });
+      expect(recordLaunchReadiness).not.toHaveBeenCalled();
+      await expect(publishSnapshot()).resolves.toEqual(before);
+    });
+
+    it('rolls publication back when its required audit cannot persist', async () => {
+      publishReadinessLaunchable = true;
+      const before = await publishSnapshot();
+      const auditFailure = vi
+        .spyOn(AuditLogRepository.prototype, 'create')
+        .mockRejectedValueOnce(new Error('injected publish audit failure'));
+
+      const response = await invokePublish(eventA);
+
+      expect(response.statusCode).toBe(500);
+      expect(recordLaunchReadiness).toHaveBeenCalledOnce();
+      await expect(publishSnapshot()).resolves.toEqual(before);
+      auditFailure.mockRestore();
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary before readiness, publication, revision, or audit mutation',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await publishSnapshot();
+
+        const response = await invokePublish(targetEvent());
+
+        expect(response.statusCode, response.body).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        expect(recordLaunchReadiness).not.toHaveBeenCalled();
+        await expect(publishSnapshot()).resolves.toEqual(before);
+      },
+    );
+
+    it('serializes publish/archive races with archive terminal and truthful audit/revision evidence', async () => {
+      publishReadinessLaunchable = true;
+      const revisionQuantum = integrationDatabaseDriver() === 'mysql' ? 1_000 : 1;
+      const futureRevision = new Date(
+        Math.ceil((Date.now() + 60_000) / revisionQuantum) * revisionQuantum,
+      );
+      await db
+        .updateTable('events')
+        .set({ public_revision: futureRevision })
+        .where('id', '=', eventA)
+        .execute();
+      const before = await publishSnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA);
+
+      const [publishResponse, archiveResponse] = await Promise.all([
+        invokePublish(eventA),
+        app.inject({ method: 'POST', url: `/events/${eventA}/archive` }),
+      ]);
+
+      expect([200, 409]).toContain(publishResponse.statusCode);
+      expect(archiveResponse.statusCode).toBe(200);
+      const after = await publishSnapshot();
+      const finalEvent = after.events.find((event) => event.id === eventA);
+      const publishCommitted = publishResponse.statusCode === 200;
+      const committedTransitions = publishCommitted ? 2 : 1;
+      expect(finalEvent?.status).toBe('archived');
+      expect(Number(finalEvent?.version)).toBe(Number(eventBefore?.version) + committedTransitions);
+      expect(finalEvent?.public_revision?.getTime()).toBe(
+        (eventBefore?.public_revision?.getTime() ?? 0) + committedTransitions * revisionQuantum,
+      );
+      expect(after.audits).toHaveLength(committedTransitions);
+      if (publishCommitted) {
+        expect(after.audits.map((audit) => audit.action)).toEqual([
+          'event.published',
+          'event.archived',
+        ]);
+        expect(storedAuditDiff(after.audits[0]!.diff_summary)).toMatchObject({
+          previousStatus: 'draft',
+          newStatus: 'published',
+        });
+        expect(storedAuditDiff(after.audits[1]!.diff_summary)).toMatchObject({
+          previousStatus: 'published',
+          newStatus: 'archived',
+        });
+      } else {
+        expect(after.audits[0]).toMatchObject({ action: 'event.archived' });
+        expect(storedAuditDiff(after.audits[0]!.diff_summary)).toEqual({
+          previousStatus: 'draft',
+          newStatus: 'archived',
+        });
+      }
+    });
   });
 
   describe('pause and archive authorization', () => {

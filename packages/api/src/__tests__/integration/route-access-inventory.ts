@@ -334,6 +334,7 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'putEventsByEventIdSetupSection',
       'postEventsByEventIdPause',
       'postEventsByEventIdArchive',
+      'postEventsByEventIdPublish',
     ],
     {
       source: 'event-route-authorization-db.integration.test.ts',

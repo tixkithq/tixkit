@@ -1809,14 +1809,26 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
               ClerkAuthService.requireBrandScope(principal, event.brand_id);
               ClerkAuthService.requireEventScope(principal, event.id);
             },
-            onPublished: ({ event }) =>
-              writeAuditLog(new AuditLogRepository(trx as typeof db), request, principal, {
-                action: 'event.published',
-                organizationId: event.organization_id,
-                brandId: event.brand_id,
-                resourceType: 'Event',
-                resourceId: event.id,
-              }),
+            onPublished: ({ event, published }) =>
+              writeAuditLog(
+                new AuditLogRepository(trx as typeof db),
+                request,
+                principal,
+                {
+                  action: 'event.published',
+                  organizationId: event.organization_id,
+                  brandId: event.brand_id,
+                  resourceType: 'Event',
+                  resourceId: event.id,
+                  diffSummary: {
+                    previousStatus: event.status,
+                    newStatus: published.status,
+                    previousVersion: Number(event.version),
+                    newVersion: Number(published.version),
+                  },
+                },
+                { failClosed: true },
+              ),
           }),
         );
     } catch (error) {
