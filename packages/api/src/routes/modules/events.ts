@@ -1453,6 +1453,10 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, authorizedSource.organization_id);
     ClerkAuthService.requireBrandScope(principal, authorizedSource.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
+    await app.context.eventDuplicationCheckpoint?.({
+      stage: 'after_authorization',
+      sourceEventId: eventId,
+    });
     const rawIdempotencyKey = request.headers['idempotency-key'];
     const idempotencyKey =
       typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : undefined;
@@ -1466,8 +1470,17 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         .setIsolationLevel('repeatable read')
         .execute(async (trx) => {
           const events = new EventRepository(trx as typeof db);
-          const source = await events.findById(eventId);
+          const source = await trx
+            .selectFrom('events')
+            .selectAll()
+            .where('id', '=', eventId)
+            .forUpdate()
+            .executeTakeFirst();
           if (!source) throw new NotFoundError('Event', eventId);
+          ClerkAuthService.requireResourceTenant(principal, source, 'Event', eventId);
+          ClerkAuthService.requireOrganizationScope(principal, source.organization_id);
+          ClerkAuthService.requireBrandScope(principal, source.brand_id);
+          ClerkAuthService.requireEventScope(principal, eventId);
           const shiftMs = requestedStart.getTime() - new Date(source.starts_at).getTime();
           const shifted = (value: Date | string | null) =>
             value === null ? null : new Date(new Date(value).getTime() + shiftMs);
@@ -1680,7 +1693,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
               try {
                 config = duplicatedIntegrationConfig(
                   integration.provider,
-                  JSON.parse(integration.config),
+                  typeof integration.config === 'string'
+                    ? JSON.parse(integration.config)
+                    : integration.config,
                 );
               } catch {
                 config = {};
@@ -1836,14 +1851,20 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
             }
           }
           const result = (await events.findById(created.id))!;
-          await writeAuditLog(new AuditLogRepository(trx as typeof db), request, principal, {
-            action: 'event.duplicated',
-            organizationId: source.organization_id,
-            brandId: source.brand_id,
-            resourceType: 'Event',
-            resourceId: result.id,
-            diffSummary: { sourceEventId: eventId, copied: body.copy },
-          });
+          await writeAuditLog(
+            new AuditLogRepository(trx as typeof db),
+            request,
+            principal,
+            {
+              action: 'event.duplicated',
+              organizationId: source.organization_id,
+              brandId: source.brand_id,
+              resourceType: 'Event',
+              resourceId: result.id,
+              diffSummary: { sourceEventId: eventId, copied: body.copy },
+            },
+            { failClosed: true },
+          );
           await app.context.eventDuplicationCheckpoint?.({
             stage: 'after_children_copied',
             sourceEventId: eventId,
@@ -1869,6 +1890,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         key: idempotencyKey,
         tenantId: principal.tenantId,
         requestHash: hashRequest({ sourceEventId: eventId, body }),
+        discardErrorCodes: ['FORBIDDEN', 'NOT_FOUND'],
       },
       duplicateEvent,
     );

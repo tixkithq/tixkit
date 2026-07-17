@@ -67,11 +67,18 @@ export type AppContext = {
   providerClientRuntime?: ProviderClientRuntime;
   portableDryRunAttestation?: PortableDryRunAttestationConfiguration;
   portableCutoverTrust?: PortableCutoverTrustConfiguration;
-  eventDuplicationCheckpoint?: (input: {
-    stage: 'after_children_copied';
-    sourceEventId: string;
-    duplicatedEventId: string;
-  }) => void | Promise<void>;
+  eventDuplicationCheckpoint?: (
+    input:
+      | {
+          stage: 'after_authorization';
+          sourceEventId: string;
+        }
+      | {
+          stage: 'after_children_copied';
+          sourceEventId: string;
+          duplicatedEventId: string;
+        },
+  ) => void | Promise<void>;
   eventPresetCheckpoint?: (input: {
     stage: 'after_preset_applied';
     eventId: string;

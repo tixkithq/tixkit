@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import {
+  AuditLogRepository,
   createDb,
   EventOccurrenceRepository,
   EventRepository,
@@ -32,7 +33,53 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
   const tenantId = `tnt_dup_${suffix}`;
   const organizationId = `org_dup_${suffix}`;
   const brandId = `brd_dup_${suffix}`;
+  const scopeSwapBrandId = `brd_dup_scope_${suffix}`;
+  const eventPageDocumentId = `cdoc_dup_page_${suffix}`;
+  const eventPageVersionId = `cver_dup_page_${suffix}`;
+  const lifecycleDocumentId = `cdoc_dup_lifecycle_${suffix}`;
+  const lifecycleVersionId = `cver_dup_lifecycle_${suffix}`;
   let sourceEventId: string;
+  let scopeSourceEventId: string;
+
+  const boundaryPayload = {
+    startsAt: '2027-04-15T18:00:00.000Z',
+    copy: {
+      basicsVenue: false,
+      ticketTypes: false,
+      products: false,
+      checkoutQuestions: false,
+      feeResalePolicies: false,
+      eventPageContent: false,
+      lifecycleContent: false,
+      marketingIntegrations: false,
+      mediaAssets: false,
+    },
+  };
+
+  async function duplicationBoundarySnapshot() {
+    const [events, audits, idempotencyRecords] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select(['id', 'tenant_id', 'organization_id', 'brand_id', 'title', 'status'])
+        .where('tenant_id', '=', tenantId)
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .select(['id', 'action', 'resource_id', 'diff_summary'])
+        .where('actor_id', '=', `usr_${suffix}`)
+        .where('action', '=', 'event.duplicated')
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('idempotency_records')
+        .select(['id', 'key', 'tenant_id', 'request_hash', 'response_status', 'status'])
+        .where('key', 'like', `duplicate-%-${suffix}`)
+        .orderBy('key')
+        .execute(),
+    ]);
+    return { events, audits, idempotencyRecords };
+  }
 
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
@@ -81,6 +128,24 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
         updated_at: now,
       })
       .execute();
+    await db
+      .insertInto('brands')
+      .values({
+        id: scopeSwapBrandId,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        name: 'Duplication scope-swap brand',
+        slug: `dup-scope-${suffix}`,
+        status: 'active',
+        theme: '{}',
+        support_url: null,
+        legal_urls: '{}',
+        white_label: false,
+        payment_account_id: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
     const source = await new EventRepository(db).create({
       tenantId,
       organizationId,
@@ -94,6 +159,17 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
       venue: { name: 'Hall' },
     });
     sourceEventId = source.id;
+    const scopeSource = await new EventRepository(db).create({
+      tenantId,
+      organizationId,
+      brandId,
+      slug: `scope-source-${suffix}`,
+      title: 'Scope source event',
+      currency: 'USD',
+      timezone: 'UTC',
+      startsAt: new Date('2027-01-02T18:00:00Z'),
+    });
+    scopeSourceEventId = scopeSource.id;
     const pool = await new InventoryPoolRepository(db).create({
       eventId: source.id,
       name: 'GA',
@@ -241,13 +317,124 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
         updated_at: now,
       })
       .execute();
+    await db
+      .insertInto('content_documents')
+      .values([
+        {
+          id: eventPageDocumentId,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          brand_id: brandId,
+          event_id: source.id,
+          channel: 'event_page',
+          key: 'event-page',
+          name: 'Event page',
+          status: 'published',
+          locale: 'en',
+          current_draft_version_id: null,
+          published_version_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: lifecycleDocumentId,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          brand_id: brandId,
+          event_id: source.id,
+          channel: 'email',
+          key: 'event-reminder',
+          name: 'Event reminder',
+          status: 'published',
+          locale: 'en',
+          current_draft_version_id: null,
+          published_version_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+    await db
+      .insertInto('content_document_versions')
+      .values([
+        {
+          id: eventPageVersionId,
+          document_id: eventPageDocumentId,
+          version_number: 3,
+          status: 'published',
+          schema_version: 1,
+          subject: null,
+          preview_text: null,
+          content_json: JSON.stringify({ heading: 'Source event' }),
+          rendered_html: '<h1>Source event</h1>',
+          rendered_text: 'Source event',
+          variables: '[]',
+          validation: '{}',
+          created_by: `usr_${suffix}`,
+          created_at: now,
+          published_at: now,
+        },
+        {
+          id: lifecycleVersionId,
+          document_id: lifecycleDocumentId,
+          version_number: 4,
+          status: 'published',
+          schema_version: 1,
+          subject: 'Event reminder',
+          preview_text: 'Soon',
+          content_json: JSON.stringify({ body: 'Your event starts soon' }),
+          rendered_html: '<p>Your event starts soon</p>',
+          rendered_text: 'Your event starts soon',
+          variables: '[]',
+          validation: '{}',
+          created_by: `usr_${suffix}`,
+          created_at: now,
+          published_at: now,
+        },
+      ])
+      .execute();
+    await db
+      .updateTable('content_documents')
+      .set({
+        current_draft_version_id: eventPageVersionId,
+        published_version_id: eventPageVersionId,
+      })
+      .where('id', '=', eventPageDocumentId)
+      .execute();
+    await db
+      .updateTable('content_documents')
+      .set({
+        current_draft_version_id: lifecycleVersionId,
+        published_version_id: lifecycleVersionId,
+      })
+      .where('id', '=', lifecycleDocumentId)
+      .execute();
+    await db
+      .insertInto('marketing_integrations')
+      .values({
+        id: `mkt_dup_${suffix}`,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: brandId,
+        event_id: source.id,
+        provider: 'ga4',
+        config: JSON.stringify({
+          measurementId: 'G-DUPLICATE',
+          apiSecret: 'must-not-copy',
+        }),
+        consent_required: true,
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
     principal = {
       type: 'user',
       id: `usr_${suffix}`,
       tenantId,
       organizationIds: [organizationId],
       brandIds: [brandId],
-      eventIds: [source.id],
+      eventIds: [source.id, scopeSource.id],
       scopes: ['events.read', 'events.write'],
     };
     app = Fastify();
@@ -286,9 +473,9 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
           products: true,
           checkoutQuestions: true,
           feeResalePolicies: true,
-          eventPageContent: false,
-          lifecycleContent: false,
-          marketingIntegrations: false,
+          eventPageContent: true,
+          lifecycleContent: true,
+          marketingIntegrations: true,
         },
       },
     });
@@ -315,9 +502,9 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
           products: true,
           checkoutQuestions: true,
           feeResalePolicies: true,
-          eventPageContent: false,
-          lifecycleContent: false,
-          marketingIntegrations: false,
+          eventPageContent: true,
+          lifecycleContent: true,
+          marketingIntegrations: true,
         },
       },
     });
@@ -391,6 +578,62 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
       .where('event_id', '=', duplicate.id)
       .execute();
     expect(fees).toHaveLength(1);
+    const duplicatedDocuments = await db
+      .selectFrom('content_documents')
+      .selectAll()
+      .where('event_id', '=', duplicate.id)
+      .orderBy('channel')
+      .execute();
+    expect(duplicatedDocuments).toHaveLength(2);
+    expect(duplicatedDocuments.map((document) => document.channel)).toEqual([
+      'email',
+      'event_page',
+    ]);
+    for (const document of duplicatedDocuments) {
+      expect(document).toMatchObject({
+        event_id: duplicate.id,
+        status: 'draft',
+        published_version_id: null,
+      });
+      expect(document.id).not.toBe(
+        document.channel === 'event_page' ? eventPageDocumentId : lifecycleDocumentId,
+      );
+      expect(document.current_draft_version_id).toBeTruthy();
+      const versions = await db
+        .selectFrom('content_document_versions')
+        .selectAll()
+        .where('document_id', '=', document.id)
+        .execute();
+      expect(versions).toHaveLength(1);
+      expect(versions[0]).toMatchObject({
+        id: document.current_draft_version_id,
+        document_id: document.id,
+        version_number: 1,
+        status: 'draft',
+        created_by: principal.id,
+        published_at: null,
+      });
+    }
+    const duplicatedIntegrations = await db
+      .selectFrom('marketing_integrations')
+      .selectAll()
+      .where('event_id', '=', duplicate.id)
+      .execute();
+    expect(duplicatedIntegrations).toHaveLength(1);
+    expect(duplicatedIntegrations[0]).toMatchObject({
+      event_id: duplicate.id,
+      provider: 'ga4',
+      status: 'active',
+    });
+    expect(Boolean(duplicatedIntegrations[0]!.consent_required)).toBe(true);
+    const duplicatedIntegrationConfig = duplicatedIntegrations[0]!.config;
+    expect(
+      typeof duplicatedIntegrationConfig === 'string'
+        ? JSON.parse(duplicatedIntegrationConfig)
+        : duplicatedIntegrationConfig,
+    ).toEqual({
+      measurementId: 'G-DUPLICATE',
+    });
     for (const table of ['orders', 'attendees', 'tickets'] as const) {
       const rows = await db
         .selectFrom(table)
@@ -414,6 +657,39 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
     expect(holds).toHaveLength(0);
     expect(scans).toHaveLength(0);
   }, 120_000);
+
+  it('omits every unselected content, integration, media, and ticketing branch', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/events/${sourceEventId}/duplicate`,
+      headers: { 'Idempotency-Key': `duplicate-unselected-${suffix}` },
+      payload: boundaryPayload,
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    const duplicateId = (response.json() as { id: string }).id;
+    const [documents, integrations, media, pools, tickets] = await Promise.all([
+      db.selectFrom('content_documents').select('id').where('event_id', '=', duplicateId).execute(),
+      db
+        .selectFrom('marketing_integrations')
+        .select('id')
+        .where('event_id', '=', duplicateId)
+        .execute(),
+      db
+        .selectFrom('event_media_assets')
+        .select('id')
+        .where('event_id', '=', duplicateId)
+        .execute(),
+      db.selectFrom('inventory_pools').select('id').where('event_id', '=', duplicateId).execute(),
+      db.selectFrom('ticket_types').select('id').where('event_id', '=', duplicateId).execute(),
+    ]);
+    expect({ documents, integrations, media, pools, tickets }).toEqual({
+      documents: [],
+      integrations: [],
+      media: [],
+      pools: [],
+      tickets: [],
+    });
+  });
 
   it('rejects dependency-breaking copy selections', async () => {
     const response = await app.inject({
@@ -474,6 +750,102 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
     expect(Number(after.count)).toBe(Number(before.count));
   });
 
+  it('fails closed at every declared duplication authorization boundary without persistence', async () => {
+    const cases: Array<{
+      boundary: string;
+      expectedCode: 'FORBIDDEN' | 'NOT_FOUND';
+      expectedStatus: 403 | 404;
+      principal: Principal;
+    }> = [
+      {
+        boundary: 'permission',
+        expectedCode: 'FORBIDDEN',
+        expectedStatus: 403,
+        principal: { ...principal, scopes: ['events.read'] },
+      },
+      {
+        boundary: 'tenant',
+        expectedCode: 'NOT_FOUND',
+        expectedStatus: 404,
+        principal: { ...principal, tenantId: `tnt_denied_${suffix}` },
+      },
+      {
+        boundary: 'organization',
+        expectedCode: 'NOT_FOUND',
+        expectedStatus: 404,
+        principal: { ...principal, organizationIds: [] },
+      },
+      {
+        boundary: 'brand',
+        expectedCode: 'NOT_FOUND',
+        expectedStatus: 404,
+        principal: { ...principal, brandIds: [`brd_denied_${suffix}`] },
+      },
+      {
+        boundary: 'event',
+        expectedCode: 'NOT_FOUND',
+        expectedStatus: 404,
+        principal: { ...principal, eventIds: [`evt_denied_${suffix}`] },
+      },
+    ];
+
+    for (const boundaryCase of cases) {
+      const authorizedPrincipal = principal;
+      const before = await duplicationBoundarySnapshot();
+      principal = boundaryCase.principal;
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: `/events/${sourceEventId}/duplicate`,
+          headers: {
+            'Idempotency-Key': `duplicate-boundary-${boundaryCase.boundary}-${suffix}`,
+          },
+          payload: boundaryPayload,
+        });
+        expect(response.statusCode, `${boundaryCase.boundary}: ${response.body}`).toBe(
+          boundaryCase.expectedStatus,
+        );
+        expect(response.json()).toMatchObject({
+          error: { code: boundaryCase.expectedCode },
+        });
+      } finally {
+        principal = authorizedPrincipal;
+      }
+      await expect(duplicationBoundarySnapshot()).resolves.toEqual(before);
+    }
+  });
+
+  it('locks and rechecks the current source scope inside the duplication transaction', async () => {
+    const before = await duplicationBoundarySnapshot();
+    duplicationCheckpoint = async (input) => {
+      if (input.stage === 'after_authorization') {
+        await db
+          .updateTable('events')
+          .set({ brand_id: scopeSwapBrandId })
+          .where('id', '=', scopeSourceEventId)
+          .execute();
+      }
+    };
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/events/${scopeSourceEventId}/duplicate`,
+        headers: { 'Idempotency-Key': `duplicate-boundary-scope-swap-${suffix}` },
+        payload: boundaryPayload,
+      });
+      expect(response.statusCode, response.body).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    } finally {
+      duplicationCheckpoint = undefined;
+      await db
+        .updateTable('events')
+        .set({ brand_id: brandId })
+        .where('id', '=', scopeSourceEventId)
+        .execute();
+    }
+    await expect(duplicationBoundarySnapshot()).resolves.toEqual(before);
+  });
+
   it('rolls back the new event when a selected child copy fails mid-transaction', async () => {
     const before = await db
       .selectFrom('events')
@@ -481,8 +853,9 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
       .where('tenant_id', '=', tenantId)
       .executeTakeFirstOrThrow();
     let attemptedEventId: string | undefined;
-    duplicationCheckpoint = ({ duplicatedEventId }) => {
-      attemptedEventId = duplicatedEventId;
+    duplicationCheckpoint = (input) => {
+      if (input.stage !== 'after_children_copied') return;
+      attemptedEventId = input.duplicatedEventId;
       throw new Error('injected duplication child failure');
     };
     try {
@@ -533,6 +906,52 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
         .executeTakeFirstOrThrow();
       expect(Number(rows.count), `${table} must roll back`).toBe(0);
     }
+  });
+
+  it('rolls back event, children, audit, and idempotency on audit failure and cleanly retries', async () => {
+    const key = `duplicate-audit-failure-${suffix}`;
+    const before = await duplicationBoundarySnapshot();
+    const auditFailure = vi
+      .spyOn(AuditLogRepository.prototype, 'create')
+      .mockRejectedValueOnce(new Error('injected duplication audit failure'));
+    try {
+      const failed = await app.inject({
+        method: 'POST',
+        url: `/events/${sourceEventId}/duplicate`,
+        headers: { 'Idempotency-Key': key },
+        payload: boundaryPayload,
+      });
+      expect(failed.statusCode, failed.body).toBe(500);
+    } finally {
+      auditFailure.mockRestore();
+    }
+    await expect(duplicationBoundarySnapshot()).resolves.toEqual(before);
+
+    const retried = await app.inject({
+      method: 'POST',
+      url: `/events/${sourceEventId}/duplicate`,
+      headers: { 'Idempotency-Key': key },
+      payload: boundaryPayload,
+    });
+    expect(retried.statusCode, retried.body).toBe(201);
+    const duplicatedEventId = (retried.json() as { id: string }).id;
+    await expect(
+      db
+        .selectFrom('audit_logs')
+        .select(['action', 'resource_id'])
+        .where('actor_id', '=', principal.id)
+        .where('action', '=', 'event.duplicated')
+        .where('resource_id', '=', duplicatedEventId)
+        .execute(),
+    ).resolves.toEqual([{ action: 'event.duplicated', resource_id: duplicatedEventId }]);
+    await expect(
+      db
+        .selectFrom('idempotency_records')
+        .select(['key', 'status', 'response_status'])
+        .where('tenant_id', '=', tenantId)
+        .where('key', '=', key)
+        .execute(),
+    ).resolves.toEqual([{ key, status: 'completed', response_status: 201 }]);
   });
 
   it('atomically creates a free preset and replays a duplicate submission without duplicate children', async () => {
