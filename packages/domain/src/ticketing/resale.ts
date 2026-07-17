@@ -5,8 +5,44 @@
  * configurable face-value caps), delist, mark-sold, and expire. Ownership
  * reassignment on a completed resale is modeled as a state transition that
  * the workflow layer consumes to reissue/void credentials. Built on the
- * existing transfer + idempotency machinery; payment/escrow is provider-delegated.
+ * existing transfer + idempotency machinery. Seller funds use an explicit
+ * organizer-managed payable contract; Tixkit does not imply an automated
+ * seller payout or escrow service.
  */
+
+export const RESALE_TERMS_VERSION = '2026-07-16' as const;
+export const RESALE_SETTLEMENT_MODEL = 'organizer_managed' as const;
+export const RESALE_REFUND_MODEL = 'manual_coordinated_resolution' as const;
+
+export type ResaleTermsAcceptance = {
+  accepted: true;
+  termsVersion: typeof RESALE_TERMS_VERSION;
+  settlementModel: typeof RESALE_SETTLEMENT_MODEL;
+  refundModel: typeof RESALE_REFUND_MODEL;
+};
+
+export function assertCurrentResaleTermsAcceptance(
+  value:
+    | {
+        accepted?: unknown;
+        termsVersion?: unknown;
+        settlementModel?: unknown;
+        refundModel?: unknown;
+      }
+    | null
+    | undefined,
+): asserts value is ResaleTermsAcceptance {
+  if (
+    value?.accepted !== true ||
+    value.termsVersion !== RESALE_TERMS_VERSION ||
+    value.settlementModel !== RESALE_SETTLEMENT_MODEL ||
+    value.refundModel !== RESALE_REFUND_MODEL
+  ) {
+    throw new ResaleError(
+      `Resale requires acceptance of ${RESALE_TERMS_VERSION} organizer-managed settlement and coordinated manual refund terms`,
+    );
+  }
+}
 
 export type TicketListingStatus = 'listed' | 'delisted' | 'sold' | 'expired';
 
@@ -54,8 +90,8 @@ export function validateResalePrice(
   if (!policy.enabled) {
     throw new ResaleError('Resale is not enabled for this event');
   }
-  if (priceCents < 0) {
-    throw new ResaleError('Resale price cannot be negative');
+  if (priceCents <= 0) {
+    throw new ResaleError('Paid resale price must be greater than zero');
   }
   const capByMultiplier = Math.round(faceValueCents * policy.maxMultiplier);
   const cap =

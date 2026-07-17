@@ -3,7 +3,7 @@ import {
   assertOrderDateOfBirthEligibility,
   normalizeAttendeeFieldsForCartItems,
 } from '../routes/modules/checkout.js';
-import { completeResaleListingSchema, transferTicketSchema } from '../http/schemas.js';
+import { transferTicketSchema } from '../http/schemas.js';
 
 const event = {
   starts_at: '2030-07-10T01:00:00.000Z',
@@ -24,21 +24,8 @@ const occurrences = new Map([
 ]);
 
 describe('checkout date-of-birth enforcement', () => {
-  it('keeps DOB optional in transport contracts so event policy decides whether it is required', () => {
+  it('keeps transfer DOB optional so event policy decides whether it is required', () => {
     expect(transferTicketSchema.safeParse({ toEmail: 'buyer@example.com' }).success).toBe(true);
-    expect(
-      completeResaleListingSchema.safeParse({
-        buyerId: 'usr_1',
-        buyerEmail: 'buyer@example.com',
-      }).success,
-    ).toBe(true);
-    expect(
-      completeResaleListingSchema.safeParse({
-        buyerId: 'usr_1',
-        buyerEmail: 'buyer@example.com',
-        buyerDateOfBirth: '1990-01-01',
-      }).success,
-    ).toBe(true);
   });
 
   it('does not collect buyer or attendee DOB for unrestricted events', () => {

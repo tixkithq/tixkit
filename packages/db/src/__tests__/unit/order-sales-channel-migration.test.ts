@@ -56,6 +56,7 @@ import { AgentExecutionPlanBindingMigration } from '../../migrations/0085_agent_
 import { AgentActionResultsMigration } from '../../migrations/0086_agent_action_results.js';
 import { DashboardActionRevisionsMigration } from '../../migrations/0087_dashboard_action_revisions.js';
 import { ProviderIncidentEvidenceMigration } from '../../migrations/0088_provider_incident_evidence.js';
+import { ResaleSettlementsMigration } from '../../migrations/0089_resale_settlements.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -240,7 +241,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0088_provider_incident_evidence');
+    expect(Object.keys(migrations).at(-1)).toBe('0089_resale_settlements');
     expect(migrations['0071_portable_import_approvals']).toBe(PortableImportApprovalsMigration);
     expect(migrations['0072_portable_import_rebindings']).toBe(PortableImportRebindingsMigration);
     expect(migrations['0073_portable_import_commit_authorizations']).toBe(
@@ -273,6 +274,7 @@ describe('OrderSalesChannelMigration', () => {
     expect(migrations['0086_agent_action_results']).toBe(AgentActionResultsMigration);
     expect(migrations['0087_dashboard_action_revisions']).toBe(DashboardActionRevisionsMigration);
     expect(migrations['0088_provider_incident_evidence']).toBe(ProviderIncidentEvidenceMigration);
+    expect(migrations['0089_resale_settlements']).toBe(ResaleSettlementsMigration);
     expect(migrations['0070_portable_import_preflights']).toBe(PortableImportPreflightsMigration);
     expect(migrations['0069_portable_export_build_leases']).toBe(
       PortableExportBuildLeasesMigration,

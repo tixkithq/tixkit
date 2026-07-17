@@ -89,6 +89,7 @@ import { AgentExecutionPlanBindingMigration } from './migrations/0085_agent_exec
 import { AgentActionResultsMigration } from './migrations/0086_agent_action_results.js';
 import { DashboardActionRevisionsMigration } from './migrations/0087_dashboard_action_revisions.js';
 import { ProviderIncidentEvidenceMigration } from './migrations/0088_provider_incident_evidence.js';
+import { ResaleSettlementsMigration } from './migrations/0089_resale_settlements.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -192,6 +193,8 @@ const ALL_SCHEMA_TABLES = [
   'event_readiness_acknowledgements',
   'dashboard_action_revisions',
   'provider_incident_evidence',
+  'resale_settlements',
+  'resale_settlement_entries',
   'sandbox_environments',
   'historical_check_ins',
   'historical_financial_snapshots',
@@ -355,6 +358,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0086_agent_action_results': AgentActionResultsMigration,
       '0087_dashboard_action_revisions': DashboardActionRevisionsMigration,
       '0088_provider_incident_evidence': ProviderIncidentEvidenceMigration,
+      '0089_resale_settlements': ResaleSettlementsMigration,
     };
   }
 }
@@ -716,8 +720,11 @@ export async function truncateAllData(db: Database): Promise<void> {
  * global setup) can inspect what happened without parsing stdout.
  */
 export async function runMigrations(dbUrl?: string): Promise<void> {
-  const db = createDb(dbUrl);
+  const previousDriver = process.env.DB_DRIVER;
+  if (!previousDriver && dbUrl) process.env.DB_DRIVER = getDriver(dbUrl);
+  let db: Database | undefined;
   try {
+    db = createDb(dbUrl);
     await adoptExistingInitialSchema(db);
 
     const migrator = new Migrator({
@@ -743,7 +750,9 @@ export async function runMigrations(dbUrl?: string): Promise<void> {
 
     console.log('All migrations completed');
   } finally {
-    await db.destroy();
+    await db?.destroy();
+    if (previousDriver === undefined) delete process.env.DB_DRIVER;
+    else process.env.DB_DRIVER = previousDriver;
   }
 }
 
@@ -753,13 +762,20 @@ export async function runMigrations(dbUrl?: string): Promise<void> {
  * that `runMigrations` alone cannot repair.
  */
 export async function resetDatabase(dbUrl?: string): Promise<void> {
-  const db = createDb(dbUrl);
+  const previousDriver = process.env.DB_DRIVER;
+  if (!previousDriver && dbUrl) process.env.DB_DRIVER = getDriver(dbUrl);
   try {
-    await dropAllTables(db);
+    const db = createDb(dbUrl);
+    try {
+      await dropAllTables(db);
+    } finally {
+      await db.destroy();
+    }
+    await runMigrations(dbUrl);
   } finally {
-    await db.destroy();
+    if (previousDriver === undefined) delete process.env.DB_DRIVER;
+    else process.env.DB_DRIVER = previousDriver;
   }
-  await runMigrations(dbUrl);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { createHash } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   AccessRuleRepository,
@@ -10,15 +11,21 @@ import {
   InventoryPoolRepository,
   ProductCategoryRepository,
   ProductRepository,
+  AuditLogRepository,
+  ResaleSettlementRepository,
+  ResaleSettlementConflictError,
   type Database,
 } from '@tixkit/db';
 import {
+  ConflictError,
   NotFoundError,
   ResaleError,
   ValidationError,
   normalizeEmailDomainAccessRuleValue,
+  assertCurrentResaleTermsAcceptance,
   validateResalePrice,
 } from '@tixkit/domain';
+import { writeAuditLog } from '../../auth/audit.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import {
   pageEnvelope,
@@ -44,6 +51,8 @@ import {
   updateProductSchema,
   resalePolicySchema,
   createResaleListingSchema,
+  recordResaleSettlementPayoutSchema,
+  recordResaleSettlementReversalSchema,
   parseBody,
 } from '../../http/schemas.js';
 
@@ -181,12 +190,16 @@ function toResaleValidationError(error: unknown): never {
   throw error;
 }
 
-function requireIdempotencyKey(request: FastifyRequest, action: string): string {
+function requireIdempotencyKey(request: FastifyRequest, action: string, maxLength = 255): string {
   const key = request.headers['idempotency-key'];
   if (typeof key !== 'string' || key.trim() === '') {
     throw new ValidationError(`Idempotency-Key header is required for ${action}`);
   }
-  return key.trim();
+  const normalized = key.trim();
+  if (normalized.length > maxLength) {
+    throw new ValidationError(`Idempotency-Key header is too long for ${action}`);
+  }
+  return normalized;
 }
 
 function requireNoLiveResaleCheckoutReservation(
@@ -204,6 +217,50 @@ function requireNoLiveResaleCheckoutReservation(
   if (reservedUntilMs > now.getTime()) {
     throw new ValidationError(`Ticket listing ${listingId} is reserved for checkout`);
   }
+}
+
+function serializeResaleSettlement(
+  settlement: Record<string, unknown>,
+  entries: Array<Record<string, unknown>>,
+) {
+  const cents = (value: unknown) => (value === null ? null : Number(value));
+  const timestamp = (value: unknown) =>
+    value instanceof Date ? value.toISOString() : String(value);
+  return {
+    id: settlement.id,
+    listingId: settlement.listing_id,
+    tenantId: settlement.tenant_id,
+    organizationId: settlement.organization_id,
+    brandId: settlement.brand_id,
+    eventId: settlement.event_id,
+    sellerOrderId: settlement.seller_order_id,
+    buyerOrderId: settlement.buyer_order_id,
+    sellerTicketId: settlement.seller_ticket_id,
+    buyerTicketId: settlement.buyer_ticket_id,
+    currency: settlement.currency,
+    grossCents: cents(settlement.gross_cents),
+    feeCents: cents(settlement.fee_cents),
+    payableCents: cents(settlement.payable_cents),
+    paidCents: cents(settlement.paid_cents),
+    reversedCents: cents(settlement.reversed_cents),
+    recoveryCents: cents(settlement.recovery_cents),
+    state: settlement.state,
+    termsVersion: settlement.terms_version,
+    version: Number(settlement.version),
+    createdAt: timestamp(settlement.created_at),
+    updatedAt: timestamp(settlement.updated_at),
+    entries: entries.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      amountCents: cents(entry.amount_cents),
+      currency: entry.currency,
+      actorId: entry.actor_id,
+      method: entry.method,
+      externalReferenceSha256: entry.external_reference_sha256,
+      reason: entry.reason,
+      createdAt: timestamp(entry.created_at),
+    })),
+  };
 }
 
 export const ticketingRoutes: FastifyPluginAsync = async (app) => {
@@ -231,6 +288,22 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     if (!event) throw new NotFoundError('Event', eventId);
     requireEventAccess(principal, event, eventId);
     return event;
+  };
+
+  const loadSettlementScope = async (principal: Principal, listingId: string) => {
+    const listing = await new TicketListingRepository(db).findById(listingId);
+    if (!listing || listing.tenant_id !== principal.tenantId) {
+      throw new NotFoundError('ResaleSettlement', listingId);
+    }
+    const event = await loadEvent(listing.event_id);
+    requireEventAccess(principal, event, listing.event_id);
+    return {
+      tenantId: principal.tenantId,
+      organizationId: String(event.organization_id),
+      brandId: String(event.brand_id),
+      eventId: listing.event_id,
+      listingId,
+    };
   };
 
   const validateEventOccurrence = async (eventId: string, occurrenceId?: string | null) => {
@@ -287,6 +360,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketId } = request.params as { ticketId: string };
     const body = parseBody(createResaleListingSchema, request.body);
+    assertCurrentResaleTermsAcceptance(body.termsAcceptance);
     const idempotencyKey = requireIdempotencyKey(request, 'resale listings');
 
     const ticketRepo = new TicketRepository(db);
@@ -311,6 +385,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       ticketId,
       priceCents: body.priceCents,
       expiresAt: body.expiresAt ?? null,
+      termsAcceptance: body.termsAcceptance,
     });
 
     const result = await withIdempotency(
@@ -378,6 +453,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
               currency: String(currentTicketType.currency),
               faceValueCents,
               expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+              termsAcceptance: body.termsAcceptance,
             });
             return { status: 201, body: serializeTicketListing(listing) };
           } catch (error) {
@@ -445,6 +521,147 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       },
     );
     return reply.status(result.status).send(result.body);
+  });
+
+  app.get('/ticket-listings/:listingId/settlement', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'orders.read');
+    const { listingId } = request.params as { listingId: string };
+    const scope = await loadSettlementScope(principal, listingId);
+    const repository = new ResaleSettlementRepository(db);
+    const settlement = await repository.findExact(scope);
+    if (!settlement) throw new NotFoundError('ResaleSettlement', listingId);
+    const entries = await repository.listEntriesExact(scope);
+    return serializeResaleSettlement(settlement, entries);
+  });
+
+  app.post('/ticket-listings/:listingId/settlement/payouts', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'billing.write');
+    const { listingId } = request.params as { listingId: string };
+    const body = parseBody(recordResaleSettlementPayoutSchema, request.body);
+    const idempotencyKey = requireIdempotencyKey(request, 'resale settlement payouts', 128);
+    const scope = await loadSettlementScope(principal, listingId);
+    const externalReferenceSha256 = createHash('sha256')
+      .update(body.externalReference, 'utf8')
+      .digest('hex');
+
+    try {
+      const response = await db.transaction().execute(async (transaction) => {
+        const repository = new ResaleSettlementRepository(transaction);
+        const locked = await repository.lockExact(scope);
+        const entriesBefore = locked ? await repository.listEntriesExact(scope) : [];
+        const replayed = entriesBefore.some((entry) => entry.idempotency_key === idempotencyKey);
+        const settlement = await repository.recordPayout({
+          ...scope,
+          amountCents: body.amountCents,
+          currency: body.currency,
+          expectedVersion: body.expectedVersion,
+          evidence: {
+            idempotencyKey,
+            actorId: principal.id,
+            method: body.method,
+            externalReferenceSha256,
+          },
+        });
+        if (!replayed) {
+          await writeAuditLog(
+            new AuditLogRepository(transaction),
+            request,
+            principal,
+            {
+              action: 'resale.settlement.payout_recorded',
+              organizationId: scope.organizationId,
+              brandId: scope.brandId,
+              resourceType: 'ResaleSettlement',
+              resourceId: settlement.id,
+              diffSummary: {
+                listingId,
+                amountCents: body.amountCents,
+                currency: body.currency,
+                method: body.method,
+                externalReferenceSha256,
+              },
+            },
+            { failClosed: true },
+          );
+        }
+        const entries = await repository.listEntriesExact(scope);
+        return serializeResaleSettlement(settlement, entries);
+      });
+      return reply.status(200).send(response);
+    } catch (error) {
+      if (error instanceof ResaleSettlementConflictError) {
+        throw new ConflictError('Resale settlement payout could not be recorded', {
+          reason: error.message,
+          listingId,
+        });
+      }
+      throw error;
+    }
+  });
+
+  app.post('/ticket-listings/:listingId/settlement/reversals', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'billing.write');
+    const { listingId } = request.params as { listingId: string };
+    const body = parseBody(recordResaleSettlementReversalSchema, request.body);
+    const idempotencyKey = requireIdempotencyKey(request, 'resale settlement reversals', 128);
+    const scope = await loadSettlementScope(principal, listingId);
+
+    try {
+      const response = await db.transaction().execute(async (transaction) => {
+        const repository = new ResaleSettlementRepository(transaction);
+        const locked = await repository.lockExact(scope);
+        const entriesBefore = locked ? await repository.listEntriesExact(scope) : [];
+        const replayed = entriesBefore.some((entry) => entry.idempotency_key === idempotencyKey);
+        const settlement = await repository.recordReversal({
+          ...scope,
+          amountCents: body.amountCents,
+          currency: body.currency,
+          expectedVersion: body.expectedVersion,
+          evidence: {
+            idempotencyKey,
+            actorId: principal.id,
+            method: body.method,
+            reason: body.reason,
+          },
+        });
+        if (!replayed) {
+          await writeAuditLog(
+            new AuditLogRepository(transaction),
+            request,
+            principal,
+            {
+              action: 'resale.settlement.reversal_recorded',
+              organizationId: scope.organizationId,
+              brandId: scope.brandId,
+              resourceType: 'ResaleSettlement',
+              resourceId: settlement.id,
+              diffSummary: {
+                listingId,
+                amountCents: body.amountCents,
+                currency: body.currency,
+                method: body.method,
+                reason: body.reason,
+              },
+            },
+            { failClosed: true },
+          );
+        }
+        const entries = await repository.listEntriesExact(scope);
+        return serializeResaleSettlement(settlement, entries);
+      });
+      return reply.status(200).send(response);
+    } catch (error) {
+      if (error instanceof ResaleSettlementConflictError) {
+        throw new ConflictError('Resale settlement reversal could not be recorded', {
+          reason: error.message,
+          listingId,
+        });
+      }
+      throw error;
+    }
   });
 
   app.post('/ticket-listings/:listingId/complete', async (request, reply) => {

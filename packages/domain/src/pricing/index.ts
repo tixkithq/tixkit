@@ -131,6 +131,12 @@ export type CartInput = {
   buyerFields?: Record<string, unknown>;
   attendeeFields?: Record<string, unknown[]>;
   waitlistEntryId?: Ulid;
+  resaleTermsAcceptance?: {
+    accepted: true;
+    termsVersion: '2026-07-16';
+    settlementModel: 'organizer_managed';
+    refundModel: 'manual_coordinated_resolution';
+  };
 };
 
 export type PricingContext = {

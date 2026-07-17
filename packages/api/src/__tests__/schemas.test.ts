@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   createCheckoutSessionSchema,
+  createResaleListingSchema,
+  recordResaleSettlementPayoutSchema,
+  recordResaleSettlementReversalSchema,
   updateCheckoutSessionSchema,
   parseBody,
   refundSchema,
@@ -27,6 +30,13 @@ import {
 } from '../http/schemas.js';
 import { ValidationError } from '@tixkit/domain';
 
+const currentResaleTermsAcceptance = {
+  accepted: true,
+  termsVersion: '2026-07-16',
+  settlementModel: 'organizer_managed',
+  refundModel: 'manual_coordinated_resolution',
+} as const;
+
 const makeOfflineScans = (count: number) =>
   Array.from({ length: count }, (_, index) => ({
     qrHash: `hash_${index}`,
@@ -35,6 +45,84 @@ const makeOfflineScans = (count: number) =>
   }));
 
 describe('safeRedirectUrl / successUrl / cancelUrl validation', () => {
+  it('requires exact current terms for resale checkout', () => {
+    expect(() =>
+      parseBody(createCheckoutSessionSchema(false), {
+        eventId: 'evt_1',
+        items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+      }),
+    ).toThrow(ValidationError);
+
+    const body = parseBody(createCheckoutSessionSchema(false), {
+      eventId: 'evt_1',
+      items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+      resaleTermsAcceptance: currentResaleTermsAcceptance,
+    });
+    expect(body.resaleTermsAcceptance).toEqual(currentResaleTermsAcceptance);
+  });
+
+  it('rejects stale resale terms and resale terms on primary checkout', () => {
+    expect(() =>
+      parseBody(createCheckoutSessionSchema(false), {
+        eventId: 'evt_1',
+        items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+        resaleTermsAcceptance: {
+          ...currentResaleTermsAcceptance,
+          termsVersion: '2026-07-15',
+        },
+      }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      parseBody(createCheckoutSessionSchema(false), {
+        eventId: 'evt_1',
+        items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+        resaleTermsAcceptance: currentResaleTermsAcceptance,
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('requires exact current terms to create a resale listing', () => {
+    expect(() => parseBody(createResaleListingSchema, { priceCents: 5000 })).toThrow(
+      ValidationError,
+    );
+    expect(
+      parseBody(createResaleListingSchema, {
+        priceCents: 5000,
+        termsAcceptance: currentResaleTermsAcceptance,
+      }),
+    ).toEqual({ priceCents: 5000, termsAcceptance: currentResaleTermsAcceptance });
+  });
+
+  it('validates bounded manual settlement payout and reversal evidence', () => {
+    expect(
+      parseBody(recordResaleSettlementPayoutSchema, {
+        amountCents: 5000,
+        currency: 'USD',
+        expectedVersion: 1,
+        method: 'bank_transfer',
+        externalReference: 'bank-payout-1',
+      }),
+    ).toMatchObject({ amountCents: 5000, expectedVersion: 1, method: 'bank_transfer' });
+    expect(() =>
+      parseBody(recordResaleSettlementPayoutSchema, {
+        amountCents: 0,
+        currency: 'usd',
+        expectedVersion: 0,
+        method: 'cash',
+        externalReference: '',
+      }),
+    ).toThrow(ValidationError);
+    expect(
+      parseBody(recordResaleSettlementReversalSchema, {
+        amountCents: 5000,
+        currency: 'USD',
+        expectedVersion: 2,
+        method: 'accounting_adjustment',
+        reason: 'Buyer refund coordinated with seller recovery',
+      }),
+    ).toMatchObject({ amountCents: 5000, expectedVersion: 2 });
+  });
+
   it('rejects javascript: scheme in successUrl', () => {
     expect(() =>
       parseBody(createCheckoutSessionSchema(false), {

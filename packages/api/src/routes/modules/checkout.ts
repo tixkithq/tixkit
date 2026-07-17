@@ -49,6 +49,7 @@ import {
   ForbiddenError,
   evaluateDateOfBirthEligibility,
   requiresDateOfBirthVerification,
+  assertCurrentResaleTermsAcceptance,
 } from '@tixkit/domain';
 import type { Question } from '@tixkit/domain';
 import {
@@ -1471,6 +1472,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       async () => {
         const resaleItems = body.items.filter((item) => item.resaleListingId);
         if (resaleItems.length > 0) {
+          assertCurrentResaleTermsAcceptance(body.resaleTermsAcceptance);
           if (body.items.length !== 1) {
             throw new ValidationError(
               'Resale checkout cannot be mixed with primary tickets or products',
@@ -1622,6 +1624,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             affiliateCode: body.affiliateCode,
             trackingId: body.trackingId,
             buyerFields,
+            resaleTermsAcceptance: body.resaleTermsAcceptance,
           };
           let sessionCreated = false;
           try {
@@ -2211,6 +2214,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       const clientToken = requireCheckoutSessionToken(request);
       const idempotencyKey = requireIdempotencyKey(request);
       const body = parseBody(createResaleListingSchema, request.body);
+      assertCurrentResaleTermsAcceptance(body.termsAcceptance);
 
       const sessionRepo = new CheckoutSessionRepository(db);
       const session = await sessionRepo.findById(sessionId);
@@ -2248,6 +2252,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         ticketId,
         priceCents: body.priceCents,
         expiresAt: body.expiresAt ?? null,
+        termsAcceptance: body.termsAcceptance,
       });
 
       const result = await withIdempotency(
@@ -2321,6 +2326,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
                 currency: String(currentTicketType.currency),
                 faceValueCents,
                 expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+                termsAcceptance: body.termsAcceptance,
               });
               return { status: 201, body: serializeTicketListing(listing) };
             } catch (error) {

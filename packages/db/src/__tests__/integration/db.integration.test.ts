@@ -24,6 +24,13 @@ import {
   EventReadinessAcknowledgementRepository,
 } from '../../repositories/index.js';
 
+const CURRENT_RESALE_TERMS_ACCEPTANCE = {
+  accepted: true,
+  termsVersion: '2026-07-16',
+  settlementModel: 'organizer_managed',
+  refundModel: 'manual_coordinated_resolution',
+} as const;
+
 type DriverCase = {
   driver: 'postgres' | 'mysql' | 'mssql';
   url: string;
@@ -492,6 +499,7 @@ describe.sequential.each(driverCases)('database integration: $driver', ({ driver
       priceCents: 2400,
       currency: 'USD',
       faceValueCents: 2500,
+      termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
     });
 
     expect(listing).toMatchObject({
@@ -513,6 +521,7 @@ describe.sequential.each(driverCases)('database integration: $driver', ({ driver
         priceCents: 2300,
         currency: 'USD',
         faceValueCents: 2500,
+        termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
       }),
     ).rejects.toThrow();
 
@@ -534,6 +543,7 @@ describe.sequential.each(driverCases)('database integration: $driver', ({ driver
       priceCents: 2200,
       currency: 'USD',
       faceValueCents: 2500,
+      termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
     });
     const sold = await repo.markSold(secondListing.id, 'usr_buyer');
     expect(sold).toMatchObject({

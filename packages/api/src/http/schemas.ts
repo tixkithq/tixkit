@@ -4,6 +4,9 @@ import {
   isLocalKioskReturnTo,
   ValidationError,
   WEBHOOK_EVENT_TYPES,
+  RESALE_REFUND_MODEL,
+  RESALE_SETTLEMENT_MODEL,
+  RESALE_TERMS_VERSION,
 } from '@tixkit/domain';
 
 // Reusable primitives
@@ -239,6 +242,15 @@ export function safeRedirectUrl(devMode: boolean): z.ZodString {
   );
 }
 
+export const resaleTermsAcceptanceSchema = z
+  .object({
+    accepted: z.literal(true),
+    termsVersion: z.literal(RESALE_TERMS_VERSION),
+    settlementModel: z.literal(RESALE_SETTLEMENT_MODEL),
+    refundModel: z.literal(RESALE_REFUND_MODEL),
+  })
+  .strict();
+
 // Checkout schemas
 export const createCheckoutSessionSchema = (devMode: boolean) =>
   z
@@ -294,10 +306,28 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
         })
         .optional(),
       buyerFields: z.record(z.string(), z.unknown()).optional(),
+      resaleTermsAcceptance: resaleTermsAcceptanceSchema.optional(),
       successUrl: safeRedirectUrl(devMode).optional(),
       cancelUrl: safeRedirectUrl(devMode).optional(),
     })
-    .strict();
+    .strict()
+    .superRefine((body, ctx) => {
+      const includesResale = body.items.some((item) => Boolean(item.resaleListingId));
+      if (includesResale && !body.resaleTermsAcceptance) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['resaleTermsAcceptance'],
+          message: 'Current resale settlement and refund terms must be accepted',
+        });
+      }
+      if (!includesResale && body.resaleTermsAcceptance) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['resaleTermsAcceptance'],
+          message: 'Resale terms are only accepted for resale checkout',
+        });
+      }
+    });
 
 export const updateCheckoutSessionSchema = (devMode: boolean) =>
   z
@@ -946,20 +976,35 @@ export const resalePolicySchema = z
 
 export const createResaleListingSchema = z
   .object({
-    priceCents: z.number().int().nonnegative(),
+    priceCents: z.number().int().positive(),
     expiresAt: iso8601Schema.optional(),
+    termsAcceptance: resaleTermsAcceptanceSchema,
   })
   .strict();
 
-export const completeResaleListingSchema = z
+const resaleSettlementMethodSchema = z.enum([
+  'bank_transfer',
+  'payment_provider',
+  'accounting_adjustment',
+]);
+
+export const recordResaleSettlementPayoutSchema = z
   .object({
-    buyerId: z.string().trim().min(1),
-    buyerEmail: z.string().trim().toLowerCase().email(),
-    buyerFirstName: z.string().trim().min(1).nullable().optional(),
-    buyerLastName: z.string().trim().min(1).nullable().optional(),
-    buyerPhone: z.string().trim().min(1).nullable().optional(),
-    buyerDateOfBirth: dateOfBirthSchema.optional(),
-    externalPaymentReference: z.string().trim().min(1).max(256).nullable().optional(),
+    amountCents: z.number().int().positive(),
+    currency: currencySchema,
+    expectedVersion: z.number().int().positive(),
+    method: resaleSettlementMethodSchema,
+    externalReference: z.string().trim().min(1).max(256),
+  })
+  .strict();
+
+export const recordResaleSettlementReversalSchema = z
+  .object({
+    amountCents: z.number().int().positive(),
+    currency: currencySchema,
+    expectedVersion: z.number().int().positive(),
+    method: resaleSettlementMethodSchema,
+    reason: z.string().trim().min(1).max(512),
   })
   .strict();
 

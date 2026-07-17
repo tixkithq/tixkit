@@ -35,6 +35,20 @@ const ATTENDEE_ID = `att_resale_${RUN_ID}`;
 const TICKET_ID = `tkt_resale_${RUN_ID}`;
 const WALLET_PASS_ID = `wps_resale_${RUN_ID}`;
 const OTHER_TENANT_ID = `tnt_resale_other_${RUN_ID}`;
+const CURRENT_RESALE_TERMS_ACCEPTANCE = {
+  accepted: true,
+  termsVersion: '2026-07-16',
+  settlementModel: 'organizer_managed',
+  refundModel: 'manual_coordinated_resolution',
+} as const;
+
+function resaleListingPayload(priceCents: number, expiresAt?: string) {
+  return {
+    priceCents,
+    ...(expiresAt ? { expiresAt } : {}),
+    termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
+  };
+}
 
 let db: Database;
 let app: FastifyInstance;
@@ -535,7 +549,7 @@ describeWithIntegrationDatabase(
     });
 
     it('creates, replays, lists, and delists a capped resale listing with real DB idempotency', async () => {
-      const payload = { priceCents: 5500 };
+      const payload = resaleListingPayload(5500);
       const idempotencyKey = `resale_db_${RUN_ID}`;
       const first = await app.inject({
         method: 'POST',
@@ -565,6 +579,9 @@ describeWithIntegrationDatabase(
         seller_id: ORDER_ID,
         status: 'listed',
         active_listing_key: TICKET_ID,
+        seller_terms_version: CURRENT_RESALE_TERMS_ACCEPTANCE.termsVersion,
+        settlement_model: CURRENT_RESALE_TERMS_ACCEPTANCE.settlementModel,
+        refund_model: CURRENT_RESALE_TERMS_ACCEPTANCE.refundModel,
       });
       expect(Number(rows[0].price_cents)).toBe(5500);
 
@@ -651,7 +668,7 @@ describeWithIntegrationDatabase(
           method: 'POST',
           url: `/tickets/${TICKET_ID}/resale-listings`,
           headers: { 'Idempotency-Key': createIdempotencyKey },
-          payload: { priceCents: 5500 },
+          payload: resaleListingPayload(5500),
         });
         expect(deniedCreate.statusCode, `${denial.label}: ${deniedCreate.body}`).toBe(
           denial.expectedStatus,
@@ -675,7 +692,7 @@ describeWithIntegrationDatabase(
           method: 'POST',
           url: `/tickets/${TICKET_ID}/resale-listings`,
           headers: { 'Idempotency-Key': `resale_auth_seed_${denial.label}_${RUN_ID}` },
-          payload: { priceCents: 5500 },
+          payload: resaleListingPayload(5500),
         });
         expect(listed.statusCode, listed.body).toBe(201);
         const listingId = listed.json().id as string;
@@ -741,7 +758,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_scope_race_seed_delist_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode, listed.body).toBe(201);
       const listingId = listed.json().id as string;
@@ -828,7 +845,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_reservation_states_seed_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode, listed.body).toBe(201);
       const listingId = listed.json().id as string;
@@ -905,7 +922,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_reservation_race_seed_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode, listed.body).toBe(201);
       const listingId = listed.json().id as string;
@@ -973,7 +990,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_public_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(create.statusCode).toBe(201);
 
@@ -1029,13 +1046,13 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_page_first_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       const secondListing = await app.inject({
         method: 'POST',
         url: `/tickets/${secondTicketId}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_page_second_${RUN_ID}` },
-        payload: { priceCents: 5600 },
+        payload: resaleListingPayload(5600),
       });
       expect(firstListing.statusCode).toBe(201);
       expect(secondListing.statusCode).toBe(201);
@@ -1066,7 +1083,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_checkout_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(create.statusCode).toBe(201);
       const listingId = create.json().id as string;
@@ -1074,6 +1091,7 @@ describeWithIntegrationDatabase(
       const payload = {
         eventId: EVENT_ID,
         items: [{ resaleListingId: listingId, quantity: 1 }],
+        resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
         buyer: { email: 'resale-public-buyer@example.com', firstName: 'Public', lastName: 'Buyer' },
       };
       const first = await app.inject({
@@ -1123,6 +1141,18 @@ describeWithIntegrationDatabase(
         .executeTakeFirstOrThrow();
       expect(reserved.reserved_checkout_session_id).toBe(first.json().id);
       expect(reserved.reserved_until).toBeTruthy();
+      const storedSession = await db
+        .selectFrom('checkout_sessions')
+        .select('cart')
+        .where('id', '=', first.json().id)
+        .executeTakeFirstOrThrow();
+      const storedCart =
+        typeof storedSession.cart === 'string'
+          ? JSON.parse(storedSession.cart)
+          : storedSession.cart;
+      expect(storedCart).toMatchObject({
+        resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
+      });
 
       const publicList = await app.inject({
         method: 'GET',
@@ -1168,7 +1198,7 @@ describeWithIntegrationDatabase(
           method: 'POST',
           url: `/tickets/${TICKET_ID}/resale-listings`,
           headers: { 'Idempotency-Key': `resale_db_age_listing_${RUN_ID}` },
-          payload: { priceCents: 5500 },
+          payload: resaleListingPayload(5500),
         });
         expect(createListing.statusCode).toBe(201);
         const checkout = await app.inject({
@@ -1178,6 +1208,7 @@ describeWithIntegrationDatabase(
           payload: {
             eventId: EVENT_ID,
             items: [{ resaleListingId: createListing.json().id, quantity: 1 }],
+            resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
             buyer: { email: 'future-buyer@example.test', dateOfBirth: '2009-07-10' },
           },
         });
@@ -1239,7 +1270,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_required_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(create.statusCode).toBe(201);
       const listingId = create.json().id as string;
@@ -1251,6 +1282,7 @@ describeWithIntegrationDatabase(
         payload: {
           eventId: EVENT_ID,
           items: [{ resaleListingId: listingId, quantity: 1 }],
+          resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
           buyer: {
             email: 'resale-required-buyer@example.com',
             firstName: 'Required',
@@ -1341,7 +1373,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_consent_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(create.statusCode).toBe(201);
       const listingId = create.json().id as string;
@@ -1353,6 +1385,7 @@ describeWithIntegrationDatabase(
         payload: {
           eventId: EVENT_ID,
           items: [{ resaleListingId: listingId, quantity: 1 }],
+          resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
           buyer: {
             email: 'resale-consent-buyer@example.com',
             firstName: 'Consent',
@@ -1388,7 +1421,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_self_checkout_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(create.statusCode).toBe(201);
       expect(create.json()).toMatchObject({ sellerId: ORDER_ID });
@@ -1400,6 +1433,7 @@ describeWithIntegrationDatabase(
         payload: {
           eventId: EVENT_ID,
           items: [{ resaleListingId: create.json().id, quantity: 1 }],
+          resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
           buyer: {
             email: 'RESALE-BUYER@example.com',
             firstName: 'Resale',
@@ -1415,7 +1449,7 @@ describeWithIntegrationDatabase(
     });
 
     it('lets a checkout-session owner create and replay a buyer resale listing', async () => {
-      const payload = { priceCents: 5500 };
+      const payload = resaleListingPayload(5500);
       const missingToken = await app.inject({
         method: 'POST',
         url: `/checkout/sessions/${CHECKOUT_SESSION_ID}/tickets/${TICKET_ID}/resale-listing`,
@@ -1499,7 +1533,7 @@ describeWithIntegrationDatabase(
               'X-Checkout-Session-Token': `client_${RUN_ID}`,
               'Idempotency-Key': `buyer_resale_race_${RUN_ID}_${index}`,
             },
-            payload: { priceCents: 5500 },
+            payload: resaleListingPayload(5500),
           }),
         ),
       );
@@ -1566,7 +1600,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_transfer_guard_seed_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode, listed.body).toBe(201);
 
@@ -1642,6 +1676,7 @@ describeWithIntegrationDatabase(
           priceCents: 5500,
           currency: 'USD',
           faceValueCents: 5000,
+          termsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
         });
         listingEntered.resolve();
         await releaseListing.promise;
@@ -1733,7 +1768,7 @@ describeWithIntegrationDatabase(
           method: 'POST',
           url: `/tickets/${TICKET_ID}/resale-listings`,
           headers: { 'Idempotency-Key': `resale_transfer_race_staff_${RUN_ID}` },
-          payload: { priceCents: 5500 },
+          payload: resaleListingPayload(5500),
         }),
         app.inject({
           method: 'POST',
@@ -1742,7 +1777,7 @@ describeWithIntegrationDatabase(
             'X-Checkout-Session-Token': `client_${RUN_ID}`,
             'Idempotency-Key': `resale_transfer_race_buyer_${RUN_ID}`,
           },
-          payload: { priceCents: 5500 },
+          payload: resaleListingPayload(5500),
         }),
       ];
       let reservationsObserved = false;
@@ -1861,7 +1896,7 @@ describeWithIntegrationDatabase(
             method: 'POST',
             url: `/tickets/${TICKET_ID}/resale-listings`,
             headers: { 'Idempotency-Key': keys[0] },
-            payload: { priceCents: 5500 },
+            payload: resaleListingPayload(5500),
           }),
           app.inject({
             method: 'POST',
@@ -1870,7 +1905,7 @@ describeWithIntegrationDatabase(
               'X-Checkout-Session-Token': `client_${RUN_ID}`,
               'Idempotency-Key': keys[1],
             },
-            payload: { priceCents: 5500 },
+            payload: resaleListingPayload(5500),
           }),
         ];
         let reservationsObserved = false;
@@ -2079,7 +2114,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_complete_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode).toBe(201);
       const listingId = listed.json().id as string;
@@ -2166,7 +2201,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_refund_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode, listed.body).toBe(201);
       const listingId = listed.json().id as string;
@@ -2333,7 +2368,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_complete_race_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode).toBe(201);
       const listingId = listed.json().id as string;
@@ -2407,7 +2442,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_expired_listing_${RUN_ID}` },
-        payload: { priceCents: 5500, expiresAt: '2020-01-01T00:00:00.000Z' },
+        payload: resaleListingPayload(5500, '2020-01-01T00:00:00.000Z'),
       });
       expect(listed.statusCode).toBe(201);
       const listingId = listed.json().id as string;
@@ -2480,7 +2515,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_load_listing_${RUN_ID}` },
-        payload: { priceCents: 5500 },
+        payload: resaleListingPayload(5500),
       });
       expect(listed.statusCode).toBe(201);
       const listingId = listed.json().id as string;
@@ -2598,7 +2633,7 @@ describeWithIntegrationDatabase(
         method: 'POST',
         url: `/tickets/${TICKET_ID}/resale-listings`,
         headers: { 'Idempotency-Key': `resale_db_cap_${RUN_ID}` },
-        payload: { priceCents: 5001 },
+        payload: resaleListingPayload(5001),
       });
       expect(rejected.statusCode).toBe(400);
 

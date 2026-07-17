@@ -1,12 +1,40 @@
 import { describe, it, expect } from 'vitest';
 import {
+  assertCurrentResaleTermsAcceptance,
   validateResalePrice,
   transitionListing,
   assertNoActiveListing,
+  RESALE_REFUND_MODEL,
+  RESALE_SETTLEMENT_MODEL,
+  RESALE_TERMS_VERSION,
   ResaleError,
   type TicketListing,
   type ResalePriceCapPolicy,
 } from '../ticketing/resale.js';
+
+describe('assertCurrentResaleTermsAcceptance', () => {
+  const currentAcceptance = {
+    accepted: true,
+    termsVersion: RESALE_TERMS_VERSION,
+    settlementModel: RESALE_SETTLEMENT_MODEL,
+    refundModel: RESALE_REFUND_MODEL,
+  } as const;
+
+  it('accepts the exact current organizer-managed settlement contract', () => {
+    expect(() => assertCurrentResaleTermsAcceptance(currentAcceptance)).not.toThrow();
+  });
+
+  it.each([
+    undefined,
+    null,
+    { ...currentAcceptance, accepted: false },
+    { ...currentAcceptance, termsVersion: '2026-07-15' },
+    { ...currentAcceptance, settlementModel: 'provider_managed' },
+    { ...currentAcceptance, refundModel: 'automatic' },
+  ])('fails closed for missing, declined, or stale terms: %j', (acceptance) => {
+    expect(() => assertCurrentResaleTermsAcceptance(acceptance)).toThrow(ResaleError);
+  });
+});
 
 const cap: ResalePriceCapPolicy = { maxMultiplier: 1.2, enabled: true };
 const faceValue = 5000; // $50.00
@@ -53,7 +81,8 @@ describe('validateResalePrice', () => {
     );
   });
 
-  it('rejects negative prices', () => {
+  it('rejects zero and negative prices', () => {
+    expect(() => validateResalePrice(0, faceValue, cap)).toThrow(ResaleError);
     expect(() => validateResalePrice(-1, faceValue, cap)).toThrow(ResaleError);
   });
 });

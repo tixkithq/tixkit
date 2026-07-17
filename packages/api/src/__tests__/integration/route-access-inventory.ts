@@ -115,6 +115,14 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'resale-routes-db.integration.test.ts',
     resolve(import.meta.dirname, 'resale-routes-db.integration.test.ts'),
   ],
+  [
+    'resale-settlement-routes.test.ts',
+    resolve(import.meta.dirname, '../resale-settlement-routes.test.ts'),
+  ],
+  [
+    'resale-settlement-concurrency-db.integration.test.ts',
+    resolve(import.meta.dirname, 'resale-settlement-concurrency-db.integration.test.ts'),
+  ],
 ]);
 
 type AuthorizationEvidenceBinding = Readonly<{
@@ -194,6 +202,19 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       persistenceSource: 'resale-routes-db.integration.test.ts',
     },
   ),
+  ...evidenceBindings(['getTicketListingsByListingIdSettlement'], {
+    source: 'resale-settlement-routes.test.ts',
+  }),
+  ...evidenceBindings(
+    [
+      'postTicketListingsByListingIdSettlementPayouts',
+      'postTicketListingsByListingIdSettlementReversals',
+    ],
+    {
+      source: 'resale-settlement-routes.test.ts',
+      persistenceSource: 'resale-settlement-concurrency-db.integration.test.ts',
+    },
+  ),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
@@ -211,6 +232,7 @@ const delegatedAuthorizationGuards = new Set([
   'loadAuthorizedCampaign',
   'loadAuthorizedDocument',
   'loadAuthorizedEvent',
+  'loadSettlementScope',
   'report',
   'requireAgent',
   'requireHumanApprover',
@@ -239,6 +261,7 @@ const eventScopeGuards = new Set([
   'loadCampaignProviderEventItems',
   'loadAuthorizedCampaign',
   'loadAuthorizedEvent',
+  'loadSettlementScope',
   'requireEventAccess',
   'requireReportEventAccess',
   'scopedEvent',

@@ -766,8 +766,64 @@ export interface TicketListingTable {
   reserved_until: Timestamp | null;
   expires_at: Timestamp | null;
   sold_at: Timestamp | null;
+  seller_terms_version: string | null;
+  settlement_model: string | null;
+  refund_model: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export type ResaleSettlementState =
+  | 'pending'
+  | 'paid'
+  | 'reversed'
+  | 'recovery_required'
+  | 'review_required';
+
+export interface ResaleSettlementTable {
+  id: string;
+  listing_id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string;
+  seller_order_id: string | null;
+  buyer_order_id: string | null;
+  seller_ticket_id: string | null;
+  buyer_ticket_id: string | null;
+  currency: string;
+  gross_cents: number | string | null;
+  fee_cents: number | string | null;
+  payable_cents: number | string | null;
+  paid_cents: number | string | null;
+  reversed_cents: number | string | null;
+  recovery_cents: number | string | null;
+  state: ResaleSettlementState;
+  terms_version: string | null;
+  version: number | string | bigint;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export type ResaleSettlementEntryKind =
+  | 'payable_accrued'
+  | 'payout_recorded'
+  | 'payable_reversed'
+  | 'recovery_required';
+
+export interface ResaleSettlementEntryTable {
+  id: string;
+  settlement_id: string;
+  tenant_id: string;
+  kind: ResaleSettlementEntryKind;
+  amount_cents: number | string;
+  currency: string;
+  idempotency_key: string;
+  actor_id: string;
+  method: string;
+  external_reference_sha256: string | null;
+  reason: string | null;
+  created_at: Timestamp;
 }
 
 export interface WalletPassTable {
@@ -2253,6 +2309,8 @@ export interface DB {
   order_timeline_events: OrderTimelineEventTable;
   tickets: TicketTable;
   ticket_listings: TicketListingTable;
+  resale_settlements: ResaleSettlementTable;
+  resale_settlement_entries: ResaleSettlementEntryTable;
   wallet_passes: WalletPassTable;
   upload_artifacts: UploadArtifactTable;
   event_media_assets: EventMediaAssetTable;

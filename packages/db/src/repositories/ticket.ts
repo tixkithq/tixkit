@@ -2,6 +2,7 @@ import { BaseRepository, insertReturning } from './base.js';
 import { ulid } from 'ulid';
 import { sql } from 'kysely';
 import type { Database } from '../client.js';
+import type { ResaleTermsAcceptance } from '@tixkit/domain';
 
 type TicketListingTerminalStatus = 'delisted' | 'expired';
 
@@ -165,6 +166,7 @@ export class TicketListingRepository extends BaseRepository {
     currency: string;
     faceValueCents: number;
     expiresAt?: Date;
+    termsAcceptance: ResaleTermsAcceptance;
   }) {
     const id = `lst_${ulid()}`;
     const now = new Date();
@@ -186,6 +188,9 @@ export class TicketListingRepository extends BaseRepository {
         reserved_until: null,
         expires_at: input.expiresAt ?? null,
         sold_at: null,
+        seller_terms_version: input.termsAcceptance.termsVersion,
+        settlement_model: input.termsAcceptance.settlementModel,
+        refund_model: input.termsAcceptance.refundModel,
         created_at: now,
         updated_at: now,
       },

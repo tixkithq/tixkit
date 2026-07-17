@@ -10,6 +10,9 @@ const dbState = {
   locks: [] as string[],
   destroy: vi.fn(),
   afterSelect: undefined as ((table: string, rows: Array<Record<string, any>>) => void) | undefined,
+  skipUpdate: undefined as
+    | ((table: string, updates: Record<string, unknown>, row: Record<string, any>) => boolean)
+    | undefined,
 };
 
 const stripeMock = {
@@ -143,6 +146,61 @@ function matches(row: Record<string, any>, filters: RowPredicate[]): boolean {
 function EmailJobRepository() {}
 function OrderRepository() {}
 
+class ResaleSettlementRepository {
+  constructor(_db: unknown) {}
+
+  async createAndAccrue(input: Record<string, any>) {
+    const existing = Object.values(dbState.tables.resale_settlements ?? {}).find(
+      (row) => row.listing_id === input.listingId,
+    );
+    if (existing) return existing;
+    const id = `rst_${input.listingId}`;
+    const now = new Date();
+    const settlement = {
+      id,
+      listing_id: input.listingId,
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      brand_id: input.brandId,
+      event_id: input.eventId,
+      seller_order_id: input.sellerOrderId,
+      buyer_order_id: input.buyerOrderId,
+      seller_ticket_id: input.sellerTicketId,
+      buyer_ticket_id: input.buyerTicketId,
+      currency: input.currency,
+      gross_cents: input.grossCents,
+      fee_cents: input.feeCents,
+      payable_cents: input.payableCents,
+      paid_cents: 0,
+      reversed_cents: 0,
+      recovery_cents: 0,
+      state: 'pending',
+      terms_version: input.termsVersion,
+      version: 1,
+      created_at: now,
+      updated_at: now,
+    };
+    dbState.tables.resale_settlements ??= {};
+    dbState.tables.resale_settlement_entries ??= {};
+    dbState.tables.resale_settlements[id] = settlement;
+    dbState.tables.resale_settlement_entries[`rse_${input.listingId}`] = {
+      id: `rse_${input.listingId}`,
+      settlement_id: id,
+      tenant_id: input.tenantId,
+      kind: 'payable_accrued',
+      amount_cents: input.payableCents,
+      currency: input.currency,
+      idempotency_key: input.evidence.idempotencyKey,
+      actor_id: input.evidence.actorId,
+      method: input.evidence.method,
+      external_reference_sha256: null,
+      reason: null,
+      created_at: now,
+    };
+    return settlement;
+  }
+}
+
 vi.mock('@tixkit/db', () => {
   function rowsFor(table: string): Record<string, any> {
     dbState.tables[table] ??= {};
@@ -226,6 +284,7 @@ vi.mock('@tixkit/db', () => {
                   return value;
                 })
               : updates;
+          if (dbState.skipUpdate?.(table, resolved, row)) continue;
           Object.assign(row, resolved);
           updatedCount += 1;
         }
@@ -285,7 +344,15 @@ vi.mock('@tixkit/db', () => {
     insertInto: insertQuery,
     deleteFrom: deleteQuery,
     transaction: () => ({
-      execute: async (fn: (trx: typeof db) => Promise<unknown>) => fn(db),
+      execute: async (fn: (trx: typeof db) => Promise<unknown>) => {
+        const snapshot = structuredClone(dbState.tables);
+        try {
+          return await fn(Object.assign(Object.create(db), db, { isTransaction: true }));
+        } catch (error) {
+          dbState.tables = snapshot;
+          throw error;
+        }
+      },
     }),
     destroy: dbState.destroy,
   };
@@ -294,6 +361,7 @@ vi.mock('@tixkit/db', () => {
     createDb: () => db,
     EmailJobRepository,
     OrderRepository,
+    ResaleSettlementRepository,
     PaymentIntentRepository: class {
       async findByProviderAndIntentId(provider: string, providerIntentId: string) {
         return Object.values(rowsFor('payment_intents')).find(
@@ -415,6 +483,7 @@ describe('createPaymentIntentActivity capture mode', () => {
     dbState.tables = {};
     dbState.locks = [];
     dbState.afterSelect = undefined;
+    dbState.skipUpdate = undefined;
     dbState.destroy.mockClear();
     stripeMock.paymentIntentsCreate.mockClear();
     stripeMock.paymentIntentsRetrieve.mockClear();
@@ -792,6 +861,7 @@ describe('finalizeOrderActivity inventory holds', () => {
     dbState.tables = {};
     dbState.locks = [];
     dbState.afterSelect = undefined;
+    dbState.skipUpdate = undefined;
     dbState.destroy.mockClear();
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     seedTrustedPaymentIntent();
@@ -803,8 +873,14 @@ describe('finalizeOrderActivity inventory holds', () => {
       tenantId: 'tnt_1',
       paymentIntentId: 'pi_provider_1',
     });
+    const replay = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
 
     expect(result.ok).toBe(true);
+    expect(replay).toEqual(result);
     expect(Object.values(dbState.tables.orders)).toHaveLength(1);
     expect(Object.values(dbState.tables.orders)[0]).toMatchObject({
       payment_intent_id: 'pi_1',
@@ -813,7 +889,7 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('converted');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(1);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('completed');
-    expect(dbState.locks).toEqual(['inventory_pools', 'checkout_holds']);
+    expect(dbState.locks).toEqual(['events', 'inventory_pools', 'checkout_holds']);
   });
 
   it('releases test holds without changing production inventory counts', async () => {
@@ -1139,6 +1215,39 @@ describe('finalizeOrderActivity inventory holds', () => {
     ).rejects.toBe(concurrencyError);
   });
 
+  it.each([
+    ['missing', undefined],
+    [
+      'stale',
+      {
+        accepted: true,
+        termsVersion: '2026-07-15',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
+    ],
+  ])('fails closed for %s buyer resale terms before order mutation', async (_label, acceptance) => {
+    dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+      items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+      resaleTermsAcceptance: acceptance,
+    });
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'RESALE_TERMS_NOT_ACCEPTED',
+      retryable: false,
+    });
+    expect(Object.values(dbState.tables.orders ?? {})).toHaveLength(0);
+    expect(Object.values(dbState.tables.resale_settlements ?? {})).toHaveLength(0);
+    expect(dbState.tables.checkout_holds.hld_1.status).toBe('active');
+  });
+
   it('finalizes a reserved resale listing into a buyer order and transfers the seller ticket', async () => {
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     dbState.tables.checkout_holds = {};
@@ -1169,6 +1278,12 @@ describe('finalizeOrderActivity inventory holds', () => {
       items: [{ resaleListingId: 'lst_1', quantity: 1 }],
       buyerFields: {},
       attendeeFields: {},
+      resaleTermsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
     });
     dbState.tables.ticket_listings = {
       lst_1: {
@@ -1187,6 +1302,9 @@ describe('finalizeOrderActivity inventory holds', () => {
         reserved_until: new Date(Date.now() + 60_000),
         expires_at: null,
         sold_at: null,
+        seller_terms_version: '2026-07-16',
+        settlement_model: 'organizer_managed',
+        refund_model: 'manual_coordinated_resolution',
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -1213,6 +1331,24 @@ describe('finalizeOrderActivity inventory holds', () => {
     };
     seedTrustedPaymentIntent({ amountCents: 5500 });
 
+    dbState.skipUpdate = (table, updates) =>
+      table === 'ticket_listings' && updates.status === 'sold';
+    const forcedRollback = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+    expect(forcedRollback).toMatchObject({
+      ok: false,
+      errorCode: 'RESALE_LISTING_UNAVAILABLE',
+      retryable: true,
+    });
+    expect(Object.values(dbState.tables.orders ?? {})).toHaveLength(0);
+    expect(Object.values(dbState.tables.resale_settlements ?? {})).toHaveLength(0);
+    expect(dbState.tables.tickets.tkt_seller_1).toMatchObject({ status: 'valid' });
+    expect(dbState.tables.ticket_listings.lst_1).toMatchObject({ status: 'listed' });
+    dbState.skipUpdate = undefined;
+
     const result = await finalizeOrderActivity({
       checkoutSessionId: 'cs_1',
       tenantId: 'tnt_1',
@@ -1221,6 +1357,12 @@ describe('finalizeOrderActivity inventory holds', () => {
 
     expect(result.ok).toBe(true);
     const buyerOrderId = result.ok ? result.value.orderId : '';
+    const replay = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+    expect(replay).toEqual(result);
     const buyerTickets = Object.values(dbState.tables.tickets).filter(
       (ticket) => ticket.order_id === buyerOrderId,
     );
@@ -1243,6 +1385,28 @@ describe('finalizeOrderActivity inventory holds', () => {
         resale_listing_id: 'lst_1',
         ticket_type_id: 'tt_1',
         total_cents: 5500,
+      }),
+    ]);
+    expect(Object.values(dbState.tables.resale_settlements)).toEqual([
+      expect.objectContaining({
+        listing_id: 'lst_1',
+        seller_order_id: 'ord_seller_1',
+        buyer_order_id: buyerOrderId,
+        seller_ticket_id: 'tkt_seller_1',
+        buyer_ticket_id: buyerTickets[0]?.id,
+        gross_cents: 5500,
+        fee_cents: 0,
+        payable_cents: 5500,
+        state: 'pending',
+        terms_version: '2026-07-16',
+      }),
+    ]);
+    expect(Object.values(dbState.tables.resale_settlement_entries)).toEqual([
+      expect.objectContaining({
+        kind: 'payable_accrued',
+        amount_cents: 5500,
+        currency: 'USD',
+        external_reference_sha256: null,
       }),
     ]);
     expect(Object.values(dbState.tables.order_timeline_events)).toEqual(
@@ -1342,6 +1506,7 @@ describe('releaseHoldActivity checkout session status', () => {
     dbState.tables = {};
     dbState.locks = [];
     dbState.afterSelect = undefined;
+    dbState.skipUpdate = undefined;
     dbState.destroy.mockClear();
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     dbState.tables.checkout_sessions.cs_1.status = 'pending_payment';
@@ -1410,6 +1575,7 @@ describe('finalizeOrderActivity promo code redemption', () => {
     dbState.tables = {};
     dbState.locks = [];
     dbState.afterSelect = undefined;
+    dbState.skipUpdate = undefined;
     dbState.destroy.mockClear();
   });
 
@@ -1584,6 +1750,7 @@ describe('finalizeOrderActivity access rule redemption', () => {
     dbState.tables = {};
     dbState.locks = [];
     dbState.afterSelect = undefined;
+    dbState.skipUpdate = undefined;
     dbState.destroy.mockClear();
   });
 

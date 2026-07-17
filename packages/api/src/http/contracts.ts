@@ -584,20 +584,6 @@ export function serializeTicketListing(row: Record<string, unknown>) {
   };
 }
 
-export function serializeTicketResaleCompletion(input: {
-  listing: Record<string, unknown>;
-  sellerTicket: Record<string, unknown>;
-  buyerTicket: Record<string, unknown>;
-  buyerAttendee: Record<string, unknown>;
-}) {
-  return {
-    listing: serializeTicketListing(input.listing),
-    sellerTicket: serializeTicket(input.sellerTicket),
-    buyerTicket: serializeTicket(input.buyerTicket),
-    buyerAttendee: serializeAttendee(input.buyerAttendee),
-  };
-}
-
 export function serializeCheckInList(row: Record<string, unknown>) {
   return {
     id: row.id,

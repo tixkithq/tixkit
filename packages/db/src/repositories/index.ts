@@ -74,6 +74,7 @@ export {
 } from './messaging.js';
 
 export { ShortLinkRepository } from './short-links.js';
+export { ResaleSettlementRepository, ResaleSettlementConflictError } from './resale-settlement.js';
 export { ContentRepository } from './content.js';
 export { EventReadinessAcknowledgementRepository, type ReadinessScope } from './readiness.js';
 export { executeTableQuery, assertServerField } from './table-query.js';

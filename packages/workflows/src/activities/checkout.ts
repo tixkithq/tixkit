@@ -5,11 +5,18 @@ import {
   PaymentIntentRepository,
   OrderRepository,
   ContentRepository,
+  ResaleSettlementRepository,
 } from '@tixkit/db';
 import { ulid } from 'ulid';
 import { QrService } from '@tixkit/domain/tickets';
 import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
-import { isConsentAccepted, isConsentAnswerSnapshot } from '@tixkit/domain';
+import {
+  isConsentAccepted,
+  isConsentAnswerSnapshot,
+  RESALE_REFUND_MODEL,
+  RESALE_SETTLEMENT_MODEL,
+  RESALE_TERMS_VERSION,
+} from '@tixkit/domain';
 import {
   ProviderOperationError,
   StripeSdkGateway,
@@ -117,6 +124,13 @@ type CheckoutHoldRow = {
 type FinalizeTransactionResult =
   | { ok: true }
   | { ok: false; errorCode: string; message: string; retryable: boolean };
+
+class FinalizeTransactionAbortError extends Error {
+  constructor(readonly result: Extract<FinalizeTransactionResult, { ok: false }>) {
+    super(result.message);
+    this.name = 'FinalizeTransactionAbortError';
+  }
+}
 
 type FinalizePaymentIntentValidationResult =
   | { ok: true; paymentIntent?: { id: string; provider: string } }
@@ -1406,6 +1420,12 @@ export async function finalizeOrderActivity(input: {
         ticketTypeId?: string;
       }>;
       waitlistEntryId?: string;
+      resaleTermsAcceptance?: {
+        accepted?: unknown;
+        termsVersion?: unknown;
+        settlementModel?: unknown;
+        refundModel?: unknown;
+      };
     }>(session.cart);
     const buyer = parseStoredJson<{
       email?: string;
@@ -1414,6 +1434,20 @@ export async function finalizeOrderActivity(input: {
       phone?: string;
       dateOfBirth?: string;
     }>(session.buyer);
+    const includesResale = cart.items.some((item) => Boolean(item.resaleListingId));
+    if (
+      includesResale &&
+      (cart.resaleTermsAcceptance?.accepted !== true ||
+        cart.resaleTermsAcceptance.termsVersion !== RESALE_TERMS_VERSION ||
+        cart.resaleTermsAcceptance.settlementModel !== RESALE_SETTLEMENT_MODEL ||
+        cart.resaleTermsAcceptance.refundModel !== RESALE_REFUND_MODEL)
+    ) {
+      return errResult(
+        'RESALE_TERMS_NOT_ACCEPTED',
+        'Current resale settlement and refund terms were not accepted',
+        false,
+      );
+    }
 
     const event = await db
       .selectFrom('events')
@@ -1606,6 +1640,21 @@ export async function finalizeOrderActivity(input: {
     const finalizeResult = await db
       .transaction()
       .execute(async (trx): Promise<FinalizeTransactionResult> => {
+        const lockedEvent = await trx
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', session.event_id)
+          .where('tenant_id', '=', input.tenantId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!lockedEvent) {
+          return {
+            ok: false,
+            errorCode: 'EVENT_SCOPE_MISMATCH',
+            message: 'Checkout event is no longer available in the tenant scope',
+            retryable: false,
+          };
+        }
         const candidateHolds = (await trx
           .selectFrom('checkout_holds')
           .selectAll()
@@ -1683,6 +1732,11 @@ export async function finalizeOrderActivity(input: {
             expires_at: Date | string | null;
             reserved_checkout_session_id: string | null;
             reserved_until: Date | string | null;
+            price_cents: number | string;
+            currency: string;
+            seller_terms_version: string | null;
+            settlement_model: string | null;
+            refund_model: string | null;
           };
           sellerTicket: {
             id: string;
@@ -1709,6 +1763,11 @@ export async function finalizeOrderActivity(input: {
               'expires_at',
               'reserved_checkout_session_id',
               'reserved_until',
+              'price_cents',
+              'currency',
+              'seller_terms_version',
+              'settlement_model',
+              'refund_model',
             ])
             .where('id', '=', resaleListingId)
             .where('tenant_id', '=', input.tenantId)
@@ -1720,6 +1779,18 @@ export async function finalizeOrderActivity(input: {
               ok: false,
               errorCode: 'RESALE_LISTING_UNAVAILABLE',
               message: `Ticket listing ${resaleListingId} is not listed`,
+              retryable: false,
+            };
+          }
+          if (
+            listing.seller_terms_version !== RESALE_TERMS_VERSION ||
+            listing.settlement_model !== RESALE_SETTLEMENT_MODEL ||
+            listing.refund_model !== RESALE_REFUND_MODEL
+          ) {
+            return {
+              ok: false,
+              errorCode: 'RESALE_SELLER_TERMS_NOT_ACCEPTED',
+              message: `Ticket listing ${resaleListingId} does not have current seller terms`,
               retryable: false,
             };
           }
@@ -1784,6 +1855,29 @@ export async function finalizeOrderActivity(input: {
               ok: false,
               errorCode: 'RESALE_LISTING_INVALID_TICKET',
               message: `Ticket status is ${sellerTicket.status}, cannot complete resale`,
+              retryable: false,
+            };
+          }
+          const resaleLine = quote.lineItems?.find(
+            (line) => line.resaleListingId === resaleListingId,
+          );
+          const grossCents = Number(listing.price_cents);
+          const feeCents = resaleLine?.feeCents ?? 0;
+          if (
+            !resaleLine ||
+            resaleLine.quantity !== 1 ||
+            resaleLine.unitPriceCents !== grossCents ||
+            !Number.isSafeInteger(grossCents) ||
+            grossCents <= 0 ||
+            !Number.isSafeInteger(feeCents) ||
+            feeCents < 0 ||
+            feeCents >= grossCents ||
+            String(listing.currency).toUpperCase() !== String(session.currency).toUpperCase()
+          ) {
+            return {
+              ok: false,
+              errorCode: 'RESALE_QUOTE_MISMATCH',
+              message: `Ticket listing ${resaleListingId} no longer matches its checkout quote`,
               retryable: false,
             };
           }
@@ -2184,12 +2278,12 @@ export async function finalizeOrderActivity(input: {
             .where('status', '=', 'valid')
             .executeTakeFirst();
           if (Number(sellerTransfer.numUpdatedRows ?? 0) !== 1) {
-            return {
+            throw new FinalizeTransactionAbortError({
               ok: false,
               errorCode: 'RESALE_LISTING_INVALID_TICKET',
-              message: `Ticket status changed before resale completion`,
+              message: 'Ticket status changed before resale completion',
               retryable: true,
-            };
+            });
           }
 
           await trx
@@ -2215,13 +2309,40 @@ export async function finalizeOrderActivity(input: {
             .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
             .executeTakeFirst();
           if (Number(soldListing.numUpdatedRows ?? 0) !== 1) {
-            return {
+            throw new FinalizeTransactionAbortError({
               ok: false,
               errorCode: 'RESALE_LISTING_UNAVAILABLE',
               message: `Ticket listing ${fulfillment.listing.id} could not be sold`,
               retryable: true,
-            };
+            });
           }
+
+          await new ResaleSettlementRepository(trx).createAndAccrue({
+            tenantId: input.tenantId,
+            organizationId: event.organization_id,
+            brandId: session.brand_id,
+            eventId: session.event_id,
+            listingId: fulfillment.listing.id,
+            sellerOrderId: fulfillment.sellerTicket.order_id,
+            buyerOrderId: orderId,
+            sellerTicketId: fulfillment.sellerTicket.id,
+            buyerTicketId,
+            currency: String(fulfillment.listing.currency).toUpperCase(),
+            grossCents: Number(fulfillment.listing.price_cents),
+            feeCents:
+              quote.lineItems?.find((line) => line.resaleListingId === fulfillment.listing.id)
+                ?.feeCents ?? 0,
+            payableCents:
+              Number(fulfillment.listing.price_cents) -
+              (quote.lineItems?.find((line) => line.resaleListingId === fulfillment.listing.id)
+                ?.feeCents ?? 0),
+            termsVersion: RESALE_TERMS_VERSION,
+            evidence: {
+              idempotencyKey: `checkout:${input.checkoutSessionId}:resale:${fulfillment.listing.id}:accrual`,
+              actorId: 'system:checkout-finalization',
+              method: 'organizer-managed',
+            },
+          });
 
           await trx
             .insertInto('order_timeline_events')
@@ -2487,6 +2608,9 @@ export async function finalizeOrderActivity(input: {
 
     return okResult({ orderId });
   } catch (err) {
+    if (err instanceof FinalizeTransactionAbortError) {
+      return errResult(err.result.errorCode, err.result.message, err.result.retryable);
+    }
     // A concurrent finalize may have won the unique constraint on
     // checkout_session_id; treat that as success and return the committed order.
     try {

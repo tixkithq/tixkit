@@ -415,52 +415,42 @@ export type AdminTicketListing = {
   updatedAt: string;
 };
 
-export type AdminResaleTicket = {
+export type AdminResaleSettlementEntry = {
   id: string;
-  tenantId: string;
-  orderId: string;
-  attendeeId: string;
-  eventId: string;
-  ticketTypeId: string;
-  eventOccurrenceId?: string;
-  status: string;
-  code: string;
-  qrPayload: string;
-  qrHash: string;
-  transferredToEmail?: string;
-  transferredAt?: string;
-  checkedInAt?: string;
-  checkedInByDeviceId?: string;
-  walletPassId?: string;
+  kind: 'payable_accrued' | 'payout_recorded' | 'payable_reversed' | 'recovery_required';
+  amountCents: number;
+  currency: string;
+  actorId: string;
+  method: string;
+  externalReferenceSha256: string | null;
+  reason: string | null;
   createdAt: string;
-  updatedAt: string;
 };
 
-export type AdminResaleAttendee = {
+export type AdminResaleSettlement = {
   id: string;
+  listingId: string;
   tenantId: string;
-  orderId: string;
+  organizationId: string;
+  brandId: string;
   eventId: string;
-  ticketTypeId: string;
-  eventOccurrenceId?: string;
-  ticketId?: string;
-  firstName?: string;
-  lastName?: string;
-  email: string;
-  phone?: string;
-  status: string;
-  customAnswers?: unknown;
-  checkedInAt?: string;
-  checkInDeviceId?: string;
+  sellerOrderId: string | null;
+  buyerOrderId: string | null;
+  sellerTicketId: string | null;
+  buyerTicketId: string | null;
+  currency: string;
+  grossCents: number | null;
+  feeCents: number | null;
+  payableCents: number | null;
+  paidCents: number | null;
+  reversedCents: number | null;
+  recoveryCents: number | null;
+  state: 'pending' | 'paid' | 'reversed' | 'recovery_required' | 'review_required';
+  termsVersion: string | null;
+  version: number;
   createdAt: string;
   updatedAt: string;
-};
-
-export type AdminTicketResaleCompletion = {
-  listing: AdminTicketListing;
-  sellerTicket: AdminResaleTicket;
-  buyerTicket: AdminResaleTicket;
-  buyerAttendee: AdminResaleAttendee;
+  entries: AdminResaleSettlementEntry[];
 };
 
 export type AdminMarketingIntegrationProvider = 'ga4' | 'meta_pixel' | 'generic_tag';
@@ -2230,25 +2220,45 @@ export type AdminApi = {
   ): Promise<ApiResult<PageResult<AdminTicketListing>>>;
   createResaleListing(
     ticketId: string,
-    input: { priceCents: number; expiresAt?: string; idempotencyKey?: string },
+    input: {
+      priceCents: number;
+      expiresAt?: string;
+      idempotencyKey?: string;
+      termsAcceptance: {
+        accepted: true;
+        termsVersion: '2026-07-16';
+        settlementModel: 'organizer_managed';
+        refundModel: 'manual_coordinated_resolution';
+      };
+    },
   ): Promise<ApiResult<AdminTicketListing>>;
   delistResaleListing(
     listingId: string,
     input?: { idempotencyKey?: string },
   ): Promise<ApiResult<AdminTicketListing>>;
-  completeResaleListing(
+  getResaleSettlement(listingId: string): Promise<ApiResult<AdminResaleSettlement>>;
+  recordResaleSettlementPayout(
     listingId: string,
     input: {
-      buyerId: string;
-      buyerEmail: string;
-      buyerDateOfBirth?: string;
-      buyerFirstName?: string | null;
-      buyerLastName?: string | null;
-      buyerPhone?: string | null;
-      externalPaymentReference?: string | null;
+      amountCents: number;
+      currency: string;
+      expectedVersion: number;
+      method: 'bank_transfer' | 'payment_provider' | 'accounting_adjustment';
+      externalReference: string;
       idempotencyKey?: string;
     },
-  ): Promise<ApiResult<AdminTicketResaleCompletion>>;
+  ): Promise<ApiResult<AdminResaleSettlement>>;
+  recordResaleSettlementReversal(
+    listingId: string,
+    input: {
+      amountCents: number;
+      currency: string;
+      expectedVersion: number;
+      method: 'bank_transfer' | 'payment_provider' | 'accounting_adjustment';
+      reason: string;
+      idempotencyKey?: string;
+    },
+  ): Promise<ApiResult<AdminResaleSettlement>>;
   listEventOccurrences(eventId: string): Promise<ApiResult<AdminEventOccurrence[]>>;
   createEventOccurrence(
     eventId: string,
@@ -3084,64 +3094,53 @@ function normalizeTicketListing(
   };
 }
 
-function normalizeResaleTicket(value: Record<string, unknown>): AdminResaleTicket {
+function normalizeResaleSettlement(value: unknown): AdminResaleSettlement {
+  const record = asRecord(value) ?? {};
+  const nullableCents = (candidate: unknown) =>
+    candidate === null || candidate === undefined ? null : finiteNumber(candidate);
+  const nullableString = (candidate: unknown) =>
+    candidate === null || candidate === undefined ? null : String(candidate);
   return {
-    id: String(value.id),
-    tenantId: String(value.tenantId ?? value.tenant_id),
-    orderId: String(value.orderId ?? value.order_id),
-    attendeeId: String(value.attendeeId ?? value.attendee_id),
-    eventId: String(value.eventId ?? value.event_id),
-    ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id),
-    eventOccurrenceId: stringValue(value.eventOccurrenceId ?? value.event_occurrence_id, undefined),
-    status: String(value.status),
-    code: String(value.code),
-    qrPayload: String(value.qrPayload ?? value.qr_payload),
-    qrHash: String(value.qrHash ?? value.qr_hash),
-    transferredToEmail: stringValue(
-      value.transferredToEmail ?? value.transferred_to_email,
-      undefined,
-    ),
-    transferredAt: stringValue(value.transferredAt ?? value.transferred_at, undefined),
-    checkedInAt: stringValue(value.checkedInAt ?? value.checked_in_at, undefined),
-    checkedInByDeviceId: stringValue(
-      value.checkedInByDeviceId ?? value.checked_in_by_device_id,
-      undefined,
-    ),
-    walletPassId: stringValue(value.walletPassId ?? value.wallet_pass_id, undefined),
-    createdAt: String(value.createdAt ?? value.created_at ?? new Date(0).toISOString()),
-    updatedAt: String(value.updatedAt ?? value.updated_at ?? new Date(0).toISOString()),
-  };
-}
-
-function normalizeResaleAttendee(value: Record<string, unknown>): AdminResaleAttendee {
-  return {
-    id: String(value.id),
-    tenantId: String(value.tenantId ?? value.tenant_id),
-    orderId: String(value.orderId ?? value.order_id),
-    eventId: String(value.eventId ?? value.event_id),
-    ticketTypeId: String(value.ticketTypeId ?? value.ticket_type_id),
-    eventOccurrenceId: stringValue(value.eventOccurrenceId ?? value.event_occurrence_id, undefined),
-    ticketId: stringValue(value.ticketId ?? value.ticket_id, undefined),
-    firstName: stringValue(value.firstName ?? value.first_name, undefined),
-    lastName: stringValue(value.lastName ?? value.last_name, undefined),
-    email: String(value.email),
-    phone: stringValue(value.phone, undefined),
-    status: String(value.status),
-    customAnswers: value.customAnswers ?? value.custom_answers,
-    checkedInAt: stringValue(value.checkedInAt ?? value.checked_in_at, undefined),
-    checkInDeviceId: stringValue(value.checkInDeviceId ?? value.check_in_device_id, undefined),
-    createdAt: String(value.createdAt ?? value.created_at ?? new Date(0).toISOString()),
-    updatedAt: String(value.updatedAt ?? value.updated_at ?? new Date(0).toISOString()),
-  };
-}
-
-function normalizeTicketResaleCompletion(value: unknown): AdminTicketResaleCompletion {
-  const record = asRecord(value);
-  return {
-    listing: normalizeTicketListing(asRecord(record?.listing) ?? {}),
-    sellerTicket: normalizeResaleTicket(asRecord(record?.sellerTicket) ?? {}),
-    buyerTicket: normalizeResaleTicket(asRecord(record?.buyerTicket) ?? {}),
-    buyerAttendee: normalizeResaleAttendee(asRecord(record?.buyerAttendee) ?? {}),
+    id: String(record.id),
+    listingId: String(record.listingId ?? record.listing_id),
+    tenantId: String(record.tenantId ?? record.tenant_id),
+    organizationId: String(record.organizationId ?? record.organization_id),
+    brandId: String(record.brandId ?? record.brand_id),
+    eventId: String(record.eventId ?? record.event_id),
+    sellerOrderId: nullableString(record.sellerOrderId ?? record.seller_order_id),
+    buyerOrderId: nullableString(record.buyerOrderId ?? record.buyer_order_id),
+    sellerTicketId: nullableString(record.sellerTicketId ?? record.seller_ticket_id),
+    buyerTicketId: nullableString(record.buyerTicketId ?? record.buyer_ticket_id),
+    currency: String(record.currency),
+    grossCents: nullableCents(record.grossCents ?? record.gross_cents),
+    feeCents: nullableCents(record.feeCents ?? record.fee_cents),
+    payableCents: nullableCents(record.payableCents ?? record.payable_cents),
+    paidCents: nullableCents(record.paidCents ?? record.paid_cents),
+    reversedCents: nullableCents(record.reversedCents ?? record.reversed_cents),
+    recoveryCents: nullableCents(record.recoveryCents ?? record.recovery_cents),
+    state: String(record.state) as AdminResaleSettlement['state'],
+    termsVersion: nullableString(record.termsVersion ?? record.terms_version),
+    version: finiteNumber(record.version),
+    createdAt: String(record.createdAt ?? record.created_at ?? new Date(0).toISOString()),
+    updatedAt: String(record.updatedAt ?? record.updated_at ?? new Date(0).toISOString()),
+    entries: (Array.isArray(record.entries) ? record.entries : []).map((entry) => {
+      const normalized = asRecord(entry) ?? {};
+      return {
+        id: String(normalized.id),
+        kind: String(normalized.kind) as AdminResaleSettlementEntry['kind'],
+        amountCents: finiteNumber(normalized.amountCents ?? normalized.amount_cents),
+        currency: String(normalized.currency),
+        actorId: String(normalized.actorId ?? normalized.actor_id),
+        method: String(normalized.method),
+        externalReferenceSha256: nullableString(
+          normalized.externalReferenceSha256 ?? normalized.external_reference_sha256,
+        ),
+        reason: nullableString(normalized.reason),
+        createdAt: String(
+          normalized.createdAt ?? normalized.created_at ?? new Date(0).toISOString(),
+        ),
+      };
+    }),
   };
 }
 
@@ -5862,6 +5861,7 @@ export const adminApi: AdminApi = {
             body: JSON.stringify({
               priceCents: input.priceCents,
               expiresAt: input.expiresAt,
+              termsAcceptance: input.termsAcceptance,
             }),
           },
         );
@@ -5921,87 +5921,73 @@ export const adminApi: AdminApi = {
     );
   },
 
-  async completeResaleListing(listingId, input) {
+  async getResaleSettlement(listingId) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminResaleSettlement>(
+          `/v1/ticket-listings/${listingId}/settlement`,
+        );
+        return result.ok ? ok(normalizeResaleSettlement(result.data)) : result;
+      },
+      () =>
+        ok(
+          normalizeResaleSettlement({
+            id: `rst_${listingId}`,
+            listingId,
+            tenantId: 'tnt_demo',
+            organizationId: 'org_demo',
+            brandId: 'brand_demo',
+            eventId: 'evt_demo_001',
+            currency: 'USD',
+            state: 'review_required',
+            version: 1,
+            createdAt: iso(0),
+            updatedAt: iso(0),
+            entries: [],
+          }),
+        ),
+    );
+  },
+
+  async recordResaleSettlementPayout(listingId, input) {
     return withFixture(
       async () => {
         const { idempotencyKey, ...body } = input;
-        const result = await request<AdminTicketResaleCompletion>(
-          `/v1/ticket-listings/${listingId}/complete`,
+        const result = await request<AdminResaleSettlement>(
+          `/v1/ticket-listings/${listingId}/settlement/payouts`,
           {
             method: 'POST',
             headers: {
               'Idempotency-Key':
-                idempotencyKey ?? adminIdempotencyKey(`resale_complete_${listingId}`),
+                idempotencyKey ?? adminIdempotencyKey(`resale_payout_${listingId}`),
             },
             body: JSON.stringify(body),
           },
         );
-        return result.ok ? ok(normalizeTicketResaleCompletion(result.data)) : result;
+        return result.ok ? ok(normalizeResaleSettlement(result.data)) : result;
       },
-      () =>
-        ok(
-          normalizeTicketResaleCompletion({
-            listing: {
-              id: listingId,
-              tenantId: 'tnt_demo',
-              eventId: 'evt_demo_001',
-              ticketId: `tkt_${listingId}`,
-              sellerId: 'usr_demo',
-              status: 'sold',
-              priceCents: 5000,
-              currency: 'USD',
-              faceValueCents: 5000,
-              soldToId: input.buyerId,
-              soldAt: iso(0),
-              createdAt: iso(0),
-              updatedAt: iso(0),
+      () => adminApi.getResaleSettlement(listingId),
+    );
+  },
+
+  async recordResaleSettlementReversal(listingId, input) {
+    return withFixture(
+      async () => {
+        const { idempotencyKey, ...body } = input;
+        const result = await request<AdminResaleSettlement>(
+          `/v1/ticket-listings/${listingId}/settlement/reversals`,
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key':
+                idempotencyKey ?? adminIdempotencyKey(`resale_reversal_${listingId}`),
             },
-            sellerTicket: {
-              id: `tkt_${listingId}`,
-              tenantId: 'tnt_demo',
-              orderId: 'ord_demo',
-              attendeeId: 'att_seller',
-              eventId: 'evt_demo_001',
-              ticketTypeId: 'tt_demo',
-              status: 'transferred',
-              code: 'TK-SELLER',
-              qrPayload: 'seller-payload',
-              qrHash: 'seller-hash',
-              transferredToEmail: input.buyerEmail,
-              transferredAt: iso(0),
-              createdAt: iso(0),
-              updatedAt: iso(0),
-            },
-            buyerTicket: {
-              id: `tkt_buyer_${listingId}`,
-              tenantId: 'tnt_demo',
-              orderId: 'ord_demo',
-              attendeeId: 'att_buyer',
-              eventId: 'evt_demo_001',
-              ticketTypeId: 'tt_demo',
-              status: 'valid',
-              code: 'TK-BUYER',
-              qrPayload: 'buyer-payload',
-              qrHash: 'buyer-hash',
-              createdAt: iso(0),
-              updatedAt: iso(0),
-            },
-            buyerAttendee: {
-              id: 'att_buyer',
-              tenantId: 'tnt_demo',
-              orderId: 'ord_demo',
-              eventId: 'evt_demo_001',
-              ticketTypeId: 'tt_demo',
-              ticketId: `tkt_buyer_${listingId}`,
-              firstName: input.buyerFirstName ?? undefined,
-              lastName: input.buyerLastName ?? undefined,
-              email: input.buyerEmail,
-              status: 'confirmed',
-              createdAt: iso(0),
-              updatedAt: iso(0),
-            },
-          }),
-        ),
+            body: JSON.stringify(body),
+          },
+        );
+        return result.ok ? ok(normalizeResaleSettlement(result.data)) : result;
+      },
+      () => adminApi.getResaleSettlement(listingId),
     );
   },
 
