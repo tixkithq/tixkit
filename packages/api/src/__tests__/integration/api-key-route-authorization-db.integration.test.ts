@@ -208,6 +208,81 @@ describeWithIntegrationDatabase('API key route authorization persistence', () =>
     ).toEqual({ revoked_at: expect.any(Date) });
   });
 
+  it('lists only authorized organization keys and denies permission or organization drift', async () => {
+    const repository = new ApiKeyRepository(db);
+    const authorized = await repository.create({
+      tenantId,
+      organizationId,
+      name: `Authorized list ${suffix}`,
+      scopes: ['events.read'],
+    });
+    const sibling = await repository.create({
+      tenantId,
+      organizationId: siblingOrganizationId,
+      name: `Sibling list ${suffix}`,
+      scopes: ['events.read'],
+    });
+    const foreign = await repository.create({
+      tenantId: otherTenantId,
+      organizationId: otherOrganizationId,
+      name: `Foreign list ${suffix}`,
+      scopes: ['events.read'],
+    });
+    const ids = [authorized.record.id, sibling.record.id, foreign.record.id] as string[];
+    const rowsBefore = await db
+      .selectFrom('api_keys')
+      .select(['id', 'tenant_id', 'organization_id', 'revoked_at'])
+      .where('id', 'in', ids)
+      .orderBy('id', 'asc')
+      .execute();
+
+    const authorizedApp = await routeApp();
+    const authorizedResponse = await authorizedApp.inject({
+      method: 'GET',
+      url: `/api-keys?organizationId=${organizationId}`,
+    });
+    expect(authorizedResponse.statusCode).toBe(200);
+    const authorizedItems = authorizedResponse.json().items as Array<{
+      id: string;
+      organizationId: string;
+    }>;
+    expect(authorizedItems).toContainEqual(
+      expect.objectContaining({ id: authorized.record.id, organizationId }),
+    );
+    expect(authorizedItems.map((item) => item.id)).not.toContain(sibling.record.id);
+    expect(authorizedItems.map((item) => item.id)).not.toContain(foreign.record.id);
+    expect(authorizedItems.every((item) => item.organizationId === organizationId)).toBe(true);
+    expect(authorizedResponse.body).not.toContain('hashed_key');
+    expect(authorizedResponse.body).not.toContain(authorized.apiKey);
+    expect(authorizedResponse.body).not.toContain(sibling.apiKey);
+    expect(authorizedResponse.body).not.toContain(foreign.apiKey);
+    await authorizedApp.close();
+
+    const permissionApp = await routeApp({ scopes: ['events.read'] });
+    const permissionResponse = await permissionApp.inject({ method: 'GET', url: '/api-keys' });
+    expect(permissionResponse.statusCode).toBe(403);
+    expect(permissionResponse.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    await permissionApp.close();
+
+    const organizationApp = await routeApp();
+    const organizationResponse = await organizationApp.inject({
+      method: 'GET',
+      url: `/api-keys?organizationId=${siblingOrganizationId}`,
+    });
+    expect(organizationResponse.statusCode).toBe(404);
+    expect(organizationResponse.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    await organizationApp.close();
+
+    expect(
+      await db
+        .selectFrom('api_keys')
+        .select(['id', 'tenant_id', 'organization_id', 'revoked_at'])
+        .where('id', 'in', ids)
+        .orderBy('id', 'asc')
+        .execute(),
+    ).toEqual(rowsBefore);
+  });
+
   it('persists no key or audit mutation for every declared HTTP denial boundary', async () => {
     const repository = new ApiKeyRepository(db);
     const primaryKey = await repository.create({

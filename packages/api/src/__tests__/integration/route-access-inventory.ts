@@ -396,6 +396,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['getOrganizationsByOrganizationIdPaymentAccounts'], {
     source: 'payment-account-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['getApiKeys'], {
+    source: 'api-key-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'postOrganizationsByOrganizationIdPaymentAccountsStripeConnect',

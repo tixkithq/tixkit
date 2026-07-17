@@ -8,6 +8,7 @@ import {
 } from './route-access-inventory.js';
 import { buildAuthenticatedRouteTestApp, buildRouteManifest } from './route-manifest.js';
 import {
+  API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -132,6 +133,7 @@ describe('API route access inventory (C-123)', () => {
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
     expect(PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
+    expect(API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
     expect(SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
@@ -141,7 +143,7 @@ describe('API route access inventory (C-123)', () => {
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(80);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(81);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -157,8 +159,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(80);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(312);
+    expect(coveredRoutes).toHaveLength(81);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(314);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))

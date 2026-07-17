@@ -659,6 +659,18 @@ export const MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.
 
 export const API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['organization'],
+    method: 'GET',
+    operationId: 'getApiKeys',
+    path: '/api-keys',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'api-key-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
     authorizedControl: { required: true, status: 201 },
     denialResponse: { code: 'NOT_FOUND', status: 404 },
     deniedBoundaries: ['organization', 'brand', 'event'],
