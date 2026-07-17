@@ -111,6 +111,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'migration-prepare-route-authorization-db.integration.test.ts'),
   ],
   [
+    'migration-commit-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'migration-commit-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'order-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'order-route-authorization-db.integration.test.ts'),
   ],
@@ -251,6 +255,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['prepareMigrationJob'], {
     source: 'migration-prepare-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-prepare-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['commitMigrationJob'], {
+    source: 'migration-commit-route-authorization-db.integration.test.ts',
+    persistenceSource: 'migration-commit-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(
     [
@@ -423,6 +431,7 @@ const scopedJobAuthorizationOperations = new Set([
   'getPortableMigrationRebindings',
   'registerMigrationJobFile',
   'prepareMigrationJob',
+  'commitMigrationJob',
   'listMigrationJobConflicts',
   'listMigrationJobEvents',
   'listMigrationJobFiles',

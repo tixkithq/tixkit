@@ -482,6 +482,25 @@ export const MIGRATION_PREPARE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
   }),
 ]);
 
+export const MIGRATION_COMMIT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 202 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'POST',
+    operationId: 'commitMigrationJob',
+    path: '/migration-jobs/{jobId}/commit',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyDeniedBoundaries: ['brand', 'event'],
+    persistenceSource: 'migration-commit-route-authorization-db.integration.test.ts',
+    resourceParameters: ['jobId'],
+    sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'migration-commit-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -837,6 +856,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...PORTABLE_MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_FILE_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_PREPARE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...MIGRATION_COMMIT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

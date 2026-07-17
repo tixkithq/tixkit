@@ -1693,12 +1693,23 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         );
       }
     }
+    await writeAuditLog(
+      new AuditLogRepository(app.context.db),
+      request,
+      principal,
+      {
+        action: 'migration_job.commit_requested',
+        organizationId,
+        resourceType: 'MigrationJob',
+        resourceId: jobId,
+      },
+      { failClosed: true },
+    );
     await app.context.temporalClient.startMigrationCommit({
       tenantId: principal.tenantId,
       organizationId,
       jobId,
     });
-    await auditMutation(app, request, organizationId, jobId, 'migration_job.commit_requested');
     return reply.status(202).send({ jobId, status: 'committing' });
   });
 
