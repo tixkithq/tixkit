@@ -239,6 +239,8 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'listMigrationJobConflicts',
       'listMigrationJobEvents',
       'assessMigrationRollback',
+      'getMigrationReport',
+      'downloadMigrationReport',
     ],
     { source: 'migration-job-read-route-authorization-db.integration.test.ts' },
   ),
@@ -447,9 +449,11 @@ const eventScopeGuards = new Set([
   'requireEventAccess',
   'requireOrganizationWideWebhookEndpointPrincipal',
   'requireReportEventAccess',
+  'report',
   'scopedEvent',
 ]);
 const organizationWideScopeGuards = new Set([
+  'report',
   'requireMigrationPermission',
   'requireOrganizationWideWebhookEndpointPrincipal',
 ]);

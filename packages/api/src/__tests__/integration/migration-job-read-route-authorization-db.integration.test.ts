@@ -38,6 +38,19 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
   let mappingAScoped: string;
   let mappingB: string;
   let portableJobA: string;
+  const conflictA = `icf_mread_${suffix}`;
+  const correctivePlanA = `ije_mread_${suffix}`;
+  const reportSentinels = [
+    'summary-buyer@example.test',
+    'sk_live_summary_secret',
+    'summary-bearer',
+    'conflict-buyer@example.test',
+    'conflict-bearer',
+    'tk_conflict_secret_123456',
+    'Raw Buyer',
+    'plan@example.test',
+    '312 555 0100',
+  ] as const;
   const basePrincipal: Principal = {
     type: 'user',
     id: `usr_mread_${suffix}`,
@@ -160,6 +173,57 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
       expectedAssets: '[]',
       requiredRebindings: '[]',
     });
+    const reportFixtureTime = new Date();
+    await db
+      .updateTable('import_jobs')
+      .set({
+        summary: JSON.stringify({
+          counts: { accepted: 1 },
+          buyerEmail: 'summary-buyer@example.test',
+          nested: {
+            providerToken: 'sk_live_summary_secret',
+            note: 'summary-contact@example.test Bearer summary-bearer',
+          },
+          inputSha256: 'c'.repeat(64),
+        }),
+      })
+      .where('id', '=', jobA)
+      .execute();
+    await db
+      .insertInto('import_conflicts')
+      .values({
+        id: conflictA,
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        import_job_id: jobA,
+        import_job_row_id: null,
+        code: 'REPORT_FIXTURE',
+        severity: 'warning',
+        entity_type: 'attendee',
+        external_id: null,
+        message: 'conflict-buyer@example.test Bearer conflict-bearer',
+        details: JSON.stringify({ apiKey: 'tk_conflict_secret_123456', safe: 'visible' }),
+        resolution: null,
+        resolved_at: null,
+        created_at: reportFixtureTime,
+      })
+      .execute();
+    await db
+      .insertInto('import_job_events')
+      .values({
+        id: correctivePlanA,
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        import_job_id: jobA,
+        sequence: 1,
+        event_key: `rollback:corrective-plan:${suffix}`,
+        type: 'rollback.corrective-plan',
+        severity: 'warning',
+        message: 'Corrective plan fixture',
+        data: JSON.stringify({ buyerName: 'Raw Buyer', note: 'plan@example.test +1 312 555 0100' }),
+        created_at: reportFixtureTime,
+      })
+      .execute();
 
     principal = basePrincipal;
     app = Fastify({ logger: false });
@@ -224,14 +288,103 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
           organization_id: organizationA,
           configurationHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           credentialConfigured: false,
-          summary: null,
+          summary: {
+            counts: { accepted: 1 },
+            buyerEmail: '[REDACTED]',
+            nested: {
+              providerToken: '[REDACTED]',
+              note: '[REDACTED_EMAIL] [REDACTED_CREDENTIAL]',
+            },
+            inputSha256: 'c'.repeat(64),
+          },
         });
         expect(response.json()).not.toHaveProperty('configuration');
       } else if (contract.operationId === 'assessMigrationRollback') {
         expect(response.json()).toEqual({ eligible: true, mode: 'cancel', blockers: [] });
+      } else if (contract.operationId === 'listMigrationJobConflicts') {
+        expect(response.json()).toEqual({
+          items: [
+            {
+              id: conflictA,
+              entity_type: 'attendee',
+              severity: 'warning',
+              code: 'REPORT_FIXTURE',
+              message: '[REDACTED_EMAIL] [REDACTED_CREDENTIAL]',
+              details: { apiKey: '[REDACTED]', safe: 'visible' },
+              correlationId: conflictA,
+            },
+          ],
+        });
+      } else if (contract.operationId === 'listMigrationJobEvents') {
+        expect(response.json()).toEqual({
+          items: [
+            {
+              id: correctivePlanA,
+              sequence: 1,
+              type: 'rollback.corrective-plan',
+              severity: 'warning',
+              message: 'Corrective plan fixture',
+              data: { buyerName: '[REDACTED]', note: '[REDACTED_EMAIL] [REDACTED_PHONE]' },
+              createdAt: expect.any(String),
+            },
+          ],
+        });
+      } else if (
+        contract.operationId === 'getMigrationReport' ||
+        contract.operationId === 'downloadMigrationReport'
+      ) {
+        expect(response.json()).toEqual({
+          job: {
+            id: jobA,
+            organizationId: organizationA,
+            sourceSystem: 'generic-csv',
+            adapterVersion: 'rfc4180-v1',
+            mode: 'dry-run',
+            status: 'pending',
+            createdAt: expect.any(String),
+            updatedAt: expect.any(String),
+          },
+          report: {
+            counts: { accepted: 1 },
+            buyerEmail: '[REDACTED]',
+            nested: {
+              providerToken: '[REDACTED]',
+              note: '[REDACTED_EMAIL] [REDACTED_CREDENTIAL]',
+            },
+            inputSha256: 'c'.repeat(64),
+          },
+          conflicts: [
+            {
+              id: conflictA,
+              entityType: 'attendee',
+              correlationId: conflictA,
+              severity: 'warning',
+              code: 'REPORT_FIXTURE',
+              message: '[REDACTED_EMAIL] [REDACTED_CREDENTIAL]',
+              details: { apiKey: '[REDACTED]', safe: 'visible' },
+              resolution: null,
+              resolvedAt: null,
+            },
+          ],
+          correctivePlans: [
+            {
+              id: correctivePlanA,
+              sequence: 1,
+              createdAt: expect.any(String),
+              plan: { buyerName: '[REDACTED]', note: '[REDACTED_EMAIL] [REDACTED_PHONE]' },
+            },
+          ],
+        });
+        if (contract.operationId === 'downloadMigrationReport') {
+          expect(response.headers['content-disposition']).toBe(
+            `attachment; filename="migration-${jobA}-report.json"`,
+          );
+          expect(response.headers['content-type']).toMatch(/^application\/json/u);
+        }
       } else {
         expect(response.json()).toEqual({ items: [] });
       }
+      for (const sentinel of reportSentinels) expect(response.body).not.toContain(sentinel);
       expect(response.body).not.toContain(jobAScoped);
       expect(response.body).not.toContain(jobB);
     },
@@ -340,6 +493,7 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
       for (const marker of [jobAScoped, jobB, mappingAScoped, mappingB]) {
         expect(response.body).not.toContain(marker);
       }
+      for (const sentinel of reportSentinels) expect(response.body).not.toContain(sentinel);
     },
   );
 

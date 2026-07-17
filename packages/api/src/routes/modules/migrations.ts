@@ -397,7 +397,7 @@ function serializeJob(job: Record<string, unknown>) {
       configuration !== null &&
       typeof configuration === 'object' &&
       typeof (configuration as Record<string, unknown>).credentialId === 'string',
-    summary: parseJson(job.summary as string | null),
+    summary: redactMigrationReportValue(parseJson(job.summary as string | null)),
   };
 }
 
@@ -1512,7 +1512,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         createdAt: job.created_at,
         updatedAt: job.updated_at,
       },
-      report: parseJson(job.summary),
+      report: redactMigrationReportValue(parseJson(job.summary)),
       ...(portableReceipt
         ? { portableDryRunReceipt: parseJson(portableReceipt.receipt_json) }
         : {}),

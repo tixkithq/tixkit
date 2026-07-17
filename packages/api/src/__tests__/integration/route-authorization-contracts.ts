@@ -324,6 +324,8 @@ export const MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fr
       ['/migration-jobs/{jobId}/conflicts', 'listMigrationJobConflicts'],
       ['/migration-jobs/{jobId}/events', 'listMigrationJobEvents'],
       ['/migration-jobs/{jobId}/rollback-assessment', 'assessMigrationRollback'],
+      ['/migration-jobs/{jobId}/report', 'getMigrationReport'],
+      ['/migration-jobs/{jobId}/report/download', 'downloadMigrationReport'],
     ] as const
   ).map(([path, operationId]) =>
     denialContract({
