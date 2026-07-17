@@ -1305,14 +1305,38 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-
-    const category = await new ProductCategoryRepository(db).create({
+    await app.context.productConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'product_category_create',
       eventId,
-      name: body.name,
-      sortOrder: body.sortOrder,
     });
 
-    return reply.status(201).send(serializeProductCategory(category));
+    const category = await db.transaction().execute(async (transaction) => {
+      const currentEvent = await loadAuthorizedEventForUpdate(transaction, principal, eventId);
+      const created = await new ProductCategoryRepository(transaction).create({
+        eventId,
+        name: body.name,
+        sortOrder: body.sortOrder,
+      });
+      const serialized = serializeProductCategory(created);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'product_category.created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'ProductCategory',
+          resourceId: created.id,
+          diffSummary: { eventId, after: serialized },
+        },
+        { failClosed: true },
+      );
+      return serialized;
+    });
+
+    return reply.status(201).send(category);
   });
 
   app.get('/events/:eventId/products', async (request) => {
@@ -1343,29 +1367,57 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-
-    if (body.categoryId) {
-      const category = await new ProductCategoryRepository(db).findById(body.categoryId);
-      if (!category || category.event_id !== eventId) {
-        throw new NotFoundError('ProductCategory', body.categoryId);
-      }
-    }
-
-    const product = await new ProductRepository(db).create({
+    await app.context.productConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'product_create',
       eventId,
-      name: body.name,
-      description: body.description,
-      priceCents: body.priceCents,
-      currency: body.currency,
-      categoryId: body.categoryId,
-      maxPerOrder: body.maxPerOrder,
-      availableFrom: body.availableFrom ? new Date(body.availableFrom) : undefined,
-      availableUntil: body.availableUntil ? new Date(body.availableUntil) : undefined,
-      status: body.status,
-      sortOrder: body.sortOrder,
     });
 
-    return reply.status(201).send(serializeProduct(product));
+    const product = await db.transaction().execute(async (transaction) => {
+      const currentEvent = await loadAuthorizedEventForUpdate(transaction, principal, eventId);
+      if (body.categoryId) {
+        const category = await transaction
+          .selectFrom('product_categories')
+          .selectAll()
+          .where('id', '=', body.categoryId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!category || category.event_id !== eventId) {
+          throw new NotFoundError('ProductCategory', body.categoryId);
+        }
+      }
+      const created = await new ProductRepository(transaction).create({
+        eventId,
+        name: body.name,
+        description: body.description,
+        priceCents: body.priceCents,
+        currency: body.currency,
+        categoryId: body.categoryId,
+        maxPerOrder: body.maxPerOrder,
+        availableFrom: body.availableFrom ? new Date(body.availableFrom) : undefined,
+        availableUntil: body.availableUntil ? new Date(body.availableUntil) : undefined,
+        status: body.status,
+        sortOrder: body.sortOrder,
+      });
+      const serialized = serializeProduct(created);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'product.created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'Product',
+          resourceId: created.id,
+          diffSummary: { eventId, after: serialized },
+        },
+        { failClosed: true },
+      );
+      return serialized;
+    });
+
+    return reply.status(201).send(product);
   });
 
   app.patch('/products/:productId', async (request) => {

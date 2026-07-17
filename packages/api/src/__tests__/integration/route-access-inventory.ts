@@ -147,6 +147,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'ticket-configuration-route-authorization-db.integration.test.ts'),
   ],
   [
+    'product-catalog-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'product-catalog-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'provider-incident-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'provider-incident-route-authorization-db.integration.test.ts'),
   ],
@@ -361,7 +365,6 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(
     [
       'postEventsByEventIdCheckInLists',
-      'postEventsByEventIdProductCategories',
       'postEventsByEventIdQuestions',
       'postEventsByEventIdReadinessAcknowledgementsByStepId',
       'deleteEventsByEventIdReadinessAcknowledgementsByStepId',
@@ -378,6 +381,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       persistenceSource: 'event-route-authorization-db.integration.test.ts',
     },
   ),
+  ...evidenceBindings(['postEventsByEventIdProductCategories', 'postEventsByEventIdProducts'], {
+    source: 'product-catalog-route-authorization-db.integration.test.ts',
+    persistenceSource: 'product-catalog-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     ['getOrdersByOrderId', 'getOrdersByOrderIdInvoice', 'getOrdersByOrderIdInvoiceDownload'],
     { source: 'order-route-authorization-db.integration.test.ts' },

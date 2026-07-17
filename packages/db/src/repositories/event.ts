@@ -480,7 +480,7 @@ export class ProductCategoryRepository extends BaseRepository {
   async create(input: { eventId: string; name: string; sortOrder?: number }) {
     const id = `pcat_${ulid()}`;
     const now = new Date();
-    return this.insertReturning(
+    const category = await this.insertReturning(
       'product_categories',
       {
         id,
@@ -492,6 +492,8 @@ export class ProductCategoryRepository extends BaseRepository {
       },
       id,
     );
+    await bumpEventPublicRevision(this.db, input.eventId, now);
+    return category;
   }
 
   async findById(id: string) {

@@ -100,7 +100,6 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...(
     [
       ['/events/{eventId}/check-in-lists', 'postEventsByEventIdCheckInLists'],
-      ['/events/{eventId}/product-categories', 'postEventsByEventIdProductCategories'],
       ['/events/{eventId}/questions', 'postEventsByEventIdQuestions'],
     ] as const
   ).map(([path, operationId]) =>
@@ -115,6 +114,26 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
       resourceParameters: ['eventId'],
       sideEffectAssertions: ['persistence'],
       source: 'event-route-authorization-db.integration.test.ts',
+    }),
+  ),
+  ...(
+    [
+      ['/events/{eventId}/product-categories', 'postEventsByEventIdProductCategories'],
+      ['/events/{eventId}/products', 'postEventsByEventIdProducts'],
+    ] as const
+  ).map(([path, operationId]) =>
+    denialContract({
+      authorizedControl: { required: true, status: 201 },
+      denialResponse: { code: 'NOT_FOUND', status: 404 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      method: 'POST',
+      operationId,
+      path,
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      persistenceSource: 'product-catalog-route-authorization-db.integration.test.ts',
+      resourceParameters: ['eventId'],
+      sideEffectAssertions: ['persistence'],
+      source: 'product-catalog-route-authorization-db.integration.test.ts',
     }),
   ),
   denialContract({
