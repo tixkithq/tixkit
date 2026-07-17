@@ -1413,17 +1413,30 @@ export class ImportRepository extends BaseRepository {
     requestedBy: string;
     configuration?: unknown;
   }): Promise<Selectable<ImportJobTable>> {
+    return (await this.createJobWithDisposition(input)).job;
+  }
+
+  async createJobWithDisposition(input: {
+    tenantId: string;
+    organizationId: string;
+    sourceSystem: string;
+    adapterVersion: string;
+    mode: 'dry-run' | 'commit';
+    idempotencyKey: string;
+    requestedBy: string;
+    configuration?: unknown;
+  }): Promise<{ created: boolean; job: Selectable<ImportJobTable> }> {
     const existing = await this.findJobByIdempotencyKey(
       input.tenantId,
       input.organizationId,
       input.idempotencyKey,
     );
-    if (existing) return existing;
+    if (existing) return { created: false, job: existing };
 
     const id = this.generateId('imp');
     const now = new Date();
     try {
-      return await this.insertReturning(
+      const job = await this.insertReturning(
         'import_jobs',
         {
           id,
@@ -1451,6 +1464,7 @@ export class ImportRepository extends BaseRepository {
         },
         id,
       );
+      return { created: true, job };
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
       const raced = await this.findJobByIdempotencyKey(
@@ -1459,7 +1473,7 @@ export class ImportRepository extends BaseRepository {
         input.idempotencyKey,
       );
       if (!raced) throw error;
-      return raced;
+      return { created: false, job: raced };
     }
   }
 

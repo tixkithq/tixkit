@@ -102,6 +102,31 @@ export type PortableMigrationIdempotencyIdentity = {
   configuration: unknown;
 };
 
+type MigrationJobIdempotencyIdentity = PortableMigrationIdempotencyIdentity & {
+  requestedBy: string;
+};
+
+function migrationJobRequestFingerprint(identity: MigrationJobIdempotencyIdentity): string {
+  return canonicalMigrationContentFingerprint({
+    attributes: {
+      sourceSystem: identity.sourceSystem,
+      adapterVersion: identity.adapterVersion,
+      mode: identity.mode,
+      configuration: identity.configuration,
+      requestedBy: identity.requestedBy,
+    },
+  });
+}
+
+function assertMigrationJobIdempotency(
+  existing: MigrationJobIdempotencyIdentity,
+  expectedFingerprint: string,
+): void {
+  if (migrationJobRequestFingerprint(existing) !== expectedFingerprint) {
+    throw new ConflictError('Idempotency-Key was already used for a different migration job');
+  }
+}
+
 export function portableMigrationRequestFingerprint(
   identity: PortableMigrationIdempotencyIdentity,
 ): string {
@@ -553,6 +578,16 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         `${body.sourceSystem} does not support source mode ${configuration.sourceMode}`,
       );
     }
+    const organization = await new OrganizationRepository(app.context.db).findById(
+      body.organizationId,
+    );
+    if (!organization) throw new NotFoundError('Organization', body.organizationId);
+    ClerkAuthService.requireResourceTenant(
+      principal,
+      organization,
+      'Organization',
+      body.organizationId,
+    );
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
     if (
       body.credentialId &&
@@ -568,23 +603,71 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const key = String(request.headers['idempotency-key'] ?? '').trim();
     if (!key || key.length > 255)
       throw new ValidationError('A valid Idempotency-Key header is required');
-    const job = await repo().createJob({
-      tenantId: principal.tenantId,
-      organizationId: body.organizationId,
+    const storedConfiguration = {
+      ...configuration,
+      ...(body.credentialId ? { credentialId: body.credentialId } : {}),
+    };
+    const expectedFingerprint = migrationJobRequestFingerprint({
       sourceSystem: body.sourceSystem,
       adapterVersion: body.adapterVersion,
       mode: body.mode,
-      idempotencyKey: key,
+      configuration: storedConfiguration,
       requestedBy: principal.id,
-      configuration: {
-        ...configuration,
-        ...(body.credentialId ? { credentialId: body.credentialId } : {}),
-      },
     });
-    await auditMutation(app, request, body.organizationId, job.id, 'migration_job.created', {
-      sourceSystem: body.sourceSystem,
-      mode: body.mode,
-    });
+    const assertReplayIdentity = (candidate: Awaited<ReturnType<ImportRepository['findJob']>>) => {
+      if (!candidate) throw new Error('Migration job replay candidate is missing');
+      assertMigrationJobIdempotency(
+        {
+          sourceSystem: candidate.source_system,
+          adapterVersion: candidate.adapter_version,
+          mode: candidate.mode,
+          configuration: candidate.configuration ? JSON.parse(candidate.configuration) : null,
+          requestedBy: candidate.requested_by,
+        },
+        expectedFingerprint,
+      );
+      return candidate;
+    };
+    let job;
+    try {
+      job = await app.context.db.transaction().execute(async (transaction) => {
+        const repository = new ImportRepository(transaction as typeof app.context.db);
+        const result = await repository.createJobWithDisposition({
+          tenantId: principal.tenantId,
+          organizationId: body.organizationId,
+          sourceSystem: body.sourceSystem,
+          adapterVersion: body.adapterVersion,
+          mode: body.mode,
+          idempotencyKey: key,
+          requestedBy: principal.id,
+          configuration: storedConfiguration,
+        });
+        const created = assertReplayIdentity(result.job);
+        if (!result.created) return created;
+        await writeAuditLog(
+          new AuditLogRepository(transaction as typeof app.context.db),
+          request,
+          principal,
+          {
+            action: 'migration_job.created',
+            organizationId: body.organizationId,
+            resourceType: 'MigrationJob',
+            resourceId: created.id,
+            diffSummary: { sourceSystem: body.sourceSystem, mode: body.mode },
+          },
+          { failClosed: true },
+        );
+        return created;
+      });
+    } catch (error) {
+      const raced = await repo().findJobByIdempotencyKey(
+        principal.tenantId,
+        body.organizationId,
+        key,
+      );
+      if (!raced) throw error;
+      job = assertReplayIdentity(raced);
+    }
     return reply.status(201).send(serializeJob(job as unknown as Record<string, unknown>));
   });
 
