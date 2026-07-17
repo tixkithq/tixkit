@@ -96,6 +96,12 @@ export type AppContext = {
     stage: 'before_transaction';
     eventId: string;
   }) => void | Promise<void>;
+  eventOccurrenceCheckpoint?: (input: {
+    stage: 'before_transaction';
+    operation: 'create' | 'update';
+    eventId: string;
+    occurrenceId?: string;
+  }) => void | Promise<void>;
   eventPagePublishCheckpoint?: (input: {
     stage: 'after_event_locked';
     eventId: string;

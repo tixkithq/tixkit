@@ -139,6 +139,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'event-duplication-db.integration.test.ts'),
   ],
   [
+    'event-occurrence-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'event-occurrence-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'provider-incident-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'provider-incident-route-authorization-db.integration.test.ts'),
   ],
@@ -305,6 +309,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'event-duplication-db.integration.test.ts',
     persistenceSource: 'event-duplication-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    ['postEventsByEventIdOccurrences', 'patchEventsByEventIdOccurrencesByOccurrenceId'],
+    {
+      source: 'event-occurrence-route-authorization-db.integration.test.ts',
+      persistenceSource: 'event-occurrence-route-authorization-db.integration.test.ts',
+    },
+  ),
   ...evidenceBindings(['runMigrationDryRun'], {
     source: 'migration-dry-run-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-dry-run-route-authorization-db.integration.test.ts',

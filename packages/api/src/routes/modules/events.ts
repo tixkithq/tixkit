@@ -1016,25 +1016,50 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
-
-    const occurrence = await new EventOccurrenceRepository(db).create({
+    await app.context.eventOccurrenceCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'create',
       eventId,
-      title: body.title,
-      startsAt,
-      endsAt,
-      timezone: body.timezone,
-      venue: body.venue as Record<string, unknown> | null | undefined,
-      capacity: body.capacity,
-      sortOrder: body.sortOrder,
-      status: body.status,
     });
-    await writeAuditLog(audit(), request, principal, {
-      action: 'event_occurrence.created',
-      organizationId: event.organization_id,
-      brandId: event.brand_id,
-      resourceType: 'EventOccurrence',
-      resourceId: occurrence.id,
-      diffSummary: { eventId, title: body.title },
+
+    const occurrence = await db.transaction().execute(async (transaction) => {
+      const currentEvent = await transaction
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentEvent) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, currentEvent, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, currentEvent.organization_id);
+      ClerkAuthService.requireBrandScope(principal, currentEvent.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      const created = await new EventOccurrenceRepository(transaction).create({
+        eventId,
+        title: body.title,
+        startsAt,
+        endsAt,
+        timezone: body.timezone,
+        venue: body.venue as Record<string, unknown> | null | undefined,
+        capacity: body.capacity,
+        sortOrder: body.sortOrder,
+        status: body.status,
+      });
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'event_occurrence.created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'EventOccurrence',
+          resourceId: created.id,
+          diffSummary: { eventId, after: serializeEventOccurrence(created) },
+        },
+        { failClosed: true },
+      );
+      return created;
     });
     return reply.status(201).send(serializeEventOccurrence(occurrence));
   });
@@ -1053,6 +1078,12 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
+    await app.context.eventOccurrenceCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'update',
+      eventId,
+      occurrenceId,
+    });
 
     return db.transaction().execute(async (transaction) => {
       const currentEvent = await transaction
@@ -1093,9 +1124,30 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
       if (body.status !== undefined) updateData.status = body.status;
 
-      return serializeEventOccurrence(
-        await new EventOccurrenceRepository(transaction).update(occurrenceId, updateData),
+      const updated = await new EventOccurrenceRepository(transaction).update(
+        occurrenceId,
+        updateData,
       );
+      const serialized = serializeEventOccurrence(updated);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'event_occurrence.updated',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'EventOccurrence',
+          resourceId: occurrenceId,
+          diffSummary: {
+            eventId,
+            before: serializeEventOccurrence(existing),
+            after: serialized,
+          },
+        },
+        { failClosed: true },
+      );
+      return serialized;
     });
   });
 
