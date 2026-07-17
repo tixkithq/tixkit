@@ -1638,6 +1638,33 @@ export interface PaymentAccountRefreshControlTable {
   updated_at: Timestamp;
 }
 
+export type ProviderAccountCleanupCommandStatus =
+  | 'pending'
+  | 'processing'
+  | 'succeeded'
+  | 'manual_review';
+
+export interface ProviderAccountCleanupCommandTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  provider: string;
+  provider_account_id: string;
+  provider_account_identity_sha256: string;
+  idempotency_key_sha256: string;
+  reason: string;
+  status: ProviderAccountCleanupCommandStatus;
+  attempts: Generated<number>;
+  available_at: Timestamp;
+  lease_token: string | null;
+  lease_expires_at: Timestamp | null;
+  last_error_kind: string | null;
+  last_error_message: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  completed_at: Timestamp | null;
+}
+
 export interface TaxRegistrationTable {
   id: string;
   tenant_id: string;
@@ -2417,6 +2444,7 @@ export interface DB {
   export_job_events: ExportJobEventTable;
   payment_accounts: PaymentAccountTable;
   payment_account_refresh_control: PaymentAccountRefreshControlTable;
+  provider_account_cleanup_commands: ProviderAccountCleanupCommandTable;
   tax_registrations: TaxRegistrationTable;
   wallet_credentials: WalletCredentialTable;
   sender_identities: SenderIdentityTable;

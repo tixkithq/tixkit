@@ -94,6 +94,7 @@ import { WebhookReplayRequestsMigration } from './migrations/0090_webhook_replay
 import { MigrationLifecycleCommandsMigration } from './migrations/0091_migration_lifecycle_commands.js';
 import { MigrationLifecycleCommandOutcomesMigration } from './migrations/0092_migration_lifecycle_command_outcomes.js';
 import { PaymentAccountRefreshGenerationMigration } from './migrations/0093_payment_account_refresh_generation.js';
+import { ProviderAccountCleanupCommandsMigration } from './migrations/0094_provider_account_cleanup_commands.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -197,6 +198,7 @@ const ALL_SCHEMA_TABLES = [
   'event_readiness_acknowledgements',
   'dashboard_action_revisions',
   'provider_incident_evidence',
+  'provider_account_cleanup_commands',
   'resale_settlements',
   'resale_settlement_entries',
   'webhook_replay_requests',
@@ -251,6 +253,7 @@ const ALL_SCHEMA_TABLES = [
   'media_object_cleanup_jobs',
   'tax_registrations',
   'wallet_credentials',
+  'payment_account_refresh_control',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -369,6 +372,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0091_migration_lifecycle_commands': MigrationLifecycleCommandsMigration,
       '0092_migration_lifecycle_command_outcomes': MigrationLifecycleCommandOutcomesMigration,
       '0093_payment_account_refresh_generation': PaymentAccountRefreshGenerationMigration,
+      '0094_provider_account_cleanup_commands': ProviderAccountCleanupCommandsMigration,
     };
   }
 }

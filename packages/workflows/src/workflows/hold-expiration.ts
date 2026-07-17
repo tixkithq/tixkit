@@ -14,6 +14,7 @@ const {
   processWaitlistOffersActivity,
   enforcePrivacyRetentionActivity,
   cleanupMigrationMediaObjectsActivity,
+  processProviderAccountCleanupActivity,
 } = proxyActivities<{
   expireStaleHoldsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
   expireStaleSessionsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
@@ -29,6 +30,9 @@ const {
   >;
   cleanupMigrationMediaObjectsActivity(): Promise<
     WorkflowActivityResult<{ completed: number; retained: number; failed: number }>
+  >;
+  processProviderAccountCleanupActivity(): Promise<
+    WorkflowActivityResult<{ completed: number; retried: number; manualReview: number }>
   >;
 }>({
   startToCloseTimeout: '60 seconds',
@@ -114,6 +118,11 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
       // eslint-disable-next-line no-await-in-loop -- durable media cleanup runs once per deterministic maintenance tick.
       const mediaCleanupResult = await cleanupMigrationMediaObjectsActivity();
       throwIfMaintenanceFailed('Portable media cleanup', mediaCleanupResult);
+    }
+    if (patched('provider-account-cleanup-v1')) {
+      // eslint-disable-next-line no-await-in-loop -- leased provider cleanup runs once per deterministic maintenance tick.
+      const providerCleanupResult = await processProviderAccountCleanupActivity();
+      throwIfMaintenanceFailed('Provider account cleanup', providerCleanupResult);
     }
     if (patched('agent-memory-retention-v1')) {
       try {

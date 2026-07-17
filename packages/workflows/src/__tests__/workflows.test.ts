@@ -257,6 +257,8 @@ const defaultActivities = {
     okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 }),
   eraseExpiredAgentMemoryActivity: async () => ({ erasedCount: 0 }),
   eraseExpiredProviderIncidentEvidenceActivity: async () => ({ erasedCount: 0 }),
+  processProviderAccountCleanupActivity: async () =>
+    okResult({ completed: 0, retried: 0, manualReview: 0 }),
   reconcilePaymentActivity: async () => okResult({ orderId: 'ord_1', status: 'paid' }),
   reconcileRefundActivity: async () => okResult({ orderId: 'ord_1', status: 'refunded' }),
   reconcileDisputeActivity: async () => okResult({ orderId: 'ord_1', status: 'disputed' }),
@@ -2527,6 +2529,30 @@ describe('holdExpirationWorkflow', () => {
 
     await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
       'Privacy retention repair failed (privacy_retention_failed): database unavailable',
+    );
+  });
+
+  it('runs durable provider account cleanup on every patched maintenance tick', async () => {
+    let attempts = 0;
+    setActivity('processProviderAccountCleanupActivity', async () => {
+      attempts += 1;
+      return okResult({ completed: 1, retried: 0, manualReview: 0 });
+    });
+
+    await expect(
+      holdExpirationWorkflow({ maxIterations: 2, tickIntervalSeconds: 15 }),
+    ).resolves.toBeUndefined();
+
+    expect(attempts).toBe(2);
+  });
+
+  it('fails the maintenance tick when durable provider cleanup infrastructure is unavailable', async () => {
+    setActivity('processProviderAccountCleanupActivity', async () =>
+      errResult('PROVIDER_ACCOUNT_CLEANUP_FAILED', 'database unavailable', true),
+    );
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'Provider account cleanup failed (PROVIDER_ACCOUNT_CLEANUP_FAILED): database unavailable',
     );
   });
 

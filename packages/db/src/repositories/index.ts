@@ -41,6 +41,7 @@ export {
   PaymentCompensationRepository,
   RefundRepository,
   PaymentEventRepository,
+  PaymentAccountCleanupCommandRepository,
 } from './payment.js';
 export {
   UserProfileRepository,

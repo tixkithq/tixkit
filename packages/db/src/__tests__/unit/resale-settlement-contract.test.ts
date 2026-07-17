@@ -121,7 +121,7 @@ describe('resale settlement persistence contract', () => {
 
   it('registers the settlement migration after the existing migration chain', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
-    expect(Object.keys(migrations).at(-1)).toBe('0093_payment_account_refresh_generation');
+    expect(Object.keys(migrations).at(-1)).toBe('0094_provider_account_cleanup_commands');
     expect(migrations).toHaveProperty('0089_resale_settlements');
   });
 

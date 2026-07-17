@@ -8,6 +8,7 @@ import {
   BrandSenderIdentityRepository,
   BrandRepository,
   PaymentAccountRepository,
+  PaymentAccountCleanupCommandRepository,
   PermissionGrantRepository,
   AuditLogRepository,
   EventRepository,
@@ -1248,29 +1249,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
             .executeTakeFirst();
           if (!account) throw error;
           if (stripeAccount.id !== account.provider_account_id) {
-            void stripe
-              .deleteConnectAccount(
-                stripeAccount.id,
-                `stripe-connect-cleanup:${organization.tenant_id}:${organization.id}:${stripeAccount.id}`,
-              )
-              .catch((cleanupError) => {
-                const providerError =
-                  cleanupError instanceof ProviderOperationError
-                    ? {
-                        kind: cleanupError.kind,
-                        retryable: cleanupError.retryable,
-                        deliveryState: cleanupError.deliveryState,
-                      }
-                    : { kind: 'unknown' };
-                request.log.warn(
-                  {
-                    providerError,
-                    organizationId,
-                    stripeAccountId: stripeAccount.id,
-                  },
-                  'Failed to clean up duplicate Stripe Connect account after concurrent payment-account creation',
-                );
-              });
+            await new PaymentAccountCleanupCommandRepository(db).enqueue({
+              tenantId: organization.tenant_id,
+              organizationId: organization.id,
+              provider: 'stripe_connect',
+              providerAccountId: stripeAccount.id,
+              idempotencyKey: `stripe-connect-cleanup:${organization.tenant_id}:${organization.id}:${stripeAccount.id}`,
+              reason: 'concurrent_create_loser',
+            });
           }
         }
 

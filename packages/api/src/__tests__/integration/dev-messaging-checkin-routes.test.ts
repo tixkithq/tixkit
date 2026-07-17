@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   RESALE_REFUND_MODEL,
@@ -84,11 +85,14 @@ const likePatternMatches = (rowValue: unknown, pattern: unknown): boolean => {
 
 type MockCondition =
   | { type: 'comparison'; column: string; op: string; value: unknown }
+  | { type: 'and'; conditions: MockCondition[] }
   | { type: 'or'; conditions: MockCondition[] };
 
 const mockConditionMatches = (row: Record<string, unknown>, condition: MockCondition): boolean => {
-  if (condition.type === 'or') {
-    return condition.conditions.some((child) => mockConditionMatches(row, child));
+  if (condition.type === 'and' || condition.type === 'or') {
+    return condition.type === 'and'
+      ? condition.conditions.every((child) => mockConditionMatches(row, child))
+      : condition.conditions.some((child) => mockConditionMatches(row, child));
   }
 
   const rowValue = getMockColumnValue(row, condition.column);
@@ -143,6 +147,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
         value,
       }),
       {
+        and: (conditions: MockCondition[]): MockCondition => ({ type: 'and', conditions }),
         or: (conditions: MockCondition[]): MockCondition => ({ type: 'or', conditions }),
       },
     );
@@ -980,7 +985,22 @@ describe('OAuth application CRUD', () => {
   });
 
   it('POST /oauth-applications creates an app and returns clientSecret', async () => {
-    const app = await setupApp(developerRoutes, makePrincipal());
+    const now = new Date();
+    const app = await setupApp(developerRoutes, makePrincipal(), {
+      organizations: [
+        {
+          id: 'org_1',
+          tenant_id: 'tnt_1',
+          name: 'Organization',
+          slug: 'organization',
+          clerk_organization_id: null,
+          box_office_settings: '{}',
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/oauth-applications',
@@ -2576,6 +2596,7 @@ describe('brand domain creation', () => {
         },
       ],
       payment_accounts: [],
+      provider_account_cleanup_commands: [],
       audit_logs: [],
       paymentAccountInsertConflictRow: {
         id: 'pa_winner',
@@ -2613,7 +2634,10 @@ describe('brand domain creation', () => {
         }),
       },
       accountLinks: {
-        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_winner' })),
+        create: vi.fn(async () => {
+          expect(tables.provider_account_cleanup_commands).toHaveLength(1);
+          return { url: 'https://connect.stripe.test/onboard/acct_winner' };
+        }),
       },
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
@@ -2625,7 +2649,7 @@ describe('brand domain creation', () => {
       headers: { 'idempotency-key': 'stripe-connect-test-race' },
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({
       id: 'pa_winner',
       provider: 'stripe_connect',
@@ -2635,11 +2659,21 @@ describe('brand domain creation', () => {
     expect(tables.payment_accounts).toHaveLength(1);
     expect(tables.audit_logs).toHaveLength(0);
     expect(stripe.accounts.create).toHaveBeenCalledTimes(1);
-    expect(stripe.accounts.del).toHaveBeenCalledWith(
-      'acct_loser',
-      {},
-      { idempotencyKey: 'stripe-connect-cleanup:tnt_1:org_1:acct_loser' },
-    );
+    expect(stripe.accounts.del).not.toHaveBeenCalled();
+    expect(tables.provider_account_cleanup_commands).toEqual([
+      expect.objectContaining({
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_loser',
+        idempotency_key_sha256: createHash('sha256')
+          .update('stripe-connect-cleanup:tnt_1:org_1:acct_loser')
+          .digest('hex'),
+        reason: 'concurrent_create_loser',
+        status: 'pending',
+        attempts: 0,
+      }),
+    ]);
     expect(stripe.accountLinks.create).toHaveBeenCalledWith(
       {
         account: 'acct_winner',
@@ -2656,7 +2690,7 @@ describe('brand domain creation', () => {
     await app.close();
   });
 
-  it('POST /organizations/:organizationId/payment-accounts/stripe-connect returns the winner without waiting for loser cleanup', async () => {
+  it('POST /organizations/:organizationId/payment-accounts/stripe-connect returns the winner after durable loser cleanup enqueue', async () => {
     const tables = {
       organizations: [
         {
@@ -2671,6 +2705,7 @@ describe('brand domain creation', () => {
         },
       ],
       payment_accounts: [],
+      provider_account_cleanup_commands: [],
       audit_logs: [],
       paymentAccountInsertConflictRow: {
         id: 'pa_winner',
@@ -2689,7 +2724,6 @@ describe('brand domain creation', () => {
         updated_at: new Date(),
       },
     };
-    const cleanupPromise = new Promise<never>(() => undefined);
     const stripe = {
       accounts: {
         create: vi.fn(async () => ({
@@ -2704,7 +2738,7 @@ describe('brand domain creation', () => {
             disabled_reason: null,
           },
         })),
-        del: vi.fn(() => cleanupPromise),
+        del: vi.fn(),
       },
       accountLinks: {
         create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_winner' })),
@@ -2721,17 +2755,20 @@ describe('brand domain creation', () => {
     });
 
     expect(Date.now() - startedAt).toBeLessThan(1000);
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({
       id: 'pa_winner',
       providerAccountId: 'acct_winner',
       onboardingUrl: 'https://connect.stripe.test/onboard/acct_winner',
     });
-    expect(stripe.accounts.del).toHaveBeenCalledWith(
-      'acct_loser',
-      {},
-      { idempotencyKey: 'stripe-connect-cleanup:tnt_1:org_1:acct_loser' },
-    );
+    expect(stripe.accounts.del).not.toHaveBeenCalled();
+    expect(tables.provider_account_cleanup_commands).toEqual([
+      expect.objectContaining({
+        provider_account_id: 'acct_loser',
+        status: 'pending',
+        attempts: 0,
+      }),
+    ]);
     expect(stripe.accountLinks.create).toHaveBeenCalledWith(
       {
         account: 'acct_winner',

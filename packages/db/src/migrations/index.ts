@@ -91,3 +91,4 @@ export { WebhookReplayRequestsMigration } from './0090_webhook_replay_requests.j
 export { MigrationLifecycleCommandsMigration } from './0091_migration_lifecycle_commands.js';
 export { MigrationLifecycleCommandOutcomesMigration } from './0092_migration_lifecycle_command_outcomes.js';
 export { PaymentAccountRefreshGenerationMigration } from './0093_payment_account_refresh_generation.js';
+export { ProviderAccountCleanupCommandsMigration } from './0094_provider_account_cleanup_commands.js';
