@@ -27,7 +27,7 @@ export interface ResolvedEventPatch {
 }
 
 export type ApplyResolvedEventPatchResult =
-  | { applied: true; event: EventRow }
+  | { applied: true; event: EventRow; previousEvent: EventRow }
   | { applied: false; currentVersion: number };
 
 export interface EventUpdateServiceCheckpoints {
@@ -314,12 +314,19 @@ export class EventUpdateService {
   async applyResolvedPatchInTransaction(
     transaction: Transaction<DB>,
     resolved: ResolvedEventPatch,
+    authorizeCurrent?: (event: EventRow) => void,
   ): Promise<ApplyResolvedEventPatchResult> {
     try {
       const repo = new EventRepository(transaction as Database);
-      const current = await repo.findById(resolved.eventId);
+      const current = await transaction
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', resolved.eventId)
+        .forUpdate()
+        .executeTakeFirst();
       if (!current || current.tenant_id !== resolved.tenantId)
         throw new NotFoundError('Event', resolved.eventId);
+      authorizeCurrent?.(current);
       if (Number(current.version) !== resolved.expectedVersion)
         throw new StaleEventPatchError(Number(current.version));
 
@@ -353,7 +360,7 @@ export class EventUpdateService {
       }
       for (const binding of resolved.mediaBindings)
         await renewEventMediaLease(transaction, current, binding);
-      return { applied: true as const, event: updated };
+      return { applied: true as const, event: updated, previousEvent: current };
     } catch (error) {
       if (error instanceof StaleEventPatchError)
         return { applied: false, currentVersion: error.currentVersion };

@@ -69,6 +69,13 @@ const publishContract = (() => {
   if (!contract) throw new Error('publish authorization contract is not registered');
   return contract;
 })();
+const eventUpdateContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'patchEventsByEventId',
+  );
+  if (!contract) throw new Error('event update authorization contract is not registered');
+  return contract;
+})();
 
 type AuthorizationScenario = {
   name: string;
@@ -128,6 +135,9 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
   const recordLaunchReadiness = vi.fn(
     (_input: { tenantId: string; organizationId: string; brandId: string; eventId: string }) =>
       undefined,
+  );
+  const eventUpdateCheckpoint = vi.fn(
+    async (_input: { stage: 'before_transaction'; eventId: string }) => undefined,
   );
 
   async function readinessAcknowledgementSnapshot() {
@@ -299,6 +309,74 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       .execute();
     publishReadinessLaunchable = false;
     recordLaunchReadiness.mockClear();
+  }
+
+  async function eventUpdateSnapshot() {
+    const [events, audits] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select([
+          'id',
+          'organization_id',
+          'brand_id',
+          'title',
+          'description',
+          'starts_at',
+          'version',
+          'public_revision',
+        ])
+        .where('id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('actor_id', '=', basePrincipal.id)
+        .where('action', '=', 'event.updated')
+        .where('resource_id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+    ]);
+    return { events, audits };
+  }
+
+  async function clearEventUpdateEvidence(): Promise<void> {
+    if (createdEventIds.length === 0) return;
+    await Promise.all([
+      db
+        .updateTable('events')
+        .set({
+          title: 'Allowed Event',
+          description: null,
+          starts_at: new Date('2027-01-01T18:00:00.000Z'),
+        })
+        .where('id', '=', eventA)
+        .execute(),
+      db
+        .updateTable('events')
+        .set({
+          title: 'Scoped Event',
+          description: null,
+          starts_at: new Date('2027-01-01T18:00:00.000Z'),
+        })
+        .where('id', '=', eventAScoped)
+        .execute(),
+      db
+        .updateTable('events')
+        .set({
+          title: 'Foreign Event',
+          description: null,
+          starts_at: new Date('2027-01-01T18:00:00.000Z'),
+        })
+        .where('id', '=', eventB)
+        .execute(),
+    ]);
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', basePrincipal.id)
+      .where('action', '=', 'event.updated')
+      .where('resource_id', 'in', createdEventIds)
+      .execute();
   }
 
   async function insertTenant(id: string, name: string) {
@@ -496,6 +574,8 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
           acknowledgementSubject,
         }) as never,
       dashboardActionServiceFactory: () => ({ getFeed: getDashboardActions }) as never,
+      eventUpdateCheckpoint: (input: { stage: 'before_transaction'; eventId: string }) =>
+        eventUpdateCheckpoint(input),
     } as unknown as AppContext);
     app.addHook('onRequest', async (request) => {
       request.principal = principal;
@@ -1354,6 +1434,216 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         expect(acknowledgementSubject).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('event update authorization and optimistic concurrency', () => {
+    beforeEach(async () => {
+      principal = basePrincipal;
+      eventUpdateCheckpoint.mockReset();
+      eventUpdateCheckpoint.mockResolvedValue(undefined);
+      await clearEventUpdateEvidence();
+    });
+    afterEach(clearEventUpdateEvidence);
+
+    async function versionOf(targetEventId: string): Promise<number> {
+      const event = await db
+        .selectFrom('events')
+        .select('version')
+        .where('id', '=', targetEventId)
+        .executeTakeFirstOrThrow();
+      return Number(event.version);
+    }
+
+    function invokeUpdate(
+      targetEventId: string,
+      expectedVersion: number,
+      title: string,
+      patch: Record<string, unknown> = {},
+    ) {
+      return app.inject({
+        method: eventUpdateContract.method,
+        url: eventUpdateContract.path.replace('{eventId}', targetEventId),
+        payload: { expectedVersion, title, description: `${title} description`, ...patch },
+      });
+    }
+
+    function auditDiff(value: unknown): Record<string, unknown> {
+      return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
+    }
+
+    it('updates the exact event with one monotonic revision and one exact atomic audit', async () => {
+      const before = await eventUpdateSnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA)!;
+      const response = await invokeUpdate(eventA, Number(eventBefore.version), 'Updated Event', {
+        startsAt: '2027-02-02T18:00:00.987Z',
+      });
+
+      expect(response.statusCode, response.body).toBe(eventUpdateContract.authorizedControl.status);
+      expect(response.json()).toMatchObject({
+        id: eventA,
+        title: 'Updated Event',
+        description: 'Updated Event description',
+        version: Number(eventBefore.version) + 1,
+      });
+      const after = await eventUpdateSnapshot();
+      const eventAfter = after.events.find((event) => event.id === eventA)!;
+      expect(eventAfter.starts_at.toISOString()).toBe(response.json().startsAt);
+      expect(eventAfter.public_revision?.getTime() ?? 0).toBeGreaterThan(
+        eventBefore.public_revision?.getTime() ?? 0,
+      );
+      expect(after.audits).toHaveLength(1);
+      expect(after.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_id: basePrincipal.id,
+        action: 'event.updated',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      expect(auditDiff(after.audits[0]!.diff_summary)).toEqual({
+        fields: ['description', 'startsAt', 'title'],
+        before: {
+          description: null,
+          startsAt: '2027-01-01T18:00:00.000Z',
+          title: 'Allowed Event',
+        },
+        after: {
+          description: 'Updated Event description',
+          startsAt: response.json().startsAt,
+          title: 'Updated Event',
+        },
+        previousVersion: Number(eventBefore.version),
+        newVersion: Number(eventBefore.version) + 1,
+      });
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without event, revision, or audit mutation',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const targetEventId = targetEvent();
+        const before = await eventUpdateSnapshot();
+        const response = await invokeUpdate(
+          targetEventId,
+          await versionOf(targetEventId),
+          'Forbidden Update',
+        );
+        expect(response.statusCode, response.body).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        await expect(eventUpdateSnapshot()).resolves.toEqual(before);
+      },
+    );
+
+    it('rejects stale updates without event, revision, or audit mutation', async () => {
+      const before = await eventUpdateSnapshot();
+      const version = await versionOf(eventA);
+      const response = await invokeUpdate(eventA, version - 1, 'Stale Update');
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'stale_event_version',
+          details: { expectedVersion: version - 1, currentVersion: version },
+        },
+      });
+      await expect(eventUpdateSnapshot()).resolves.toEqual(before);
+    });
+
+    it('revalidates organization and brand scope against the locked mutation row', async () => {
+      let checkpointSnapshot: Awaited<ReturnType<typeof eventUpdateSnapshot>> | undefined;
+      eventUpdateCheckpoint.mockImplementationOnce(async () => {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+          .where('id', '=', eventA)
+          .execute();
+        checkpointSnapshot = await eventUpdateSnapshot();
+      });
+
+      try {
+        const response = await invokeUpdate(eventA, await versionOf(eventA), 'Scope Race');
+        expect(response.statusCode).toBe(404);
+        expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+        expect(checkpointSnapshot).toBeDefined();
+        await expect(eventUpdateSnapshot()).resolves.toEqual(checkpointSnapshot);
+      } finally {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationA, brand_id: brandA })
+          .where('id', '=', eventA)
+          .execute();
+      }
+    });
+
+    it('rolls the event update back when its required audit cannot persist', async () => {
+      const before = await eventUpdateSnapshot();
+      const failure = vi
+        .spyOn(AuditLogRepository.prototype, 'create')
+        .mockRejectedValueOnce(new Error('injected event update audit failure'));
+      const response = await invokeUpdate(eventA, await versionOf(eventA), 'Rolled Back');
+      expect(response.statusCode).toBe(500);
+      await expect(eventUpdateSnapshot()).resolves.toEqual(before);
+      failure.mockRestore();
+    });
+
+    it('allows exactly one winner for concurrent updates at the same version', async () => {
+      const before = await eventUpdateSnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA)!;
+      const version = Number(eventBefore.version);
+      const responses = await Promise.all([
+        invokeUpdate(eventA, version, 'Concurrent Alpha'),
+        invokeUpdate(eventA, version, 'Concurrent Beta'),
+      ]);
+      expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+      const after = await eventUpdateSnapshot();
+      const eventAfter = after.events.find((event) => event.id === eventA)!;
+      expect(['Concurrent Alpha', 'Concurrent Beta']).toContain(eventAfter.title);
+      expect(Number(eventAfter.version)).toBe(version + 1);
+      expect(eventAfter.public_revision?.getTime() ?? 0).toBeGreaterThan(
+        eventBefore.public_revision?.getTime() ?? 0,
+      );
+      expect(after.audits).toHaveLength(1);
+      expect(auditDiff(after.audits[0]!.diff_summary)).toMatchObject({
+        fields: ['description', 'title'],
+        previousVersion: version,
+        newVersion: version + 1,
+        before: { title: 'Allowed Event', description: null },
+        after: { title: eventAfter.title, description: `${eventAfter.title} description` },
+      });
+    });
   });
 
   describe('publish authorization and terminal-state safety', () => {

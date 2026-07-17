@@ -39,7 +39,7 @@ import {
 import { ReadinessService, resolvePaymentMode } from '../../services/readiness.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 import { publishEvent } from '../../services/event-publication.js';
-import { EventUpdateService } from '../../services/event-update.js';
+import { EventUpdateService, projectEventUpdateFields } from '../../services/event-update.js';
 import { loadEventMediaThumbnails } from '../../services/event-media.js';
 
 const marketingIntegrationStatusSchema = z.enum(['active', 'disabled']).default('active');
@@ -1072,7 +1072,41 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         eventId,
         patch: body,
       });
-      result = await service.applyResolvedPatch(resolved);
+      await app.context.eventUpdateCheckpoint?.({ stage: 'before_transaction', eventId });
+      result = await db.transaction().execute(async (transaction) => {
+        const applied = await service.applyResolvedPatchInTransaction(
+          transaction,
+          resolved,
+          (current) => {
+            ClerkAuthService.requireResourceTenant(principal, current, 'Event', eventId);
+            ClerkAuthService.requireOrganizationScope(principal, current.organization_id);
+            ClerkAuthService.requireBrandScope(principal, current.brand_id);
+            ClerkAuthService.requireEventScope(principal, eventId);
+          },
+        );
+        if (!applied.applied) return applied;
+        await writeAuditLog(
+          new AuditLogRepository(transaction as typeof db),
+          request,
+          principal,
+          {
+            action: 'event.updated',
+            organizationId: applied.previousEvent.organization_id,
+            brandId: applied.previousEvent.brand_id,
+            resourceType: 'Event',
+            resourceId: eventId,
+            diffSummary: {
+              fields: resolved.requestedFields,
+              before: projectEventUpdateFields(applied.previousEvent, resolved.requestedFields),
+              after: projectEventUpdateFields(applied.event, resolved.requestedFields),
+              previousVersion: resolved.expectedVersion,
+              newVersion: Number(applied.event.version),
+            },
+          },
+          { failClosed: true },
+        );
+        return applied;
+      });
     } catch (error) {
       if (body.venueId && isVenueForeignKeyError(error)) {
         throw new NotFoundError('Venue', body.venueId);
