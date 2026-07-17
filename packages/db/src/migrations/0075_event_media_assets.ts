@@ -92,23 +92,11 @@ export const EventMediaAssetsMigration: Migration = {
       .addUniqueConstraint('event_media_renditions_variant_unique', ['asset_id', 'variant'])
       .execute();
   },
-  async down(db): Promise<void> {
-    await db.schema.dropTable('event_media_renditions').execute();
-    await db.schema.dropTable('event_media_assets').execute();
-    if (process.env.DB_DRIVER === 'mysql') {
-      await sql`alter table upload_artifacts drop index upload_artifacts_event_media_scope_unique`.execute(
-        db,
-      );
-    } else {
-      await db.schema
-        .alterTable('upload_artifacts')
-        .dropConstraint('upload_artifacts_event_media_scope_unique')
-        .execute();
-    }
-    await db.schema
-      .alterTable('upload_artifacts')
-      .dropColumn('completion_started_at')
-      .dropColumn('completion_owner_token')
-      .execute();
+  async down(): Promise<void> {
+    // Event media assets and renditions contain owned content that cannot be reconstructed from
+    // upload artifacts alone. A reversible downgrade requires a separate archival migration that
+    // preserves those records before any table, constraint, or completion-coordination column is
+    // removed.
+    throw new Error('Event media assets are irreversible without an archival migration');
   },
 };

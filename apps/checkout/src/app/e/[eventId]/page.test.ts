@@ -131,7 +131,9 @@ describe('eventPageMetadataFromBootstrap', () => {
   });
 
   it('uses dimensions and alt text from the exact stored-role rendition', () => {
-    const posterSocialUrl = '/v1/public/event-media/renditions/emr_poster_social';
+    const posterSocialReference = '/v1/public/event-media/renditions/emr_poster_social';
+    const posterSocialUrl =
+      'https://api.self-hosted.example/v1/public/event-media/renditions/emr_poster_social';
     const metadata = eventPageMetadataFromBootstrap(
       bootstrap({
         event: {
@@ -178,11 +180,12 @@ describe('eventPageMetadataFromBootstrap', () => {
           page: {
             provider: '@puckeditor/core',
             puckData: null,
-            settings: { discovery: { socialImageUrl: posterSocialUrl } },
+            settings: { discovery: { socialImageUrl: posterSocialReference } },
             discovery: { title: 'Event', summary: 'Event summary', tags: [] },
           },
         },
       }),
+      'https://api.self-hosted.example',
     );
 
     expect(metadata.openGraph).toMatchObject({

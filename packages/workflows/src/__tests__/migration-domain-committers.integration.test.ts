@@ -580,13 +580,50 @@ describeDatabase('production migration committers', () => {
     await expect(committer.assessReconciled(reconciliationInput)).resolves.toEqual({
       reconciled: true,
     });
+    const retainedCleanup = await db
+      .selectFrom('media_object_cleanup_jobs')
+      .selectAll()
+      .where('bucket', '=', rendition.bucket)
+      .where('object_key', '=', rendition.object_key)
+      .executeTakeFirstOrThrow();
+    expect(retainedCleanup).toMatchObject({
+      tenant_id: tenantId,
+      organization_id: organizationId,
+      bucket: rendition.bucket,
+      object_key: rendition.object_key,
+      checksum_sha256: rendition.checksum_sha256,
+    });
+    const retainedCleanupNow = new Date();
+    await db
+      .updateTable('media_object_cleanup_jobs')
+      .set({
+        reason: 'event-media-prewrite',
+        status: 'pending',
+        available_at: retainedCleanupNow,
+        last_error: null,
+        updated_at: retainedCleanupNow,
+      })
+      .where('id', '=', retainedCleanup.id)
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('bucket', '=', rendition.bucket)
+      .where('object_key', '=', rendition.object_key)
+      .where('checksum_sha256', '=', rendition.checksum_sha256)
+      .execute();
     await expect(
       processMigrationMediaCleanupJobs(db, mediaStore, new Date(Date.now() + 1_000)),
     ).resolves.toEqual({
       completed: 5,
-      retained: 0,
+      retained: 1,
       failed: 0,
     });
+    await expect(
+      db
+        .selectFrom('media_object_cleanup_jobs')
+        .select('status')
+        .where('id', '=', retainedCleanup.id)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ status: 'retained' });
     expect(deletedKeys).toHaveLength(5);
     expect(deletedKeys).toEqual(expect.arrayContaining([expect.stringContaining(sha256)]));
   });

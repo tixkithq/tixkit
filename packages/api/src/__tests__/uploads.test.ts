@@ -248,9 +248,51 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({
 type Row = Record<string, unknown>;
 type RowPredicate = (row: Row) => boolean;
 
+function eventMediaSeed(original: Buffer, checksum: string): Record<string, Row[]> {
+  return {
+    events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' }],
+    upload_artifacts: [
+      {
+        id: 'upl_cover',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+        purpose: 'event_cover',
+        status: 'uploaded',
+        scan_status: 'clean',
+        bucket: 'tixkit',
+        object_key: 'uploads/original.jpg',
+        checksum_sha256: checksum,
+        size_bytes: original.length,
+        metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'jpeg' } }),
+      },
+    ],
+  };
+}
+
+function attachCover(db: Database) {
+  return attachEventMedia({
+    db,
+    tenantId: 'tnt_1',
+    organizationId: 'org_1',
+    brandId: 'brd_1',
+    eventId: 'evt_1',
+    uploadArtifactId: 'upl_cover',
+    role: 'cover',
+    altText: 'Crowd watching the main stage',
+    focalPoint: { x: 0.5, y: 0.5 },
+    createdBy: 'usr_1',
+  });
+}
+
 function createMockDb(
   seed: Record<string, Row[]> = {},
-  options: { onUpdate?: (table: string, row: Row, values: Row) => void } = {},
+  options: {
+    beforeTransaction?: () => void;
+    onInsert?: (table: string, values: Row | Row[]) => void;
+    onUpdate?: (table: string, row: Row, values: Row) => void;
+  } = {},
 ) {
   const tables: Record<string, Row[]> = { upload_artifacts: [], ...seed };
 
@@ -318,6 +360,7 @@ function createMockDb(
       values(values: Row | Row[]) {
         return {
           execute: async () => {
+            options.onInsert?.(table, values);
             rowsFor(table).push(
               ...(Array.isArray(values) ? values : [values]).map((value) => ({
                 ...value,
@@ -390,7 +433,10 @@ function createMockDb(
   } as unknown as Database;
   Object.assign(db, {
     transaction: () => ({
-      execute: (work: (transaction: Database) => unknown) => work(db),
+      execute: (work: (transaction: Database) => unknown) => {
+        options.beforeTransaction?.();
+        return work(db);
+      },
     }),
   });
   return { tables, db };
@@ -2864,8 +2910,13 @@ describe('upload artifact service', () => {
       .toBuffer();
     const checksum = createHash('sha256').update(original).digest('hex');
     const writes: Array<Record<string, unknown>> = [];
+    const cleanupIntentCountsAtWrite: number[] = [];
+    let cleanupJobs: Row[] = [];
     s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
-      if (command.input.Body) writes.push(command.input);
+      if (command.input.Body) {
+        cleanupIntentCountsAtWrite.push(cleanupJobs.length);
+        writes.push(command.input);
+      }
       return command.input.Body
         ? {}
         : {
@@ -2874,6 +2925,7 @@ describe('upload artifact service', () => {
           };
     });
     const { db, tables } = createMockDb({
+      media_object_cleanup_jobs: [],
       events: [
         {
           id: 'evt_1',
@@ -2902,6 +2954,7 @@ describe('upload artifact service', () => {
         },
       ],
     });
+    cleanupJobs = tables.media_object_cleanup_jobs ?? [];
 
     const media = await attachEventMedia({
       db,
@@ -2938,6 +2991,38 @@ describe('upload artifact service', () => {
     expect(tables.event_media_assets).toHaveLength(1);
     expect(tables.event_media_renditions).toHaveLength(4);
     expect(tables.upload_artifacts).toHaveLength(1);
+    expect(cleanupIntentCountsAtWrite).toEqual([4, 4, 4, 4]);
+    expect(tables.media_object_cleanup_jobs).toHaveLength(4);
+    expect(tables.media_object_cleanup_jobs).toEqual(
+      expect.arrayContaining(
+        tables.event_media_renditions.map((rendition) =>
+          expect.objectContaining({
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            bucket: rendition.bucket,
+            object_key: rendition.object_key,
+            checksum_sha256: rendition.checksum_sha256,
+            reason: 'event-media-prewrite',
+            status: 'pending',
+          }),
+        ),
+      ),
+    );
+    expect(
+      tables.media_object_cleanup_jobs.every((job) =>
+        tables.event_media_renditions.some(
+          (rendition) => rendition.bucket === job.bucket && rendition.object_key === job.object_key,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      tables.media_object_cleanup_jobs.every(
+        (job) =>
+          job.available_at instanceof Date &&
+          job.created_at instanceof Date &&
+          job.available_at.getTime() - job.created_at.getTime() >= 60_000,
+      ),
+    ).toBe(true);
   });
 
   it('uses post-orientation dimensions for focal-point rendition geometry', async () => {
@@ -3164,7 +3249,7 @@ describe('upload artifact service', () => {
         createdBy: 'usr_1',
       }),
     ).rejects.toThrow('page event media rendition exceeds its 600000-byte performance budget');
-    expect(writes).toHaveLength(2);
+    expect(writes).toHaveLength(0);
     expect(deletes).toEqual(writes);
     expect(tables.event_media_assets ?? []).toHaveLength(0);
     expect(tables.event_media_renditions ?? []).toHaveLength(0);
@@ -3187,7 +3272,7 @@ describe('upload artifact service', () => {
       }
       if (String(command.input.Key).startsWith('event-media/')) {
         deletedKeys.push(String(command.input.Key));
-        return {};
+        throw new Error('object delete unavailable');
       }
       return { Body: { transformToByteArray: async () => original } };
     });
@@ -3234,10 +3319,332 @@ describe('upload artifact service', () => {
         focalPoint: { x: 0.5, y: 0.5 },
         createdBy: 'usr_1',
       }),
-    ).rejects.toThrow('object store unavailable');
+    ).rejects.toThrow('Event media rendition storage failed');
     expect(deletedKeys).toHaveLength(2);
+    expect(tables.media_object_cleanup_jobs).toHaveLength(4);
+    expect(tables.media_object_cleanup_jobs).toEqual(
+      expect.arrayContaining(
+        deletedKeys.map((objectKey) =>
+          expect.objectContaining({
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            bucket: 'tixkit',
+            object_key: objectKey,
+            cleanup_identity_sha256: createHash('sha256')
+              .update(
+                `tnt_1:org_1:tixkit:${objectKey}:${String(
+                  tables.media_object_cleanup_jobs.find((job) => job.object_key === objectKey)
+                    ?.checksum_sha256,
+                )}`,
+              )
+              .digest('hex'),
+            reason: 'event-media-prewrite',
+            status: 'pending',
+          }),
+        ),
+      ),
+    );
     expect(tables.event_media_assets ?? []).toHaveLength(0);
     expect(tables.event_media_renditions ?? []).toHaveLength(0);
+  });
+
+  it('fails closed before object storage when a pre-write cleanup intent cannot persist', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    let renditionWrites = 0;
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      if (command.input.Body) {
+        renditionWrites += 1;
+        return {};
+      }
+      return { Body: { transformToByteArray: async () => original } };
+    });
+    const { db, tables } = createMockDb(
+      {
+        events: [
+          {
+            id: 'evt_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'brd_1',
+          },
+        ],
+        upload_artifacts: [
+          {
+            id: 'upl_cover',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'brd_1',
+            event_id: 'evt_1',
+            purpose: 'event_cover',
+            status: 'uploaded',
+            scan_status: 'clean',
+            bucket: 'tixkit',
+            object_key: 'uploads/original.jpg',
+            checksum_sha256: checksum,
+            size_bytes: original.length,
+            metadata: JSON.stringify({
+              image: { width: 1600, height: 1000, format: 'jpeg' },
+            }),
+          },
+        ],
+      },
+      {
+        onInsert(table) {
+          if (table === 'media_object_cleanup_jobs') {
+            throw new Error('cleanup intent database unavailable');
+          }
+        },
+      },
+    );
+
+    await expect(
+      attachEventMedia({
+        db,
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        uploadArtifactId: 'upl_cover',
+        role: 'cover',
+        altText: 'Crowd watching the main stage',
+        focalPoint: { x: 0.5, y: 0.5 },
+        createdBy: 'usr_1',
+      }),
+    ).rejects.toThrow('cleanup intent database unavailable');
+    expect(renditionWrites).toBe(0);
+    expect(tables.media_object_cleanup_jobs ?? []).toHaveLength(0);
+    expect(tables.event_media_assets ?? []).toHaveLength(0);
+    expect(tables.event_media_renditions ?? []).toHaveLength(0);
+  });
+
+  it('retains durable cleanup intents when the rendition database commit fails', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    const writtenKeys: string[] = [];
+    const deletedKeys: string[] = [];
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      const key = String(command.input.Key ?? '');
+      if (command.input.Body) {
+        writtenKeys.push(key);
+        return {};
+      }
+      if (key.startsWith('event-media/')) {
+        deletedKeys.push(key);
+        return {};
+      }
+      return { Body: { transformToByteArray: async () => original } };
+    });
+    const { db, tables } = createMockDb(
+      {
+        events: [
+          {
+            id: 'evt_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'brd_1',
+          },
+        ],
+        upload_artifacts: [
+          {
+            id: 'upl_cover',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'brd_1',
+            event_id: 'evt_1',
+            purpose: 'event_cover',
+            status: 'uploaded',
+            scan_status: 'clean',
+            bucket: 'tixkit',
+            object_key: 'uploads/original.jpg',
+            checksum_sha256: checksum,
+            size_bytes: original.length,
+            metadata: JSON.stringify({
+              image: { width: 1600, height: 1000, format: 'jpeg' },
+            }),
+          },
+        ],
+      },
+      {
+        onInsert(table) {
+          if (table === 'event_media_assets') throw new Error('event media database unavailable');
+        },
+      },
+    );
+
+    await expect(
+      attachEventMedia({
+        db,
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        uploadArtifactId: 'upl_cover',
+        role: 'cover',
+        altText: 'Crowd watching the main stage',
+        focalPoint: { x: 0.5, y: 0.5 },
+        createdBy: 'usr_1',
+      }),
+    ).rejects.toThrow('event media database unavailable');
+    expect(writtenKeys).toHaveLength(4);
+    expect(deletedKeys).toEqual(writtenKeys);
+    expect(tables.media_object_cleanup_jobs).toHaveLength(4);
+    expect(
+      tables.media_object_cleanup_jobs.every(
+        (job) =>
+          job.reason === 'event-media-prewrite' &&
+          job.status === 'pending' &&
+          writtenKeys.includes(String(job.object_key)),
+      ),
+    ).toBe(true);
+    expect(tables.event_media_assets ?? []).toHaveLength(0);
+    expect(tables.event_media_renditions ?? []).toHaveLength(0);
+  });
+
+  it('fails closed when a persisted cleanup object has checksum drift', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    let writes = 0;
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      if (command.input.Body) writes += 1;
+      return command.input.Body ? {} : { Body: { transformToByteArray: async () => original } };
+    });
+    const { db, tables } = createMockDb(eventMediaSeed(original, checksum), {
+      onInsert(table, values) {
+        if (table === 'media_object_cleanup_jobs' && !Array.isArray(values)) {
+          values.checksum_sha256 = 'f'.repeat(64);
+        }
+      },
+    });
+
+    await expect(attachCover(db)).rejects.toThrow('cleanup intent fence was lost');
+    expect(writes).toBe(4);
+    expect(tables.event_media_assets ?? []).toHaveLength(0);
+    expect(tables.event_media_renditions ?? []).toHaveLength(0);
+  });
+
+  it('locks and validates every cleanup lease before the media transaction mutates data', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) =>
+      command.input.Body ? {} : { Body: { transformToByteArray: async () => original } },
+    );
+    let tables!: Record<string, Row[]>;
+    const fixture = createMockDb(eventMediaSeed(original, checksum), {
+      beforeTransaction() {
+        tables.media_object_cleanup_jobs[0]!.status = 'processing';
+      },
+    });
+    tables = fixture.tables;
+
+    await expect(attachCover(fixture.db)).rejects.toThrow(
+      'cleanup intent transaction fence was lost',
+    );
+    expect(tables.event_media_assets ?? []).toHaveLength(0);
+    expect(tables.event_media_renditions ?? []).toHaveLength(0);
+  });
+
+  it('heartbeats cleanup leases while a bounded rendition PUT is live', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    vi.useFakeTimers();
+    try {
+      let releaseFirstPut!: () => void;
+      let markFirstPutStarted!: () => void;
+      const firstPut = new Promise<void>((resolve) => {
+        releaseFirstPut = resolve;
+      });
+      const firstPutStarted = new Promise<void>((resolve) => {
+        markFirstPutStarted = resolve;
+      });
+      let puts = 0;
+      s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+        if (!command.input.Body) return { Body: { transformToByteArray: async () => original } };
+        puts += 1;
+        if (puts === 1) {
+          markFirstPutStarted();
+          await firstPut;
+        }
+        return {};
+      });
+      const { db, tables } = createMockDb(eventMediaSeed(original, checksum));
+      const attachment = attachCover(db);
+      await firstPutStarted;
+      const initialUpdatedAt = tables.media_object_cleanup_jobs[0]!.updated_at as Date;
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect((tables.media_object_cleanup_jobs[0]!.updated_at as Date).getTime()).toBeGreaterThan(
+        initialUpdatedAt.getTime(),
+      );
+      expect((tables.media_object_cleanup_jobs[0]!.available_at as Date).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+      releaseFirstPut();
+      await expect(attachment).resolves.toMatchObject({ role: 'cover' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts a rendition PUT at its deadline and retains cleanup recovery state', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    vi.useFakeTimers();
+    try {
+      let markPutStarted!: () => void;
+      const putStarted = new Promise<void>((resolve) => {
+        markPutStarted = resolve;
+      });
+      s3Send.mockImplementation(
+        async (
+          command: { input: Record<string, unknown> },
+          options?: { abortSignal?: AbortSignal },
+        ) => {
+          if (!command.input.Body) return { Body: { transformToByteArray: async () => original } };
+          markPutStarted();
+          return new Promise((_, reject) => {
+            options?.abortSignal?.addEventListener('abort', () =>
+              reject(new Error('secret abort')),
+            );
+          });
+        },
+      );
+      const { db, tables } = createMockDb(eventMediaSeed(original, checksum));
+      const attachment = attachCover(db);
+      const deadlineFailure = expect(attachment).rejects.toThrow(
+        'rendition storage deadline exceeded',
+      );
+      await putStarted;
+      await vi.advanceTimersByTimeAsync(20_001);
+      await deadlineFailure;
+      expect(tables.media_object_cleanup_jobs).toHaveLength(4);
+      expect(tables.event_media_assets ?? []).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -39,6 +39,9 @@ export const EVENT_MEDIA_RENDITION_MAX_BYTES = {
 const RENDITION_QUALITY_STEPS = [82, 76, 70, 64, 58, 52, 46, 40] as const;
 const EVENT_MEDIA_CONFLICT_REFERENCE_LIMIT = 50;
 const EVENT_MEDIA_CONFLICT_FIELD_MAX_LENGTH = 200;
+const EVENT_MEDIA_CLEANUP_LEASE_MS = 60_000;
+const EVENT_MEDIA_CLEANUP_HEARTBEAT_MS = 10_000;
+const EVENT_MEDIA_RENDITION_PUT_TIMEOUT_MS = 20_000;
 
 const PURPOSE_BY_ROLE: Record<EventMediaRole, string[]> = {
   poster: ['event_poster'],
@@ -133,36 +136,75 @@ async function stageRenditionCleanup(
   input: {
     tenantId: string;
     organizationId: string;
-    reason: 'event-media-replaced' | 'event-media-removed';
+    reason: 'event-media-prewrite' | 'event-media-replaced' | 'event-media-removed';
+    availableAt?: Date;
     renditions: Array<{
       bucket: string;
       object_key: string;
       checksum_sha256: string;
     }>;
   },
-): Promise<void> {
-  const now = new Date();
+): Promise<EventMediaCleanupLeaseEntry[]> {
+  const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const availableAt = input.availableAt ?? now;
+  const entries: EventMediaCleanupLeaseEntry[] = [];
   for (const rendition of input.renditions) {
     const identity = createHash('sha256')
-      .update(`${rendition.bucket}:${rendition.object_key}`)
+      .update(
+        `${input.tenantId}:${input.organizationId}:${rendition.bucket}:${rendition.object_key}:${rendition.checksum_sha256}`,
+      )
       .digest('hex');
     const existing = await db
       .selectFrom('media_object_cleanup_jobs')
-      .select('id')
-      .where('cleanup_identity_sha256', '=', identity)
+      .select(['id', 'tenant_id', 'organization_id', 'bucket', 'object_key', 'checksum_sha256'])
+      .where((eb) =>
+        eb.or([
+          eb('cleanup_identity_sha256', '=', identity),
+          eb.and([
+            eb('bucket', '=', rendition.bucket),
+            eb('object_key', '=', rendition.object_key),
+          ]),
+        ]),
+      )
       .executeTakeFirst();
     if (existing) {
-      await db
+      if (
+        existing.tenant_id !== input.tenantId ||
+        existing.organization_id !== input.organizationId ||
+        existing.bucket !== rendition.bucket ||
+        existing.object_key !== rendition.object_key ||
+        existing.checksum_sha256 !== rendition.checksum_sha256
+      ) {
+        throw new Error('Event media cleanup identity is bound to a different object scope');
+      }
+      const updated = await db
         .updateTable('media_object_cleanup_jobs')
         .set({
           reason: input.reason,
           status: 'pending',
-          available_at: now,
+          available_at: availableAt,
           last_error: null,
           updated_at: now,
         })
         .where('id', '=', existing.id)
-        .execute();
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('bucket', '=', rendition.bucket)
+        .where('object_key', '=', rendition.object_key)
+        .where('checksum_sha256', '=', rendition.checksum_sha256)
+        .executeTakeFirst();
+      if (Number(updated.numUpdatedRows) !== 1) {
+        throw new Error('Event media cleanup intent fence was lost');
+      }
+      entries.push({
+        id: existing.id,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        bucket: rendition.bucket,
+        objectKey: rendition.object_key,
+        checksumSha256: rendition.checksum_sha256,
+        updatedAt: now,
+      });
       continue;
     }
     await db
@@ -178,13 +220,127 @@ async function stageRenditionCleanup(
         reason: input.reason,
         status: 'pending',
         attempts: 0,
-        available_at: now,
+        available_at: availableAt,
         last_error: null,
         created_at: now,
         updated_at: now,
       })
       .execute();
+    entries.push({
+      id: `moc_${identity.slice(0, 26)}`,
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      bucket: rendition.bucket,
+      objectKey: rendition.object_key,
+      checksumSha256: rendition.checksum_sha256,
+      updatedAt: now,
+    });
   }
+  return entries;
+}
+
+type EventMediaCleanupLeaseEntry = {
+  id: string;
+  tenantId: string;
+  organizationId: string;
+  bucket: string;
+  objectKey: string;
+  checksumSha256: string;
+  updatedAt: Date;
+};
+
+async function extendEventMediaCleanupLease(
+  db: Database,
+  entries: EventMediaCleanupLeaseEntry[],
+): Promise<void> {
+  for (const entry of entries) {
+    const heartbeatAt = new Date(
+      Math.ceil(Math.max(Date.now(), entry.updatedAt.getTime() + 1000) / 1000) * 1000,
+    );
+    const updated = await db
+      .updateTable('media_object_cleanup_jobs')
+      .set({
+        available_at: new Date(heartbeatAt.getTime() + EVENT_MEDIA_CLEANUP_LEASE_MS),
+        updated_at: heartbeatAt,
+      })
+      .where('id', '=', entry.id)
+      .where('tenant_id', '=', entry.tenantId)
+      .where('organization_id', '=', entry.organizationId)
+      .where('bucket', '=', entry.bucket)
+      .where('object_key', '=', entry.objectKey)
+      .where('checksum_sha256', '=', entry.checksumSha256)
+      .where('status', '=', 'pending')
+      .where('updated_at', '=', entry.updatedAt)
+      .executeTakeFirst();
+    if (Number(updated.numUpdatedRows) !== 1) {
+      throw new Error('Event media cleanup intent fence was lost');
+    }
+    entry.updatedAt = heartbeatAt;
+  }
+}
+
+async function lockEventMediaCleanupLease(
+  db: Database,
+  entries: EventMediaCleanupLeaseEntry[],
+): Promise<void> {
+  for (const entry of entries) {
+    const locked = await db
+      .selectFrom('media_object_cleanup_jobs')
+      .select('id')
+      .where('id', '=', entry.id)
+      .where('tenant_id', '=', entry.tenantId)
+      .where('organization_id', '=', entry.organizationId)
+      .where('bucket', '=', entry.bucket)
+      .where('object_key', '=', entry.objectKey)
+      .where('checksum_sha256', '=', entry.checksumSha256)
+      .where('status', '=', 'pending')
+      .where('updated_at', '=', entry.updatedAt)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!locked) throw new Error('Event media cleanup intent transaction fence was lost');
+  }
+}
+
+function startEventMediaCleanupLease(db: Database, entries: EventMediaCleanupLeaseEntry[]) {
+  let failure: Error | undefined;
+  let currentPutAbortController: AbortController | undefined;
+  let heartbeat = Promise.resolve();
+  const timer = setInterval(() => {
+    heartbeat = heartbeat
+      .then(() => extendEventMediaCleanupLease(db, entries))
+      .catch(() => {
+        failure = new Error('Event media cleanup lease was lost');
+        currentPutAbortController?.abort();
+        clearInterval(timer);
+      });
+  }, EVENT_MEDIA_CLEANUP_HEARTBEAT_MS);
+  timer.unref();
+  return {
+    assertActive(): void {
+      if (failure) throw failure;
+    },
+    setCurrentPutAbortController(controller: AbortController | undefined): void {
+      currentPutAbortController = controller;
+      if (failure) controller?.abort();
+    },
+    async stop(): Promise<void> {
+      clearInterval(timer);
+      await heartbeat;
+    },
+  };
+}
+
+async function attemptImmediateRenditionCleanup(
+  renditions: Array<{ bucket: string; object_key: string }>,
+): Promise<void> {
+  // The durable pre-write intents remain authoritative. This is only a best-effort latency
+  // optimization, so a delete outage must neither erase recovery state nor replace the causal
+  // rendering/storage/database error returned to the caller.
+  await Promise.allSettled(
+    renditions.map((rendition) =>
+      deleteEventMediaRendition(rendition.bucket, rendition.object_key),
+    ),
+  );
 }
 
 async function renderAtFocalPoint(
@@ -330,51 +486,86 @@ export async function attachEventMedia(input: {
     size_bytes: number;
     created_at: Date;
   }> = [];
-  try {
-    for (const target of TARGETS[input.role]) {
-      const rendered = await renderAtFocalPoint(
-        normalized,
-        { width: normalizedWidth, height: normalizedHeight },
-        target,
-        input.focalPoint,
-      );
-      const renditionId = id('emr');
-      const objectKey = `event-media/${input.tenantId}/${input.eventId}/${assetId}/${renditionId}.webp`;
-      const checksumSha256 = createHash('sha256').update(rendered.buffer).digest('hex');
-      const rendition = {
-        id: renditionId,
-        asset_id: assetId,
-        variant: target.variant,
-        width: rendered.width,
-        height: rendered.height,
-        format: 'webp',
-        content_type: 'image/webp',
-        bucket: artifact.bucket,
-        object_key: objectKey,
-        checksum_sha256: checksumSha256,
-        size_bytes: rendered.buffer.length,
-        created_at: new Date(),
-      } as const;
-      renditions.push(rendition);
-      await writeEventMediaRendition({
-        bucket: artifact.bucket,
-        objectKey,
-        body: rendered.buffer,
-        contentType: 'image/webp',
-        checksumSha256,
-      });
-    }
-  } catch (error) {
-    await Promise.all(
-      renditions.map((rendition) =>
-        deleteEventMediaRendition(rendition.bucket, rendition.object_key),
-      ),
+  const preparedRenditions: Array<{ body: Buffer; rendition: (typeof renditions)[number] }> = [];
+  for (const target of TARGETS[input.role]) {
+    const rendered = await renderAtFocalPoint(
+      normalized,
+      { width: normalizedWidth, height: normalizedHeight },
+      target,
+      input.focalPoint,
     );
-    throw error;
+    const renditionId = id('emr');
+    const objectKey = `event-media/${input.tenantId}/${input.eventId}/${assetId}/${renditionId}.webp`;
+    const checksumSha256 = createHash('sha256').update(rendered.buffer).digest('hex');
+    const rendition = {
+      id: renditionId,
+      asset_id: assetId,
+      variant: target.variant,
+      width: rendered.width,
+      height: rendered.height,
+      format: 'webp',
+      content_type: 'image/webp',
+      bucket: artifact.bucket,
+      object_key: objectKey,
+      checksum_sha256: checksumSha256,
+      size_bytes: rendered.buffer.length,
+      created_at: new Date(),
+    } as const;
+    renditions.push(rendition);
+    preparedRenditions.push({ body: rendered.buffer, rendition });
   }
-  const now = new Date();
+  const cleanupLeaseEntries = await stageRenditionCleanup(input.db, {
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    reason: 'event-media-prewrite',
+    availableAt: new Date(Date.now() + EVENT_MEDIA_CLEANUP_LEASE_MS),
+    renditions,
+  });
+  const cleanupLease = startEventMediaCleanupLease(input.db, cleanupLeaseEntries);
+  let committed = false;
+  const attemptedRenditions: typeof renditions = [];
   try {
+    for (const { body, rendition } of preparedRenditions) {
+      cleanupLease.assertActive();
+      attemptedRenditions.push(rendition);
+      const putAbortController = new AbortController();
+      cleanupLease.setCurrentPutAbortController(putAbortController);
+      const putTimeout = setTimeout(
+        () => putAbortController.abort(),
+        EVENT_MEDIA_RENDITION_PUT_TIMEOUT_MS,
+      );
+      putTimeout.unref();
+      try {
+        try {
+          await writeEventMediaRendition({
+            bucket: rendition.bucket,
+            objectKey: rendition.object_key,
+            body,
+            contentType: rendition.content_type,
+            checksumSha256: rendition.checksum_sha256,
+            abortSignal: putAbortController.signal,
+          });
+        } catch {
+          if (putAbortController.signal.aborted) {
+            throw new Error('Event media rendition storage deadline exceeded');
+          }
+          throw new Error('Event media rendition storage failed');
+        }
+        if (putAbortController.signal.aborted) {
+          throw new Error('Event media rendition storage deadline exceeded');
+        }
+      } finally {
+        clearTimeout(putTimeout);
+        cleanupLease.setCurrentPutAbortController(undefined);
+      }
+      cleanupLease.assertActive();
+    }
+    await cleanupLease.stop();
+    cleanupLease.assertActive();
+    await extendEventMediaCleanupLease(input.db, cleanupLeaseEntries);
+    const now = new Date();
     await input.db.transaction().execute(async (transaction) => {
+      await lockEventMediaCleanupLease(transaction as typeof input.db, cleanupLeaseEntries);
       const lockedEvent = await transaction
         .selectFrom('events')
         .select('id')
@@ -474,12 +665,10 @@ export async function attachEventMedia(input: {
       await transaction.insertInto('event_media_renditions').values(renditions).execute();
       await bumpEventPublicRevision(transaction, input.eventId, now);
     });
+    committed = true;
   } catch (error) {
-    await Promise.all(
-      renditions.map((rendition) =>
-        deleteEventMediaRendition(rendition.bucket, rendition.object_key),
-      ),
-    );
+    await cleanupLease.stop();
+    if (!committed) await attemptImmediateRenditionCleanup(attemptedRenditions);
     throw error;
   }
   return {

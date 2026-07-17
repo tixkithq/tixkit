@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { PublicEvent, PublicEventMediaAsset } from '@/lib/api';
-import { resolveEventPageMedia, resolveEventSocialMedia } from '@/lib/event-media';
+import {
+  resolveEventMediaByUrl,
+  resolveEventPageMedia,
+  resolveEventSocialMedia,
+} from '@/lib/event-media';
 
 function asset(
   role: PublicEventMediaAsset['role'],
@@ -60,5 +64,43 @@ describe('event media fallback resolution', () => {
     expect(
       resolveEventPageMedia(event([asset('poster', ['page']), asset('cover', ['page'])]))?.url,
     ).toBe('https://media.example/cover-page.webp');
+  });
+
+  it('canonicalizes only exact owned relative rendition paths to the API URL', () => {
+    const mediaEvent = event([asset('social', ['social'])]);
+    mediaEvent.mediaAssets![0]!.renditions[0]!.url =
+      'https://api.example.test/v1/public/event-media/renditions/emr_social';
+
+    expect(
+      resolveEventMediaByUrl(
+        mediaEvent,
+        '/v1/public/event-media/renditions/emr_social',
+        'https://api.example.test',
+      )?.url,
+    ).toBe('https://api.example.test/v1/public/event-media/renditions/emr_social');
+    expect(
+      resolveEventMediaByUrl(
+        mediaEvent,
+        'https://foreign.example/v1/public/event-media/renditions/emr_social',
+        'https://api.example.test',
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveEventMediaByUrl(
+        mediaEvent,
+        '/v1/public/event-media/renditions/emr_social?credential=secret',
+        'https://api.example.test',
+      ),
+    ).toBeUndefined();
+
+    mediaEvent.mediaAssets![0]!.renditions[0]!.url =
+      'https://user:secret@foreign.example/v1/public/event-media/renditions/emr_social';
+    expect(
+      resolveEventMediaByUrl(
+        mediaEvent,
+        '/v1/public/event-media/renditions/emr_social',
+        'https://api.example.test',
+      ),
+    ).toBeUndefined();
   });
 });

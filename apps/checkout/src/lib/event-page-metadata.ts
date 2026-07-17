@@ -5,8 +5,12 @@ import {
   isSafeEventPageImageSource,
 } from '@tixkit/content-event-page';
 import { resolveEventMediaByUrl, resolveEventSocialMedia } from '@/lib/event-media';
+import { parseCheckoutRuntimeConfig } from '@/lib/runtime-config-server';
 
-export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstrap): Metadata {
+export function eventPageMetadataFromBootstrap(
+  bootstrap: PublicEventPageBootstrap,
+  apiOrigin = parseCheckoutRuntimeConfig().apiBaseUrl,
+): Metadata {
   const storedDiscovery = bootstrap.contentPage?.page.settings?.discovery as
     | {
         seoTitle?: string;
@@ -33,16 +37,17 @@ export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstr
     !eventPageMediaReferenceRole(storedDiscovery?.coverImageUrl ?? '')
       ? storedDiscovery.coverImageUrl
       : undefined;
-  const imageUrl =
+  const requestedImageUrl =
     storedSocialImageUrl ||
     socialMedia?.url ||
     storedCoverImageUrl ||
     publicDiscovery?.imageUrl ||
     bootstrap.event.coverImageUrl;
-  const selectedMedia = imageUrl
-    ? (resolveEventMediaByUrl(bootstrap.event, imageUrl) ??
-      (socialMedia?.url === imageUrl ? socialMedia : undefined))
+  const selectedMedia = requestedImageUrl
+    ? (resolveEventMediaByUrl(bootstrap.event, requestedImageUrl, apiOrigin) ??
+      (socialMedia?.url === requestedImageUrl ? socialMedia : undefined))
     : undefined;
+  const imageUrl = selectedMedia?.url ?? requestedImageUrl;
 
   return {
     title: { absolute: title },

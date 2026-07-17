@@ -2028,6 +2028,7 @@ export async function writeEventMediaRendition(input: {
   body: Buffer;
   contentType: string;
   checksumSha256: string;
+  abortSignal?: AbortSignal;
 }): Promise<void> {
   await createS3Client().send(
     new PutObjectCommand({
@@ -2041,6 +2042,7 @@ export async function writeEventMediaRendition(input: {
       ChecksumSHA256: Buffer.from(input.checksumSha256, 'hex').toString('base64'),
       ...s3PutEncryption(),
     }),
+    { abortSignal: input.abortSignal },
   );
 }
 

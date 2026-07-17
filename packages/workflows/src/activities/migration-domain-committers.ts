@@ -151,7 +151,7 @@ export interface MigrationMediaObjectStore {
     contentType: string;
   }): Promise<void>;
   verify(input: { objectKey: string; bytes: number; sha256: string }): Promise<void>;
-  delete(objectKey: string): Promise<void>;
+  delete(objectKey: string, abortSignal: AbortSignal): Promise<void>;
 }
 
 export interface MigrationPortableAssetResolver {
@@ -262,9 +262,11 @@ export function createMigrationMediaObjectStore(
       )
         throw new Error('MIGRATION_MEDIA_OBJECT_INTEGRITY_FAILED');
     },
-    async delete(objectKey) {
+    async delete(objectKey, abortSignal) {
       if (!bucket) throw new Error('MIGRATION_MEDIA_BUCKET_REQUIRED');
-      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }), {
+        abortSignal,
+      });
     },
   };
 }
@@ -331,6 +333,7 @@ export async function processMigrationMediaCleanupJobs(
   store: MigrationMediaObjectStore,
   now = new Date(),
   limit = 100,
+  options: { deleteTimeoutMs?: number } = {},
 ): Promise<{ completed: number; retained: number; failed: number }> {
   const jobs = await db
     .selectFrom('media_object_cleanup_jobs')
@@ -352,9 +355,13 @@ export async function processMigrationMediaCleanupJobs(
   let retained = 0;
   let failed = 0;
   for (const job of jobs) {
+    const claimToken = new Date(
+      Math.ceil(Math.max(now.getTime(), job.updated_at.getTime() + 1000) / 1000) * 1000,
+    );
+    const resultToken = new Date(claimToken.getTime() + 1000);
     const claimed = await db
       .updateTable('media_object_cleanup_jobs')
-      .set({ status: 'processing', updated_at: now })
+      .set({ status: 'processing', updated_at: claimToken })
       .where('id', '=', job.id)
       .where('status', '=', job.status)
       .where('updated_at', '=', job.updated_at)
@@ -363,56 +370,102 @@ export async function processMigrationMediaCleanupJobs(
     const [uploadReference, renditionReference] = await Promise.all([
       db
         .selectFrom('upload_artifacts')
-        .select('id')
+        .select(['id', 'checksum_sha256'])
         .where('bucket', '=', job.bucket)
         .where('object_key', '=', job.object_key)
         .executeTakeFirst(),
       db
         .selectFrom('event_media_renditions')
-        .select('id')
+        .select(['id', 'checksum_sha256'])
         .where('bucket', '=', job.bucket)
         .where('object_key', '=', job.object_key)
         .executeTakeFirst(),
     ]);
-    if (uploadReference || renditionReference) {
-      await db
+    if (
+      uploadReference?.checksum_sha256 === job.checksum_sha256 ||
+      renditionReference?.checksum_sha256 === job.checksum_sha256
+    ) {
+      const retainedResult = await db
         .updateTable('media_object_cleanup_jobs')
-        .set({ status: 'retained', updated_at: now })
+        .set({ status: 'retained', updated_at: resultToken })
         .where('id', '=', job.id)
         .where('status', '=', 'processing')
-        .execute();
-      retained += 1;
+        .where('updated_at', '=', claimToken)
+        .executeTakeFirst();
+      if (Number(retainedResult.numUpdatedRows) === 1) retained += 1;
+      continue;
+    }
+    if (uploadReference || renditionReference) {
+      const mismatchResult = await db
+        .updateTable('media_object_cleanup_jobs')
+        .set({
+          status: 'pending',
+          attempts: job.attempts + 1,
+          last_error: 'cleanup_reference_checksum_mismatch',
+          available_at: new Date(now.getTime() + Math.min(60, 2 ** job.attempts) * 60_000),
+          updated_at: resultToken,
+        })
+        .where('id', '=', job.id)
+        .where('status', '=', 'processing')
+        .where('updated_at', '=', claimToken)
+        .executeTakeFirst();
+      if (Number(mismatchResult.numUpdatedRows) === 1) failed += 1;
       continue;
     }
     try {
       if (store.bucket !== job.bucket) throw new Error('MIGRATION_MEDIA_CLEANUP_BUCKET_MISMATCH');
-      await store.delete(job.object_key);
-      await db
+      const deleteTimeoutMs = options.deleteTimeoutMs ?? 20_000;
+      const deleteAbortController = new AbortController();
+      let deleteTimedOut = false;
+      const deleteTimeout = setTimeout(() => {
+        deleteTimedOut = true;
+        deleteAbortController.abort();
+      }, deleteTimeoutMs);
+      deleteTimeout.unref();
+      try {
+        await store.delete(job.object_key, deleteAbortController.signal);
+        if (deleteTimedOut) throw new Error('MIGRATION_MEDIA_CLEANUP_DELETE_TIMEOUT');
+      } catch (error) {
+        // eslint-disable-next-line preserve-caught-error -- provider abort errors can contain request identifiers and must not escape the redaction boundary.
+        if (deleteTimedOut) throw new Error('MIGRATION_MEDIA_CLEANUP_DELETE_TIMEOUT');
+        throw error;
+      } finally {
+        clearTimeout(deleteTimeout);
+      }
+      const completedResult = await db
         .updateTable('media_object_cleanup_jobs')
         .set({
           status: 'completed',
           attempts: job.attempts + 1,
           last_error: null,
-          updated_at: now,
+          updated_at: resultToken,
         })
         .where('id', '=', job.id)
         .where('status', '=', 'processing')
-        .execute();
-      completed += 1;
+        .where('updated_at', '=', claimToken)
+        .executeTakeFirst();
+      if (Number(completedResult.numUpdatedRows) === 1) completed += 1;
     } catch (error) {
-      await db
+      const lastError =
+        error instanceof Error && error.message === 'MIGRATION_MEDIA_CLEANUP_BUCKET_MISMATCH'
+          ? 'cleanup_bucket_mismatch'
+          : error instanceof Error && error.message === 'MIGRATION_MEDIA_CLEANUP_DELETE_TIMEOUT'
+            ? 'cleanup_delete_timeout'
+            : 'cleanup_delete_failed';
+      const retryResult = await db
         .updateTable('media_object_cleanup_jobs')
         .set({
           status: 'pending',
           attempts: job.attempts + 1,
-          last_error: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+          last_error: lastError,
           available_at: new Date(now.getTime() + Math.min(60, 2 ** job.attempts) * 60_000),
-          updated_at: now,
+          updated_at: resultToken,
         })
         .where('id', '=', job.id)
         .where('status', '=', 'processing')
-        .execute();
-      failed += 1;
+        .where('updated_at', '=', claimToken)
+        .executeTakeFirst();
+      if (Number(retryResult.numUpdatedRows) === 1) failed += 1;
     }
   }
   return { completed, retained, failed };

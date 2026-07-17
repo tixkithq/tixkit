@@ -180,7 +180,16 @@ test.describe('role-based event media journeys', () => {
       mimeType: 'image/png',
       buffer: await readFile('apps/admin-dashboard/public/brand/tixkit-symbol.png'),
     });
-    expect((await replaced).status()).toBe(200);
+    const replacementResponse = await replaced;
+    expect(replacementResponse.status()).toBe(200);
+    const replacementMedia = (await replacementResponse.json()) as {
+      renditions: Array<{ variant: string; url: string }>;
+    };
+    const replacementSocialUrl = replacementMedia.renditions.find(
+      (rendition) => rendition.variant === 'social',
+    )?.url;
+    expect(replacementSocialUrl).toBeTruthy();
+    const expectedSocialUrl = new URL(replacementSocialUrl!, apiBaseUrl).href;
     await expect
       .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-replaced'))
       .toHaveLength(8);
@@ -202,6 +211,14 @@ test.describe('role-based event media journeys', () => {
       const buyerPoster = page.getByAltText(altText);
       await expect(buyerPoster).toBeVisible();
       await expect(buyerPoster).toHaveAttribute('src', /\/v1\/public\/event-media\/renditions\//u);
+      await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+        'content',
+        expectedSocialUrl,
+      );
+      await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute(
+        'content',
+        expectedSocialUrl,
+      );
       await buyerPoster.evaluate((image: HTMLImageElement) => image.decode());
       const performance = await buyerPoster.evaluate((image: HTMLImageElement) => {
         return {

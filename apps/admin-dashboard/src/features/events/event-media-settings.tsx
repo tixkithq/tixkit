@@ -11,6 +11,21 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AuthenticatedEventImage } from './authenticated-event-image';
 
+function eventMediaDefaults(event: AdminEventDetail) {
+  return {
+    alt: {
+      poster: event.title,
+      cover: event.coverImageAlt ?? event.title,
+      social: event.title,
+    } satisfies Record<AdminEventMediaRole, string>,
+    focalPoints: {
+      poster: { x: 0.5, y: 0.5 },
+      cover: { x: 0.5, y: 0.5 },
+      social: { x: 0.5, y: 0.5 },
+    } satisfies Record<AdminEventMediaRole, { x: number; y: number }>,
+  };
+}
+
 export function EventMediaSettings({
   event,
   onChanged,
@@ -18,6 +33,9 @@ export function EventMediaSettings({
   event: AdminEventDetail;
   onChanged: () => void;
 }) {
+  const currentEventId = React.useRef(event.id);
+  currentEventId.current = event.id;
+  const initialDefaults = eventMediaDefaults(event);
   const [state, setState] = React.useState<
     'loading' | 'idle' | 'uploading' | 'saving' | 'saved' | 'error'
   >('loading');
@@ -27,20 +45,22 @@ export function EventMediaSettings({
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [activeUploadRole, setActiveUploadRole] = React.useState<AdminEventMediaRole>();
   const [assets, setAssets] = React.useState<AdminEventMediaAsset[]>([]);
-  const [roleAlt, setRoleAlt] = React.useState<Record<AdminEventMediaRole, string>>({
-    poster: event.title,
-    cover: event.coverImageAlt ?? event.title,
-    social: event.title,
-  });
+  const [mediaEventId, setMediaEventId] = React.useState(event.id);
+  const [roleAlt, setRoleAlt] = React.useState<Record<AdminEventMediaRole, string>>(
+    initialDefaults.alt,
+  );
   const [roleFocalPoints, setRoleFocalPoints] = React.useState<
     Record<AdminEventMediaRole, { x: number; y: number }>
-  >({
-    poster: { x: 0.5, y: 0.5 },
-    cover: { x: 0.5, y: 0.5 },
-    social: { x: 0.5, y: 0.5 },
-  });
+  >(initialDefaults.focalPoints);
   React.useEffect(() => {
     let active = true;
+    const defaults = eventMediaDefaults(event);
+    setMediaEventId(event.id);
+    setAssets([]);
+    setRoleAlt(defaults.alt);
+    setRoleFocalPoints(defaults.focalPoints);
+    setActiveUploadRole(undefined);
+    setUploadProgress(0);
     setState('loading');
     setListFailed(false);
     setError(undefined);
@@ -71,10 +91,20 @@ export function EventMediaSettings({
     return () => {
       active = false;
     };
-  }, [event.id, loadRevision]);
-  const busy = state === 'loading' || state === 'uploading' || state === 'saving' || listFailed;
+  }, [event, event.id, loadRevision]);
+  const eventIsCurrent = mediaEventId === event.id;
+  const visibleAssets = eventIsCurrent ? assets : [];
+  const visibleRoleAlt = eventIsCurrent ? roleAlt : initialDefaults.alt;
+  const visibleRoleFocalPoints = eventIsCurrent ? roleFocalPoints : initialDefaults.focalPoints;
+  const busy =
+    !eventIsCurrent ||
+    state === 'loading' ||
+    state === 'uploading' ||
+    state === 'saving' ||
+    listFailed;
   const uploadRole = async (file: File, role: AdminEventMediaRole) => {
-    const altText = roleAlt[role].trim();
+    const operationEventId = event.id;
+    const altText = visibleRoleAlt[role].trim();
     if (!altText) {
       setState('error');
       setError(`Add alt text before uploading the ${role} image.`);
@@ -91,8 +121,11 @@ export function EventMediaSettings({
         file,
         eventId: event.id,
         brandId: event.brandId,
-        onProgress: setUploadProgress,
+        onProgress: (progress) => {
+          if (currentEventId.current === operationEventId) setUploadProgress(progress);
+        },
       });
+      if (currentEventId.current !== operationEventId) return;
       if (!uploaded.ok) {
         setState('error');
         setActiveUploadRole(undefined);
@@ -102,8 +135,9 @@ export function EventMediaSettings({
       const attached = await adminApi.attachEventMedia(event.id, role, {
         uploadArtifactId: uploaded.data.artifactId,
         altText,
-        focalPoint: roleFocalPoints[role],
+        focalPoint: visibleRoleFocalPoints[role],
       });
+      if (currentEventId.current !== operationEventId) return;
       if (!attached.ok) {
         setState('error');
         setActiveUploadRole(undefined);
@@ -115,23 +149,27 @@ export function EventMediaSettings({
       setActiveUploadRole(undefined);
       onChanged();
     } catch (cause) {
+      if (currentEventId.current !== operationEventId) return;
       setState('error');
       setActiveUploadRole(undefined);
       setError(cause instanceof Error ? cause.message : `Unable to upload the ${role} image.`);
     }
   };
   const removeRole = async (role: AdminEventMediaRole) => {
+    const operationEventId = event.id;
     if (!window.confirm(`Remove the ${role} image and its published renditions?`)) return;
     setState('saving');
     setError(undefined);
     try {
       const removed = await adminApi.removeEventMedia(event.id, role);
+      if (currentEventId.current !== operationEventId) return;
       if (!removed.ok) {
         setState('error');
         setError(removed.error.message);
         return;
       }
     } catch (cause) {
+      if (currentEventId.current !== operationEventId) return;
       setState('error');
       setError(cause instanceof Error ? cause.message : `Unable to remove the ${role} image.`);
       return;
@@ -156,7 +194,7 @@ export function EventMediaSettings({
         <div className="grid gap-4 lg:grid-cols-3">
           {(['poster', 'cover', 'social'] as const).map((role) => {
             const roleLabel = `${role.charAt(0).toUpperCase()}${role.slice(1)}`;
-            const asset = assets.find((candidate) => candidate.role === role);
+            const asset = visibleAssets.find((candidate) => candidate.role === role);
             const preview =
               asset?.renditions.find((rendition) => rendition.variant === 'card') ??
               asset?.renditions.find((rendition) => rendition.variant === 'thumbnail');
@@ -183,7 +221,7 @@ export function EventMediaSettings({
                   <span>{roleLabel} alt text for next upload</span>
                   <Input
                     id={`event-${role}-alt`}
-                    value={roleAlt[role]}
+                    value={visibleRoleAlt[role]}
                     maxLength={500}
                     required
                     onChange={(change) =>
@@ -200,7 +238,7 @@ export function EventMediaSettings({
                     <label key={axis} className="block text-sm">
                       <span>
                         {axis === 'x' ? 'Horizontal' : 'Vertical'} (
-                        {Math.round(roleFocalPoints[role][axis] * 100)}%)
+                        {Math.round(visibleRoleFocalPoints[role][axis] * 100)}%)
                       </span>
                       <input
                         className="w-full"
@@ -208,7 +246,7 @@ export function EventMediaSettings({
                         min="0"
                         max="1"
                         step="0.01"
-                        value={roleFocalPoints[role][axis]}
+                        value={visibleRoleFocalPoints[role][axis]}
                         onChange={(change) =>
                           setRoleFocalPoints((current) => ({
                             ...current,

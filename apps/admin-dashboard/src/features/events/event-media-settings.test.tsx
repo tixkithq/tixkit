@@ -44,6 +44,16 @@ const event = {
   brandId: 'brd_1',
 } as AdminEventDetail;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 afterEach(() => vi.clearAllMocks());
 
 describe('EventMediaSettings', () => {
@@ -251,5 +261,140 @@ describe('EventMediaSettings', () => {
     await waitFor(() => expect(view.getByLabelText('Upload cover')).toBeEnabled());
     expect(view.queryByRole('alert')).not.toBeInTheDocument();
     expect(view.getByText(/JPEG, PNG, and WebP files up to 8 MB/)).toBeInTheDocument();
+  });
+
+  it('clears prior media and resets sparse role metadata when the event changes', async () => {
+    api.listEventMedia
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [
+          {
+            id: 'ema_cover_a',
+            role: 'cover',
+            original: {
+              uploadArtifactId: 'upl_cover_a',
+              width: 1600,
+              height: 900,
+              format: 'webp',
+              checksumSha256: 'a'.repeat(64),
+              sizeBytes: 100,
+            },
+            focalPoint: { x: 0.2, y: 0.8 },
+            altText: 'Event A cover',
+            renditions: [
+              {
+                id: 'emr_cover_a',
+                variant: 'card',
+                width: 480,
+                height: 270,
+                format: 'webp',
+                checksumSha256: 'b'.repeat(64),
+                sizeBytes: 60,
+                url: '/v1/public/event-media/renditions/emr_cover_a',
+                organizerUrl: '/v1/events/evt_1/media/renditions/emr_cover_a',
+              },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ ok: true, data: [] });
+    const view = render(<EventMediaSettings event={event} onChanged={vi.fn()} />);
+    expect(await view.findByAltText('Event A cover')).toBeInTheDocument();
+
+    const nextEvent = {
+      ...event,
+      id: 'evt_2',
+      title: 'Event B',
+      coverImageAlt: 'Event B cover default',
+    } as AdminEventDetail;
+    view.rerender(<EventMediaSettings event={nextEvent} onChanged={vi.fn()} />);
+
+    expect(view.queryByAltText('Event A cover')).not.toBeInTheDocument();
+    expect(view.getByLabelText('Upload cover')).toBeDisabled();
+    await waitFor(() => expect(api.listEventMedia).toHaveBeenLastCalledWith('evt_2'));
+    await waitFor(() => expect(view.getByLabelText('Upload cover')).toBeEnabled());
+    expect(view.getByLabelText('Cover alt text for next upload')).toHaveValue(
+      'Event B cover default',
+    );
+    expect(view.getByRole('slider', { name: 'cover horizontal focal point' })).toHaveValue('0.5');
+    expect(view.getByRole('slider', { name: 'cover vertical focal point' })).toHaveValue('0.5');
+  });
+
+  it('ignores an old-event upload completion after navigating to another event', async () => {
+    const upload = deferred<{
+      ok: true;
+      data: { artifactId: string; status: string; scanStatus: string };
+    }>();
+    api.listEventMedia.mockResolvedValue({ ok: true, data: [] });
+    api.uploadArtifact.mockReturnValue(upload.promise);
+    const onChanged = vi.fn();
+    const view = render(<EventMediaSettings event={event} onChanged={onChanged} />);
+    await waitFor(() => expect(view.getByLabelText('Upload poster')).toBeEnabled());
+    fireEvent.change(view.getByLabelText('Upload poster'), {
+      target: { files: [new File(['image'], 'poster.webp', { type: 'image/webp' })] },
+    });
+    expect(await view.findByText(/Uploading poster/)).toBeInTheDocument();
+
+    view.rerender(
+      <EventMediaSettings
+        event={{ ...event, id: 'evt_2', title: 'Event B' } as AdminEventDetail}
+        onChanged={onChanged}
+      />,
+    );
+    upload.resolve({
+      ok: true,
+      data: { artifactId: 'upl_old', status: 'uploaded', scanStatus: 'clean' },
+    });
+
+    await waitFor(() => expect(api.listEventMedia).toHaveBeenCalledWith('evt_2'));
+    await waitFor(() => expect(view.getByLabelText('Upload poster')).toBeEnabled());
+    expect(api.attachEventMedia).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(view.queryByText(/Uploading poster|Saved/)).not.toBeInTheDocument();
+  });
+
+  it('ignores an old-event removal completion after navigating to another event', async () => {
+    const removal = deferred<{ ok: true; data: undefined }>();
+    api.listEventMedia
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [
+          {
+            id: 'ema_social_a',
+            role: 'social',
+            original: {
+              uploadArtifactId: 'upl_social_a',
+              width: 1200,
+              height: 630,
+              format: 'webp',
+              checksumSha256: 'c'.repeat(64),
+              sizeBytes: 80,
+            },
+            focalPoint: { x: 0.5, y: 0.5 },
+            altText: 'Event A social',
+            renditions: [],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ ok: true, data: [] });
+    api.removeEventMedia.mockReturnValue(removal.promise);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const onChanged = vi.fn();
+    const view = render(<EventMediaSettings event={event} onChanged={onChanged} />);
+    fireEvent.click(await view.findByRole('button', { name: 'Remove social' }));
+
+    view.rerender(
+      <EventMediaSettings
+        event={{ ...event, id: 'evt_2', title: 'Event B' } as AdminEventDetail}
+        onChanged={onChanged}
+      />,
+    );
+    removal.resolve({ ok: true, data: undefined });
+
+    await waitFor(() => expect(api.listEventMedia).toHaveBeenLastCalledWith('evt_2'));
+    await waitFor(() => expect(view.getByLabelText('Upload social')).toBeEnabled());
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(view.queryByText('Saved')).not.toBeInTheDocument();
+    expect(view.queryByRole('button', { name: 'Remove social' })).not.toBeInTheDocument();
   });
 });

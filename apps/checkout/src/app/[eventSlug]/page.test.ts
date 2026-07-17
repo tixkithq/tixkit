@@ -11,7 +11,10 @@ vi.mock('@/lib/api-server', () => ({
   getServerEventPageBootstrapBySlug: mocks.getEventPageBootstrapBySlug,
 }));
 vi.mock('@/lib/runtime-config-server', () => ({
-  parseCheckoutRuntimeConfig: () => ({ checkoutUrl: 'https://checkout.tixkit.com' }),
+  parseCheckoutRuntimeConfig: () => ({
+    apiBaseUrl: 'https://api.tixkit.com',
+    checkoutUrl: 'https://checkout.tixkit.com',
+  }),
 }));
 
 import { generateMetadata } from './page';
