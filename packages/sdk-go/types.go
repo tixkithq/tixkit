@@ -768,20 +768,19 @@ type OfflineManifest struct {
 }
 
 type ScanTicketRequest struct {
-	CheckInListID string `json:"checkInListId"`
-	QRPayload     string `json:"qrPayload"`
-	ScannedAt     string `json:"scannedAt"`
-	Offline       bool   `json:"offline,omitempty"`
-	DeviceID      string `json:"deviceId,omitempty"`
-	DeviceSecret  string `json:"-"`
+	CheckInListID  string `json:"checkInListId"`
+	QRPayload      string `json:"qrPayload"`
+	ScannedAt      string `json:"scannedAt"`
+	Offline        bool   `json:"offline,omitempty"`
+	DeviceID       string `json:"deviceId,omitempty"`
+	DeviceSecret   string `json:"-"`
+	IdempotencyKey string `json:"-"`
 }
 
 type ScanResult struct {
-	Status    string    `json:"status"`
-	Message   string    `json:"message,omitempty"`
-	Ticket    *Ticket   `json:"ticket,omitempty"`
-	Attendee  *Attendee `json:"attendee,omitempty"`
-	ScannedAt string    `json:"scannedAt,omitempty"`
+	Outcome  string `json:"outcome"`
+	TicketID string `json:"ticketId,omitempty"`
+	Message  string `json:"message"`
 }
 
 type OfflineScan struct {

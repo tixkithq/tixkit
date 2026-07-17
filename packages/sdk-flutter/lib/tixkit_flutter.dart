@@ -7,7 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
-const String tixkitApiVersion = '2026-08-14';
+const String tixkitApiVersion = '2026-08-15';
 
 enum TixkitScanOutcome {
   accepted,
@@ -992,14 +992,19 @@ class TixkitScannerClient {
     return expected == manifest.signature;
   }
 
-  Future<TixkitScanResult> scanOnline(String checkInListId, String qrPayload) async {
+  Future<TixkitScanResult> scanOnline(
+    String checkInListId,
+    String qrPayload, {
+    required String idempotencyKey,
+    required DateTime scannedAt,
+  }) async {
     final response = await httpClient.post(
       _apiUri('/check-ins/scan'),
-      headers: _authHeaders,
+      headers: {..._authHeaders, 'Idempotency-Key': idempotencyKey},
       body: jsonEncode({
         'checkInListId': checkInListId,
         'qrPayload': qrPayload,
-        'scannedAt': DateTime.now().toUtc().toIso8601String(),
+        'scannedAt': scannedAt.toUtc().toIso8601String(),
         'offline': false,
       }),
     );
@@ -1211,8 +1216,16 @@ class _TixkitCameraScannerState extends State<TixkitCameraScanner> {
     if (widget.mode == TixkitScannerMode.offline) {
       return widget.client.scanOffline(payload);
     }
+    final scannedAt = DateTime.now().toUtc();
+    final idempotencyKey =
+        'scan:${widget.checkInListId}:${scannedAt.microsecondsSinceEpoch}:${tixkitQrHashForPayload(payload).substring(0, 32)}';
     try {
-      return await widget.client.scanOnline(widget.checkInListId, payload);
+      return await widget.client.scanOnline(
+        widget.checkInListId,
+        payload,
+        idempotencyKey: idempotencyKey,
+        scannedAt: scannedAt,
+      );
     } catch (error) {
       if (widget.mode != TixkitScannerMode.auto) rethrow;
       return widget.client.scanOffline(payload);

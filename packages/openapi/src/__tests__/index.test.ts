@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-14');
+    expect(openApiSpec.info.version).toBe('2026-08-15');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1310,14 +1310,26 @@ describe('openApiSpec', () => {
   });
 
   it('documents signed QR payloads for online check-in scans', () => {
-    const schema =
-      openApiSpec.paths['/check-ins/scan'].post.requestBody.content['application/json'].schema;
+    const operation = openApiSpec.paths['/check-ins/scan'].post;
+    const schema = operation.requestBody.content['application/json'].schema;
     expect(schema.required).toEqual(['checkInListId', 'qrPayload', 'scannedAt']);
     expect(schema.properties).toHaveProperty('qrPayload');
     expect(schema.properties).not.toHaveProperty('qrHash');
-    expect(openApiSpec.paths['/check-ins/scan'].post.parameters).toContainEqual({
-      $ref: '#/components/parameters/ScannerDeviceSecret',
+    expect(operation.security).toEqual([
+      { ScannerDeviceAuth: [] },
+      { BearerAuth: [] },
+      { ApiKey: [] },
+    ]);
+    expect(operation.parameters).toContainEqual({
+      $ref: '#/components/parameters/OptionalScannerDeviceSecret',
     });
+    expect(operation.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(operation['x-required-permissions']).toEqual(['checkins.write']);
+    expect(operation.description).toContain('checkins.write');
+    expect(operation['x-compatibility-breaking-change']).toContain('requires Idempotency-Key');
+    expect(operation.responses).toHaveProperty('400');
   });
 
   it('documents scanner manifest and check-in list contracts', () => {

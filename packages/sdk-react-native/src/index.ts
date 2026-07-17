@@ -14,7 +14,7 @@ import {
   type TicketListing,
 } from '@tixkit/js';
 
-export const TIXKIT_API_VERSION = '2026-08-14';
+export const TIXKIT_API_VERSION = '2026-08-15';
 
 // NOTE: React Native does not provide Node.js `crypto` APIs by default.
 // The following is a pure-JS HMAC-SHA256 implementation so the SDK works
@@ -429,6 +429,8 @@ export type TixkitBarcodeScanOptions = {
   client: TixkitScannerClient;
   checkInListId: string;
   qrPayload: string;
+  idempotencyKey: string;
+  scannedAt: string;
   mode?: TixkitScannerMode;
   qrHashFromPayload?: (qrPayload: string) => string;
 };
@@ -555,7 +557,12 @@ export async function scanBarcodePayload(options: TixkitBarcodeScanOptions): Pro
   }
 
   try {
-    return await options.client.scanOnline(options.checkInListId, options.qrPayload);
+    return await options.client.scanOnline(
+      options.checkInListId,
+      options.qrPayload,
+      options.idempotencyKey,
+      options.scannedAt,
+    );
   } catch (error) {
     if (mode !== 'auto') throw error;
     return options.client.scanOffline(
@@ -649,12 +656,16 @@ export function createTixkitReactNativeComponents(
       lastPayload = qrPayload;
       lastScanAt = now;
       inFlight = true;
+      const scannedAt = new Date(now).toISOString();
+      const idempotencyKey = `scan:${props.checkInListId}:${now}:${(props.qrHashFromPayload ?? qrHashForPayload)(qrPayload).slice(0, 32)}`;
 
       try {
         const result = await scanBarcodePayload({
           client: props.client,
           checkInListId: props.checkInListId,
           qrPayload,
+          idempotencyKey,
+          scannedAt,
           mode,
           qrHashFromPayload: props.qrHashFromPayload,
         });
@@ -1046,14 +1057,20 @@ export class TixkitScannerClient {
   /**
    * Scans a ticket online (requires network).
    */
-  async scanOnline(checkInListId: string, qrPayload: string): Promise<ScanResult> {
+  async scanOnline(
+    checkInListId: string,
+    qrPayload: string,
+    idempotencyKey: string,
+    scannedAt: string,
+  ): Promise<ScanResult> {
     return this.client.request('POST', '/check-ins/scan', {
       body: {
         checkInListId,
         qrPayload,
-        scannedAt: new Date().toISOString(),
+        scannedAt,
         offline: false,
       },
+      idempotencyKey,
       headers: this.authHeaders(),
     });
   }

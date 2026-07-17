@@ -238,6 +238,44 @@ func TestRetriesIdempotentWriteWithStableHeaderAndBody(t *testing.T) {
 	}
 }
 
+func TestCheckInScanSendsRequiredIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/check-ins/scan" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Idempotency-Key"); got != "scan-tkt-1" {
+			t.Fatalf("Idempotency-Key = %q", got)
+		}
+		if got := r.Header.Get("X-Device-Id"); got != "dev_1" {
+			t.Fatalf("X-Device-Id = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"outcome":"accepted","ticketId":"tkt_1","message":"Check-in successful"}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient("", WithBaseURL(server.URL), WithMaxRetries(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.CheckIn.Scan(context.Background(), ScanTicketRequest{
+		CheckInListID:  "cil_1",
+		QRPayload:      "signed-qr",
+		ScannedAt:      "2026-06-01T12:00:00.000Z",
+		DeviceID:       "dev_1",
+		DeviceSecret:   "secret",
+		IdempotencyKey: "scan-tkt-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != "accepted" || result.TicketID != "tkt_1" || result.Message != "Check-in successful" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestCheckoutCreateSendsIdempotencyHeader(t *testing.T) {
 	t.Parallel()
 

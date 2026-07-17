@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { validateSdkParity } from './lib/sdk-parity.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
-const apiVersion = '2026-08-14';
+const apiVersion = '2026-08-15';
 const distribution = JSON.parse(
   readFileSync(new URL('../distribution/public-distribution.json', import.meta.url), 'utf8'),
 );
@@ -161,6 +161,9 @@ const checks = [
       'createTixkitSecureStorage',
       'manifestSigningKey',
       'onSyncConflict',
+      'scanOnline',
+      'idempotencyKey',
+      'scannedAt',
       'syncScans',
       'TixkitPublicEventPageClient',
       'getEventPageBySlug',
@@ -188,6 +191,10 @@ const checks = [
       'TixkitScannerClient',
       'verifyManifestSignature',
       'onSyncConflict',
+      'scanOnline',
+      'idempotencyKey',
+      'scannedAt',
+      'Idempotency-Key',
       'syncScans',
       'TixkitPublicEventPageClient',
       'getEventPageBySlug',
@@ -215,6 +222,10 @@ const checks = [
       'TixkitScannerClient',
       'verifyManifestSignature',
       'onSyncConflict',
+      'scanOnline',
+      'idempotencyKey',
+      'scannedAt',
+      'Idempotency-Key',
       'syncScans',
       'TixkitPublicEventPageClient',
       'getEventPageBySlug',
@@ -311,6 +322,8 @@ const checks = [
       'GetResaleSettlement',
       'RecordResaleSettlementPayout',
       'RecordResaleSettlementReversal',
+      'func (s *CheckInService) Scan',
+      'withIdempotencyKey(input.IdempotencyKey)',
       'X-Checkout-Session-Token',
       'withIdempotencyKey',
       'func (s *OrdersService) Refund',
@@ -338,6 +351,9 @@ const checks = [
       'ResaleTermsAcceptance',
       'CreateCheckoutTicketResaleListingRequest',
       'RefundQueued',
+      'ScanTicketRequest',
+      'IdempotencyKey',
+      'ScanResult',
       'RestoreInventory',
       'VoidTickets',
     ],

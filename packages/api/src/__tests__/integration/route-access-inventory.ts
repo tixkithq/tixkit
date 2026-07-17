@@ -127,6 +127,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'attendee-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'attendee-route-authorization-db.integration.test.ts'),
   ],
+  [
+    'checkin-scan-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'checkin-scan-route-authorization-db.integration.test.ts'),
+  ],
 ]);
 
 type AuthorizationEvidenceBinding = Readonly<{
@@ -222,6 +226,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['patchAttendeesByAttendeeId'], {
     source: 'attendee-route-authorization-db.integration.test.ts',
     persistenceSource: 'attendee-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postCheckInsScan'], {
+    source: 'checkin-scan-route-authorization-db.integration.test.ts',
+    persistenceSource: 'checkin-scan-route-authorization-db.integration.test.ts',
   }),
 ]);
 

@@ -2239,6 +2239,28 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('checkIns.scan sends the required stable idempotency key', async () => {
+    const fm = mockFetch(200, { outcome: 'accepted', ticketId: 'tkt_1' });
+    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+
+    await c.checkIns.scan({
+      checkInListId: 'cil_1',
+      qrPayload: 'signed-qr',
+      scannedAt: '2026-06-01T12:00:00.000Z',
+      idempotencyKey: 'scan-tkt-1',
+      headers: { 'X-Device-Id': 'dev_1', 'X-Device-Secret': 'secret' },
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/check-ins/scan');
+    expect(call.headers['Idempotency-Key']).toBe('scan-tkt-1');
+    expect(JSON.parse(call.body)).toEqual({
+      checkInListId: 'cil_1',
+      qrPayload: 'signed-qr',
+      scannedAt: '2026-06-01T12:00:00.000Z',
+    });
+  });
+
   it('checkIns.syncBacklog creates one async job, uploads chunks, and polls with backoff', async () => {
     const job = {
       id: 'bcs_1',
@@ -3885,7 +3907,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-14',
+        'X-Tixkit-Version': '2026-08-15',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

@@ -31,7 +31,11 @@ import {
   ValidationError,
 } from '@tixkit/domain';
 import type { ScanRequest, SyncScanInput } from '@tixkit/domain';
-import { withIdempotency, hashRequest } from '../../services/idempotency.js';
+import {
+  withIdempotency,
+  hashRequest,
+  type IdempotencyHandlerContext,
+} from '../../services/idempotency.js';
 import { ulid } from 'ulid';
 import {
   pageEnvelope,
@@ -1059,6 +1063,10 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     if (!list) throw new NotFoundError('CheckInList', body.checkInListId);
     const event = await loadEvent(list.event_id);
     requireEventAccess(principal, event, list.event_id);
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
+      throw new ValidationError('Idempotency-Key header is required for online scans');
+    }
+    const normalizedIdempotencyKey = idempotencyKey.trim();
     if (list.status !== 'active') throw new ValidationError('Check-in list is not active');
 
     const effectiveDeviceId = resolveCheckInDeviceId(principal, body.deviceId);
@@ -1069,8 +1077,8 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       scannedAt: body.scannedAt,
     });
 
-    const handler = async () => {
-      const { result, scanLog } = await db.transaction().execute(async (transaction) => {
+    const handler = async ({ completeInTransaction }: IdempotencyHandlerContext) => {
+      const { response, scanLog } = await db.transaction().execute(async (transaction) => {
         const transactionDb = transaction as Database;
         const lockedList = await new CheckInListRepository(transactionDb).findByIdForUpdate(
           body.checkInListId!,
@@ -1102,33 +1110,31 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
           offline: body.offline ?? false,
           metadata: metadataWithClockWarning(result.metadata, normalizedScannedAt),
         });
-        return { result, scanLog };
+        const response = {
+          status: 200,
+          body: {
+            outcome: result.outcome,
+            ticketId: result.ticketId,
+            message:
+              result.outcome === 'accepted' ? 'Check-in successful' : `Check-in ${result.outcome}`,
+          },
+        };
+        await completeInTransaction(transactionDb, response);
+        return { response, scanLog };
       });
       void publishCheckInActivityEvent(body.checkInListId!, scanLog.id);
-
-      return {
-        status: 200,
-        body: {
-          outcome: result.outcome,
-          ticketId: result.ticketId,
-          message:
-            result.outcome === 'accepted' ? 'Check-in successful' : `Check-in ${result.outcome}`,
-        },
-      };
+      return response;
     };
 
-    const result =
-      typeof idempotencyKey === 'string'
-        ? await withIdempotency(
-            db,
-            {
-              key: idempotencyKey,
-              tenantId: principal.tenantId,
-              requestHash,
-            },
-            handler,
-          )
-        : await handler();
+    const result = await withIdempotency(
+      db,
+      {
+        key: normalizedIdempotencyKey,
+        tenantId: principal.tenantId,
+        requestHash,
+      },
+      handler,
+    );
 
     return reply.status(result.status).send(result.body);
   });

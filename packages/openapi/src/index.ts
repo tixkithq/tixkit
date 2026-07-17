@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-14',
+    version: '2026-08-15',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5808,7 +5808,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-14, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-15, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5855,7 +5855,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-14, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-15, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5962,7 +5962,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-14 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-15 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5999,7 +5999,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-14 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-15 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8285,7 +8285,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-14 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-15 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8342,7 +8342,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-14 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-15 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -13422,10 +13422,15 @@ const rawOpenApiSpec = {
     '/check-ins/scan': {
       post: {
         summary: 'Scan ticket (scanner device auth)',
-        security: [{ ScannerDeviceAuth: [] }],
+        description:
+          'Requires `checkins.write`. The authenticated principal must also be authorized for the check-in list event.',
+        'x-required-permissions': ['checkins.write'],
+        'x-compatibility-breaking-change':
+          'API 2026-08-15 requires Idempotency-Key for every online scan.',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
-          { $ref: '#/components/parameters/ScannerDeviceSecret' },
-          { $ref: '#/components/parameters/IdempotencyKey' },
+          { $ref: '#/components/parameters/OptionalScannerDeviceSecret' },
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
         ],
         requestBody: {
           required: true,
@@ -13456,6 +13461,7 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '400': { description: 'Missing or invalid Idempotency-Key or scan payload' },
         },
       },
     },

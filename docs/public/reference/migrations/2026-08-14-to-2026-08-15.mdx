@@ -1,0 +1,32 @@
+---
+title: Migrate API 2026-08-14 to 2026-08-15
+description: Adopt fail-closed, replay-safe online check-in scans.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-14
+related:
+  - /operators/check-in
+  - /developers/api-fundamentals/idempotency
+---
+
+API `2026-08-15` makes online ticket scanning explicitly permissioned and replay-safe.
+
+## Required client change
+
+Every `POST /v1/check-ins/scan` request must send a non-empty `Idempotency-Key`. Reuse the same key only for the same check-in list, signed QR payload, device identity and scan timestamp. A changed payload with the same key is rejected.
+
+The JavaScript and React Native scan inputs, Go `ScanTicketRequest`, Swift `scanOnline`, and Dart `scanOnline` now require a caller-supplied idempotency key and send it as the request header. The mobile scanner components create one key and timestamp per captured payload and preserve both through the underlying request. Upgrade the SDK or add the header before selecting this API version.
+
+## Authorization contract
+
+The operation requires `checkins.write` plus tenant, organization, brand and event access. Scanner-device credentials, bearer users and API keys are documented authentication paths. Resource-boundary denials remain non-enumerating `404` responses.
+
+## Failure behavior
+
+Ticket state, attendee state, the check-in-list activity sequence, the scan log and the completed idempotency response commit in one database transaction. A failure in the redundant post-commit response write replays the transactionally stored response; it does not create a stuck `in_progress` reservation or repeat the scan mutation.

@@ -265,6 +265,22 @@ export const ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postCheckInsScan',
+    path: '/check-ins/scan',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'checkin-scan-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'checkin-scan-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -353,5 +369,6 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

@@ -226,6 +226,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-14 attendee lifecycle safety',
         routeId: 'apiMigration20260813To20260814',
       },
+      {
+        label: 'Adopt 2026-08-15 replay-safe online scanning',
+        routeId: 'apiMigration20260814To20260815',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

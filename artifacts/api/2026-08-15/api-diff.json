@@ -1,0 +1,24 @@
+{
+  "from": "2026-08-14",
+  "to": "2026-08-15",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 1,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "POST /check-ins/scan",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /check-ins/scan",
+      "message": "The operation declares a conditional behavioral breaking change."
+    }
+  ]
+}

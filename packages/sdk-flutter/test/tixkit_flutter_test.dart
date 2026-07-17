@@ -234,6 +234,43 @@ void main() {
     expect(tixkitQrHashForPayload(payload), sha256.convert(utf8.encode(payload)).toString());
   });
 
+  test('online scan sends the caller idempotency key and stable timestamp', () async {
+    final client = TixkitScannerClient(
+      deviceId: 'dev_1',
+      deviceSecret: 'secret',
+      manifestSigningKey: 'manifest',
+      apiBaseUrl: 'https://api.test',
+      httpClient: MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/v1/check-ins/scan');
+        expect(request.headers['Idempotency-Key'], 'scan-ticket-1');
+        final body = jsonDecode(request.body) as Map<String, Object?>;
+        expect(body['checkInListId'], 'cil_1');
+        expect(body['qrPayload'], 'signed-ticket-payload');
+        expect(body['scannedAt'], '2026-07-16T12:00:00.000Z');
+        return http.Response(
+          jsonEncode({
+            'outcome': 'accepted',
+            'ticketId': 'tkt_1',
+            'message': 'Check-in successful',
+          }),
+          200,
+        );
+      }),
+    );
+
+    final result = await client.scanOnline(
+      'cil_1',
+      'signed-ticket-payload',
+      idempotencyKey: 'scan-ticket-1',
+      scannedAt: DateTime.parse('2026-07-16T12:00:00.000Z'),
+    );
+
+    expect(result.outcome, TixkitScanOutcome.accepted);
+    expect(result.ticketId, 'tkt_1');
+    expect(result.message, 'Check-in successful');
+  });
+
   test('verifies signed offline manifests', () {
     const key = 'manifest-signing-key';
     final unsigned = {

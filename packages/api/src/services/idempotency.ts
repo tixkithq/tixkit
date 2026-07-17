@@ -8,6 +8,10 @@ export type IdempotentResponse = {
   body: unknown;
 };
 
+export type IdempotencyHandlerContext = Readonly<{
+  completeInTransaction: (transactionDb: Database, response: IdempotentResponse) => Promise<void>;
+}>;
+
 type IdempotencyRecord = {
   id: string;
   key: string;
@@ -71,7 +75,7 @@ export async function withIdempotency(
     inProgressPollIntervalMs?: number;
     discardErrorCodes?: readonly string[];
   },
-  handler: () => Promise<IdempotentResponse>,
+  handler: (context: IdempotencyHandlerContext) => Promise<IdempotentResponse>,
 ): Promise<IdempotentResponse> {
   const inProgressWaitMs = Math.max(0, input.inProgressWaitMs ?? 10_000);
   const inProgressPollIntervalMs = Math.max(1, input.inProgressPollIntervalMs ?? 50);
@@ -147,7 +151,15 @@ export async function withIdempotency(
 
   let result: IdempotentResponse;
   try {
-    result = await handler();
+    result = await handler({
+      completeInTransaction: async (transactionDb, response) => {
+        await completeRecordWithRetry(transactionDb, recordId, {
+          response_status: response.status,
+          response_body: JSON.stringify(response.body),
+          status: 'completed',
+        });
+      },
+    });
   } catch (err) {
     const error = err as Error & {
       statusCode?: number;
@@ -187,11 +199,25 @@ export async function withIdempotency(
   if (result.status >= 500) {
     await deleteRecord(db, recordId);
   } else {
-    await completeRecordWithRetry(db, recordId, {
-      response_status: result.status,
-      response_body: JSON.stringify(result.body),
-      status: 'completed',
-    });
+    try {
+      await completeRecordWithRetry(db, recordId, {
+        response_status: result.status,
+        response_body: JSON.stringify(result.body),
+        status: 'completed',
+      });
+    } catch (completionError) {
+      const transactionallyCompleted = await findRecord(db, input.key, input.tenantId);
+      if (
+        transactionallyCompleted?.status === 'completed' &&
+        transactionallyCompleted.request_hash === input.requestHash
+      ) {
+        return {
+          status: transactionallyCompleted.response_status,
+          body: JSON.parse(transactionallyCompleted.response_body),
+        };
+      }
+      throw completionError;
+    }
   }
 
   return result;

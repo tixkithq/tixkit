@@ -400,7 +400,7 @@ type CheckInService struct{ client *Client }
 
 func (s *CheckInService) Scan(ctx context.Context, input ScanTicketRequest) (*ScanResult, error) {
 	var out ScanResult
-	err := s.client.request(ctx, http.MethodPost, "/check-ins/scan", input, &out, withHeaders(deviceHeaders(input.DeviceID, input.DeviceSecret)))
+	err := s.client.request(ctx, http.MethodPost, "/check-ins/scan", input, &out, withHeaders(deviceHeaders(input.DeviceID, input.DeviceSecret)), withIdempotencyKey(input.IdempotencyKey))
 	return &out, err
 }
 

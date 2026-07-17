@@ -138,7 +138,12 @@ describe('TixkitScannerClient', () => {
     );
     const client = makeClient();
 
-    await client.scanOnline('cil_1', 'signed-qr-payload');
+    await client.scanOnline(
+      'cil_1',
+      'signed-qr-payload',
+      'scan-cil-1-ticket-1',
+      '2026-07-16T12:00:00.000Z',
+    );
 
     const [url, init] = fetchMock.mock.calls[0]!;
     const headers = init?.headers as Record<string, string>;
@@ -148,9 +153,11 @@ describe('TixkitScannerClient', () => {
     expect(headers.Authorization).toBeUndefined();
     expect(headers['X-Device-Id']).toBe('sd_public_1');
     expect(headers['X-Device-Secret']).toBe('scanner-secret');
+    expect(headers['Idempotency-Key']).toBe('scan-cil-1-ticket-1');
     expect(body).toMatchObject({
       checkInListId: 'cil_1',
       qrPayload: 'signed-qr-payload',
+      scannedAt: '2026-07-16T12:00:00.000Z',
       offline: false,
     });
     expect(body).not.toHaveProperty('deviceId');
@@ -691,7 +698,7 @@ describe('TixkitScannerClient', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       const headers = init?.headers as Record<string, string>;
-      expect(headers['X-Tixkit-Version']).toBe('2026-08-14');
+      expect(headers['X-Tixkit-Version']).toBe('2026-08-15');
 
       if (url.includes('/events/evt_1/resale-listings')) {
         expect(init?.method).toBe('GET');
@@ -809,10 +816,17 @@ describe('TixkitScannerClient', () => {
         client,
         checkInListId: 'cil_1',
         qrPayload: 'signed-ticket-payload',
+        idempotencyKey: 'scan-helper-1',
+        scannedAt: '2026-07-16T12:00:00.000Z',
       }),
     ).resolves.toEqual({ outcome: 'accepted', message: 'ok' });
 
-    expect(scanOnline).toHaveBeenCalledWith('cil_1', 'signed-ticket-payload');
+    expect(scanOnline).toHaveBeenCalledWith(
+      'cil_1',
+      'signed-ticket-payload',
+      'scan-helper-1',
+      '2026-07-16T12:00:00.000Z',
+    );
     expect(scanOffline).not.toHaveBeenCalled();
   });
 
@@ -827,6 +841,8 @@ describe('TixkitScannerClient', () => {
         client,
         checkInListId: 'cil_1',
         qrPayload: 'signed-ticket-payload',
+        idempotencyKey: 'unused-offline-key',
+        scannedAt: '2026-07-16T12:00:00.000Z',
         mode: 'offline',
         qrHashFromPayload: () => 'hash_1',
       }),
@@ -847,6 +863,8 @@ describe('TixkitScannerClient', () => {
         client,
         checkInListId: 'cil_1',
         qrPayload: 'signed-ticket-payload',
+        idempotencyKey: 'scan-auto-1',
+        scannedAt: '2026-07-16T12:00:00.000Z',
         mode: 'auto',
         qrHashFromPayload: () => 'hash_1',
       }),
@@ -1012,6 +1030,7 @@ describe('Tixkit React Native component adapters', () => {
       checkInListId: 'cil_1',
       cameraPermission: 'granted',
       testID: 'camera-scanner',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
       onResult,
     }) as RenderNode;
     const camera = scanner.children.find((child) => {
@@ -1031,7 +1050,12 @@ describe('Tixkit React Native component adapters', () => {
       data: 'signed-ticket-payload',
     });
 
-    expect(scanOnline).toHaveBeenCalledWith('cil_1', 'signed-ticket-payload');
+    expect(scanOnline).toHaveBeenCalledWith(
+      'cil_1',
+      'signed-ticket-payload',
+      'scan:cil_1:1784203200000:d88e53b8891735df0e76f0af37f0bad3',
+      '2026-07-16T12:00:00.000Z',
+    );
     expect(onResult).toHaveBeenCalledWith({
       outcome: 'accepted',
       message: 'ok',

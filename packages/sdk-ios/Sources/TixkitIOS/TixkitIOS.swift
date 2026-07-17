@@ -6,7 +6,7 @@ import SwiftUI
   import Security
 #endif
 
-public let TixkitAPIVersion = "2026-08-14"
+public let TixkitAPIVersion = "2026-08-15"
 
 public enum TixkitScanOutcome: String, Codable, Equatable, Sendable {
   case accepted
@@ -935,12 +935,18 @@ public final class TixkitScannerClient: @unchecked Sendable {
     return manifest
   }
 
-  public func scanOnline(checkInListId: String, qrPayload: String, scannedAt: Date = Date())
+  public func scanOnline(
+    checkInListId: String,
+    qrPayload: String,
+    idempotencyKey: String,
+    scannedAt: Date
+  )
     async throws -> TixkitScanResult
   {
     var request = URLRequest(url: apiURL(path: "/check-ins/scan"))
     request.httpMethod = "POST"
     applyAuthHeaders(to: &request)
+    request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
     request.httpBody = try JSONSerialization.data(withJSONObject: [
       "checkInListId": checkInListId,
       "qrPayload": qrPayload,
@@ -1152,14 +1158,24 @@ public final class TixkitScannerController: ObservableObject {
   }
 
   private func scan(_ payload: String) async throws -> TixkitScanResult {
+    let scannedAt = Date()
+    let idempotencyKey = "scan-\(UUID().uuidString)"
     switch mode {
     case .offline:
       return client.scanOffline(payload)
     case .online:
-      return try await client.scanOnline(checkInListId: checkInListId, qrPayload: payload)
+      return try await client.scanOnline(
+        checkInListId: checkInListId,
+        qrPayload: payload,
+        idempotencyKey: idempotencyKey,
+        scannedAt: scannedAt)
     case .automatic:
       do {
-        return try await client.scanOnline(checkInListId: checkInListId, qrPayload: payload)
+        return try await client.scanOnline(
+          checkInListId: checkInListId,
+          qrPayload: payload,
+          idempotencyKey: idempotencyKey,
+          scannedAt: scannedAt)
       } catch {
         return client.scanOffline(payload)
       }

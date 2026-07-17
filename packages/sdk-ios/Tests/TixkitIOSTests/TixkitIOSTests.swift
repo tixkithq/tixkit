@@ -53,6 +53,49 @@ final class TixkitIOSTests: XCTestCase {
     XCTAssertEqual(tixkitQRHash(forPayload: payload), expected)
   }
 
+  func testOnlineScanSendsStableIdempotencyKeyAndTimestamp() async throws {
+    URLProtocolStub.handler = { request in
+      XCTAssertEqual(request.url?.path, "/v1/check-ins/scan")
+      XCTAssertEqual(request.httpMethod, "POST")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "scan-ticket-1")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "X-Device-Id"), "dev_1")
+      let payload = try XCTUnwrap(request.httpBody)
+      let json = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+      XCTAssertEqual(json["checkInListId"] as? String, "cil_1")
+      XCTAssertEqual(json["qrPayload"] as? String, "signed-ticket-payload")
+      XCTAssertEqual(json["scannedAt"] as? String, "2026-07-16T12:00:00.000Z")
+      let data = try JSONSerialization.data(withJSONObject: [
+        "outcome": "accepted", "ticketId": "tkt_1", "message": "Check-in successful",
+      ])
+      return (
+        HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+        data
+      )
+    }
+    defer { URLProtocolStub.handler = nil }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [URLProtocolStub.self]
+    let client = TixkitScannerClient(
+      deviceId: "dev_1",
+      deviceSecret: "secret",
+      manifestSigningKey: "manifest",
+      apiBaseURL: try XCTUnwrap(URL(string: "https://api.test")),
+      urlSession: URLSession(configuration: configuration)
+    )
+    let scannedAt = Date(timeIntervalSince1970: 1_784_203_200)
+
+    let result = try await client.scanOnline(
+      checkInListId: "cil_1",
+      qrPayload: "signed-ticket-payload",
+      idempotencyKey: "scan-ticket-1",
+      scannedAt: scannedAt
+    )
+
+    XCTAssertEqual(result.outcome, .accepted)
+    XCTAssertEqual(result.ticketId, "tkt_1")
+    XCTAssertEqual(result.message, "Check-in successful")
+  }
+
   func testFetchesPublicEventPagesWithoutScannerHeaders() async throws {
     var requestURLs: [String] = []
     URLProtocolStub.handler = { request in

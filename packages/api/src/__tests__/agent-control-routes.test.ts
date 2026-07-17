@@ -513,7 +513,7 @@ describe('agent control routes', () => {
         agentPrincipalId: principalId,
         capabilities: ['events.read'],
         resourceScopes: ['event:event_agent_route_01'],
-        expiresAt: '2026-08-14T12:00:00.001Z',
+        expiresAt: '2026-08-15T12:00:00.001Z',
       },
     });
     expect(excessive.statusCode).toBe(400);

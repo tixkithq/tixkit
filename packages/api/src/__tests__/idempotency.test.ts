@@ -355,7 +355,13 @@ function createMockDb(
     },
   };
 
-  return { db: chainable as unknown as any, records };
+  return {
+    db: chainable as unknown as any,
+    records,
+    failNextUpdates(count: number) {
+      remainingUpdateFailures = count;
+    },
+  };
 }
 
 describe('withIdempotency', () => {
@@ -417,6 +423,60 @@ describe('withIdempotency', () => {
 
     expect(replayed).toEqual({ status: 202, body: { exportId: 'exp_1' } });
     expect(replayHandler).not.toHaveBeenCalled();
+  });
+
+  it('replays a response completed inside the side-effect transaction when outer completion fails', async () => {
+    const requestHash = hashRequest({ checkInListId: 'cil_1', ticketId: 'tkt_1' });
+    const { db, records, failNextUpdates } = createMockDb();
+    let durableSideEffects = 0;
+    const handler = vi.fn(async ({ completeInTransaction }) => {
+      const response = { status: 200, body: { outcome: 'accepted', ticketId: 'tkt_1' } };
+      durableSideEffects += 1;
+      await completeInTransaction(db, response);
+      failNextUpdates(3);
+      return response;
+    });
+
+    const result = await withIdempotency(
+      db,
+      {
+        key: 'idem-transactional-completion',
+        tenantId: 'tnt_1',
+        requestHash,
+        inProgressWaitMs: 0,
+      },
+      handler,
+    );
+
+    expect(result).toEqual({
+      status: 200,
+      body: { outcome: 'accepted', ticketId: 'tkt_1' },
+    });
+    expect(durableSideEffects).toBe(1);
+    expect(records[0]).toMatchObject({
+      status: 'completed',
+      response_status: 200,
+      response_body: JSON.stringify({ outcome: 'accepted', ticketId: 'tkt_1' }),
+    });
+
+    const replayHandler = vi.fn(async () => ({
+      status: 200,
+      body: { outcome: 'duplicate', ticketId: 'tkt_1' },
+    }));
+    const replayed = await withIdempotency(
+      db,
+      {
+        key: 'idem-transactional-completion',
+        tenantId: 'tnt_1',
+        requestHash,
+        inProgressWaitMs: 0,
+      },
+      replayHandler,
+    );
+
+    expect(replayed).toEqual(result);
+    expect(replayHandler).not.toHaveBeenCalled();
+    expect(durableSideEffects).toBe(1);
   });
 
   it('replays the non-expired stored response on second use with same payload', async () => {
