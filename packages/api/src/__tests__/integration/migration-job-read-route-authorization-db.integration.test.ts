@@ -14,11 +14,14 @@ import {
 import {
   MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  PORTABLE_REBINDING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 } from './route-authorization-contracts.js';
 
 describeWithIntegrationDatabase('migration job read route authorization matrix', () => {
   let app: FastifyInstance;
+  let connectionDb: Database;
   let db: Database;
+  let rollbackTransaction: (() => Promise<void>) | undefined;
   let previousDriver: string | undefined;
   let principal: Principal;
 
@@ -34,6 +37,7 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
   let mappingA: string;
   let mappingAScoped: string;
   let mappingB: string;
+  let portableJobA: string;
   const basePrincipal: Principal = {
     type: 'user',
     id: `usr_mread_${suffix}`,
@@ -110,7 +114,12 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
 
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
-    db = createDb(integrationDatabaseUrl());
+    connectionDb = createDb(integrationDatabaseUrl());
+    const transaction = await connectionDb.startTransaction().execute();
+    db = transaction;
+    rollbackTransaction = async () => {
+      await transaction.rollback().execute();
+    };
     await insertTenant(tenantA, 'Migration read tenant A');
     await insertTenant(tenantB, 'Migration read tenant B');
     await insertOrganization(organizationA, tenantA, 'Migration read organization A');
@@ -122,6 +131,35 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
     mappingA = await createMapping(tenantA, organizationA, 'authorized');
     mappingAScoped = await createMapping(tenantA, organizationAScoped, 'scoped');
     mappingB = await createMapping(tenantB, organizationB, 'foreign');
+    portableJobA = (
+      await new ImportRepository(db).createJob({
+        tenantId: tenantA,
+        organizationId: organizationA,
+        sourceSystem: 'tixkit-portable',
+        adapterVersion: 'tixkit-portable-bundle-v1',
+        mode: 'dry-run',
+        idempotencyKey: `mread-portable-${suffix}`,
+        requestedBy: basePrincipal.id,
+        configuration: { sourceMode: 'official-export', artifactIds: ['upl_mread_fixture'] },
+      })
+    ).id;
+    await new ImportRepository(db).recordPortablePreflight({
+      tenantId: tenantA,
+      organizationId: organizationA,
+      jobId: portableJobA,
+      operationId: `op_mread_${suffix}`,
+      bundleId: `bundle_mread_${suffix}`,
+      manifestSha256: 'a'.repeat(64),
+      artifactSha256: 'b'.repeat(64),
+      sourceDeploymentId: `source_mread_${suffix}`,
+      sourceChangeCursor: `cursor_mread_${suffix}`,
+      destinationId: `destination_mread_${suffix}`,
+      manifestJson: '{}',
+      preflightJson: '{}',
+      expectedCounts: '{}',
+      expectedAssets: '[]',
+      requiredRebindings: '[]',
+    });
 
     principal = basePrincipal;
     app = Fastify({ logger: false });
@@ -151,26 +189,10 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
       if (app) await attempt(() => app.close());
     } finally {
       try {
-        if (db) {
-          await attempt(() =>
-            db
-              .deleteFrom('import_mappings')
-              .where('id', 'in', [mappingA, mappingAScoped, mappingB])
-              .execute(),
-          );
-          await attempt(() =>
-            db.deleteFrom('import_jobs').where('id', 'in', [jobA, jobAScoped, jobB]).execute(),
-          );
-          for (const id of [organizationA, organizationAScoped, organizationB]) {
-            await attempt(() => db.deleteFrom('organizations').where('id', '=', id).execute());
-          }
-          for (const id of [tenantA, tenantB]) {
-            await attempt(() => db.deleteFrom('tenants').where('id', '=', id).execute());
-          }
-        }
+        if (rollbackTransaction) await attempt(rollbackTransaction);
       } finally {
         try {
-          if (db) await attempt(() => db.destroy());
+          if (connectionDb) await attempt(() => connectionDb.destroy());
         } finally {
           restoreDatabaseDriver(previousDriver);
         }
@@ -289,17 +311,25 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
 
       expect(response.statusCode, response.body).toBe(contract.authorizedControl.status);
       const body = response.json();
-      expect(body.items).toHaveLength(1);
       if (contract.operationId === 'listMigrationJobs') {
-        expect(body.items[0]).toMatchObject({
+        expect(body.items).toHaveLength(2);
+        expect(body.items).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: jobA }),
+            expect.objectContaining({ id: portableJobA, source_system: 'tixkit-portable' }),
+          ]),
+        );
+        const authorizedJob = body.items.find((item: { id: string }) => item.id === jobA);
+        expect(authorizedJob).toMatchObject({
           id: jobA,
           tenant_id: tenantA,
           organization_id: organizationA,
           configurationHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           credentialConfigured: false,
         });
-        expect(body.items[0]).not.toHaveProperty('configuration');
+        expect(authorizedJob).not.toHaveProperty('configuration');
       } else {
+        expect(body.items).toHaveLength(1);
         expect(body.items[0]).toMatchObject({
           id: mappingA,
           tenant_id: tenantA,
@@ -371,4 +401,72 @@ describeWithIntegrationDatabase('migration job read route authorization matrix',
       }
     },
   );
+
+  it('returns the exact empty portable rebinding status for the authorized job', async () => {
+    const contract = PORTABLE_REBINDING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+
+    const response = await invoke(contract.path, portableJobA);
+
+    expect(response.statusCode, response.body).toBe(contract.authorizedControl.status);
+    expect(response.json()).toEqual({ required: [], completed: [], complete: true });
+    for (const marker of [jobA, jobAScoped, jobB, organizationAScoped, organizationB]) {
+      expect(response.body).not.toContain(marker);
+    }
+  });
+
+  it('denies every portable rebinding read boundary before status disclosure', async () => {
+    const contract = PORTABLE_REBINDING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const cases: Array<{
+      principal: Principal;
+      jobId: string;
+      organizationId?: string;
+      status: 403 | 404;
+      code: 'FORBIDDEN' | 'NOT_FOUND';
+    }> = [
+      {
+        principal: { ...basePrincipal, scopes: ['migrations.write'] },
+        jobId: portableJobA,
+        status: 403,
+        code: 'FORBIDDEN',
+      },
+      {
+        principal: { ...basePrincipal, brandIds: [`brd_mread_${suffix}`] },
+        jobId: portableJobA,
+        status: 403,
+        code: 'FORBIDDEN',
+      },
+      {
+        principal: { ...basePrincipal, eventIds: [`evt_mread_${suffix}`] },
+        jobId: portableJobA,
+        status: 403,
+        code: 'FORBIDDEN',
+      },
+      {
+        principal: basePrincipal,
+        jobId: jobAScoped,
+        status: 404,
+        code: 'NOT_FOUND',
+      },
+      {
+        principal: basePrincipal,
+        jobId: jobB,
+        organizationId: organizationB,
+        status: 404,
+        code: 'NOT_FOUND',
+      },
+    ];
+
+    for (const denial of cases) {
+      principal = denial.principal;
+
+      const response = await invoke(contract.path, denial.jobId, denial.organizationId);
+
+      expect(response.statusCode, response.body).toBe(denial.status);
+      expect(response.json()).toMatchObject({ error: { code: denial.code } });
+      expect(response.body).not.toContain(portableJobA);
+      expect(response.body).not.toContain(organizationA);
+      expect(response.body).not.toContain(organizationAScoped);
+      expect(response.body).not.toContain(organizationB);
+    }
+  });
 });

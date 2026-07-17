@@ -217,6 +217,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['listMigrationJobs', 'listMigrationMappings'], {
     source: 'migration-job-read-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['getPortableMigrationRebindings'], {
+    source: 'migration-job-read-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'getOrganizationsByOrganizationIdReadiness',
@@ -385,6 +388,7 @@ const organizationWideScopeGuards = new Set([
 const scopedJobAuthorizationOperations = new Set([
   'assessMigrationRollback',
   'getMigrationJob',
+  'getPortableMigrationRebindings',
   'listMigrationJobConflicts',
   'listMigrationJobEvents',
   'listMigrationJobFiles',
