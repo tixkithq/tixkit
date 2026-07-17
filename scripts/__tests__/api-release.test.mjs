@@ -15,6 +15,7 @@ const currentReleaseManifest = JSON.parse(
 );
 const currentReleaseIsDerivedExport =
   currentReleaseManifest.provenance?.exportTransformation?.kind === 'license-status-normalization';
+const currentReleaseIsPublishable = currentReleaseManifest.provenance?.publishable === true;
 const currentVersionIsCheckedIn = (() => {
   try {
     execFileSync('git', ['cat-file', '-e', `HEAD:artifacts/api/${currentVersion}/openapi.json`], {
@@ -283,7 +284,10 @@ test(
 
 test(
   'clean committed rebuild is byte-stable and validates recorded provenance',
-  { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
+  {
+    skip:
+      !currentVersionIsCheckedIn || currentReleaseIsDerivedExport || !currentReleaseIsPublishable,
+  },
   () => {
     const expected = snapshotRelease();
     execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
@@ -301,8 +305,35 @@ test(
 );
 
 test(
+  'committed local candidate is byte-stable and remains publication-ineligible',
+  {
+    skip:
+      !currentVersionIsCheckedIn || currentReleaseIsDerivedExport || currentReleaseIsPublishable,
+  },
+  () => {
+    const expected = snapshotRelease();
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+      cwd: root,
+      stdio: 'pipe',
+    });
+    assertReleaseSnapshot(expected);
+    assert.throws(
+      () =>
+        execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
+          cwd: root,
+          stdio: 'pipe',
+        }),
+      /release provenance is not clean|release provenance is not publishable/u,
+    );
+  },
+);
+
+test(
   'validates recorded provenance when a shallow or exported repository lacks the source object',
-  { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
+  {
+    skip:
+      !currentVersionIsCheckedIn || currentReleaseIsDerivedExport || !currentReleaseIsPublishable,
+  },
   () => {
     const directory = resolve(root, `artifacts/api/${currentVersion}`);
     const docsDirectory = resolve(root, `apps/docs/public/contracts/${currentVersion}`);
@@ -382,7 +413,10 @@ test(
 
 test(
   'derived export integrity mode accepts only the pending-license normalization contract',
-  { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
+  {
+    skip:
+      !currentVersionIsCheckedIn || currentReleaseIsDerivedExport || !currentReleaseIsPublishable,
+  },
   () => {
     const directory = resolve(root, `artifacts/api/${currentVersion}`);
     const docsDirectory = resolve(root, `apps/docs/public/contracts/${currentVersion}`);
