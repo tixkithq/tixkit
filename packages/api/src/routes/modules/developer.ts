@@ -4,8 +4,7 @@ import {
   ApiKeyRepository,
   ScannerDeviceRepository,
   AuditLogRepository,
-  BrandRepository,
-  EventRepository,
+  type Database,
 } from '@tixkit/db';
 import { ForbiddenError, NotFoundError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
@@ -234,33 +233,86 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     return authorizedRows;
   }
 
-  async function assertBrandIds(principal: Principal, brandIds?: string[]) {
+  async function assertBrandIds(
+    principal: Principal,
+    organizationId: string,
+    brandIds: string[] | undefined,
+    database: Database = db,
+  ) {
     if (!brandIds) return;
-    const repo = new BrandRepository(db);
-    await Promise.all(
-      brandIds.map(async (brandId) => {
-        const brand = await repo.findById(brandId);
-        if (!brand) throw new NotFoundError('Brand', brandId);
-        ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
-        ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-        ClerkAuthService.requireBrandScope(principal, brandId);
-      }),
-    );
+    const requestedIds = [...new Set(brandIds)].sort();
+    const rows = await database
+      .selectFrom('brands')
+      .selectAll()
+      .where('id', 'in', requestedIds)
+      .orderBy('id', 'asc')
+      .forUpdate()
+      .execute();
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    for (const brandId of requestedIds) {
+      const brand = byId.get(brandId);
+      if (!brand) throw new NotFoundError('Brand', brandId);
+      ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+      if (brand.organization_id !== organizationId) throw new NotFoundError('Brand', brandId);
+      ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+      ClerkAuthService.requireBrandScope(principal, brandId);
+    }
   }
 
-  async function assertEventIds(principal: Principal, eventIds?: string[]) {
+  async function assertEventIds(
+    principal: Principal,
+    organizationId: string,
+    eventIds: string[] | undefined,
+    database: Database = db,
+  ) {
     if (!eventIds) return;
-    const repo = new EventRepository(db);
-    await Promise.all(
-      eventIds.map(async (eventId) => {
-        const event = await repo.findById(eventId);
-        if (!event) throw new NotFoundError('Event', eventId);
-        ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-        ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
-        ClerkAuthService.requireBrandScope(principal, event.brand_id);
-        ClerkAuthService.requireEventScope(principal, eventId);
-      }),
-    );
+    const requestedIds = [...new Set(eventIds)].sort();
+    const rows = await database
+      .selectFrom('events')
+      .selectAll()
+      .where('id', 'in', requestedIds)
+      .orderBy('id', 'asc')
+      .forUpdate()
+      .execute();
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    for (const eventId of requestedIds) {
+      const event = byId.get(eventId);
+      if (!event) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+      if (event.organization_id !== organizationId) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+      ClerkAuthService.requireBrandScope(principal, event.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+    }
+  }
+
+  async function assertCredentialOrganization(
+    principal: Principal,
+    organizationId: string,
+    database: Database,
+  ) {
+    const organization = await database
+      .selectFrom('organizations')
+      .selectAll()
+      .where('id', '=', organizationId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!organization) throw new NotFoundError('Organization', organizationId);
+    ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
+    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+  }
+
+  async function withCredentialCreationResources<T>(
+    principal: Principal,
+    input: { brandIds?: string[]; eventIds?: string[]; organizationId: string },
+    operation: (transaction: Database) => Promise<T>,
+  ): Promise<T> {
+    return db.transaction().execute(async (transaction) => {
+      await assertCredentialOrganization(principal, input.organizationId, transaction);
+      await assertBrandIds(principal, input.organizationId, input.brandIds, transaction);
+      await assertEventIds(principal, input.organizationId, input.eventIds, transaction);
+      return operation(transaction);
+    });
   }
 
   app.post('/api-keys', async (request, reply) => {
@@ -274,34 +326,39 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       brandIds: body.brandIds,
       eventIds: body.eventIds,
     });
-    await assertBrandIds(principal, body.brandIds);
-    await assertEventIds(principal, body.eventIds);
-
-    const { apiKey, record } = await db.transaction().execute(async (transaction) => {
-      const created = await new ApiKeyRepository(transaction).create({
-        tenantId: principal.tenantId,
+    const { apiKey, record } = await withCredentialCreationResources(
+      principal,
+      {
         organizationId: body.organizationId,
-        name: body.name,
-        scopes: body.scopes,
         brandIds: body.brandIds,
         eventIds: body.eventIds,
-        expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
-      });
-      await writeAuditLog(
-        new AuditLogRepository(transaction),
-        request,
-        principal,
-        {
-          action: 'api_key.created',
+      },
+      async (transaction) => {
+        const created = await new ApiKeyRepository(transaction).create({
+          tenantId: principal.tenantId,
           organizationId: body.organizationId,
-          resourceType: 'ApiKey',
-          resourceId: created.record.id as string,
-          diffSummary: { name: body.name, scopes: body.scopes },
-        },
-        { failClosed: true },
-      );
-      return created;
-    });
+          name: body.name,
+          scopes: body.scopes,
+          brandIds: body.brandIds,
+          eventIds: body.eventIds,
+          expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+        });
+        await writeAuditLog(
+          new AuditLogRepository(transaction),
+          request,
+          principal,
+          {
+            action: 'api_key.created',
+            organizationId: body.organizationId,
+            resourceType: 'ApiKey',
+            resourceId: created.record.id as string,
+            diffSummary: { name: body.name, scopes: body.scopes },
+          },
+          { failClosed: true },
+        );
+        return created;
+      },
+    );
 
     // The raw `apiKey` is returned exactly once at creation. The persisted
     // record never exposes the hashed key material.
@@ -410,26 +467,36 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
 
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
     requireAssignableScannerScope(principal, body.eventIds);
-    await assertEventIds(principal, body.eventIds);
     const scopes = [...(body.scopes ?? DEFAULT_SCANNER_DEVICE_SCOPES)];
     requireAssignableScopes(principal, scopes);
 
-    const repo = new ScannerDeviceRepository(db);
-    const { secret, record } = await repo.create({
-      tenantId: principal.tenantId,
-      organizationId: body.organizationId,
-      name: body.name,
-      eventIds: body.eventIds ?? [],
-      scopes,
-    });
-
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'scanner_device.created',
-      organizationId: body.organizationId,
-      resourceType: 'ScannerDevice',
-      resourceId: record.id as string,
-      diffSummary: { name: body.name, eventIds: body.eventIds, scopes },
-    });
+    const { secret, record } = await withCredentialCreationResources(
+      principal,
+      { organizationId: body.organizationId, eventIds: body.eventIds },
+      async (transaction) => {
+        const created = await new ScannerDeviceRepository(transaction).create({
+          tenantId: principal.tenantId,
+          organizationId: body.organizationId,
+          name: body.name,
+          eventIds: body.eventIds ?? [],
+          scopes,
+        });
+        await writeAuditLog(
+          new AuditLogRepository(transaction),
+          request,
+          principal,
+          {
+            action: 'scanner_device.created',
+            organizationId: body.organizationId,
+            resourceType: 'ScannerDevice',
+            resourceId: created.record.id as string,
+            diffSummary: { name: body.name, eventIds: body.eventIds, scopes },
+          },
+          { failClosed: true },
+        );
+        return created;
+      },
+    );
 
     // The raw device `secret` is returned exactly once. The persisted record
     // only stores the hash.
@@ -486,7 +553,6 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const { deviceId } = request.params as { deviceId: string };
-    const repo = new ScannerDeviceRepository(db);
     const device = await db
       .selectFrom('scanner_devices')
       .selectAll()
@@ -505,12 +571,25 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
         error: { code: 'NOT_FOUND', message: 'Scanner device not found', requestId: request.id },
       });
     }
-    await repo.revoke(device.id);
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'scanner_device.revoked',
-      organizationId: device.organization_id,
-      resourceType: 'ScannerDevice',
-      resourceId: device.id,
+    await db.transaction().execute(async (transaction) => {
+      const revoked = await new ScannerDeviceRepository(transaction).revokeScoped({
+        id: device.id,
+        tenantId: principal.tenantId,
+        organizationId: device.organization_id,
+      });
+      if (revoked !== 1) throw new NotFoundError('ScannerDevice', deviceId);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'scanner_device.revoked',
+          organizationId: device.organization_id,
+          resourceType: 'ScannerDevice',
+          resourceId: device.id,
+        },
+        { failClosed: true },
+      );
     });
     return reply.status(200).send({ deviceId, status: 'revoked' });
   });

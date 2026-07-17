@@ -100,6 +100,7 @@ function matchesScannerLifecycleRow(
 
 function createScannerDeviceLifecycleDb() {
   const tables: Record<string, Record<string, unknown>[]> = {
+    organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }],
     scanner_devices: [],
     audit_logs: [],
   };
@@ -140,6 +141,9 @@ function createScannerDeviceLifecycleDb() {
       const conditions: QueryCondition[] = [];
       const query = {
         selectAll() {
+          return query;
+        },
+        forUpdate() {
           return query;
         },
         where(column: string, operator: string, value: unknown) {

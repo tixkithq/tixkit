@@ -202,11 +202,20 @@ export class ScannerDeviceRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
-  async revoke(id: string) {
-    return this.updateReturning('scanner_devices', id, {
-      status: 'revoked',
-      updated_at: new Date(),
-    });
+  async revokeScoped(input: {
+    id: string;
+    organizationId: string;
+    tenantId: string;
+  }): Promise<number> {
+    const result = await this.db
+      .updateTable('scanner_devices')
+      .set({ status: 'revoked', updated_at: new Date() })
+      .where('id', '=', input.id)
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('status', '=', 'active')
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows ?? 0);
   }
 }
 

@@ -54,37 +54,52 @@ function database(row: Record<string, unknown> = storedKey) {
       const rows: Record<string, unknown>[] =
         table === 'api_keys'
           ? [row]
-          : table === 'brands'
-            ? [
-                {
-                  id: 'brand_other_01',
-                  tenant_id: tenantId,
-                  organization_id: organizationId,
-                },
-              ]
-            : table === 'events'
+          : table === 'organizations'
+            ? [{ id: organizationId, tenant_id: tenantId }]
+            : table === 'brands'
               ? [
                   {
-                    id: 'event_other_01',
+                    id: 'brand_other_01',
                     tenant_id: tenantId,
                     organization_id: organizationId,
-                    brand_id: 'brand_allowed_01',
                   },
                 ]
-              : [];
-      const predicates: Array<[string, unknown]> = [];
+              : table === 'events'
+                ? [
+                    {
+                      id: 'event_other_01',
+                      tenant_id: tenantId,
+                      organization_id: organizationId,
+                      brand_id: 'brand_allowed_01',
+                    },
+                  ]
+                : [];
+      const predicates: Array<[string, string, unknown]> = [];
       const query = {
         selectAll() {
           return query;
         },
-        where(column: string, _operator: string, value: unknown) {
-          predicates.push([column, value]);
+        where(column: string, operator: string, value: unknown) {
+          predicates.push([column, operator, value]);
           return query;
         },
-        async executeTakeFirst() {
-          return rows.find((candidate) =>
-            predicates.every(([column, value]) => candidate[column] === value),
+        forUpdate() {
+          return query;
+        },
+        orderBy() {
+          return query;
+        },
+        async execute() {
+          return rows.filter((candidate) =>
+            predicates.every(([column, operator, value]) =>
+              operator === 'in'
+                ? Array.isArray(value) && value.includes(candidate[column])
+                : candidate[column] === value,
+            ),
           );
+        },
+        async executeTakeFirst() {
+          return (await query.execute())[0];
         },
       };
       return query;

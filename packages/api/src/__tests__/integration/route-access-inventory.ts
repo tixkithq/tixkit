@@ -103,6 +103,14 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'api-key-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'api-key-route-authorization-db.integration.test.ts'),
   ],
+  [
+    'scanner-device-route-authorization.test.ts',
+    resolve(import.meta.dirname, '../scanner-device-route-authorization.test.ts'),
+  ],
+  [
+    'scanner-device-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'scanner-device-route-authorization-db.integration.test.ts'),
+  ],
 ]);
 
 type AuthorizationEvidenceBinding = Readonly<{
@@ -167,11 +175,17 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'api-key-route-authorization.test.ts',
     persistenceSource: 'api-key-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['postScannerDevices', 'postScannerDevicesByDeviceIdRevoke'], {
+    source: 'scanner-device-route-authorization.test.ts',
+    persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',
+  }),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
 const credentialOnlyOperations = new Set(['getAgentSession', 'getMe']);
 const delegatedAuthorizationGuards = new Set([
+  'withCredentialCreationResources',
+  'assertEventIds',
   'filterManageableScopedCredentialRows',
   'assertPrincipalCanAuthorizeOrganizationWideOAuth',
   'assertPrincipalCanAuthorizeResourceOwnerOAuth',
@@ -202,6 +216,8 @@ const delegatedAuthorizationGuards = new Set([
   'scopedJob',
 ]);
 const eventScopeGuards = new Set([
+  'withCredentialCreationResources',
+  'assertEventIds',
   'filterManageableScopedCredentialRows',
   'loadCampaignProviderEventItems',
   'loadAuthorizedCampaign',

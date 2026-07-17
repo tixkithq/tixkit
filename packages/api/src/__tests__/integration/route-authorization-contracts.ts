@@ -220,10 +220,40 @@ export const API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postScannerDevices',
+    path: '/scanner-devices',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'scanner-device-route-authorization.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postScannerDevicesByDeviceIdRevoke',
+    path: '/scanner-devices/{deviceId}/revoke',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',
+    resourceParameters: ['deviceId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'scanner-device-route-authorization.test.ts',
+  }),
+]);
+
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);
