@@ -238,6 +238,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-17 Stripe Connect permission metadata',
         routeId: 'apiMigration20260816To20260817',
       },
+      {
+        label: 'Adopt 2026-08-18 replay-safe webhook dispatch',
+        routeId: 'apiMigration20260817To20260818',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

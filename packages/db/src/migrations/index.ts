@@ -87,3 +87,4 @@ export { AgentActionResultsMigration } from './0086_agent_action_results.js';
 export { DashboardActionRevisionsMigration } from './0087_dashboard_action_revisions.js';
 export { ProviderIncidentEvidenceMigration } from './0088_provider_incident_evidence.js';
 export { ResaleSettlementsMigration } from './0089_resale_settlements.js';
+export { WebhookReplayRequestsMigration } from './0090_webhook_replay_requests.js';

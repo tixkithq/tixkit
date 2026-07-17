@@ -203,16 +203,23 @@ export class TemporalClient {
     const workflowId = input.replayNonce
       ? webhookDeliveryReplayWorkflowId(input.eventId, input.endpointId, input.replayNonce)
       : baseWorkflowId;
-    return this.client.workflow.start(webhookDeliveryWorkflow, {
-      taskQueue: config.temporalTaskQueue,
-      workflowId,
-      args: [
-        {
-          version: WEBHOOK_DELIVERY_WORKFLOW_VERSION,
-          ...input,
-        } satisfies WebhookDeliveryWorkflowInput,
-      ],
-    });
+    try {
+      return await this.client.workflow.start(webhookDeliveryWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [
+          {
+            version: WEBHOOK_DELIVERY_WORKFLOW_VERSION,
+            ...input,
+          } satisfies WebhookDeliveryWorkflowInput,
+        ],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) {
+        return this.client.workflow.getHandle(workflowId);
+      }
+      throw err;
+    }
   }
 
   async startExport(input: Omit<ExportWorkflowInput, 'version'>) {

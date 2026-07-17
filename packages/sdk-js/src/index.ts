@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-17';
+export const TIXKIT_API_VERSION = '2026-08-18';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -5875,8 +5875,15 @@ class WebhookEndpointResource {
   async replayEvent(
     endpointId: string,
     eventId: string,
+    options: IdempotencyOptions,
   ): Promise<{ queued: true; eventId: string; endpointId: string }> {
-    return this.client.request('POST', `/webhook-endpoints/${endpointId}/events/${eventId}/replay`);
+    return this.client.request(
+      'POST',
+      `/webhook-endpoints/${endpointId}/events/${eventId}/replay`,
+      {
+        idempotencyKey: options.idempotencyKey,
+      },
+    );
   }
   async sendTest(endpointId: string): Promise<{
     queued: true;
@@ -5886,8 +5893,13 @@ class WebhookEndpointResource {
   }> {
     return this.client.request('POST', `/webhook-endpoints/${endpointId}/test`);
   }
-  async replay(eventId: string): Promise<{ queued: true; eventId: string; endpoints: number }> {
-    return this.client.request('POST', `/webhook-events/${eventId}/replay`);
+  async replay(
+    eventId: string,
+    options: IdempotencyOptions,
+  ): Promise<{ queued: true; eventId: string; endpoints: number }> {
+    return this.client.request('POST', `/webhook-events/${eventId}/replay`, {
+      idempotencyKey: options.idempotencyKey,
+    });
   }
 }
 

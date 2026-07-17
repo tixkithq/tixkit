@@ -1,15 +1,21 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { Principal } from '@tixkit/domain';
 import { Buffer } from 'node:buffer';
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   AuditLogRepository,
   WebhookDeliveryRepository,
   WebhookEndpointRepository,
   WebhookEventRepository,
+  WebhookReplayRequestRepository,
 } from '@tixkit/db';
-import { ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
+import {
+  ForbiddenError,
+  IdempotencyConflictError,
+  NotFoundError,
+  ValidationError,
+} from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
   pageEnvelope,
@@ -36,6 +42,35 @@ function requireOrganizationWideWebhookEndpointPrincipal(principal: Principal) {
   if (principal.brandIds?.length || principal.eventIds?.length) {
     throw new ForbiddenError(scopedWebhookEndpointManagementMessage);
   }
+}
+
+function requireReplayIdempotencyKey(headers: Record<string, unknown>): string {
+  const value = headers['idempotency-key'];
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 128 ||
+    value.trim() !== value ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint <= 31 || codePoint === 127;
+    })
+  ) {
+    throw new ValidationError('Idempotency-Key header must be 1-128 printable characters');
+  }
+  return value;
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function parseReplayEndpointIds(value: string): string[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((endpointId) => typeof endpointId === 'string')) {
+    throw new Error('Stored webhook replay endpoint snapshot is invalid');
+  }
+  return parsed;
 }
 
 export const webhookRoutes: FastifyPluginAsync = async (app) => {
@@ -227,7 +262,9 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
       ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
       if (endpoint.status !== 'active') {
-        throw new ValidationError('Webhook endpoint is not active', { endpointId });
+        throw new ValidationError('Webhook endpoint is not active', {
+          endpointId,
+        });
       }
 
       const payload = createWebhookTestPayload(endpointId);
@@ -248,7 +285,11 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         organizationId: endpoint.organization_id,
         resourceType: 'WebhookEndpoint',
         resourceId: endpointId,
-        diffSummary: { eventId: event.id, eventType: WEBHOOK_TEST_EVENT_TYPE, test: true },
+        diffSummary: {
+          eventId: event.id,
+          eventType: WEBHOOK_TEST_EVENT_TYPE,
+          test: true,
+        },
       });
       try {
         await temporalClient.startWebhookDelivery({
@@ -265,7 +306,11 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
           organizationId: endpoint.organization_id,
           resourceType: 'WebhookEvent',
           resourceId: event.id,
-          diffSummary: { endpointId, eventType: WEBHOOK_TEST_EVENT_TYPE, test: true },
+          diffSummary: {
+            endpointId,
+            eventType: WEBHOOK_TEST_EVENT_TYPE,
+            test: true,
+          },
         });
         return reply.status(503).send({
           queued: false,
@@ -287,112 +332,249 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'developers.write');
     requireOrganizationWideWebhookEndpointPrincipal(principal);
     const { eventId } = request.params as { eventId: string };
-
     const eventRepo = new WebhookEventRepository(db);
     const event = await eventRepo.findById(eventId);
     if (!event) throw new NotFoundError('WebhookEvent', eventId);
     ClerkAuthService.requireResourceTenant(principal, event, 'WebhookEvent', eventId);
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    const idempotencyKey = requireReplayIdempotencyKey(request.headers);
+    const idempotencyKeySha256 = sha256(idempotencyKey);
+    const requestSha256 = sha256(JSON.stringify({ scope: 'organization', eventId }));
 
-    const endpointRepo = new WebhookEndpointRepository(db);
-    const endpoints = await endpointRepo.findActiveByEvent(
-      event.organization_id,
-      event.type as string,
-    );
+    const replayRepo = new WebhookReplayRequestRepository(db);
+    const existingReplay = await replayRepo.findByKeyHash(principal.tenantId, idempotencyKeySha256);
+    if (existingReplay && existingReplay.request_sha256 !== requestSha256) {
+      throw new IdempotencyConflictError(idempotencyKey);
+    }
+
+    const endpointIds = existingReplay
+      ? parseReplayEndpointIds(existingReplay.endpoint_ids_json)
+      : (
+          await new WebhookEndpointRepository(db).findActiveByEvent(
+            event.organization_id,
+            event.type as string,
+          )
+        )
+          .map((endpoint) => endpoint.id)
+          .sort();
+    const response = { queued: true, eventId, endpoints: endpointIds.length };
+    const reserved = existingReplay
+      ? { request: existingReplay, created: false }
+      : await replayRepo.reserve({
+          tenantId: principal.tenantId,
+          organizationId: event.organization_id,
+          eventId,
+          idempotencyKeySha256,
+          requestSha256,
+          endpointIds,
+          response,
+          audit: {
+            actorType: principal.type,
+            actorId: principal.id,
+            action: 'webhook_event.replay_requested',
+            diffSummary: {
+              replayScope: 'organization',
+              eventType: event.type,
+              queuedEndpointCount: endpointIds.length,
+            },
+            requestId: request.id,
+            ip: request.ip,
+            userAgent: request.headers['user-agent'],
+          },
+        });
+    if (reserved.request.request_sha256 !== requestSha256) {
+      throw new IdempotencyConflictError(idempotencyKey);
+    }
+    if (reserved.request.status === 'completed') {
+      return reply.status(202).send(JSON.parse(reserved.request.response_json));
+    }
 
     const payload = serializeWebhookEvent(event).payload as Record<string, unknown>;
-    await Promise.all(
-      endpoints.map((endpoint) =>
-        temporalClient.startWebhookDelivery({
+    try {
+      for (const endpointId of endpointIds) {
+        await temporalClient.startWebhookDelivery({
           apiVersion: WEBHOOK_TEST_API_VERSION,
-          endpointId: endpoint.id,
+          endpointId,
           eventId,
           eventType: event.type as string,
-          replayNonce: randomUUID(),
+          replayNonce: reserved.request.id,
           payload,
           maxAttempts: 5,
-        }),
-      ),
-    );
+        });
+      }
+    } catch {
+      return reply.status(503).send({
+        queued: false,
+        eventId,
+        error: {
+          code: 'REPLAY_DISPATCH_INCOMPLETE',
+          message: 'Webhook replay dispatch is incomplete; retry with the same Idempotency-Key.',
+        },
+      });
+    }
+    try {
+      await replayRepo.complete({
+        id: reserved.request.id,
+        tenantId: principal.tenantId,
+        organizationId: event.organization_id,
+        actorType: principal.type,
+        actorId: principal.id,
+        requestId: request.id,
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+      });
+    } catch {
+      return reply.status(503).send({
+        queued: false,
+        eventId,
+        error: {
+          code: 'REPLAY_FINALIZATION_UNAVAILABLE',
+          message:
+            'Webhook replay was dispatched but not finalized; retry with the same Idempotency-Key.',
+        },
+      });
+    }
 
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'webhook_event.replayed',
-      organizationId: event.organization_id,
-      resourceType: 'WebhookEvent',
-      resourceId: eventId,
-      diffSummary: {
-        replayScope: 'organization',
-        eventType: event.type,
-        queuedEndpointCount: endpoints.length,
-      },
-    });
-
-    return reply.status(202).send({ queued: true, eventId, endpoints: endpoints.length });
+    return reply.status(202).send(response);
   });
 
   app.post('/webhook-endpoints/:endpointId/events/:eventId/replay', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     requireOrganizationWideWebhookEndpointPrincipal(principal);
-    const { endpointId, eventId } = request.params as { endpointId: string; eventId: string };
-
-    const endpointRepo = new WebhookEndpointRepository(db);
-    const endpoint = await endpointRepo.findById(endpointId);
-    if (!endpoint) throw new NotFoundError('WebhookEndpoint', endpointId);
-    ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
-    ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
-
+    const { endpointId, eventId } = request.params as {
+      endpointId: string;
+      eventId: string;
+    };
     const eventRepo = new WebhookEventRepository(db);
     const event = await eventRepo.findById(eventId);
     if (!event) throw new NotFoundError('WebhookEvent', eventId);
     ClerkAuthService.requireResourceTenant(principal, event, 'WebhookEvent', eventId);
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
-
-    if (endpoint.organization_id !== event.organization_id) {
-      throw new NotFoundError('WebhookEvent', eventId);
+    const idempotencyKey = requireReplayIdempotencyKey(request.headers);
+    const idempotencyKeySha256 = sha256(idempotencyKey);
+    const requestSha256 = sha256(JSON.stringify({ scope: 'endpoint', endpointId, eventId }));
+    const replayRepo = new WebhookReplayRequestRepository(db);
+    const existingReplay = await replayRepo.findByKeyHash(principal.tenantId, idempotencyKeySha256);
+    if (existingReplay && existingReplay.request_sha256 !== requestSha256) {
+      throw new IdempotencyConflictError(idempotencyKey);
     }
-    if (endpoint.status !== 'active') {
-      throw new ValidationError('Webhook endpoint is not active', { endpointId });
+    const storedEndpointIds = existingReplay
+      ? parseReplayEndpointIds(existingReplay.endpoint_ids_json)
+      : undefined;
+    if (
+      existingReplay &&
+      (existingReplay.event_id !== eventId ||
+        existingReplay.organization_id !== event.organization_id ||
+        storedEndpointIds?.length !== 1 ||
+        storedEndpointIds?.[0] !== endpointId)
+    ) {
+      throw new Error('Stored endpoint webhook replay scope is invalid');
+    }
+    if (existingReplay?.status === 'completed') {
+      return reply.status(202).send(JSON.parse(existingReplay.response_json));
     }
 
     const eventType = event.type as string;
-    const subscribedEvents = parseWebhookEndpointEvents(endpoint.events);
     const eventPayload = serializeWebhookEvent(event).payload as Record<string, unknown>;
     const syntheticTest =
       eventType === WEBHOOK_TEST_EVENT_TYPE && isWebhookTestPayload(eventPayload, endpointId);
-    if (!syntheticTest && !subscribedEvents.includes(eventType)) {
-      throw new ValidationError('Webhook endpoint is not subscribed to this event type', {
-        endpointId,
-        eventId,
-        eventType,
-      });
+    if (!existingReplay) {
+      const endpoint = await new WebhookEndpointRepository(db).findById(endpointId);
+      if (!endpoint) throw new NotFoundError('WebhookEndpoint', endpointId);
+      ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
+      ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
+      if (endpoint.organization_id !== event.organization_id) {
+        throw new NotFoundError('WebhookEvent', eventId);
+      }
+      if (endpoint.status !== 'active') {
+        throw new ValidationError('Webhook endpoint is not active', { endpointId });
+      }
+      if (!syntheticTest && !parseWebhookEndpointEvents(endpoint.events).includes(eventType)) {
+        throw new ValidationError('Webhook endpoint is not subscribed to this event type', {
+          endpointId,
+          eventId,
+          eventType,
+        });
+      }
     }
 
     const payload = syntheticTest ? createWebhookTestPayload(endpointId) : eventPayload;
-    await temporalClient.startWebhookDelivery({
-      apiVersion: WEBHOOK_TEST_API_VERSION,
-      endpointId,
-      eventId,
-      eventType,
-      replayNonce: randomUUID(),
-      payload,
-      maxAttempts: 5,
-    });
-
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'webhook_event.replayed',
-      organizationId: event.organization_id,
-      resourceType: 'WebhookEvent',
-      resourceId: eventId,
-      diffSummary: {
-        replayScope: 'endpoint',
+    const response = { queued: true, eventId, endpointId };
+    const reserved = existingReplay
+      ? { request: existingReplay, created: false }
+      : await replayRepo.reserve({
+          tenantId: principal.tenantId,
+          organizationId: event.organization_id,
+          eventId,
+          idempotencyKeySha256,
+          requestSha256,
+          endpointIds: [endpointId],
+          response,
+          audit: {
+            actorType: principal.type,
+            actorId: principal.id,
+            action: 'webhook_event.replay_requested',
+            diffSummary: {
+              replayScope: 'endpoint',
+              endpointId,
+              eventType,
+              queuedEndpointCount: 1,
+            },
+            requestId: request.id,
+            ip: request.ip,
+            userAgent: request.headers['user-agent'],
+          },
+        });
+    if (reserved.request.request_sha256 !== requestSha256) {
+      throw new IdempotencyConflictError(idempotencyKey);
+    }
+    try {
+      await temporalClient.startWebhookDelivery({
+        apiVersion: WEBHOOK_TEST_API_VERSION,
         endpointId,
+        eventId,
         eventType,
-        queuedEndpointCount: 1,
-      },
-    });
+        replayNonce: reserved.request.id,
+        payload,
+        maxAttempts: 5,
+      });
+    } catch {
+      return reply.status(503).send({
+        queued: false,
+        eventId,
+        endpointId,
+        error: {
+          code: 'REPLAY_DISPATCH_INCOMPLETE',
+          message: 'Webhook replay dispatch is incomplete; retry with the same Idempotency-Key.',
+        },
+      });
+    }
+    try {
+      await replayRepo.complete({
+        id: reserved.request.id,
+        tenantId: principal.tenantId,
+        organizationId: event.organization_id,
+        actorType: principal.type,
+        actorId: principal.id,
+        requestId: request.id,
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+      });
+    } catch {
+      return reply.status(503).send({
+        queued: false,
+        eventId,
+        endpointId,
+        error: {
+          code: 'REPLAY_FINALIZATION_UNAVAILABLE',
+          message:
+            'Webhook replay was dispatched but not finalized; retry with the same Idempotency-Key.',
+        },
+      });
+    }
 
-    return reply.status(202).send({ queued: true, eventId, endpointId });
+    return reply.status(202).send(response);
   });
 };
 

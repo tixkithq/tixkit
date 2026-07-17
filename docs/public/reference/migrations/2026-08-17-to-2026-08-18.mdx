@@ -1,0 +1,28 @@
+---
+title: Migrate API 2026-08-17 to 2026-08-18
+description: Supply durable idempotency identity for webhook replay requests.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-17
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /developers/webhooks/setup
+---
+
+API `2026-08-18` requires `Idempotency-Key` on both webhook replay operations:
+
+- `POST /webhook-events/{eventId}/replay`
+- `POST /webhook-endpoints/{endpointId}/events/{eventId}/replay`
+
+Supply a nonblank printable key of at most 128 characters and retain it until the request reaches `202 Accepted`. An identical retry returns the stored response without starting another logical replay. Reusing the key for another event, endpoint or replay scope returns `409 IDEMPOTENCY_CONFLICT`.
+
+Tixkit stores only the key digest, an immutable request fingerprint and the sorted endpoint snapshot. It writes the replay intent and requested audit atomically before dispatch. Each endpoint uses the replay-request ID in its Temporal workflow and delivery identity, so an accepted-but-ambiguous start can be recovered safely. Endpoint additions after the first attempt do not expand the replay. A `503` means the intent remains durable; retry the same route with the same key.
+
+SDK callers must pass the idempotency key explicitly. JavaScript uses `{ idempotencyKey }`; Go passes the key as the final replay-method argument. This requirement is intentionally breaking because silently generating a new key would defeat recovery across process or network failures.

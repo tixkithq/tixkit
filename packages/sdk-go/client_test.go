@@ -433,6 +433,54 @@ func TestOrderGetDecodesEnrichedDetail(t *testing.T) {
 	}
 }
 
+func TestWebhookReplaySendsRequiredIdempotencyKeys(t *testing.T) {
+	t.Parallel()
+
+	requests := make(chan *http.Request, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(ReplayWebhookEventResult{
+			Queued:    true,
+			EventID:   "whe_1",
+			Endpoints: 1,
+		})
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	if _, err := client.Webhooks.ReplayEndpointEvent(
+		context.Background(),
+		"wh_1",
+		"whe_1",
+		"replay-endpoint-1",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Webhooks.ReplayEvent(
+		context.Background(),
+		"whe_1",
+		"replay-event-1",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	endpointRequest := <-requests
+	if endpointRequest.URL.Path != "/v1/webhook-endpoints/wh_1/events/whe_1/replay" {
+		t.Fatalf("endpoint replay path = %s", endpointRequest.URL.Path)
+	}
+	if got := endpointRequest.Header.Get("Idempotency-Key"); got != "replay-endpoint-1" {
+		t.Fatalf("endpoint replay idempotency key = %s", got)
+	}
+	eventRequest := <-requests
+	if eventRequest.URL.Path != "/v1/webhook-events/whe_1/replay" {
+		t.Fatalf("event replay path = %s", eventRequest.URL.Path)
+	}
+	if got := eventRequest.Header.Get("Idempotency-Key"); got != "replay-event-1" {
+		t.Fatalf("event replay idempotency key = %s", got)
+	}
+}
+
 func TestOrderRefundSendsLifecycleFlagsAndDecodesQueuedResponse(t *testing.T) {
 	t.Parallel()
 

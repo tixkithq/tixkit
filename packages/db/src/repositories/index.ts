@@ -55,6 +55,8 @@ export {
   WebhookEndpointRepository,
   WebhookEventRepository,
   WebhookDeliveryRepository,
+  WebhookReplayRequestRepository,
+  type WebhookReplayRequest,
 } from './webhook.js';
 export {
   NotificationTemplateRepository,

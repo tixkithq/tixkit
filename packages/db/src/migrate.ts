@@ -90,6 +90,7 @@ import { AgentActionResultsMigration } from './migrations/0086_agent_action_resu
 import { DashboardActionRevisionsMigration } from './migrations/0087_dashboard_action_revisions.js';
 import { ProviderIncidentEvidenceMigration } from './migrations/0088_provider_incident_evidence.js';
 import { ResaleSettlementsMigration } from './migrations/0089_resale_settlements.js';
+import { WebhookReplayRequestsMigration } from './migrations/0090_webhook_replay_requests.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -195,6 +196,7 @@ const ALL_SCHEMA_TABLES = [
   'provider_incident_evidence',
   'resale_settlements',
   'resale_settlement_entries',
+  'webhook_replay_requests',
   'sandbox_environments',
   'historical_check_ins',
   'historical_financial_snapshots',
@@ -359,6 +361,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0087_dashboard_action_revisions': DashboardActionRevisionsMigration,
       '0088_provider_incident_evidence': ProviderIncidentEvidenceMigration,
       '0089_resale_settlements': ResaleSettlementsMigration,
+      '0090_webhook_replay_requests': WebhookReplayRequestsMigration,
     };
   }
 }

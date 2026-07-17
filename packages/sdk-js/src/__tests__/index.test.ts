@@ -3907,7 +3907,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-17',
+        'X-Tixkit-Version': '2026-08-18',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
@@ -4113,7 +4113,9 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
 
-    const result = await c.webhookEndpoints.replayEvent('ep_1', 'whe_1');
+    const result = await c.webhookEndpoints.replayEvent('ep_1', 'whe_1', {
+      idempotencyKey: 'replay-endpoint-1',
+    });
     const call = getCall(fm);
 
     expect(result).toEqual({
@@ -4123,6 +4125,7 @@ describe('TixkitClient new resource methods', () => {
     });
     expect(call.method).toBe('POST');
     expect(call.url).toBe('https://api.test/v1/webhook-endpoints/ep_1/events/whe_1/replay');
+    expect(call.headers).toMatchObject({ 'Idempotency-Key': 'replay-endpoint-1' });
   });
 
   it('webhookEndpoints.sendTest queues a synthetic signed delivery', async () => {
@@ -4158,12 +4161,52 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
 
-    const result = await c.webhookEndpoints.replay('whe_1');
+    const result = await c.webhookEndpoints.replay('whe_1', {
+      idempotencyKey: 'replay-event-1',
+    });
     const call = getCall(fm);
 
     expect(result).toEqual({ queued: true, eventId: 'whe_1', endpoints: 2 });
     expect(call.method).toBe('POST');
     expect(call.url).toBe('https://api.test/v1/webhook-events/whe_1/replay');
+    expect(call.headers).toMatchObject({ 'Idempotency-Key': 'replay-event-1' });
+  });
+
+  it('webhookEndpoints.replay retries a transient failure with the same idempotency key', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            queued: false,
+            eventId: 'whe_1',
+            error: {
+              code: 'REPLAY_DISPATCH_INCOMPLETE',
+              message: 'retry with the same key',
+            },
+          }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ queued: true, eventId: 'whe_1', endpoints: 2 }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const client = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 1,
+    });
+
+    await expect(
+      client.webhookEndpoints.replay('whe_1', { idempotencyKey: 'replay-event-stable' }),
+    ).resolves.toEqual({ queued: true, eventId: 'whe_1', endpoints: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (let index = 0; index < 2; index++) {
+      expect(getCall(fetchMock, index).headers['Idempotency-Key']).toBe('replay-event-stable');
+    }
   });
 
   it('webhookEndpoints.listEvents supports missing-endpoint dead letters', async () => {

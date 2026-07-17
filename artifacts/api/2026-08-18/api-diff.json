@@ -1,0 +1,42 @@
+{
+  "from": "2026-08-17",
+  "to": "2026-08-18",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 2,
+    "compatible": 3
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /webhook-endpoints/{endpointId}/events/{eventId}/replay",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /webhook-events/{eventId}/replay",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.WebhookReplayRetryError",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.WebhookReplayUnavailable",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.WebhookEndpointReplayUnavailable",
+      "message": "A named schema was added."
+    }
+  ]
+}

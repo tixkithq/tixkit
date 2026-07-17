@@ -437,6 +437,20 @@ export interface AuditLogTable {
   created_at: Timestamp;
 }
 
+export interface WebhookReplayRequestTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  event_id: string;
+  idempotency_key_sha256: string;
+  request_sha256: string;
+  endpoint_ids_json: string;
+  response_json: string;
+  status: string;
+  created_at: Timestamp;
+  completed_at: Timestamp | null;
+}
+
 export interface PrivacyRequestTable {
   id: string;
   tenant_id: string;
@@ -2292,6 +2306,7 @@ export interface DB {
   api_keys: ApiKeyTable;
   scanner_devices: ScannerDeviceTable;
   audit_logs: AuditLogTable;
+  webhook_replay_requests: WebhookReplayRequestTable;
   privacy_requests: PrivacyRequestTable;
   events: EventTable;
   event_readiness_acknowledgements: EventReadinessAcknowledgementTable;

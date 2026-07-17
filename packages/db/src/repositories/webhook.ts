@@ -1,6 +1,135 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
 import { createHash, randomBytes } from 'node:crypto';
+import type { Selectable } from 'kysely';
+import type { DB } from '../types/db.js';
+import { AuditLogRepository } from './identity.js';
+
+export type WebhookReplayRequest = Selectable<DB['webhook_replay_requests']>;
+
+export class WebhookReplayRequestRepository extends BaseRepository {
+  async findByKeyHash(
+    tenantId: string,
+    keyHash: string,
+  ): Promise<WebhookReplayRequest | undefined> {
+    return this.db
+      .selectFrom('webhook_replay_requests')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('idempotency_key_sha256', '=', keyHash)
+      .executeTakeFirst();
+  }
+
+  async reserve(input: {
+    tenantId: string;
+    organizationId: string;
+    eventId: string;
+    idempotencyKeySha256: string;
+    requestSha256: string;
+    endpointIds: string[];
+    response: Record<string, unknown>;
+    audit: {
+      actorType: string;
+      actorId: string;
+      action: string;
+      diffSummary: Record<string, unknown>;
+      requestId?: string;
+      ip?: string;
+      userAgent?: string;
+    };
+  }): Promise<{ request: WebhookReplayRequest; created: boolean }> {
+    const existing = await this.findByKeyHash(input.tenantId, input.idempotencyKeySha256);
+    if (existing) return { request: existing, created: false };
+
+    const id = `whr_${ulid()}`;
+    try {
+      const request = await this.db.transaction().execute(async (transaction) => {
+        const row = await new WebhookReplayRequestRepository(transaction).insertReturning(
+          'webhook_replay_requests',
+          {
+            id,
+            tenant_id: input.tenantId,
+            organization_id: input.organizationId,
+            event_id: input.eventId,
+            idempotency_key_sha256: input.idempotencyKeySha256,
+            request_sha256: input.requestSha256,
+            endpoint_ids_json: JSON.stringify(input.endpointIds),
+            response_json: JSON.stringify(input.response),
+            status: 'prepared',
+            created_at: new Date(),
+            completed_at: null,
+          },
+          id,
+        );
+        await new AuditLogRepository(transaction).create({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          actorType: input.audit.actorType,
+          actorId: input.audit.actorId,
+          action: input.audit.action,
+          resourceType: 'WebhookReplayRequest',
+          resourceId: id,
+          diffSummary: input.audit.diffSummary,
+          requestId: input.audit.requestId,
+          ip: input.audit.ip,
+          userAgent: input.audit.userAgent,
+        });
+        return row;
+      });
+      return { request, created: true };
+    } catch (error) {
+      const winner = await this.findByKeyHash(input.tenantId, input.idempotencyKeySha256);
+      if (winner) return { request: winner, created: false };
+      throw error;
+    }
+  }
+
+  async complete(input: {
+    id: string;
+    tenantId: string;
+    organizationId: string;
+    actorType: string;
+    actorId: string;
+    requestId?: string;
+    ip?: string;
+    userAgent?: string;
+  }): Promise<void> {
+    await this.db.transaction().execute(async (transaction) => {
+      const replayRequest = await transaction
+        .selectFrom('webhook_replay_requests')
+        .select(['organization_id'])
+        .where('id', '=', input.id)
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('status', '=', 'prepared')
+        .executeTakeFirst();
+      if (!replayRequest) return;
+
+      const result = await transaction
+        .updateTable('webhook_replay_requests')
+        .set({ status: 'completed', completed_at: new Date() })
+        .where('id', '=', input.id)
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', replayRequest.organization_id)
+        .where('status', '=', 'prepared')
+        .executeTakeFirst();
+      if (Number(result.numUpdatedRows ?? 0) === 0) return;
+
+      await new AuditLogRepository(transaction).create({
+        tenantId: input.tenantId,
+        organizationId: replayRequest.organization_id,
+        actorType: input.actorType,
+        actorId: input.actorId,
+        action: 'webhook_event.replay_queued',
+        resourceType: 'WebhookReplayRequest',
+        resourceId: input.id,
+        requestId: input.requestId,
+        ip: input.ip,
+        userAgent: input.userAgent,
+      });
+    });
+  }
+}
 
 export class WebhookEndpointRepository extends BaseRepository {
   async create(input: {
@@ -56,7 +185,10 @@ export class WebhookEndpointRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('webhook_endpoints', id, { ...input, updated_at: new Date() });
+    return this.updateReturning('webhook_endpoints', id, {
+      ...input,
+      updated_at: new Date(),
+    });
   }
 }
 

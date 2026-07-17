@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-17');
+    expect(openApiSpec.info.version).toBe('2026-08-18');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1189,6 +1189,37 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/WebhookReplayQueued' });
+    const wholeReplay = openApiSpec.paths['/webhook-events/{eventId}/replay'].post;
+    const endpointReplay =
+      openApiSpec.paths['/webhook-endpoints/{endpointId}/events/{eventId}/replay'].post;
+    expect(wholeReplay.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(wholeReplay.parameters).toContainEqual({
+      name: 'eventId',
+      in: 'path',
+      required: true,
+      schema: { type: 'string' },
+    });
+    expect(endpointReplay.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    for (const operation of [wholeReplay, endpointReplay]) {
+      expect(operation['x-compatibility-breaking-change']).toContain('requires Idempotency-Key');
+      for (const status of ['400', '401', '403', '404', '409', '503']) {
+        expect(operation.responses).toHaveProperty(status);
+      }
+    }
+    expect(wholeReplay.responses['503'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/WebhookReplayUnavailable',
+    });
+    expect(endpointReplay.responses['503'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/WebhookEndpointReplayUnavailable',
+    });
+    expect(openApiSpec.components.schemas.WebhookReplayRetryError.properties.code.enum).toEqual([
+      'REPLAY_DISPATCH_INCOMPLETE',
+      'REPLAY_FINALIZATION_UNAVAILABLE',
+    ]);
   });
 
   it('documents brand payment account binding on response schemas', () => {

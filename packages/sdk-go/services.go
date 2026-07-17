@@ -571,15 +571,15 @@ func (s *WebhooksService) ListEvents(ctx context.Context, endpointID string, par
 	return &out, err
 }
 
-func (s *WebhooksService) ReplayEndpointEvent(ctx context.Context, endpointID string, eventID string) (*ReplayWebhookEventResult, error) {
+func (s *WebhooksService) ReplayEndpointEvent(ctx context.Context, endpointID string, eventID string, idempotencyKey string) (*ReplayWebhookEventResult, error) {
 	var out ReplayWebhookEventResult
-	err := s.client.request(ctx, http.MethodPost, "/webhook-endpoints/"+escape(endpointID)+"/events/"+escape(eventID)+"/replay", nil, &out)
+	err := s.client.request(ctx, http.MethodPost, "/webhook-endpoints/"+escape(endpointID)+"/events/"+escape(eventID)+"/replay", nil, &out, withIdempotencyKey(idempotencyKey))
 	return &out, err
 }
 
-func (s *WebhooksService) ReplayEvent(ctx context.Context, eventID string) (*ReplayWebhookEventResult, error) {
+func (s *WebhooksService) ReplayEvent(ctx context.Context, eventID string, idempotencyKey string) (*ReplayWebhookEventResult, error) {
 	var out ReplayWebhookEventResult
-	err := s.client.request(ctx, http.MethodPost, "/webhook-events/"+escape(eventID)+"/replay", nil, &out)
+	err := s.client.request(ctx, http.MethodPost, "/webhook-events/"+escape(eventID)+"/replay", nil, &out, withIdempotencyKey(idempotencyKey))
 	return &out, err
 }
 

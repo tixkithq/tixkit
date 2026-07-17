@@ -289,4 +289,32 @@ describe('TemporalClient webhook delivery', () => {
     expect(startOptions.args[0]).toMatchObject({ replayNonce: 'rpl_1' });
     expect(startOptions.args[0]).not.toHaveProperty('secret');
   });
+
+  it('recovers an ambiguously accepted replay start by returning the stable workflow handle', async () => {
+    const existingHandle = { workflowId: 'webhook-delivery:whe_1:wh_1:replay:whr_1' };
+    const client = {
+      workflow: {
+        start: vi.fn(async () => {
+          const error = new Error('Workflow execution already started');
+          error.name = 'WorkflowExecutionAlreadyStartedError';
+          throw error;
+        }),
+        getHandle: vi.fn(() => existingHandle),
+      },
+    };
+    const temporalClient = new TemporalClient(client as never);
+
+    const result = await temporalClient.startWebhookDelivery({
+      endpointId: 'wh_1',
+      eventId: 'whe_1',
+      replayNonce: 'whr_1',
+      payload: { orderId: 'ord_1' },
+      maxAttempts: 5,
+    });
+
+    expect(result).toBe(existingHandle);
+    expect(client.workflow.getHandle).toHaveBeenCalledWith(
+      'webhook-delivery:whe_1:wh_1:replay:whr_1',
+    );
+  });
 });

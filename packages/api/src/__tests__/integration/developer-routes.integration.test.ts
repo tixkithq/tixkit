@@ -184,6 +184,8 @@ function createScannerDeviceLifecycleDb() {
 }
 
 function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
+  let queuedAuditFailuresRemaining = Number(tables.__queued_audit_failures?.[0]?.remaining ?? 0);
+  delete tables.__queued_audit_failures;
   const rowsFor = (table: string) => {
     tables[table] ??= [];
     return tables[table];
@@ -252,19 +254,26 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
     });
   };
 
-  return {
+  const db = {
     insertInto(table: string) {
       return {
         values(values: Record<string, unknown>) {
+          const failQueuedAudit =
+            table === 'audit_logs' &&
+            values.action === 'webhook_event.replay_queued' &&
+            queuedAuditFailuresRemaining > 0;
+          if (failQueuedAudit) queuedAuditFailuresRemaining -= 1;
           const insert = {
             returningAll() {
               return insert;
             },
             async executeTakeFirstOrThrow() {
+              if (failQueuedAudit) throw new Error('queued audit unavailable');
               rowsFor(table).push(values);
               return values;
             },
             async execute() {
+              if (failQueuedAudit) throw new Error('queued audit unavailable');
               rowsFor(table).push(values);
               return [];
             },
@@ -373,10 +382,37 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
           }
           return [];
         },
+        async executeTakeFirst() {
+          let numUpdatedRows = 0;
+          for (const row of rowsFor(table).filter((candidate) =>
+            predicates.every((predicate) => predicate(candidate)),
+          )) {
+            Object.assign(row, nextValues);
+            numUpdatedRows += 1;
+          }
+          return { numUpdatedRows: BigInt(numUpdatedRows) };
+        },
       };
       return update;
     },
+    transaction() {
+      return {
+        async execute<T>(operation: (transaction: typeof db) => Promise<T>) {
+          const snapshot = Object.fromEntries(
+            Object.entries(tables).map(([table, rows]) => [table, rows.map((row) => ({ ...row }))]),
+          );
+          try {
+            return await operation(db);
+          } catch (error) {
+            for (const table of Object.keys(tables)) delete tables[table];
+            for (const [table, rows] of Object.entries(snapshot)) tables[table] = rows;
+            throw error;
+          }
+        },
+      };
+    },
   };
+  return db;
 }
 
 function createWebhookEndpointListDb(rows: Record<string, unknown>[]) {
@@ -1926,14 +1962,18 @@ describe('developer routes integration', () => {
     });
     await app.register(webhookRoutes);
 
-    const response = await app.inject({ method: 'POST', url: '/webhook-events/whe_1/replay' });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook-events/whe_1/replay',
+      headers: { 'Idempotency-Key': 'replay-order-paid-1' },
+    });
 
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ queued: true, eventId: 'whe_1', endpoints: 1 });
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-08-17',
+        apiVersion: '2026-08-18',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'order.paid',
@@ -1948,9 +1988,14 @@ describe('developer routes integration', () => {
     expect(replayInput).not.toHaveProperty('secret');
     expect(tables.audit_logs).toEqual([
       expect.objectContaining({
-        action: 'webhook_event.replayed',
-        resource_type: 'WebhookEvent',
-        resource_id: 'whe_1',
+        action: 'webhook_event.replay_requested',
+        resource_type: 'WebhookReplayRequest',
+        resource_id: expect.stringMatching(/^whr_/),
+      }),
+      expect.objectContaining({
+        action: 'webhook_event.replay_queued',
+        resource_type: 'WebhookReplayRequest',
+        resource_id: expect.stringMatching(/^whr_/),
       }),
     ]);
     expect(JSON.parse(tables.audit_logs[0].diff_summary as string)).toEqual({
@@ -1960,6 +2005,293 @@ describe('developer routes integration', () => {
     });
     expect(JSON.stringify(tables.audit_logs[0])).not.toContain('ord_1');
     expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret');
+
+    const exactReplay = await app.inject({
+      method: 'POST',
+      url: '/webhook-events/whe_1/replay',
+      headers: { 'Idempotency-Key': 'replay-order-paid-1' },
+    });
+    expect(exactReplay.statusCode).toBe(202);
+    expect(exactReplay.json()).toEqual(response.json());
+    expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
+    expect(tables.audit_logs).toHaveLength(2);
+
+    const conflictingReplay = await app.inject({
+      method: 'POST',
+      url: '/webhook-endpoints/wh_1/events/whe_1/replay',
+      headers: { 'Idempotency-Key': 'replay-order-paid-1' },
+    });
+    expect(conflictingReplay.statusCode).toBe(409);
+    expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
+
+    const missingKey = await app.inject({
+      method: 'POST',
+      url: '/webhook-events/whe_1/replay',
+    });
+    expect(missingKey.statusCode).toBe(400);
+    expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
+
+    await app.close();
+  });
+
+  it('resumes a partial webhook replay with the frozen endpoint snapshot and stable workflow identity', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const createdAt = new Date('2026-06-01T00:00:00Z');
+    const calls: Array<Record<string, unknown>> = [];
+    let failSecondEndpoint = true;
+    const startWebhookDelivery = vi.fn(async (input: Record<string, unknown>) => {
+      calls.push(input);
+      if (input.endpointId === 'wh_2' && failSecondEndpoint) {
+        failSecondEndpoint = false;
+        throw new Error('ambiguous Temporal start');
+      }
+    });
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_events: [
+        {
+          id: 'whe_partial',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          type: 'order.paid',
+          payload: JSON.stringify({ orderId: 'ord_partial' }),
+          status: 'pending',
+          created_at: createdAt,
+        },
+      ],
+      webhook_endpoints: ['wh_1', 'wh_2'].map((id) => ({
+        id,
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        url: `https://${id}.example.test/webhooks`,
+        secret: `${id}_secret`,
+        events: JSON.stringify(['order.paid']),
+        status: 'active',
+        description: null,
+        created_at: createdAt,
+        updated_at: createdAt,
+      })),
+      audit_logs: [],
+      webhook_replay_requests: [],
+    };
+    const app = Fastify();
+    app.decorate('context', {
+      db: createWebhookDb(tables) as unknown as Database,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: { startWebhookDelivery },
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(webhookRoutes);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/webhook-events/whe_partial/replay',
+      headers: { 'Idempotency-Key': 'partial-replay-1' },
+    });
+    expect(first.statusCode).toBe(503);
+    expect(tables.webhook_replay_requests[0]?.status).toBe('prepared');
+    expect(tables.audit_logs.map((entry) => entry.action)).toEqual([
+      'webhook_event.replay_requested',
+    ]);
+
+    tables.webhook_endpoints.push({
+      ...tables.webhook_endpoints[0],
+      id: 'wh_added_after_failure',
+    });
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/webhook-events/whe_partial/replay',
+      headers: { 'Idempotency-Key': 'partial-replay-1' },
+    });
+    expect(retry.statusCode).toBe(202);
+    expect(retry.json()).toEqual({ queued: true, eventId: 'whe_partial', endpoints: 2 });
+    expect(calls.map((call) => call.endpointId)).toEqual(['wh_1', 'wh_2', 'wh_1', 'wh_2']);
+    expect(new Set(calls.map((call) => call.replayNonce)).size).toBe(1);
+    expect(calls.some((call) => call.endpointId === 'wh_added_after_failure')).toBe(false);
+    expect(tables.webhook_replay_requests[0]?.status).toBe('completed');
+    expect(tables.audit_logs.map((entry) => entry.action)).toEqual([
+      'webhook_event.replay_requested',
+      'webhook_event.replay_queued',
+    ]);
+
+    await app.close();
+  });
+
+  it('resumes and replays endpoint-scoped intent after the endpoint row is deleted', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const createdAt = new Date('2026-06-01T00:00:00Z');
+    const calls: Array<Record<string, unknown>> = [];
+    let firstStart = true;
+    const startWebhookDelivery = vi.fn(async (input: Record<string, unknown>) => {
+      calls.push(input);
+      if (firstStart) {
+        firstStart = false;
+        throw new Error('ambiguous Temporal start');
+      }
+    });
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_events: [
+        {
+          id: 'whe_deleted_endpoint',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          type: 'order.paid',
+          payload: JSON.stringify({ orderId: 'ord_deleted_endpoint' }),
+          status: 'pending',
+          created_at: createdAt,
+        },
+      ],
+      webhook_endpoints: [
+        {
+          id: 'wh_deleted',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://deleted.example.test/webhooks',
+          secret: 'deleted-secret',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+      ],
+      audit_logs: [],
+      webhook_replay_requests: [],
+    };
+    const app = Fastify();
+    app.decorate('context', {
+      db: createWebhookDb(tables) as unknown as Database,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: { startWebhookDelivery },
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(webhookRoutes);
+    const request = {
+      method: 'POST' as const,
+      url: '/webhook-endpoints/wh_deleted/events/whe_deleted_endpoint/replay',
+      headers: { 'Idempotency-Key': 'deleted-endpoint-replay-1' },
+    };
+
+    const first = await app.inject(request);
+    expect(first.statusCode).toBe(503);
+    expect(first.json().error.code).toBe('REPLAY_DISPATCH_INCOMPLETE');
+    tables.webhook_endpoints.splice(0);
+
+    const retry = await app.inject(request);
+    expect(retry.statusCode).toBe(202);
+    const completedReplay = await app.inject(request);
+    expect(completedReplay.statusCode).toBe(202);
+    expect(completedReplay.json()).toEqual(retry.json());
+    expect(startWebhookDelivery).toHaveBeenCalledTimes(2);
+    expect(new Set(calls.map((call) => call.replayNonce)).size).toBe(1);
+    expect(tables.audit_logs.map((entry) => entry.action)).toEqual([
+      'webhook_event.replay_requested',
+      'webhook_event.replay_queued',
+    ]);
+
+    await app.close();
+  });
+
+  it('keeps accepted dispatch retryable when queued-audit finalization fails', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const createdAt = new Date('2026-06-01T00:00:00Z');
+    const calls: Array<Record<string, unknown>> = [];
+    const startWebhookDelivery = vi.fn(async (input: Record<string, unknown>) => {
+      calls.push(input);
+    });
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_events: [
+        {
+          id: 'whe_finalize',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          type: 'order.paid',
+          payload: JSON.stringify({ orderId: 'ord_finalize' }),
+          status: 'pending',
+          created_at: createdAt,
+        },
+      ],
+      webhook_endpoints: [
+        {
+          id: 'wh_finalize',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://finalize.example.test/webhooks',
+          secret: 'finalize-secret',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+      ],
+      audit_logs: [],
+      webhook_replay_requests: [],
+      __queued_audit_failures: [{ remaining: 1 }],
+    };
+    const app = Fastify();
+    app.decorate('context', {
+      db: createWebhookDb(tables) as unknown as Database,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: { startWebhookDelivery },
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(webhookRoutes);
+    const request = {
+      method: 'POST' as const,
+      url: '/webhook-events/whe_finalize/replay',
+      headers: { 'Idempotency-Key': 'finalization-retry-1' },
+    };
+
+    const first = await app.inject(request);
+    expect(first.statusCode).toBe(503);
+    expect(first.json().error.code).toBe('REPLAY_FINALIZATION_UNAVAILABLE');
+    expect(tables.webhook_replay_requests[0]?.status).toBe('prepared');
+    expect(tables.audit_logs.map((entry) => entry.action)).toEqual([
+      'webhook_event.replay_requested',
+    ]);
+
+    const retry = await app.inject(request);
+    expect(retry.statusCode).toBe(202);
+    expect(startWebhookDelivery).toHaveBeenCalledTimes(2);
+    expect(new Set(calls.map((call) => call.replayNonce)).size).toBe(1);
+    expect(tables.webhook_replay_requests[0]?.status).toBe('completed');
+    expect(tables.audit_logs.map((entry) => entry.action)).toEqual([
+      'webhook_event.replay_requested',
+      'webhook_event.replay_queued',
+    ]);
 
     await app.close();
   });
@@ -2035,6 +2367,7 @@ describe('developer routes integration', () => {
         },
       ],
       audit_logs: [],
+      webhook_replay_requests: [],
     };
     const app = Fastify();
     app.decorate('context', {
@@ -2053,6 +2386,7 @@ describe('developer routes integration', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/webhook-endpoints/wh_1/events/whe_1/replay',
+      headers: { 'Idempotency-Key': 'replay-test-ping-1' },
     });
 
     expect(response.statusCode).toBe(202);
@@ -2060,7 +2394,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-08-17',
+        apiVersion: '2026-08-18',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'test.ping',
@@ -2068,7 +2402,7 @@ describe('developer routes integration', () => {
         payload: expect.objectContaining({
           type: 'test.ping',
           test: true,
-          apiVersion: '2026-08-17',
+          apiVersion: '2026-08-18',
           data: { endpointId: 'wh_1' },
         }),
         replayNonce: expect.any(String),
@@ -2076,9 +2410,14 @@ describe('developer routes integration', () => {
     );
     expect(tables.audit_logs).toEqual([
       expect.objectContaining({
-        action: 'webhook_event.replayed',
-        resource_type: 'WebhookEvent',
-        resource_id: 'whe_1',
+        action: 'webhook_event.replay_requested',
+        resource_type: 'WebhookReplayRequest',
+        resource_id: expect.stringMatching(/^whr_/),
+      }),
+      expect.objectContaining({
+        action: 'webhook_event.replay_queued',
+        resource_type: 'WebhookReplayRequest',
+        resource_id: expect.stringMatching(/^whr_/),
       }),
     ]);
     expect(JSON.parse(tables.audit_logs[0].diff_summary as string)).toEqual({

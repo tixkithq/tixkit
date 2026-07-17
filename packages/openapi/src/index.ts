@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-17',
+    version: '2026-08-18',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5641,6 +5641,39 @@ const rawOpenApiSpec = {
         },
         required: ['queued', 'eventId', 'endpointId'],
       },
+      WebhookReplayRetryError: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          code: {
+            type: 'string',
+            enum: ['REPLAY_DISPATCH_INCOMPLETE', 'REPLAY_FINALIZATION_UNAVAILABLE'],
+          },
+          message: { type: 'string' },
+        },
+        required: ['code', 'message'],
+      },
+      WebhookReplayUnavailable: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          queued: { type: 'boolean', enum: [false] },
+          eventId: { type: 'string' },
+          error: { $ref: '#/components/schemas/WebhookReplayRetryError' },
+        },
+        required: ['queued', 'eventId', 'error'],
+      },
+      WebhookEndpointReplayUnavailable: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          queued: { type: 'boolean', enum: [false] },
+          eventId: { type: 'string' },
+          endpointId: { type: 'string' },
+          error: { $ref: '#/components/schemas/WebhookReplayRetryError' },
+        },
+        required: ['queued', 'eventId', 'endpointId', 'error'],
+      },
       PaymentAccount: {
         type: 'object',
         properties: {
@@ -5808,7 +5841,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-17, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-18, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5855,7 +5888,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-17, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-18, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5962,7 +5995,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-17 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-18 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5999,7 +6032,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-17 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-18 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8285,7 +8318,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-17 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-18 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8342,7 +8375,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-17 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-18 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -21422,7 +21455,10 @@ const rawOpenApiSpec = {
           'Queues one webhook delivery for the selected endpoint when the endpoint is active and subscribed to the event type.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['developers.write'],
+        'x-compatibility-breaking-change':
+          'API 2026-08-18 requires Idempotency-Key for endpoint webhook replay.',
         parameters: [
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
           {
             name: 'endpointId',
             in: 'path',
@@ -21448,7 +21484,8 @@ const rawOpenApiSpec = {
             },
           },
           '400': {
-            description: 'Endpoint inactive or not subscribed to this event type',
+            description:
+              'Missing or invalid Idempotency-Key, endpoint inactive, or endpoint not subscribed to this event type',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },
@@ -21479,6 +21516,23 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '409': {
+            description: 'Idempotency-Key was already used for a different replay request',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '503': {
+            description:
+              'Replay intent was persisted, but dispatch is unavailable; retry with the same Idempotency-Key',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WebhookEndpointReplayUnavailable' },
+              },
+            },
+          },
         },
       },
     },
@@ -21487,12 +21541,72 @@ const rawOpenApiSpec = {
         summary: 'Replay webhook event',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['developers.write'],
+        'x-compatibility-breaking-change':
+          'API 2026-08-18 requires Idempotency-Key for whole-event webhook replay.',
+        parameters: [
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '202': {
             description: 'Webhook replay queued',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/WebhookReplayQueued' },
+              },
+            },
+          },
+          '400': {
+            description: 'Missing or invalid Idempotency-Key',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description: 'Webhook event not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description: 'Idempotency-Key was already used for a different replay request',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '503': {
+            description:
+              'Replay intent was persisted, but dispatch is unavailable; retry with the same Idempotency-Key',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WebhookReplayUnavailable' },
               },
             },
           },

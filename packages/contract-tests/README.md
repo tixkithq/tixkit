@@ -48,7 +48,7 @@ It publishes the selected event. Run it only in an isolated private-beta or Self
 ```json
 {
   "baseUrl": "https://sandbox.example.test",
-  "apiVersion": "2026-08-17",
+  "apiVersion": "2026-08-18",
   "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
   "agentClientId": "tk_agent_example",
   "agentClientSecretEnv": "TIXKIT_CONFORMANCE_AGENT_SECRET",
