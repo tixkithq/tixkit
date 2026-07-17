@@ -21,6 +21,16 @@
       "dependency": "@aws-sdk/client-s3",
       "dependencyClass": "dependencies",
       "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/integration/upload-artifact-route-authorization-db.integration.test.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
       "importPath": "packages/api/src/__tests__/portable-export.test.ts",
       "integrationIds": ["s3-runtime"],
       "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
@@ -105,6 +115,16 @@
       "integrationIds": ["s3-runtime"],
       "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
       "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/s3-request-presigner",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/integration/upload-artifact-route-authorization-db.integration.test.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
     },
     {
       "classifications": ["runtime-boundary"],

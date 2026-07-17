@@ -228,6 +228,7 @@ vi.mock('@tixkit/db', () => {
 
 const { renderTemplateActivity, sendEmailActivity, sendSmsActivity, markEmailJobFailedActivity } =
   await import('../activities/notification.js');
+const { closeActivityClients } = await import('../activities/activity-clients.js');
 
 function activeEmailRoute(overrides: Record<string, unknown> = {}) {
   return {
@@ -264,7 +265,8 @@ function activeSmsRoute(overrides: Record<string, unknown> = {}) {
 }
 
 describe('notification activity deliverability gating', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    await closeActivityClients();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -759,7 +761,7 @@ describe('notification activity deliverability gating', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(dbState.providerIncidentCaptures).toHaveLength(1);
+    await vi.waitFor(() => expect(dbState.providerIncidentCaptures).toHaveLength(1));
     expect(dbState.providerIncidentCaptures[0]).toMatchObject({
       tenantId: 'tnt_1',
       organizationId: 'org_1',
