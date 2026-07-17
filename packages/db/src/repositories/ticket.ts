@@ -191,6 +191,16 @@ export class TicketListingRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async findByIdForUpdate(id: string) {
+    assertTransactionOwned(this.db);
+    return this.db
+      .selectFrom('ticket_listings')
+      .selectAll()
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
   async findActiveByTicket(tenantId: string, ticketId: string) {
     return this.db
       .selectFrom('ticket_listings')

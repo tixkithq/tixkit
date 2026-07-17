@@ -196,6 +196,23 @@ function requireIdempotencyKey(request: FastifyRequest, action: string): string 
   return key.trim();
 }
 
+function requireNoLiveResaleCheckoutReservation(
+  listing: { reserved_checkout_session_id?: string | null; reserved_until?: Date | string | null },
+  listingId: string,
+  now: Date,
+) {
+  const reservationId = listing.reserved_checkout_session_id;
+  const reservedUntil = listing.reserved_until;
+  if (!reservationId && !reservedUntil) return;
+  const reservedUntilMs = reservedUntil ? new Date(reservedUntil).getTime() : Number.NaN;
+  if (!reservationId || !reservedUntil || !Number.isFinite(reservedUntilMs)) {
+    throw new ValidationError(`Ticket listing ${listingId} has an invalid checkout reservation`);
+  }
+  if (reservedUntilMs > now.getTime()) {
+    throw new ValidationError(`Ticket listing ${listingId} is reserved for checkout`);
+  }
+}
+
 export const ticketingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const inventoryService = app.context.inventoryService;
@@ -204,6 +221,22 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const eventRepo = new EventRepository(db);
     const event = await eventRepo.findById(eventId);
     if (!event) throw new NotFoundError('Event', eventId);
+    return event;
+  };
+
+  const loadAuthorizedEventForUpdate = async (
+    transaction: Database,
+    principal: Principal,
+    eventId: string,
+  ) => {
+    const event = await transaction
+      .selectFrom('events')
+      .selectAll()
+      .where('id', '=', eventId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!event) throw new NotFoundError('Event', eventId);
+    requireEventAccess(principal, event, eventId);
     return event;
   };
 
@@ -346,17 +379,35 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         key: idempotencyKey,
         tenantId: principal.tenantId,
         requestHash: hashRequest({ listingId, action: 'delist' }),
+        discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
       },
       async () => {
-        try {
-          const delisted = await listingRepo.delist(listingId);
-          return { status: 200, body: serializeTicketListing(delisted) };
-        } catch (error) {
-          if (error instanceof Error && /not listed/i.test(error.message)) {
-            throw new ValidationError(`Ticket listing ${listingId} is not listed`);
+        return db.transaction().execute(async (transaction) => {
+          const currentEvent = await loadAuthorizedEventForUpdate(
+            transaction,
+            principal,
+            listing.event_id as string,
+          );
+          const txListingRepo = new TicketListingRepository(transaction);
+          const currentListing = await txListingRepo.findByIdForUpdate(listingId);
+          if (
+            !currentListing ||
+            currentListing.tenant_id !== principal.tenantId ||
+            currentListing.event_id !== currentEvent.id
+          ) {
+            throw new NotFoundError('TicketListing', listingId);
           }
-          throw error;
-        }
+          requireNoLiveResaleCheckoutReservation(currentListing, listingId, new Date());
+          try {
+            const delisted = await txListingRepo.delist(listingId);
+            return { status: 200, body: serializeTicketListing(delisted) };
+          } catch (error) {
+            if (error instanceof Error && /not listed/i.test(error.message)) {
+              throw new ValidationError(`Ticket listing ${listingId} is not listed`);
+            }
+            throw error;
+          }
+        });
       },
     );
     return reply.status(result.status).send(result.body);

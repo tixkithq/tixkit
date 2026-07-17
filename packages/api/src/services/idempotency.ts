@@ -69,6 +69,7 @@ export async function withIdempotency(
     ttlSeconds?: number;
     inProgressWaitMs?: number;
     inProgressPollIntervalMs?: number;
+    discardErrorCodes?: readonly string[];
   },
   handler: () => Promise<IdempotentResponse>,
 ): Promise<IdempotentResponse> {
@@ -152,6 +153,10 @@ export async function withIdempotency(
       statusCode?: number;
       code?: string;
     };
+    if (error.code && input.discardErrorCodes?.includes(error.code)) {
+      await deleteRecord(db, recordId);
+      throw err;
+    }
     if ((error.statusCode ?? 500) >= 500) {
       const transactionallyCompleted = await findRecord(db, input.key, input.tenantId);
       if (

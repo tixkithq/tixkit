@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { createDb, type Database } from '@tixkit/db';
+import { createDb, TicketListingRepository, type Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import type { AppContext } from '../../app.js';
@@ -21,6 +21,7 @@ const RUN_ID = ulid().slice(-10).toLowerCase();
 const TENANT_ID = `tnt_resale_${RUN_ID}`;
 const ORG_ID = `org_resale_${RUN_ID}`;
 const BRAND_ID = `brd_resale_${RUN_ID}`;
+const OTHER_BRAND_ID = `brd_resale_other_${RUN_ID}`;
 const EVENT_ID = `evt_resale_${RUN_ID}`;
 const SELLER_ID = `usr_resale_${RUN_ID}`;
 const POOL_ID = `pool_resale_${RUN_ID}`;
@@ -30,12 +31,21 @@ const ORDER_ID = `ord_resale_${RUN_ID}`;
 const ATTENDEE_ID = `att_resale_${RUN_ID}`;
 const TICKET_ID = `tkt_resale_${RUN_ID}`;
 const WALLET_PASS_ID = `wps_resale_${RUN_ID}`;
+const OTHER_TENANT_ID = `tnt_resale_other_${RUN_ID}`;
 
 let db: Database;
 let app: FastifyInstance;
 let previousDbDriver: string | undefined;
 
-function makePrincipal(): Principal {
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+function makePrincipal(overrides: Partial<Principal> = {}): Principal {
   return {
     type: 'user',
     id: SELLER_ID,
@@ -44,10 +54,14 @@ function makePrincipal(): Principal {
     brandIds: [BRAND_ID],
     eventIds: [EVENT_ID],
     scopes: ['events.read', 'tickets.write'],
+    ...overrides,
   };
 }
 
-async function setupRouteApp(database: Database): Promise<FastifyInstance> {
+async function setupRouteApp(
+  database: Database,
+  principal: Principal = makePrincipal(),
+): Promise<FastifyInstance> {
   const routeApp = Fastify();
   routeApp.decorate('context', {
     db: database,
@@ -56,13 +70,13 @@ async function setupRouteApp(database: Database): Promise<FastifyInstance> {
     qrService: new QrService('resale-db-test-secret'),
     authService: {
       isLocalDevMode: vi.fn(() => true),
-      authenticateLocalDev: vi.fn(async () => ({ principal: makePrincipal() })),
+      authenticateLocalDev: vi.fn(async () => ({ principal })),
     },
     temporalClient: {},
   } as unknown as AppContext);
   registerErrorHandler(routeApp);
   routeApp.addHook('onRequest', async (request) => {
-    request.principal = makePrincipal();
+    request.principal = principal;
   });
   await routeApp.register(ticketingRoutes);
   await routeApp.register(publicRoutes);
@@ -111,6 +125,23 @@ async function seedTenantGraph(database: Database): Promise<void> {
         organization_id: ORG_ID,
         name: `Resale DB ${RUN_ID}`,
         slug: `resale-db-${RUN_ID}`,
+        status: 'active',
+        theme: JSON.stringify({}),
+        legal_urls: JSON.stringify({}),
+        white_label: false,
+        payment_account_id: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await trx
+      .insertInto('brands')
+      .values({
+        id: OTHER_BRAND_ID,
+        tenant_id: TENANT_ID,
+        organization_id: ORG_ID,
+        name: `Resale DB Other ${RUN_ID}`,
+        slug: `resale-db-other-${RUN_ID}`,
         status: 'active',
         theme: JSON.stringify({}),
         legal_urls: JSON.stringify({}),
@@ -327,7 +358,7 @@ async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('events').where('id', '=', EVENT_ID).execute();
-  await database.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
+  await database.deleteFrom('brands').where('id', 'in', [BRAND_ID, OTHER_BRAND_ID]).execute();
   await database.deleteFrom('organizations').where('id', '=', ORG_ID).execute();
   await database.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
 }
@@ -387,6 +418,8 @@ async function resetListings(database: Database): Promise<void> {
   await database
     .updateTable('events')
     .set({
+      organization_id: ORG_ID,
+      brand_id: BRAND_ID,
       resale_enabled: true,
       resale_max_multiplier: 1.2,
       resale_max_absolute_cents: null,
@@ -501,6 +534,338 @@ describeWithIntegrationDatabase(
         .executeTakeFirstOrThrow();
       expect(delisted.status).toBe('delisted');
       expect(delisted.active_listing_key).toBe(listingId);
+    });
+
+    it('denies every staff delisting boundary without persistence', async () => {
+      const denialPrincipals: Array<{
+        expectedStatus: number;
+        label: string;
+        principal: Principal;
+      }> = [
+        {
+          expectedStatus: 403,
+          label: 'permission',
+          principal: makePrincipal({ scopes: ['events.read'] }),
+        },
+        {
+          expectedStatus: 404,
+          label: 'tenant',
+          principal: makePrincipal({ tenantId: OTHER_TENANT_ID }),
+        },
+        {
+          expectedStatus: 404,
+          label: 'organization',
+          principal: makePrincipal({ organizationIds: [`org_resale_other_${RUN_ID}`] }),
+        },
+        {
+          expectedStatus: 404,
+          label: 'brand',
+          principal: makePrincipal({ brandIds: [`brd_resale_other_${RUN_ID}`] }),
+        },
+        {
+          expectedStatus: 404,
+          label: 'event',
+          principal: makePrincipal({ eventIds: [`evt_resale_other_${RUN_ID}`] }),
+        },
+      ];
+      for (const denial of denialPrincipals) {
+        await resetListings(db);
+        const listed = await app.inject({
+          method: 'POST',
+          url: `/tickets/${TICKET_ID}/resale-listings`,
+          headers: { 'Idempotency-Key': `resale_auth_seed_${denial.label}_${RUN_ID}` },
+          payload: { priceCents: 5500 },
+        });
+        expect(listed.statusCode, listed.body).toBe(201);
+        const listingId = listed.json().id as string;
+        const idempotencyKey = `resale_auth_delist_${denial.label}_${RUN_ID}`;
+        const deniedApp = await setupRouteApp(db, denial.principal);
+        const response = await deniedApp.inject({
+          method: 'POST',
+          url: `/ticket-listings/${listingId}/delist`,
+          headers: { 'Idempotency-Key': idempotencyKey },
+        });
+
+        expect(response.statusCode, `${denial.label}: ${response.body}`).toBe(
+          denial.expectedStatus,
+        );
+        expect(
+          await db
+            .selectFrom('idempotency_records')
+            .select('id')
+            .where('key', '=', idempotencyKey)
+            .execute(),
+        ).toEqual([]);
+        expect(
+          await db
+            .selectFrom('ticket_listings')
+            .select(['id', 'status', 'sold_to_id'])
+            .where('tenant_id', '=', TENANT_ID)
+            .execute(),
+        ).toEqual([{ id: listingId, status: 'listed', sold_to_id: null }]);
+        expect(
+          await db
+            .selectFrom('tickets')
+            .select(['id', 'status'])
+            .where('tenant_id', '=', TENANT_ID)
+            .orderBy('id', 'asc')
+            .execute(),
+        ).toEqual([{ id: TICKET_ID, status: 'valid' }]);
+        expect(
+          await db
+            .selectFrom('attendees')
+            .select('id')
+            .where('tenant_id', '=', TENANT_ID)
+            .execute(),
+        ).toEqual([{ id: ATTENDEE_ID }]);
+        expect(
+          await db
+            .selectFrom('wallet_passes')
+            .select(['id', 'status'])
+            .where('id', '=', WALLET_PASS_ID)
+            .execute(),
+        ).toEqual([{ id: WALLET_PASS_ID, status: 'active' }]);
+        expect(
+          await db
+            .selectFrom('order_timeline_events')
+            .select('id')
+            .where('order_id', '=', ORDER_ID)
+            .execute(),
+        ).toEqual([]);
+        await deniedApp.close();
+      }
+    });
+
+    it('revalidates the locked event scope before staff delisting', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_scope_race_seed_delist_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode, listed.body).toBe(201);
+      const listingId = listed.json().id as string;
+      const mutationEntered = deferred();
+      const releaseMutation = deferred();
+      const mutation = db.transaction().execute(async (transaction) => {
+        await transaction
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', EVENT_ID)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        mutationEntered.resolve();
+        await releaseMutation.promise;
+        await transaction
+          .updateTable('events')
+          .set({ brand_id: OTHER_BRAND_ID, updated_at: new Date() })
+          .where('id', '=', EVENT_ID)
+          .execute();
+      });
+      await mutationEntered.promise;
+
+      const idempotencyKey = `resale_scope_race_delist_${RUN_ID}`;
+      const request = app.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/delist`,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      });
+      let reservationObserved = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop -- this bounded poll proves preflight authorization completed before releasing the event lock.
+        const reservation = await db
+          .selectFrom('idempotency_records')
+          .select('id')
+          .where('tenant_id', '=', TENANT_ID)
+          .where('key', '=', idempotencyKey)
+          .executeTakeFirst();
+        if (reservation) {
+          reservationObserved = true;
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop -- wait for the in-flight request to reserve its idempotency key.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(reservationObserved).toBe(true);
+      releaseMutation.resolve();
+      await mutation;
+      const response = await request;
+
+      expect(response.statusCode, response.body).toBe(404);
+      expect(
+        await db
+          .selectFrom('idempotency_records')
+          .select('id')
+          .where('key', '=', idempotencyKey)
+          .execute(),
+      ).toEqual([]);
+      expect(
+        await db
+          .selectFrom('ticket_listings')
+          .select(['id', 'status', 'sold_to_id'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute(),
+      ).toEqual([{ id: listingId, status: 'listed', sold_to_id: null }]);
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('tenant_id', '=', TENANT_ID)
+          .orderBy('id', 'asc')
+          .execute(),
+      ).toEqual([{ id: TICKET_ID, status: 'valid' }]);
+      expect(
+        await db
+          .selectFrom('order_timeline_events')
+          .select('id')
+          .where('order_id', '=', ORDER_ID)
+          .execute(),
+      ).toEqual([]);
+    });
+
+    it('fails closed for live or malformed checkout reservations before staff delisting', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_reservation_states_seed_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode, listed.body).toBe(201);
+      const listingId = listed.json().id as string;
+      const reservationStates = [
+        {
+          label: 'missing expiry',
+          reserved_checkout_session_id: `chk_reservation_${RUN_ID}`,
+          reserved_until: null,
+        },
+        {
+          label: 'missing checkout session',
+          reserved_checkout_session_id: null,
+          reserved_until: new Date(Date.now() + 60_000),
+        },
+        {
+          label: 'live reservation',
+          reserved_checkout_session_id: `chk_reservation_${RUN_ID}`,
+          reserved_until: new Date(Date.now() + 60_000),
+        },
+      ];
+
+      for (const [index, reservation] of reservationStates.entries()) {
+        await db
+          .updateTable('ticket_listings')
+          .set({
+            reserved_checkout_session_id: reservation.reserved_checkout_session_id,
+            reserved_until: reservation.reserved_until,
+            updated_at: new Date(),
+          })
+          .where('id', '=', listingId)
+          .execute();
+        const response = await app.inject({
+          method: 'POST',
+          url: `/ticket-listings/${listingId}/delist`,
+          headers: { 'Idempotency-Key': `resale_reservation_state_${index}_${RUN_ID}` },
+        });
+        expect(response.statusCode, `${reservation.label}: ${response.body}`).toBe(400);
+        expect(
+          await db
+            .selectFrom('ticket_listings')
+            .select('status')
+            .where('id', '=', listingId)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ status: 'listed' });
+      }
+
+      await db
+        .updateTable('ticket_listings')
+        .set({
+          reserved_checkout_session_id: `chk_expired_${RUN_ID}`,
+          reserved_until: new Date(Date.now() - 60_000),
+          updated_at: new Date(),
+        })
+        .where('id', '=', listingId)
+        .execute();
+      const delisted = await app.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/delist`,
+        headers: { 'Idempotency-Key': `resale_expired_reservation_${RUN_ID}` },
+      });
+      expect(delisted.statusCode, delisted.body).toBe(200);
+      await expect(
+        new TicketListingRepository(db).reserveForCheckout({
+          tenantId: TENANT_ID,
+          listingId,
+          checkoutSessionId: CHECKOUT_SESSION_ID,
+          reservedUntil: new Date(Date.now() + 60_000),
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('preserves a checkout reservation that commits while staff delisting waits', async () => {
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_reservation_race_seed_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode, listed.body).toBe(201);
+      const listingId = listed.json().id as string;
+      const reservationEntered = deferred();
+      const releaseReservation = deferred();
+      const reservation = db.transaction().execute(async (transaction) => {
+        await transaction
+          .selectFrom('ticket_listings')
+          .select('id')
+          .where('id', '=', listingId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable('ticket_listings')
+          .set({
+            reserved_checkout_session_id: CHECKOUT_SESSION_ID,
+            reserved_until: new Date(Date.now() + 60_000),
+            updated_at: new Date(),
+          })
+          .where('id', '=', listingId)
+          .execute();
+        reservationEntered.resolve();
+        await releaseReservation.promise;
+      });
+      await reservationEntered.promise;
+      const idempotencyKey = `resale_reservation_race_delist_${RUN_ID}`;
+      const request = app.inject({
+        method: 'POST',
+        url: `/ticket-listings/${listingId}/delist`,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      });
+      let reservationObserved = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop -- bounded polling proves the staff request reached its mutation boundary.
+        const record = await db
+          .selectFrom('idempotency_records')
+          .select('id')
+          .where('tenant_id', '=', TENANT_ID)
+          .where('key', '=', idempotencyKey)
+          .executeTakeFirst();
+        if (record) {
+          reservationObserved = true;
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop -- wait for the staff request to reserve its idempotency key.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(reservationObserved).toBe(true);
+      releaseReservation.resolve();
+      await reservation;
+      const response = await request;
+
+      expect(response.statusCode, response.body).toBe(400);
+      expect(
+        await db
+          .selectFrom('ticket_listings')
+          .select(['status', 'reserved_checkout_session_id'])
+          .where('id', '=', listingId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ status: 'listed', reserved_checkout_session_id: CHECKOUT_SESSION_ID });
     });
 
     it('exposes public resale listings without seller or tenant internals', async () => {

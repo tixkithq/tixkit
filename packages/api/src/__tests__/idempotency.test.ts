@@ -755,6 +755,7 @@ describe('withIdempotency', () => {
           key: 'idem-failure',
           tenantId: 'tnt_1',
           requestHash,
+          discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
         },
         handler,
       ),
@@ -779,6 +780,7 @@ describe('withIdempotency', () => {
         key: 'idem-failure',
         tenantId: 'tnt_1',
         requestHash,
+        discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
       },
       replayHandler,
     );
@@ -821,6 +823,37 @@ describe('withIdempotency', () => {
 
     expect(records).toHaveLength(0);
   });
+
+  it.each(['NOT_FOUND', 'FORBIDDEN'])(
+    'discards configured %s fail-closed authorization errors instead of replaying them',
+    async (code) => {
+      const { db, records } = createMockDb();
+      const handler = vi.fn(async () => {
+        const error = new Error('Authorization failed') as Error & {
+          statusCode: number;
+          code: string;
+        };
+        error.statusCode = code === 'NOT_FOUND' ? 404 : 403;
+        error.code = code;
+        throw error;
+      });
+
+      await expect(
+        withIdempotency(
+          db,
+          {
+            key: `idem-authorization-failure-${code}`,
+            tenantId: 'tnt_1',
+            requestHash: hashRequest({ ticketId: 'tkt_1' }),
+            discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
+          },
+          handler,
+        ),
+      ).rejects.toThrow('Authorization failed');
+
+      expect(records).toHaveLength(0);
+    },
+  );
 
   it('replays a response completed transactionally before a later 5xx', async () => {
     const { db, records } = createMockDb();

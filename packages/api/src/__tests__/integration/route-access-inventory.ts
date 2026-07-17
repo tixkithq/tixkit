@@ -111,6 +111,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'scanner-device-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'scanner-device-route-authorization-db.integration.test.ts'),
   ],
+  [
+    'resale-routes-db.integration.test.ts',
+    resolve(import.meta.dirname, 'resale-routes-db.integration.test.ts'),
+  ],
 ]);
 
 type AuthorizationEvidenceBinding = Readonly<{
@@ -179,11 +183,16 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'scanner-device-route-authorization.test.ts',
     persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['postTicketListingsByListingIdDelist'], {
+    source: 'resale-routes-db.integration.test.ts',
+    persistenceSource: 'resale-routes-db.integration.test.ts',
+  }),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
 const credentialOnlyOperations = new Set(['getAgentSession', 'getMe']);
 const delegatedAuthorizationGuards = new Set([
+  'loadAuthorizedEventForUpdate',
   'withCredentialCreationResources',
   'assertEventIds',
   'filterManageableScopedCredentialRows',
@@ -216,6 +225,7 @@ const delegatedAuthorizationGuards = new Set([
   'scopedJob',
 ]);
 const eventScopeGuards = new Set([
+  'loadAuthorizedEventForUpdate',
   'withCredentialCreationResources',
   'assertEventIds',
   'filterManageableScopedCredentialRows',
