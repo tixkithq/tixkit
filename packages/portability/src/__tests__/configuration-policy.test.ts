@@ -4,6 +4,7 @@ import {
   buildPortableLogicalExport,
   createPortableConfigurationPayloadPolicies,
   PORTABLE_CONFIGURATION_POLICY_VERSION,
+  verifyAndPreflightPortableImport,
 } from '../index.js';
 
 const organization = {
@@ -168,6 +169,112 @@ describe('portable configuration section policies', () => {
     ]) {
       expect(brandPolicy.validateRecord('brands', { ...brand, attributes })).toBe(false);
     }
+  });
+
+  it('round-trips both rotating code-format boundaries and rejects neighboring values', () => {
+    const policies = createPortableConfigurationPayloadPolicies();
+    const policy = policies.get('events')!;
+    const event = (codeFormat: Record<string, unknown>, portableId = 'event_code_format_1') => ({
+      portableId,
+      attributes: {
+        title: 'Portable scanner event',
+        slug: 'portable-scanner-event',
+        status: 'draft',
+        currency: 'USD',
+        timezone: 'UTC',
+        startsAt: '2027-01-01T18:00:00.000Z',
+        visibility: 'public',
+        codeFormat,
+      },
+    });
+    const minimum = {
+      symbology: 'qr',
+      payloadFormat: 'signed_v1',
+      rotating: { timeStepSeconds: 15, toleranceWindows: 0, digits: 6 },
+    };
+    const maximum = {
+      symbology: 'data_matrix',
+      payloadFormat: 'compact_v2',
+      rotating: { timeStepSeconds: 300, toleranceWindows: 5, digits: 10 },
+    };
+    expect(policy.validateRecord('events', event(minimum))).toBe(true);
+    expect(policy.validateRecord('events', event(maximum))).toBe(true);
+    for (const rotating of [
+      { timeStepSeconds: 14, toleranceWindows: 0, digits: 6 },
+      { timeStepSeconds: 301, toleranceWindows: 0, digits: 6 },
+      { timeStepSeconds: 15, toleranceWindows: -1, digits: 6 },
+      { timeStepSeconds: 15, toleranceWindows: 6, digits: 6 },
+      { timeStepSeconds: 15, toleranceWindows: 0, digits: 5 },
+      { timeStepSeconds: 15, toleranceWindows: 0, digits: 11 },
+    ]) {
+      expect(policy.validateRecord('events', event({ ...minimum, rotating }))).toBe(false);
+    }
+
+    const keys = generateKeyPairSync('ed25519');
+    const built = buildPortableLogicalExport({
+      bundleId: 'bundle_code_format_boundaries_01',
+      mode: 'configuration',
+      source: {
+        operatingModel: 'self-hosted',
+        deploymentId: 'deployment_source',
+        tenantId: 'tenant_1',
+        organizationId: 'organization_1',
+        exportSequence: 1,
+        changeCursor: 'cursor_code_format_1',
+      },
+      apiVersion: '2026-07-17',
+      dataSchemaVersion: '0077',
+      exportedAt: '2026-07-17T12:00:00.000Z',
+      currentTime: '2026-07-17T12:00:00.000Z',
+      compatibility: {
+        minimumApiVersion: '2026-01-01',
+        maximumApiVersion: '2026-12-31',
+        minimumDataSchemaVersion: '0077',
+        maximumDataSchemaVersion: '0077',
+        requiredCapabilities: ['portable-bundle-v2'],
+        requiredEntitlements: [],
+      },
+      sections: new Map([
+        [
+          'events',
+          [event(minimum, 'event_code_format_min'), event(maximum, 'event_code_format_max')],
+        ],
+      ]),
+      bundleSigning: { keyId: 'bundle_key_code_format', privateKey: keys.privateKey },
+      payloadSigning: { keyId: 'payload_key_code_format', privateKey: keys.privateKey },
+      payloadPolicies: policies,
+    });
+    expect(built.envelope.manifest.entityCounts).toEqual({ events: 2 });
+    expect(
+      verifyAndPreflightPortableImport(
+        built.envelope,
+        {
+          deploymentId: 'deployment_destination',
+          apiVersion: '2026-07-17',
+          dataSchemaVersion: '0077',
+          capabilities: ['portable-bundle-v2'],
+          entitlements: [],
+          availableStorageBytes: 1024 * 1024,
+          acceptedSourceOperatingModels: ['self-hosted'],
+        },
+        new Map([['bundle_key_code_format', keys.publicKey]]),
+        new Map([['payload_key_code_format', keys.publicKey]]),
+        new Map([
+          [
+            'events',
+            {
+              schemaId: policy.schemaId,
+              schemaSha256: policy.schemaSha256,
+              policySha256: policy.policySha256,
+              scannerId: policy.scannerId,
+              keyId: 'payload_key_code_format',
+            },
+          ],
+        ]),
+        new Map([['payload_key_code_format', keys.publicKey]]),
+        new Map(),
+      ).compatible,
+    ).toBe(true);
   });
 
   it('accepts logical content versions and rejects malformed or duplicate version identity', () => {

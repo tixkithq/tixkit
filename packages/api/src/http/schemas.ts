@@ -535,6 +535,21 @@ export const updateEventFeePolicySchema = z
   })
   .strict();
 
+export const updateEventCodeFormatSchema = z
+  .object({
+    symbology: z.enum(['qr', 'code128', 'pdf417', 'aztec', 'data_matrix']).optional(),
+    payloadFormat: z.enum(['signed_v1', 'compact_v2']).optional(),
+    rotating: z
+      .object({
+        timeStepSeconds: z.number().int().min(15).max(300),
+        toleranceWindows: z.number().int().min(0).max(5),
+        digits: z.number().int().min(6).max(10).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 export const createEventOccurrenceSchema = z
   .object({
     title: z.string().min(1),

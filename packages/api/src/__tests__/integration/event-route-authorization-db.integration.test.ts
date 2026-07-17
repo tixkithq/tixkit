@@ -83,6 +83,13 @@ const feePolicyContract = (() => {
   if (!contract) throw new Error('fee policy authorization contract is not registered');
   return contract;
 })();
+const codeFormatContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'putEventsByEventIdCodeFormat',
+  );
+  if (!contract) throw new Error('code format authorization contract is not registered');
+  return contract;
+})();
 
 type AuthorizationScenario = {
   name: string;
@@ -147,6 +154,9 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     async (_input: { stage: 'before_transaction'; eventId: string }) => undefined,
   );
   const eventFeePolicyCheckpoint = vi.fn(
+    async (_input: { stage: 'before_transaction'; eventId: string }) => undefined,
+  );
+  const eventCodeFormatCheckpoint = vi.fn(
     async (_input: { stage: 'before_transaction'; eventId: string }) => undefined,
   );
 
@@ -455,6 +465,41 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       .execute();
   }
 
+  async function codeFormatSnapshot() {
+    const [events, audits] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select(['id', 'organization_id', 'brand_id', 'code_format', 'version', 'public_revision'])
+        .where('id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('actor_id', '=', basePrincipal.id)
+        .where('action', '=', 'event.code_format_updated')
+        .where('resource_id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+    ]);
+    return { events, audits };
+  }
+
+  async function clearCodeFormatEvidence(): Promise<void> {
+    if (createdEventIds.length === 0) return;
+    await db
+      .updateTable('events')
+      .set({ code_format: null })
+      .where('id', 'in', createdEventIds)
+      .execute();
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', basePrincipal.id)
+      .where('action', '=', 'event.code_format_updated')
+      .where('resource_id', 'in', createdEventIds)
+      .execute();
+  }
+
   async function insertTenant(id: string, name: string) {
     const now = new Date();
     await db
@@ -654,6 +699,8 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         eventUpdateCheckpoint(input),
       eventFeePolicyCheckpoint: (input: { stage: 'before_transaction'; eventId: string }) =>
         eventFeePolicyCheckpoint(input),
+      eventCodeFormatCheckpoint: (input: { stage: 'before_transaction'; eventId: string }) =>
+        eventCodeFormatCheckpoint(input),
     } as unknown as AppContext);
     app.addHook('onRequest', async (request) => {
       request.principal = principal;
@@ -1515,6 +1562,194 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         expect(acknowledgementSubject).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('code format authorization and serialized updates', () => {
+    beforeEach(async () => {
+      principal = basePrincipal;
+      eventCodeFormatCheckpoint.mockReset();
+      eventCodeFormatCheckpoint.mockResolvedValue(undefined);
+      await clearCodeFormatEvidence();
+    });
+    afterEach(clearCodeFormatEvidence);
+
+    function invokeCodeFormat(targetEventId: string, compact: boolean) {
+      return app.inject({
+        method: codeFormatContract.method,
+        url: codeFormatContract.path.replace('{eventId}', targetEventId),
+        payload: compact
+          ? {
+              symbology: 'pdf417',
+              payloadFormat: 'compact_v2',
+              rotating: { timeStepSeconds: 30, toleranceWindows: 1, digits: 8 },
+            }
+          : { symbology: 'aztec', payloadFormat: 'signed_v1' },
+      });
+    }
+
+    function storedCodeFormatAudit(value: unknown): Record<string, unknown> {
+      return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
+    }
+
+    function storedCodeFormat(value: unknown): Record<string, unknown> {
+      return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
+    }
+
+    it('atomically updates the exact code format with a monotonic revision and exact audit', async () => {
+      const before = await codeFormatSnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA)!;
+      const response = await invokeCodeFormat(eventA, true);
+
+      expect(response.statusCode, response.body).toBe(codeFormatContract.authorizedControl.status);
+      expect(response.json()).toMatchObject({
+        eventId: eventA,
+        codeFormat: {
+          symbology: 'pdf417',
+          payloadFormat: 'compact_v2',
+          rotating: { timeStepSeconds: 30, toleranceWindows: 1, digits: 8 },
+        },
+      });
+      const after = await codeFormatSnapshot();
+      const eventAfter = after.events.find((event) => event.id === eventA)!;
+      expect(storedCodeFormat(eventAfter.code_format)).toEqual(response.json().codeFormat);
+      expect(Number(eventAfter.version)).toBe(Number(eventBefore.version) + 1);
+      expect(eventAfter.public_revision?.getTime() ?? 0).toBeGreaterThan(
+        eventBefore.public_revision?.getTime() ?? 0,
+      );
+      expect(after.audits).toHaveLength(1);
+      expect(after.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_id: basePrincipal.id,
+        action: 'event.code_format_updated',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      expect(storedCodeFormatAudit(after.audits[0]!.diff_summary)).toEqual({
+        before: { symbology: 'qr', payloadFormat: 'signed_v1' },
+        after: response.json().codeFormat,
+        previousVersion: Number(eventBefore.version),
+        newVersion: Number(eventBefore.version) + 1,
+      });
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without config, event, revision, or audit mutation',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await codeFormatSnapshot();
+        const response = await invokeCodeFormat(targetEvent(), true);
+        expect(response.statusCode, response.body).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        await expect(codeFormatSnapshot()).resolves.toEqual(before);
+      },
+    );
+
+    it('rolls back the code format when its required audit cannot persist', async () => {
+      const before = await codeFormatSnapshot();
+      const failure = vi
+        .spyOn(AuditLogRepository.prototype, 'create')
+        .mockRejectedValueOnce(new Error('injected code format audit failure'));
+      const response = await invokeCodeFormat(eventA, true);
+      expect(response.statusCode).toBe(500);
+      await expect(codeFormatSnapshot()).resolves.toEqual(before);
+      failure.mockRestore();
+    });
+
+    it('revalidates scope against the locked code-format event', async () => {
+      let checkpointSnapshot: Awaited<ReturnType<typeof codeFormatSnapshot>> | undefined;
+      eventCodeFormatCheckpoint.mockImplementationOnce(async () => {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+          .where('id', '=', eventA)
+          .execute();
+        checkpointSnapshot = await codeFormatSnapshot();
+      });
+      try {
+        const response = await invokeCodeFormat(eventA, true);
+        expect(response.statusCode).toBe(404);
+        expect(checkpointSnapshot).toBeDefined();
+        await expect(codeFormatSnapshot()).resolves.toEqual(checkpointSnapshot);
+      } finally {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationA, brand_id: brandA })
+          .where('id', '=', eventA)
+          .execute();
+      }
+    });
+
+    it('serializes concurrent updates into an exact two-audit chain', async () => {
+      const before = await codeFormatSnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA)!;
+      const responses = await Promise.all([
+        invokeCodeFormat(eventA, true),
+        invokeCodeFormat(eventA, false),
+      ]);
+      expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+      const compactConfig = {
+        symbology: 'pdf417',
+        payloadFormat: 'compact_v2',
+        rotating: { timeStepSeconds: 30, toleranceWindows: 1, digits: 8 },
+      };
+      const signedConfig = { symbology: 'aztec', payloadFormat: 'signed_v1' };
+      expect(responses[0]!.json().codeFormat).toEqual(compactConfig);
+      expect(responses[1]!.json().codeFormat).toEqual(signedConfig);
+      const after = await codeFormatSnapshot();
+      const eventAfter = after.events.find((event) => event.id === eventA)!;
+      expect(Number(eventAfter.version)).toBe(Number(eventBefore.version) + 2);
+      expect(eventAfter.public_revision?.getTime() ?? 0).toBeGreaterThan(
+        eventBefore.public_revision?.getTime() ?? 0,
+      );
+      expect(after.audits).toHaveLength(2);
+      const diffs = after.audits.map((audit) => storedCodeFormatAudit(audit.diff_summary));
+      const first = diffs.find((diff) => diff.previousVersion === Number(eventBefore.version))!;
+      const second = diffs.find(
+        (diff) => diff.previousVersion === Number(eventBefore.version) + 1,
+      )!;
+      expect(first.newVersion).toBe(Number(eventBefore.version) + 1);
+      expect(second.newVersion).toBe(Number(eventBefore.version) + 2);
+      expect([first.after, second.after]).toEqual(
+        expect.arrayContaining([compactConfig, signedConfig]),
+      );
+      expect(second.before).toEqual(first.after);
+      expect(storedCodeFormat(eventAfter.code_format)).toEqual(second.after);
+    });
   });
 
   describe('fee policy authorization and optimistic concurrency', () => {

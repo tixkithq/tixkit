@@ -2848,15 +2848,26 @@ export const apiReferenceOperations = [
                       "type": "object",
                       "properties": {
                         "timeStepSeconds": {
-                          "type": "integer"
+                          "type": "integer",
+                          "minimum": 15,
+                          "maximum": 300
                         },
                         "toleranceWindows": {
-                          "type": "integer"
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 5
                         },
                         "digits": {
-                          "type": "integer"
+                          "type": "integer",
+                          "minimum": 6,
+                          "maximum": 10
                         }
-                      }
+                      },
+                      "required": [
+                        "timeStepSeconds",
+                        "toleranceWindows"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -2991,25 +3002,36 @@ export const apiReferenceOperations = [
                 "type": "object",
                 "properties": {
                   "timeStepSeconds": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 15,
+                    "maximum": 300
                   },
                   "toleranceWindows": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5
                   },
                   "digits": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 6,
+                    "maximum": 10
                   }
-                }
+                },
+                "required": [
+                  "timeStepSeconds",
+                  "toleranceWindows"
+                ],
+                "additionalProperties": false
               }
-            }
+            },
+            "additionalProperties": false
           },
           "example": {
             "symbology": "qr",
             "payloadFormat": "signed_v1",
             "rotating": {
-              "timeStepSeconds": 1,
-              "toleranceWindows": 1,
-              "digits": 1
+              "timeStepSeconds": 15,
+              "toleranceWindows": 0
             }
           }
         }

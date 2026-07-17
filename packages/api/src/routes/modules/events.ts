@@ -33,6 +33,7 @@ import {
   createEventSchema,
   parseBody,
   updateEventFeePolicySchema,
+  updateEventCodeFormatSchema,
   updateEventOccurrenceSchema,
   updateEventSchema,
 } from '../../http/schemas.js';
@@ -390,6 +391,13 @@ function serializeDate(value: Date | string | undefined): string | undefined {
 
 function boolValue(value: boolean | number | null | undefined): boolean {
   return value === true || value === 1;
+}
+
+function eventCodeFormat(value: unknown): CodeFormat {
+  if (value === null || value === undefined) return DEFAULT_CODE_FORMAT;
+  if (typeof value === 'string') return JSON.parse(value) as CodeFormat;
+  if (typeof value === 'object' && !Array.isArray(value)) return value as CodeFormat;
+  throw new Error('Persisted event code format is invalid');
 }
 
 function duplicatedIntegrationConfig(provider: string, value: unknown): Record<string, unknown> {
@@ -2133,9 +2141,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
-    const config = existing.code_format
-      ? (JSON.parse(existing.code_format) as CodeFormat)
-      : DEFAULT_CODE_FORMAT;
+    const config = eventCodeFormat(existing.code_format);
     return {
       eventId,
       codeFormat: config,
@@ -2147,47 +2153,18 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
     const { eventId } = request.params as { eventId: string };
-    const body = request.body as {
-      symbology?: string;
-      payloadFormat?: string;
-      rotating?: unknown;
-    };
+    const body = parseBody(updateEventCodeFormatSchema, request.body ?? {});
     const symbology = body.symbology ?? DEFAULT_CODE_FORMAT.symbology;
     const payloadFormat = body.payloadFormat ?? DEFAULT_CODE_FORMAT.payloadFormat;
-    const validSymbologies = ['qr', 'code128', 'pdf417', 'aztec', 'data_matrix'];
-    const validFormats = ['signed_v1', 'compact_v2'];
-    if (!validSymbologies.includes(symbology)) {
-      throw new ValidationError('Invalid symbology', { field: 'symbology' });
-    }
-    if (!validFormats.includes(payloadFormat)) {
-      throw new ValidationError('Invalid payloadFormat', {
-        field: 'payloadFormat',
-      });
-    }
     const config: CodeFormat = {
-      symbology: symbology as CodeFormat['symbology'],
-      payloadFormat: payloadFormat as CodeFormat['payloadFormat'],
+      symbology,
+      payloadFormat,
     };
-    if (body.rotating && typeof body.rotating === 'object') {
-      const r = body.rotating as {
-        timeStepSeconds?: number;
-        toleranceWindows?: number;
-        digits?: number;
-      };
-      if (typeof r.timeStepSeconds !== 'number' || r.timeStepSeconds < 5) {
-        throw new ValidationError('rotating.timeStepSeconds must be >= 5', {
-          field: 'rotating',
-        });
-      }
-      if (typeof r.toleranceWindows !== 'number' || r.toleranceWindows < 0) {
-        throw new ValidationError('rotating.toleranceWindows must be >= 0', {
-          field: 'rotating',
-        });
-      }
+    if (body.rotating) {
       config.rotating = {
-        timeStepSeconds: r.timeStepSeconds,
-        toleranceWindows: r.toleranceWindows,
-        digits: r.digits,
+        timeStepSeconds: body.rotating.timeStepSeconds,
+        toleranceWindows: body.rotating.toleranceWindows,
+        digits: body.rotating.digits,
       };
     }
     const repo = new EventRepository(db);
@@ -2197,15 +2174,41 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
-    await repo.update(eventId, {
-      code_format: JSON.stringify(config),
-    } as Record<string, unknown>);
-    await writeAuditLog(audit(), request, principal, {
-      action: 'event.code_format_updated',
-      organizationId: existing.organization_id,
-      brandId: existing.brand_id,
-      resourceType: 'Event',
-      resourceId: eventId,
+    await app.context.eventCodeFormatCheckpoint?.({ stage: 'before_transaction', eventId });
+    await db.transaction().execute(async (trx) => {
+      const locked = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!locked) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, locked, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, locked.organization_id);
+      ClerkAuthService.requireBrandScope(principal, locked.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      const updated = await new EventRepository(trx as typeof db).update(eventId, {
+        code_format: JSON.stringify(config),
+      } as Record<string, unknown>);
+      await writeAuditLog(
+        new AuditLogRepository(trx as typeof db),
+        request,
+        principal,
+        {
+          action: 'event.code_format_updated',
+          organizationId: locked.organization_id,
+          brandId: locked.brand_id,
+          resourceType: 'Event',
+          resourceId: eventId,
+          diffSummary: {
+            before: eventCodeFormat(locked.code_format),
+            after: eventCodeFormat(updated.code_format),
+            previousVersion: Number(locked.version),
+            newVersion: Number(updated.version),
+          },
+        },
+        { failClosed: true },
+      );
     });
     return {
       eventId,

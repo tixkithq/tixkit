@@ -1416,6 +1416,88 @@ describe('event routes', () => {
     await app.close();
   });
 
+  it('updates event code format and writes its exact audit atomically', async () => {
+    const { db, inserted, updates } = createEventMutationDb({ event: baseEventRow() });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/code-format',
+      payload: {
+        symbology: 'pdf417',
+        payloadFormat: 'compact_v2',
+        rotating: { timeStepSeconds: 30, toleranceWindows: 1, digits: 8 },
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      eventId: 'evt_1',
+      codeFormat: {
+        symbology: 'pdf417',
+        payloadFormat: 'compact_v2',
+        rotating: { timeStepSeconds: 30, toleranceWindows: 1, digits: 8 },
+      },
+    });
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        code_format: JSON.stringify(response.json().codeFormat),
+      }),
+    );
+    expect(inserted).toContainEqual(
+      expect.objectContaining({
+        action: 'event.code_format_updated',
+        resource_type: 'Event',
+        resource_id: 'evt_1',
+      }),
+    );
+    await app.close();
+  });
+
+  it.each([
+    [{ timeStepSeconds: 5.5, toleranceWindows: 1, digits: 6 }],
+    [{ timeStepSeconds: 14, toleranceWindows: 1, digits: 6 }],
+    [{ timeStepSeconds: 301, toleranceWindows: 1, digits: 6 }],
+    [{ timeStepSeconds: 30, toleranceWindows: 6, digits: 6 }],
+    [{ timeStepSeconds: 30, toleranceWindows: 1, digits: 5 }],
+    [{ timeStepSeconds: 30, toleranceWindows: 1, digits: 11 }],
+    [{ timeStepSeconds: 30 }],
+    [{ toleranceWindows: 1 }],
+    ['invalid'],
+  ])('rejects unsafe rotating code bounds without persistence', async (rotating) => {
+    const { db, inserted, updates } = createEventMutationDb({ event: baseEventRow() });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/code-format',
+      payload: { symbology: 'qr', payloadFormat: 'signed_v1', rotating },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(updates.some((update) => 'code_format' in update)).toBe(false);
+    expect(inserted).not.toContainEqual(
+      expect.objectContaining({ action: 'event.code_format_updated' }),
+    );
+    await app.close();
+  });
+
+  it.each([
+    [{ timeStepSeconds: 15, toleranceWindows: 0, digits: 6 }],
+    [{ timeStepSeconds: 300, toleranceWindows: 5, digits: 10 }],
+  ])('accepts portable rotating code boundary values', async (rotating) => {
+    const { db } = createEventMutationDb({ event: baseEventRow() });
+    const app = await setupEventApp(db, writePrincipal);
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/code-format',
+      payload: { symbology: 'qr', payloadFormat: 'compact_v2', rotating },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().codeFormat.rotating).toEqual(rotating);
+    await app.close();
+  });
+
   it('hides event code format from principals outside the event scope', async () => {
     const principal: Principal = {
       type: 'api_key',

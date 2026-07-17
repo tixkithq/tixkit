@@ -334,6 +334,7 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'putEventsByEventIdSetupSection',
       'patchEventsByEventId',
       'putEventsByEventIdFeePolicy',
+      'putEventsByEventIdCodeFormat',
       'postEventsByEventIdPause',
       'postEventsByEventIdArchive',
       'postEventsByEventIdPublish',
