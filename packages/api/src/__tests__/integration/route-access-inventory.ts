@@ -67,7 +67,10 @@ export type NegativeAuthorizationEvidence = {
   authorizedControlStatus: 200 | 201 | 202 | 204 | 410;
   boundary: AuthorizationBoundary;
   condition:
-    | Readonly<{ discriminator: 'principal-scope'; value: 'organization-wide' }>
+    | Readonly<{
+        discriminator: 'principal-scope';
+        value: 'no-event-scope' | 'organization-wide';
+      }>
     | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>
     | null;
   denialKind: 'permission' | 'policy' | 'resource-boundary';
@@ -82,6 +85,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
     'event-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'event-route-authorization-db.integration.test.ts'),
+  ],
+  [
+    'tenant-list-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'tenant-list-route-authorization-db.integration.test.ts'),
   ],
   [
     'order-route-authorization-db.integration.test.ts',
@@ -186,6 +193,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     ],
     { source: 'event-route-authorization-db.integration.test.ts' },
   ),
+  ...evidenceBindings(['getOrganizations', 'getBrands'], {
+    source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'getOrganizationsByOrganizationIdReadiness',
@@ -659,6 +669,7 @@ function boundariesFor(
   if (guardEvidence.some((guard) => eventScopeGuards.has(guard))) {
     boundaries.push('tenant', 'organization', 'brand', 'event');
   }
+  if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');
   if (guardEvidence.includes('requireHumanUserPrincipal')) boundaries.push('principal-type');
   if (guardEvidence.includes('requireUploadArtifactAccess')) {
     boundaries.push('organization', 'brand', 'event', 'owner', 'principal-type');
@@ -679,7 +690,7 @@ function contractError(contract: RouteAuthorizationDenialContract, message: stri
 export function negativeAuthorizationEvidenceForRoutes(
   routes: readonly Pick<
     RouteAccessInventoryEntry,
-    'access' | 'boundaries' | 'method' | 'operationId' | 'path'
+    'access' | 'boundaries' | 'guardEvidence' | 'method' | 'operationId' | 'path'
   >[],
   contracts: readonly RouteAuthorizationDenialContract[] = ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ): Map<string, NegativeAuthorizationEvidence[]> {
@@ -776,12 +787,22 @@ export function negativeAuthorizationEvidenceForRoutes(
         );
       }
     } else if (contract.policyCondition?.discriminator === 'principal-scope') {
-      if (
-        contract.policyCondition.value !== 'organization-wide' ||
-        !route.boundaries.includes('brand') ||
-        !route.boundaries.includes('event')
-      ) {
-        throw contractError(contract, 'organization-wide scope policy is not enforced by runtime');
+      if (contract.policyCondition.value === 'organization-wide') {
+        if (!route.boundaries.includes('brand') || !route.boundaries.includes('event')) {
+          throw contractError(
+            contract,
+            'organization-wide scope policy is not enforced by runtime',
+          );
+        }
+      } else if (contract.policyCondition.value === 'no-event-scope') {
+        if (
+          !route.guardEvidence.includes('ClerkAuthService.requireNoEventScope') ||
+          !route.boundaries.includes('event')
+        ) {
+          throw contractError(contract, 'no-event-scope policy is not enforced by runtime');
+        }
+      } else {
+        throw contractError(contract, 'unsupported policy condition');
       }
     } else if (contract.policyCondition) {
       throw contractError(contract, 'unsupported policy condition');

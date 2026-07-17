@@ -10,7 +10,10 @@ export type AuthorizationBoundary =
 export type AuthorizationSideEffectKind = 'persistence' | 'workflow';
 
 export type AuthorizationPolicyCondition =
-  | Readonly<{ discriminator: 'principal-scope'; value: 'organization-wide' }>
+  | Readonly<{
+      discriminator: 'principal-scope';
+      value: 'no-event-scope' | 'organization-wide';
+    }>
   | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>;
 
 export type RouteAuthorizationDenialContract = Readonly<{
@@ -191,6 +194,36 @@ export const ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Objec
     }),
   ),
 );
+
+export const TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'GET',
+    operationId: 'getOrganizations',
+    path: '/organizations',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'GET',
+    operationId: 'getBrands',
+    path: '/brands',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyDeniedBoundaries: ['event'],
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
+]);
 
 export const ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...(
@@ -607,6 +640,7 @@ export const WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
