@@ -39,7 +39,10 @@ export const MediaObjectCleanupJobsMigration: Migration = {
       .columns(['status', 'available_at'])
       .execute();
   },
-  async down(db): Promise<void> {
-    await db.schema.dropTable('media_object_cleanup_jobs').execute();
+  async down(): Promise<void> {
+    // Pending cleanup commands are the durable recovery authority for objects written before their
+    // relational commit. Dropping this table can silently orphan owned media, so downgrade requires
+    // a separately reviewed archival/drain migration.
+    throw new Error('Media object cleanup jobs are irreversible without an archival migration');
   },
 };
