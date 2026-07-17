@@ -324,6 +324,22 @@ export const BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'POST',
+    operationId: 'postOrganizationsByOrganizationIdPaymentAccountsStripeConnect',
+    path: '/organizations/{organizationId}/payment-accounts/stripe-connect',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'payment-account-route-authorization-db.integration.test.ts',
+    resourceParameters: ['organizationId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'payment-account-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -461,6 +477,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

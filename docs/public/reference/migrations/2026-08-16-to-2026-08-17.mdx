@@ -1,0 +1,22 @@
+---
+title: Migrate API 2026-08-16 to 2026-08-17
+description: Adopt explicit Stripe Connect onboarding permission metadata.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-16
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+---
+
+API `2026-08-17` documents the existing authorization contract for `POST /organizations/{organizationId}/payment-accounts/stripe-connect` through `x-required-permissions: [billing.write]`.
+
+This release does not widen or tighten runtime access. The route already requires `billing.write`, exact tenant access, organization scope and—when the principal carries narrower brand or event filters—an explicit organization-scoped grant. Missing permission returns `403 FORBIDDEN`; inaccessible organizations remain non-enumerating `404 NOT_FOUND` responses. Authorization completes before Stripe account creation, account-link creation, payment-account persistence or audit mutation.
+
+Clients should regenerate types and permission-aware tooling against `2026-08-17`. Existing correctly authorized requests retain the same payload, response and idempotency-key behavior.

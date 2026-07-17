@@ -333,6 +333,28 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
           path: operationPath,
           message: 'The operation declares a conditional behavioral breaking change.',
         });
+      const previousRequiredPermissions = previousOperation['x-required-permissions'];
+      const currentRequiredPermissions = currentOperation['x-required-permissions'];
+      if (stable(previousRequiredPermissions) !== stable(currentRequiredPermissions)) {
+        const added =
+          previousRequiredPermissions === undefined && currentRequiredPermissions !== undefined;
+        const removed =
+          previousRequiredPermissions !== undefined && currentRequiredPermissions === undefined;
+        changes.push({
+          severity: added ? 'compatible' : 'breaking',
+          category: added
+            ? 'required-permission-metadata-added'
+            : removed
+              ? 'required-permission-metadata-removed'
+              : 'required-permission-metadata-changed',
+          path: operationPath,
+          message: added
+            ? 'Explicit required-permission metadata was added for the existing operation.'
+            : removed
+              ? 'Required-permission metadata was removed.'
+              : 'Required-permission metadata changed.',
+        });
+      }
       const beforeParameters = new Map([
         ...parameters(previousItem.parameters),
         ...parameters(previousOperation.parameters),

@@ -1,0 +1,18 @@
+{
+  "from": "2026-08-16",
+  "to": "2026-08-17",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /organizations/{organizationId}/payment-accounts/stripe-connect",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    }
+  ]
+}

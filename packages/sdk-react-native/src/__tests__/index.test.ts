@@ -695,39 +695,39 @@ describe('TixkitScannerClient', () => {
   });
 
   it('routes resale helpers through versioned API requests with required headers', async () => {
+    const withDeadline = async <T>(label: string, request: Promise<T>): Promise<T> => {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          request,
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error(`${label} did not settle`)), 1_000);
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    };
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
-      const headers = init?.headers as Record<string, string>;
-      expect(headers['X-Tixkit-Version']).toBe('2026-08-16');
 
       if (url.includes('/events/evt_1/resale-listings')) {
-        expect(init?.method).toBe('GET');
-        expect(headers.Authorization).toBe('Bearer tk_test_123');
         return new Response(JSON.stringify({ items: [{ id: 'lst_1', status: 'listed' }] }), {
           status: 200,
         });
       }
       if (url.includes('/checkout/sessions/cs_1/tickets/tkt_1/resale-listing')) {
-        expect(init?.method).toBe('POST');
-        expect(headers['X-Checkout-Session-Token']).toBe('client_token');
-        expect(headers['Idempotency-Key']).toBe('idem_checkout');
         return new Response(JSON.stringify({ id: 'lst_checkout', status: 'listed' }), {
           status: 200,
         });
       }
       if (url.includes('/tickets/tkt_1/resale-listings')) {
-        expect(init?.method).toBe('POST');
-        expect(headers.Authorization).toBe('Bearer tk_test_123');
-        expect(headers['Idempotency-Key']).toBe('idem_create');
         return new Response(JSON.stringify({ id: 'lst_2', status: 'listed' }), { status: 200 });
       }
       if (url.includes('/ticket-listings/lst_2/delist')) {
-        expect(init?.method).toBe('POST');
-        expect(headers['Idempotency-Key']).toBe('idem_delist');
         return new Response(JSON.stringify({ id: 'lst_2', status: 'delisted' }), { status: 200 });
       }
       if (url.includes('/ticket-listings/lst_2/settlement')) {
-        expect(init?.method).toBe('GET');
         return new Response(
           JSON.stringify({
             id: 'rst_1',
@@ -739,9 +739,15 @@ describe('TixkitScannerClient', () => {
           { status: 200 },
         );
       }
-      return new Response(JSON.stringify({ message: 'unexpected request' }), {
-        status: 500,
-      });
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 'UNEXPECTED_TEST_REQUEST',
+            message: `${init?.method ?? 'GET'} ${url}`,
+          },
+        }),
+        { status: 400 },
+      );
     });
 
     const client = new TixkitResaleClient({
@@ -750,33 +756,47 @@ describe('TixkitScannerClient', () => {
     });
 
     await expect(
-      client.listResaleListings('evt_1', { cursor: 'lst_0', limit: 25 }),
+      withDeadline(
+        'list resale listings',
+        client.listResaleListings('evt_1', { cursor: 'lst_0', limit: 25 }),
+      ),
     ).resolves.toMatchObject({ items: [{ id: 'lst_1' }] });
-    await client.createTicketResaleListing('tkt_1', {
-      priceCents: 5500,
-      termsAcceptance: {
-        accepted: true,
-        termsVersion: '2026-07-16',
-        settlementModel: 'organizer_managed',
-        refundModel: 'manual_coordinated_resolution',
-      },
-      idempotencyKey: 'idem_create',
-    });
-    await client.createCheckoutTicketResaleListing('cs_1', 'tkt_1', {
-      priceCents: 5500,
-      clientToken: 'client_token',
-      termsAcceptance: {
-        accepted: true,
-        termsVersion: '2026-07-16',
-        settlementModel: 'organizer_managed',
-        refundModel: 'manual_coordinated_resolution',
-      },
-      idempotencyKey: 'idem_checkout',
-    });
-    await client.delistResaleListing('lst_2', {
-      idempotencyKey: 'idem_delist',
-    });
-    await expect(client.getResaleSettlement('lst_2')).resolves.toMatchObject({
+    await withDeadline(
+      'create resale listing',
+      client.createTicketResaleListing('tkt_1', {
+        priceCents: 5500,
+        termsAcceptance: {
+          accepted: true,
+          termsVersion: '2026-07-16',
+          settlementModel: 'organizer_managed',
+          refundModel: 'manual_coordinated_resolution',
+        },
+        idempotencyKey: 'idem_create',
+      }),
+    );
+    await withDeadline(
+      'create checkout resale listing',
+      client.createCheckoutTicketResaleListing('cs_1', 'tkt_1', {
+        priceCents: 5500,
+        clientToken: 'client_token',
+        termsAcceptance: {
+          accepted: true,
+          termsVersion: '2026-07-16',
+          settlementModel: 'organizer_managed',
+          refundModel: 'manual_coordinated_resolution',
+        },
+        idempotencyKey: 'idem_checkout',
+      }),
+    );
+    await withDeadline(
+      'delist resale listing',
+      client.delistResaleListing('lst_2', {
+        idempotencyKey: 'idem_delist',
+      }),
+    );
+    await expect(
+      withDeadline('get resale settlement', client.getResaleSettlement('lst_2')),
+    ).resolves.toMatchObject({
       id: 'rst_1',
       state: 'pending',
     });
@@ -784,6 +804,30 @@ describe('TixkitScannerClient', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       'https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25',
     );
+    const requests = fetchMock.mock.calls.map(([input, init]) => ({
+      headers: init?.headers as Record<string, string>,
+      method: init?.method,
+      url: String(input),
+    }));
+    expect(requests).toHaveLength(5);
+    expect(requests.map((request) => request.headers['X-Tixkit-Version'])).toEqual([
+      '2026-08-17',
+      '2026-08-17',
+      '2026-08-17',
+      '2026-08-17',
+      '2026-08-17',
+    ]);
+    expect(requests[0]).toMatchObject({ method: 'GET' });
+    expect(requests[0]?.headers.Authorization).toBe('Bearer tk_test_123');
+    expect(requests[1]).toMatchObject({ method: 'POST' });
+    expect(requests[1]?.headers.Authorization).toBe('Bearer tk_test_123');
+    expect(requests[1]?.headers['Idempotency-Key']).toBe('idem_create');
+    expect(requests[2]).toMatchObject({ method: 'POST' });
+    expect(requests[2]?.headers['X-Checkout-Session-Token']).toBe('client_token');
+    expect(requests[2]?.headers['Idempotency-Key']).toBe('idem_checkout');
+    expect(requests[3]).toMatchObject({ method: 'POST' });
+    expect(requests[3]?.headers['Idempotency-Key']).toBe('idem_delist');
+    expect(requests[4]).toMatchObject({ method: 'GET' });
   });
 
   it('hashes scanned QR payloads with the same SHA-256 contract as offline manifests', () => {

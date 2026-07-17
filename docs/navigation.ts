@@ -234,6 +234,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-16 human-only avatar uploads',
         routeId: 'apiMigration20260815To20260816',
       },
+      {
+        label: 'Adopt 2026-08-17 Stripe Connect permission metadata',
+        routeId: 'apiMigration20260816To20260817',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

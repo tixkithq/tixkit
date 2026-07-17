@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-16');
+    expect(openApiSpec.info.version).toBe('2026-08-17');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1302,6 +1302,11 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/organizations/{organizationId}/payment-accounts/stripe-connect'].post
         .responses,
     ).toHaveProperty('201');
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/payment-accounts/stripe-connect'].post[
+        'x-required-permissions'
+      ],
+    ).toEqual(['billing.write']);
     expect(
       openApiSpec.paths[
         '/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh'

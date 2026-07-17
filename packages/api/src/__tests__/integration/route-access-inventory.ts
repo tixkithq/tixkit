@@ -144,6 +144,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'upload-artifact-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'upload-artifact-route-authorization-db.integration.test.ts'),
   ],
+  [
+    'payment-account-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'payment-account-route-authorization-db.integration.test.ts'),
+  ],
 ]);
 
 type AuthorizationEvidenceBinding = Readonly<{
@@ -254,6 +258,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getUploadArtifactsByArtifactIdDownload'], {
     source: 'upload-artifact-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postOrganizationsByOrganizationIdPaymentAccountsStripeConnect'], {
+    source: 'payment-account-route-authorization-db.integration.test.ts',
+    persistenceSource: 'payment-account-route-authorization-db.integration.test.ts',
   }),
 ]);
 

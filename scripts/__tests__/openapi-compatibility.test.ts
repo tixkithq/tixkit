@@ -357,6 +357,35 @@ describe('OpenAPI compatibility', () => {
     expect(changes).not.toContainEqual(expect.objectContaining({ severity: 'breaking' }));
   });
 
+  it('records additive required-permission metadata and fails closed on later drift', () => {
+    const added = structuredClone(base);
+    added.paths['/things'].post['x-required-permissions'] = ['things.write'];
+    expect(compareOpenApi(base as never, added as never)).toContainEqual({
+      severity: 'compatible',
+      category: 'required-permission-metadata-added',
+      path: 'POST /things',
+      message: 'Explicit required-permission metadata was added for the existing operation.',
+    });
+
+    const changed = structuredClone(added);
+    changed.paths['/things'].post['x-required-permissions'] = ['things.admin'];
+    expect(compareOpenApi(added as never, changed as never)).toContainEqual(
+      expect.objectContaining({
+        severity: 'breaking',
+        category: 'required-permission-metadata-changed',
+      }),
+    );
+
+    const removed = structuredClone(added);
+    delete removed.paths['/things'].post['x-required-permissions'];
+    expect(compareOpenApi(added as never, removed as never)).toContainEqual(
+      expect.objectContaining({
+        severity: 'breaking',
+        category: 'required-permission-metadata-removed',
+      }),
+    );
+  });
+
   it('detects request and response schema reference changes', () => {
     const current = structuredClone(base);
     current.paths['/things'].post.requestBody.content['application/json'].schema.$ref =
