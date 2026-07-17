@@ -165,6 +165,12 @@ function requireAnyPermission(principal: Principal, permissions: Permission[]): 
   }
 }
 
+function requireHumanUserPrincipal(principal: Principal): void {
+  if (principal.type !== 'user') {
+    throw new ForbiddenError('User avatar uploads require a human user principal');
+  }
+}
+
 function requireUploadArtifactAccess(
   principal: Principal,
   artifact: ScopedUploadArtifact,
@@ -187,6 +193,7 @@ function requireUploadArtifactAccess(
   }
 
   if (artifact.purpose === 'user_avatar') {
+    requireHumanUserPrincipal(principal);
     if (!artifact.created_by_user_id || artifact.created_by_user_id !== principal.id) {
       throw new NotFoundError('UploadArtifact', 'scoped');
     }
@@ -373,6 +380,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       organizationId = event.organization_id;
       brandId = event.brand_id;
     } else if (body.purpose === 'user_avatar') {
+      requireHumanUserPrincipal(principal);
       if (brandId) throw new ValidationError('brandId is not allowed for user avatar uploads');
       if (eventId) throw new ValidationError('eventId is not allowed for user avatar uploads');
       if (hasCheckoutQuestionMetadata(body.metadata)) {

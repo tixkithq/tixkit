@@ -14,6 +14,9 @@ import {
 type OpenApiOperation = {
   operationId?: string;
   security?: readonly Record<string, readonly string[]>[];
+  'x-principal-type-restrictions'?: {
+    byUploadPurpose?: Readonly<Record<string, readonly string[]>>;
+  };
   'x-required-permissions'?:
     | readonly Permission[]
     | {
@@ -63,7 +66,8 @@ export type RouteAccessInventory = {
 export type NegativeAuthorizationEvidence = {
   authorizedControlStatus: 200 | 201 | 202 | 204;
   boundary: AuthorizationBoundary;
-  denialKind: 'permission' | 'resource-boundary';
+  condition: Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }> | null;
+  denialKind: 'permission' | 'policy' | 'resource-boundary';
   deniedCode: 'FORBIDDEN' | 'NOT_FOUND';
   deniedStatus: 403 | 404;
   persistenceSource: string | null;
@@ -135,6 +139,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
     'box-office-orders-db.integration.test.ts',
     resolve(import.meta.dirname, 'box-office-orders-db.integration.test.ts'),
+  ],
+  [
+    'upload-artifact-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'upload-artifact-route-authorization-db.integration.test.ts'),
   ],
 ]);
 
@@ -240,6 +248,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'box-office-routes.test.ts',
     persistenceSource: 'box-office-orders-db.integration.test.ts',
   }),
+  ...evidenceBindings(['postUploadArtifacts', 'postUploadArtifactsByArtifactIdComplete'], {
+    source: 'upload-artifact-route-authorization-db.integration.test.ts',
+    persistenceSource: 'upload-artifact-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getUploadArtifactsByArtifactIdDownload'], {
+    source: 'upload-artifact-route-authorization-db.integration.test.ts',
+  }),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
@@ -266,6 +281,7 @@ const delegatedAuthorizationGuards = new Set([
   'requireHumanAgentAdministrator',
   'requireHumanMemoryActor',
   'requireHumanMemorySponsor',
+  'requireHumanUserPrincipal',
   'requireContentListPermission',
   'requireContentPermission',
   'requireEventAccess',
@@ -603,6 +619,10 @@ function boundariesFor(
   if (guardEvidence.some((guard) => eventScopeGuards.has(guard))) {
     boundaries.push('tenant', 'organization', 'brand', 'event');
   }
+  if (guardEvidence.includes('requireHumanUserPrincipal')) boundaries.push('principal-type');
+  if (guardEvidence.includes('requireUploadArtifactAccess')) {
+    boundaries.push('organization', 'brand', 'event', 'owner', 'principal-type');
+  }
   return sortedUnique(boundaries);
 }
 
@@ -678,6 +698,53 @@ export function negativeAuthorizationEvidenceForRoutes(
     ) {
       throw contractError(contract, 'permission denial must be 403 FORBIDDEN');
     }
+    const policyDeniedBoundaries = contract.policyDeniedBoundaries ?? [];
+    if (policyDeniedBoundaries.length > 0 && !contract.policyDenialResponse) {
+      throw contractError(contract, 'policy denials require an explicit response');
+    }
+    if (policyDeniedBoundaries.length > 0 && !contract.policyCondition) {
+      throw contractError(contract, 'policy denials require an explicit condition');
+    }
+    if (
+      contract.policyDenialResponse &&
+      (contract.policyDenialResponse.status !== 403 ||
+        contract.policyDenialResponse.code !== 'FORBIDDEN')
+    ) {
+      throw contractError(contract, 'policy denial must be 403 FORBIDDEN');
+    }
+    if (contract.policyDenialResponse && policyDeniedBoundaries.length === 0) {
+      throw contractError(contract, 'policy denial response has no boundary');
+    }
+    if (contract.policyCondition && policyDeniedBoundaries.length === 0) {
+      throw contractError(contract, 'policy condition has no boundary');
+    }
+    if (
+      contract.policyCondition &&
+      (contract.policyCondition.discriminator !== 'purpose' ||
+        contract.policyCondition.value !== 'user_avatar')
+    ) {
+      throw contractError(contract, 'unsupported policy condition');
+    }
+    if (contract.policyCondition) {
+      const operation = (
+        openApiSpec.paths as unknown as Record<string, Record<string, OpenApiOperation>>
+      )[contract.path]?.[contract.method.toLowerCase()];
+      const permittedPrincipalTypes =
+        operation?.['x-principal-type-restrictions']?.byUploadPurpose?.[
+          contract.policyCondition.value
+        ];
+      if (JSON.stringify(permittedPrincipalTypes) !== JSON.stringify(['user'])) {
+        throw contractError(
+          contract,
+          'policy condition drifts from OpenAPI principal restrictions',
+        );
+      }
+    }
+    for (const boundary of policyDeniedBoundaries) {
+      if (!route.boundaries.includes(boundary)) {
+        throw contractError(contract, `inventory omits policy boundary ${boundary}`);
+      }
+    }
     if (
       contract.method !== 'GET' &&
       (contract.sideEffectAssertions.length === 0 ||
@@ -716,6 +783,7 @@ export function negativeAuthorizationEvidenceForRoutes(
       evidence.push({
         authorizedControlStatus: contract.authorizedControl.status,
         boundary,
+        condition: null,
         denialKind: 'resource-boundary',
         deniedCode: contract.denialResponse.code,
         deniedStatus: contract.denialResponse.status,
@@ -733,9 +801,28 @@ export function negativeAuthorizationEvidenceForRoutes(
       evidence.push({
         authorizedControlStatus: contract.authorizedControl.status,
         boundary: 'permission',
+        condition: null,
         denialKind: 'permission',
         deniedCode: contract.permissionDenialResponse.code,
         deniedStatus: contract.permissionDenialResponse.status,
+        persistenceSource: contract.persistenceSource ?? null,
+        sideEffectAssertions: [...contract.sideEffectAssertions],
+        source: contract.source,
+      });
+    }
+    for (const boundary of policyDeniedBoundaries) {
+      const pair = `${routeKey} ${boundary} ${contract.policyCondition!.discriminator}=${contract.policyCondition!.value}`;
+      if (routeBoundaryPairs.has(pair)) {
+        throw contractError(contract, `duplicate route/boundary pair ${boundary}`);
+      }
+      routeBoundaryPairs.add(pair);
+      evidence.push({
+        authorizedControlStatus: contract.authorizedControl.status,
+        boundary,
+        condition: { ...contract.policyCondition! },
+        denialKind: 'policy',
+        deniedCode: contract.policyDenialResponse!.code,
+        deniedStatus: contract.policyDenialResponse!.status,
         persistenceSource: contract.persistenceSource ?? null,
         sideEffectAssertions: [...contract.sideEffectAssertions],
         source: contract.source,

@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-15');
+    expect(openApiSpec.info.version).toBe('2026-08-16');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -2593,6 +2593,23 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/UploadArtifactDownload' });
+  });
+
+  it('documents human-only user-avatar lifecycle authorization', () => {
+    const operations = [
+      openApiSpec.paths['/upload-artifacts'].post,
+      openApiSpec.paths['/upload-artifacts/{artifactId}/complete'].post,
+      openApiSpec.paths['/upload-artifacts/{artifactId}/download'].get,
+    ];
+
+    for (const operation of operations) {
+      expect(operation.description).toContain('human user principal');
+      expect(operation['x-compatibility-breaking-change']).toContain('2026-08-16');
+      expect(operation['x-principal-type-restrictions']).toEqual({
+        byUploadPurpose: { user_avatar: ['user'] },
+      });
+      expect(operation.responses['403']).toBeDefined();
+    }
   });
 
   it('keeps offline sync outcomes in the generated schema source of truth', () => {

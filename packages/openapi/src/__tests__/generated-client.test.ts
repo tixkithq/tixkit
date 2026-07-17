@@ -194,9 +194,16 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('organizerAbsorbedFeeCents?: number');
     expect(output).toContain('successUrl?: string');
     expect(output).toContain('cancelUrl?: string');
-    expect(output).toContain(
-      'status?: "pending" | "confirmed" | "cancelled" | "refunded" | "checked_in"',
-    );
+    const attendeeUpdateStart = output.indexOf('AttendeeUpdateInput: {');
+    const attendeeUpdateEnd = output.indexOf('\n        };', attendeeUpdateStart);
+    const attendeeUpdate = output.slice(attendeeUpdateStart, attendeeUpdateEnd);
+    expect(attendeeUpdateStart).toBeGreaterThanOrEqual(0);
+    expect(attendeeUpdateEnd).toBeGreaterThan(attendeeUpdateStart);
+    expect(attendeeUpdate).toContain('firstName?: string | null');
+    expect(attendeeUpdate).toContain('lastName?: string | null');
+    expect(attendeeUpdate).toContain('email?: string');
+    expect(attendeeUpdate).toContain('phone?: string | null');
+    expect(attendeeUpdate).not.toContain('status?:');
   });
 
   it('preserves schema combinators and array element unions', async () => {

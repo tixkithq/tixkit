@@ -1,6 +1,18 @@
-export type AuthorizationBoundary = 'brand' | 'event' | 'organization' | 'permission' | 'tenant';
+export type AuthorizationBoundary =
+  | 'brand'
+  | 'event'
+  | 'organization'
+  | 'owner'
+  | 'permission'
+  | 'principal-type'
+  | 'tenant';
 
 export type AuthorizationSideEffectKind = 'persistence' | 'workflow';
+
+export type AuthorizationPolicyCondition = Readonly<{
+  discriminator: 'purpose';
+  value: 'user_avatar';
+}>;
 
 export type RouteAuthorizationDenialContract = Readonly<{
   authorizedControl: Readonly<{
@@ -19,6 +31,12 @@ export type RouteAuthorizationDenialContract = Readonly<{
     code: 'FORBIDDEN';
     status: 403;
   }>;
+  policyDenialResponse?: Readonly<{
+    code: 'FORBIDDEN';
+    status: 403;
+  }>;
+  policyCondition?: AuthorizationPolicyCondition;
+  policyDeniedBoundaries?: readonly Extract<AuthorizationBoundary, 'principal-type'>[];
   persistenceSource?: string;
   resourceParameters: readonly string[];
   sideEffectAssertions: readonly AuthorizationSideEffectKind[];
@@ -35,6 +53,15 @@ function denialContract(
     deniedBoundaries: Object.freeze([...contract.deniedBoundaries]),
     ...(contract.permissionDenialResponse
       ? { permissionDenialResponse: Object.freeze({ ...contract.permissionDenialResponse }) }
+      : {}),
+    ...(contract.policyDenialResponse
+      ? { policyDenialResponse: Object.freeze({ ...contract.policyDenialResponse }) }
+      : {}),
+    ...(contract.policyCondition
+      ? { policyCondition: Object.freeze({ ...contract.policyCondition }) }
+      : {}),
+    ...(contract.policyDeniedBoundaries
+      ? { policyDeniedBoundaries: Object.freeze([...contract.policyDeniedBoundaries]) }
       : {}),
     resourceParameters: Object.freeze([...contract.resourceParameters]),
     sideEffectAssertions: Object.freeze([...contract.sideEffectAssertions]),
@@ -297,6 +324,53 @@ export const BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'POST',
+    operationId: 'postUploadArtifacts',
+    path: '/upload-artifacts',
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'purpose', value: 'user_avatar' },
+    policyDeniedBoundaries: ['principal-type'],
+    persistenceSource: 'upload-artifact-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'upload-artifact-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'owner'],
+    method: 'POST',
+    operationId: 'postUploadArtifactsByArtifactIdComplete',
+    path: '/upload-artifacts/{artifactId}/complete',
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'purpose', value: 'user_avatar' },
+    policyDeniedBoundaries: ['principal-type'],
+    persistenceSource: 'upload-artifact-route-authorization-db.integration.test.ts',
+    resourceParameters: ['artifactId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'upload-artifact-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'owner'],
+    method: 'GET',
+    operationId: 'getUploadArtifactsByArtifactIdDownload',
+    path: '/upload-artifacts/{artifactId}/download',
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'purpose', value: 'user_avatar' },
+    policyDeniedBoundaries: ['principal-type'],
+    resourceParameters: ['artifactId'],
+    sideEffectAssertions: [],
+    source: 'upload-artifact-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -387,5 +461,6 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

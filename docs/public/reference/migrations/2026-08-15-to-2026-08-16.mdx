@@ -1,0 +1,29 @@
+---
+title: Migrate from API 2026-08-15 to 2026-08-16
+description: Adopt human-only authorization for user-avatar artifact creation, completion, and download.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-15
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+---
+
+API `2026-08-16` makes one intentional authorization break: the `user_avatar` upload purpose is a human-profile operation. Only an authenticated human user principal may create an avatar upload ticket, complete the owned artifact, or request its signed download URL.
+
+API keys, agent principals, mobile-device principals, and system principals now receive `403 FORBIDDEN` for all three avatar lifecycle operations, even when a legacy artifact's `createdByUserId` happens to match the machine principal identifier. Other upload purposes retain their existing purpose-specific permission and resource-scope rules.
+
+To migrate:
+
+1. Move avatar upload requests into a server or client flow authenticated with the human user's bearer session.
+2. Keep the same human principal for create, complete, and download; another human owner receives the existing indistinguishable `404 NOT_FOUND` response.
+3. Do not substitute an API key or agent credential for the user session. If a machine integration needs private file storage, use a purpose explicitly designed and permissioned for that integration rather than `user_avatar`.
+4. Update SDK and server compatibility pins to `2026-08-16` and exercise the full create/upload/complete/download flow before rollout.
+
+The OpenAPI operations retain both bearer and API-key security alternatives because other artifact purposes support machine principals. The `x-principal-type-restrictions` extension declares the conditional `user_avatar → user` rule.

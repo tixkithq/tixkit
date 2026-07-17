@@ -4400,6 +4400,82 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
+  it('rejects every non-user principal across the user-avatar artifact lifecycle', async () => {
+    for (const principalType of ['api_key', 'agent', 'mobile_device', 'system'] as const) {
+      signedUrlInputs.length = 0;
+      s3Send.mockReset();
+      const principalId = `${principalType}_avatar_owner`;
+      const { db, tables } = createMockDb({
+        upload_artifacts: [
+          {
+            id: `upl_${principalType}_pending`,
+            tenant_id: 'tnt_1',
+            organization_id: null,
+            brand_id: null,
+            event_id: null,
+            created_by_user_id: principalId,
+            purpose: 'user_avatar',
+            status: 'pending',
+            scan_status: 'pending',
+            bucket: 'tixkit',
+            object_key: `uploads/tnt_1/avatars/${principalId}/staging/pending.png`,
+            content_type: 'image/png',
+            size_bytes: 12,
+            expires_at: new Date(Date.now() + 60_000),
+          },
+          {
+            id: `upl_${principalType}_clean`,
+            tenant_id: 'tnt_1',
+            organization_id: null,
+            brand_id: null,
+            event_id: null,
+            created_by_user_id: principalId,
+            purpose: 'user_avatar',
+            status: 'uploaded',
+            scan_status: 'clean',
+            bucket: 'tixkit',
+            object_key: `uploads/tnt_1/avatars/${principalId}/final/clean.png`,
+            content_type: 'image/png',
+            file_name: 'avatar.png',
+          },
+        ],
+      });
+      const app = await setupUploadApp(
+        db,
+        uploadRoutes,
+        makePrincipal({ type: principalType, id: principalId, scopes: [] }),
+      );
+
+      const create = await app.inject({
+        method: 'POST',
+        url: '/upload-artifacts',
+        payload: {
+          purpose: 'user_avatar',
+          fileName: 'avatar.png',
+          contentType: 'image/png',
+          sizeBytes: 12,
+        },
+      });
+      const complete = await app.inject({
+        method: 'POST',
+        url: `/upload-artifacts/upl_${principalType}_pending/complete`,
+      });
+      const download = await app.inject({
+        method: 'GET',
+        url: `/upload-artifacts/upl_${principalType}_clean/download`,
+      });
+
+      for (const response of [create, complete, download]) {
+        expect(response.statusCode).toBe(403);
+        expect(response.json().error.code).toBe('FORBIDDEN');
+      }
+      expect(tables.upload_artifacts).toHaveLength(2);
+      expect(s3Send).not.toHaveBeenCalled();
+      expect(signedUrlInputs).toHaveLength(0);
+      await app.close();
+    }
+  });
+
   it('rejects brand-logo uploads with checkout event scope or question metadata before creating artifacts', async () => {
     const { db, tables } = createMockDb({
       brands: [

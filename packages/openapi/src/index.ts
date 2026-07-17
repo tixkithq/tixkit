@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-15',
+    version: '2026-08-16',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5808,7 +5808,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-15, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-16, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5855,7 +5855,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-15, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-16, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5962,7 +5962,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-15 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-16 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5999,7 +5999,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-15 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-16 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8285,7 +8285,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-15 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-16 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8342,7 +8342,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-15 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-16 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -11903,7 +11903,14 @@ const rawOpenApiSpec = {
     '/upload-artifacts': {
       post: {
         summary: 'Create a signed upload artifact ticket',
+        description:
+          'Authorization is purpose-specific. user_avatar is a human-profile operation and requires a human user principal; API keys and other machine principals are forbidden for that purpose.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-compatibility-breaking-change':
+          '2026-08-16 forbids API-key, agent, mobile-device and system principals from creating user_avatar artifacts.',
+        'x-principal-type-restrictions': {
+          byUploadPurpose: { user_avatar: ['user'] },
+        },
         requestBody: {
           required: true,
           content: {
@@ -11959,7 +11966,14 @@ const rawOpenApiSpec = {
     '/upload-artifacts/{artifactId}/complete': {
       post: {
         summary: 'Complete and scan an upload artifact',
+        description:
+          'Authorization is artifact-purpose-specific. user_avatar completion requires the owning human user principal; machine principals are forbidden even when their identifier matches legacy ownership data.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-compatibility-breaking-change':
+          '2026-08-16 forbids API-key, agent, mobile-device and system principals from completing user_avatar artifacts.',
+        'x-principal-type-restrictions': {
+          byUploadPurpose: { user_avatar: ['user'] },
+        },
         requestBody: {
           required: false,
           content: {
@@ -12017,7 +12031,14 @@ const rawOpenApiSpec = {
     '/upload-artifacts/{artifactId}/download': {
       get: {
         summary: 'Get a signed download URL for a completed upload artifact',
+        description:
+          'Authorization is artifact-purpose-specific. user_avatar download requires the owning human user principal; machine principals are forbidden even when their identifier matches legacy ownership data.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-compatibility-breaking-change':
+          '2026-08-16 forbids API-key, agent, mobile-device and system principals from downloading user_avatar artifacts.',
+        'x-principal-type-restrictions': {
+          byUploadPurpose: { user_avatar: ['user'] },
+        },
         responses: {
           '200': {
             description: 'Signed download URL',

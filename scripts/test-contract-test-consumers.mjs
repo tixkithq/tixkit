@@ -202,7 +202,7 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
-      apiVersion: '2026-08-15',
+      apiVersion: '2026-08-16',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',

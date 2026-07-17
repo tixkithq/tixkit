@@ -1,0 +1,30 @@
+{
+  "from": "2026-08-15",
+  "to": "2026-08-16",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 3,
+    "compatible": 0
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /upload-artifacts",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /upload-artifacts/{artifactId}/complete",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "GET /upload-artifacts/{artifactId}/download",
+      "message": "The operation declares a conditional behavioral breaking change."
+    }
+  ]
+}

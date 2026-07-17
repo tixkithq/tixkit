@@ -3907,7 +3907,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-15',
+        'X-Tixkit-Version': '2026-08-16',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

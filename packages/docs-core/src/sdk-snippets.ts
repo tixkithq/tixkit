@@ -15,7 +15,7 @@ export interface SdkSnippetEntry {
   demoPath: string;
   docRouteId: DocRouteId;
   supportStatus: SdkSupportStatus;
-  apiVersion: '2026-08-15';
+  apiVersion: '2026-08-16';
 }
 
 export const sdkSnippetRegistry = [
@@ -32,7 +32,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'packages/sdk-js/src/__tests__/index.test.ts',
     docRouteId: 'sdkJavaScript',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'nextjs',
@@ -47,7 +47,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'apps/sdk-next-demo',
     docRouteId: 'sdkNext',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'sveltekit',
@@ -62,7 +62,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'apps/sdk-sveltekit-demo',
     docRouteId: 'sdkSvelteKit',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'vue',
@@ -77,7 +77,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'apps/sdk-nuxt-demo',
     docRouteId: 'sdkVue',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'astro',
@@ -92,7 +92,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'apps/sdk-astro-demo',
     docRouteId: 'sdkAstro',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'remix',
@@ -107,7 +107,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'apps/sdk-remix-demo',
     docRouteId: 'sdkRemix',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'react-native',
@@ -122,7 +122,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'apps/sdk-react-native-demo',
     docRouteId: 'sdkReactNative',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'flutter',
@@ -137,7 +137,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'apps/sdk-flutter-demo',
     docRouteId: 'sdkFlutter',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'ios',
@@ -152,7 +152,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'packages/sdk-ios/Tests',
     docRouteId: 'sdkIos',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'android',
@@ -166,7 +166,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'packages/sdk-android/example',
     docRouteId: 'sdkAndroid',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'go',
@@ -180,7 +180,7 @@ export const sdkSnippetRegistry = [
     demoPath: 'packages/sdk-go/examples/checkout',
     docRouteId: 'sdkGo',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
   {
     id: 'rust',
@@ -194,6 +194,6 @@ export const sdkSnippetRegistry = [
     demoPath: 'packages/sdk-rust/examples/checkout.rs',
     docRouteId: 'sdkRust',
     supportStatus: 'beta',
-    apiVersion: '2026-08-15',
+    apiVersion: '2026-08-16',
   },
 ] as const satisfies readonly SdkSnippetEntry[];

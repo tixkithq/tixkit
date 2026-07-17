@@ -18,6 +18,7 @@ import {
   RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   type RouteAuthorizationDenialContract,
 } from './route-authorization-contracts.js';
 
@@ -96,8 +97,9 @@ describe('API route access inventory (C-123)', () => {
     expect(ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
+    expect(UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(6);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(35);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(38);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -106,12 +108,31 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.deniedBoundaries) &&
           (!contract.permissionDenialResponse ||
             Object.isFrozen(contract.permissionDenialResponse)) &&
+          (!contract.policyDenialResponse || Object.isFrozen(contract.policyDenialResponse)) &&
+          (!contract.policyCondition || Object.isFrozen(contract.policyCondition)) &&
+          (!contract.policyDeniedBoundaries || Object.isFrozen(contract.policyDeniedBoundaries)) &&
           Object.isFrozen(contract.resourceParameters) &&
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(35);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(118);
+    expect(coveredRoutes).toHaveLength(38);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(125);
+    expect(
+      inventory.routes
+        .filter((route) => route.operationId?.includes('UploadArtifacts'))
+        .flatMap((route) => route.negativeAuthorizationEvidence)
+        .filter((evidence) => evidence.denialKind === 'policy'),
+    ).toHaveLength(3);
+    expect(
+      inventory.routes
+        .flatMap((route) => route.negativeAuthorizationEvidence)
+        .filter((evidence) => evidence.denialKind === 'policy')
+        .map((evidence) => evidence.condition),
+    ).toEqual([
+      { discriminator: 'purpose', value: 'user_avatar' },
+      { discriminator: 'purpose', value: 'user_avatar' },
+      { discriminator: 'purpose', value: 'user_avatar' },
+    ]);
     expect(
       inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,
     ).toEqual([]);
@@ -289,6 +310,11 @@ describe('API route access inventory (C-123)', () => {
       (candidate) =>
         candidate.method === deleteMutation.method && candidate.path === deleteMutation.path,
     )!;
+    const conditionalPolicy = UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const conditionalPolicyRoute = inventory.routes.find(
+      (candidate) =>
+        candidate.method === conditionalPolicy.method && candidate.path === conditionalPolicy.path,
+    )!;
     const invalidFixtures: Array<{
       contracts: readonly RouteAuthorizationDenialContract[];
       message: RegExp;
@@ -329,6 +355,34 @@ describe('API route access inventory (C-123)', () => {
         contracts: [{ ...mutation, sideEffectAssertions: [] }],
         message: /omits persistence or workflow side-effect proof/,
         routes: [mutationRoute],
+      },
+      {
+        contracts: [{ ...conditionalPolicy, policyCondition: undefined }],
+        message: /policy denials require an explicit condition/,
+        routes: [conditionalPolicyRoute],
+      },
+      {
+        contracts: [
+          {
+            ...conditionalPolicy,
+            policyCondition: { discriminator: 'purpose', value: 'event_cover' },
+          } as unknown as RouteAuthorizationDenialContract,
+        ],
+        message: /unsupported policy condition/,
+        routes: [conditionalPolicyRoute],
+      },
+      {
+        contracts: [
+          {
+            ...conditionalPolicy,
+            policyCondition: {
+              discriminator: 'uploadPurpose',
+              value: 'user_avatar',
+            },
+          } as unknown as RouteAuthorizationDenialContract,
+        ],
+        message: /unsupported policy condition/,
+        routes: [conditionalPolicyRoute],
       },
       {
         contracts: [{ ...deleteMutation, authorizedControl: { required: true, status: 201 } }],
