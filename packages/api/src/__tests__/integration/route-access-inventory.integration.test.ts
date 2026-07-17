@@ -12,6 +12,7 @@ import {
   BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -97,6 +98,7 @@ describe('API route access inventory (C-123)', () => {
     expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(17);
     expect(ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
+    expect(MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
     expect(PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
@@ -109,7 +111,7 @@ describe('API route access inventory (C-123)', () => {
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(51);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(52);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -125,8 +127,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(51);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(175);
+    expect(coveredRoutes).toHaveLength(52);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(178);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
@@ -140,6 +142,8 @@ describe('API route access inventory (C-123)', () => {
         .map((evidence) => evidence.condition),
     ).toEqual([
       { discriminator: 'principal-scope', value: 'no-event-scope' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
       { discriminator: 'purpose', value: 'user_avatar' },
       { discriminator: 'purpose', value: 'user_avatar' },
       { discriminator: 'purpose', value: 'user_avatar' },

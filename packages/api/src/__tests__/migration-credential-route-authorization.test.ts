@@ -2,9 +2,13 @@ import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImportRepository } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
+import { migrationAdapterCatalog } from '@tixkit/migration-core';
 import { registerErrorHandler } from '../app.js';
 import { migrationRoutes } from '../routes/modules/migrations.js';
-import { MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './integration/route-authorization-contracts.js';
+import {
+  MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+} from './integration/route-authorization-contracts.js';
 
 const { writeAuditLog } = vi.hoisted(() => ({
   writeAuditLog: vi.fn(async (..._arguments: unknown[]) => undefined),
@@ -145,6 +149,21 @@ describe('migration credential route authorization contract', () => {
   });
 
   it('is the exact executable source for the immutable C-123 contracts', () => {
+    expect(MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toEqual([
+      expect.objectContaining({
+        authorizedControl: { required: true, status: 200 },
+        deniedBoundaries: [],
+        method: 'GET',
+        operationId: 'listMigrationAdapters',
+        path: '/migration-adapters',
+        permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+        policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+        policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+        policyDeniedBoundaries: ['brand', 'event'],
+        sideEffectAssertions: [],
+        source: 'migration-credential-route-authorization.test.ts',
+      }),
+    ]);
     expect(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toEqual([
       expect.objectContaining({
         authorizedControl: { required: true, status: 201 },
@@ -170,6 +189,59 @@ describe('migration credential route authorization contract', () => {
       }),
     ]);
   });
+
+  it('returns the exact public adapter catalog to a migrations.read principal', async () => {
+    const app = await testApp(principal({ scopes: ['migrations.read'] }));
+
+    const response = await app.inject({ method: 'GET', url: '/migration-adapters' });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual({ items: migrationAdapterCatalog() });
+    expect(ImportRepository.prototype.createCredential).not.toHaveBeenCalled();
+    expect(ImportRepository.prototype.revokeCredential).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('denies adapter catalog access without migrations.read before any side effect', async () => {
+    const contract = MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const app = await testApp(principal({ scopes: ['migrations.write'] }));
+
+    const response = await app.inject({ method: 'GET', url: contract.path });
+
+    expect(response.statusCode).toBe(contract.permissionDenialResponse?.status);
+    expect(response.json().error.code).toBe(contract.permissionDenialResponse?.code);
+    expect(response.body).not.toContain('generic-csv');
+    expect(ImportRepository.prototype.createCredential).not.toHaveBeenCalled();
+    expect(ImportRepository.prototype.revokeCredential).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    ['brand', 'brandIds'],
+    ['event', 'eventIds'],
+  ] as const)(
+    'denies %s-scoped adapter catalog access before any side effect',
+    async (_boundary, scopeKey) => {
+      const contract = MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+      const scope: Partial<Principal> =
+        scopeKey === 'brandIds'
+          ? { brandIds: ['brand_migration_scoped_01'] }
+          : { eventIds: ['event_migration_scoped_01'] };
+      const app = await testApp(principal({ scopes: ['migrations.read'], ...scope }));
+
+      const response = await app.inject({ method: 'GET', url: contract.path });
+
+      expect(response.statusCode).toBe(contract.policyDenialResponse?.status);
+      expect(response.json().error.code).toBe(contract.policyDenialResponse?.code);
+      expect(response.body).not.toContain('generic-csv');
+      expect(ImportRepository.prototype.createCredential).not.toHaveBeenCalled();
+      expect(ImportRepository.prototype.revokeCredential).not.toHaveBeenCalled();
+      expect(writeAuditLog).not.toHaveBeenCalled();
+      await app.close();
+    },
+  );
 
   it.each(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)(
     'returns the declared 403 permission denial before persistence or audit for $method $path',

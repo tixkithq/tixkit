@@ -196,6 +196,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['getOrganizations', 'getBrands'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['listMigrationAdapters'], {
+    source: 'migration-credential-route-authorization.test.ts',
+  }),
   ...evidenceBindings(
     [
       'getOrganizationsByOrganizationIdReadiness',
@@ -356,6 +359,10 @@ const eventScopeGuards = new Set([
   'requireOrganizationWideWebhookEndpointPrincipal',
   'requireReportEventAccess',
   'scopedEvent',
+]);
+const organizationWideScopeGuards = new Set([
+  'requireMigrationPermission',
+  'requireOrganizationWideWebhookEndpointPrincipal',
 ]);
 const delegatedPermissionContracts = new Map<
   string,
@@ -669,6 +676,9 @@ function boundariesFor(
   if (guardEvidence.some((guard) => eventScopeGuards.has(guard))) {
     boundaries.push('tenant', 'organization', 'brand', 'event');
   }
+  if (guardEvidence.some((guard) => organizationWideScopeGuards.has(guard))) {
+    boundaries.push('brand', 'event');
+  }
   if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');
   if (guardEvidence.includes('requireHumanUserPrincipal')) boundaries.push('principal-type');
   if (guardEvidence.includes('requireUploadArtifactAccess')) {
@@ -788,7 +798,11 @@ export function negativeAuthorizationEvidenceForRoutes(
       }
     } else if (contract.policyCondition?.discriminator === 'principal-scope') {
       if (contract.policyCondition.value === 'organization-wide') {
-        if (!route.boundaries.includes('brand') || !route.boundaries.includes('event')) {
+        if (
+          !route.guardEvidence.some((guard) => organizationWideScopeGuards.has(guard)) ||
+          !route.boundaries.includes('brand') ||
+          !route.boundaries.includes('event')
+        ) {
           throw contractError(
             contract,
             'organization-wide scope policy is not enforced by runtime',
