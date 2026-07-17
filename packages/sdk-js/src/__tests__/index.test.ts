@@ -2065,6 +2065,33 @@ describe('TixkitClient new resource methods', () => {
     expect(call.method).toBe('GET');
   });
 
+  it('attendees.update sends profile fields without lifecycle status', async () => {
+    const fm = mockFetch(200, { id: 'att_1', status: 'confirmed' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.attendees.update('att_1', {
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.test',
+      phone: '+15555550123',
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/attendees/att_1');
+    expect(call.method).toBe('PATCH');
+    expect(JSON.parse(call.body)).toEqual({
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.test',
+      phone: '+15555550123',
+    });
+    expect(JSON.parse(call.body)).not.toHaveProperty('status');
+  });
+
   it('checkInLists.list forwards scanner headers with pagination', async () => {
     const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
     const c = new TixkitClient({
@@ -3858,7 +3885,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-13',
+        'X-Tixkit-Version': '2026-08-14',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

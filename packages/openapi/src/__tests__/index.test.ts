@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-13');
+    expect(openApiSpec.info.version).toBe('2026-08-14');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -2377,11 +2377,8 @@ describe('openApiSpec', () => {
       lastName: { type: ['string', 'null'] },
       email: { type: 'string', format: 'email' },
       phone: { type: ['string', 'null'] },
-      status: {
-        type: 'string',
-        enum: ['pending', 'confirmed', 'cancelled', 'refunded', 'checked_in'],
-      },
     });
+    expect(route['x-required-permissions']).toEqual(['attendees.write']);
   });
 
   it('documents admin table query params and runtime page envelopes', () => {

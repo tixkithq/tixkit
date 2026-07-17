@@ -7088,7 +7088,7 @@ describe('ticket transfer and attendee update', () => {
     await app.close();
   });
 
-  it('PATCH /attendees/:attendeeId updates attendee fields', async () => {
+  it('PATCH /attendees/:attendeeId updates profile fields and rejects check-in status bypasses', async () => {
     const tables = {
       attendees: [
         {
@@ -7130,11 +7130,20 @@ describe('ticket transfer and attendee update', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/attendees/att_1',
-      payload: { firstName: 'Updated', status: 'checked_in' },
+      payload: { firstName: 'Updated' },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.firstName).toBe('Updated');
+    expect(body.status).toBe('confirmed');
+
+    const statusBypass = await app.inject({
+      method: 'PATCH',
+      url: '/attendees/att_1',
+      payload: { status: 'checked_in' },
+    });
+    expect(statusBypass.statusCode).toBe(400);
+    expect((tables.attendees as Array<Record<string, unknown>>)[0]?.status).toBe('confirmed');
     await app.close();
   });
 });

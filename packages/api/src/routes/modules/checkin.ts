@@ -532,14 +532,10 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(existing.event_id);
     ClerkAuthService.requireResourceTenant(principal, existing, 'Attendee', attendeeId);
     requireEventAccess(principal, event, existing.event_id);
-    const updateData = pickAllowedFields(
-      body,
-      ['firstName', 'lastName', 'email', 'phone', 'status'],
-      {
-        firstName: 'first_name',
-        lastName: 'last_name',
-      },
-    );
+    const updateData = pickAllowedFields(body, ['firstName', 'lastName', 'email', 'phone'], {
+      firstName: 'first_name',
+      lastName: 'last_name',
+    });
     return serializeAttendee(await repo.update(attendeeId, updateData));
   });
 

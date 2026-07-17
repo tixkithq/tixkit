@@ -1,0 +1,24 @@
+---
+title: API migration from 2026-08-13 to 2026-08-14
+description: Remove attendee lifecycle mutation from the generic profile update operation.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-13
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+---
+
+API version `2026-08-14` makes the generic attendee update operation profile-only so lifecycle mutations cannot bypass the canonical check-in, refund, or transfer invariants.
+
+## Remove attendee lifecycle updates from profile patches
+
+`PATCH /v1/attendees/{attendeeId}` now accepts only `firstName`, `lastName`, `email`, and `phone`. Remove `status` from this request in custom clients and regenerate clients from the `2026-08-14` OpenAPI contract.
+
+Generic attendee profile updates cannot check in, revoke, refund, cancel, or transfer a ticket. Use the dedicated check-in scan and offline-sync operations for check-in lifecycle changes; those operations preserve ticket validation, list and device scope, idempotency, scan logs, and check-in activity. Use the dedicated refund and transfer workflows for those lifecycle changes.

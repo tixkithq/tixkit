@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-13',
+    version: '2026-08-14',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -4782,10 +4782,6 @@ const rawOpenApiSpec = {
           lastName: { type: ['string', 'null'] },
           email: { type: 'string', format: 'email' },
           phone: { type: ['string', 'null'] },
-          status: {
-            type: 'string',
-            enum: ['pending', 'confirmed', 'cancelled', 'refunded', 'checked_in'],
-          },
         },
       },
       AttendeePage: adminTablePageSchema({
@@ -5812,7 +5808,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-13, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-14, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5859,7 +5855,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-13, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-14, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5966,7 +5962,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-13 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-14 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6003,7 +5999,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-13 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-14 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8289,7 +8285,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-13 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-14 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8346,7 +8342,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-13 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-14 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -12732,6 +12728,7 @@ const rawOpenApiSpec = {
       patch: {
         summary: 'Update attendee',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['attendees.write'],
         requestBody: {
           required: true,
           content: {

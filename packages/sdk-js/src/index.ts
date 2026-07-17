@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-13';
+export const TIXKIT_API_VERSION = '2026-08-14';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1500,6 +1500,10 @@ export type Attendee = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type UpdateAttendeeInput = Partial<
+  Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone'>
+>;
 
 export type Organization = {
   id: string;
@@ -4644,10 +4648,7 @@ class AttendeeResource {
       params: query,
     });
   }
-  async update(
-    attendeeId: string,
-    input: Partial<Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone' | 'status'>>,
-  ): Promise<Attendee> {
+  async update(attendeeId: string, input: UpdateAttendeeInput): Promise<Attendee> {
     return this.client.request('PATCH', `/attendees/${attendeeId}`, {
       body: input,
     });

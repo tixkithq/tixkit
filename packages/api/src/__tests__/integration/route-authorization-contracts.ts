@@ -12,7 +12,7 @@ export type RouteAuthorizationDenialContract = Readonly<{
     status: 404;
   }>;
   deniedBoundaries: readonly AuthorizationBoundary[];
-  method: 'DELETE' | 'GET' | 'POST';
+  method: 'DELETE' | 'GET' | 'PATCH' | 'POST';
   operationId: string;
   path: string;
   permissionDenialResponse?: Readonly<{
@@ -249,6 +249,22 @@ export const SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze
   }),
 ]);
 
+export const ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'PATCH',
+    operationId: 'patchAttendeesByAttendeeId',
+    path: '/attendees/{attendeeId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'attendee-route-authorization-db.integration.test.ts',
+    resourceParameters: ['attendeeId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'attendee-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -336,5 +352,6 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

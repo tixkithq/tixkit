@@ -16,13 +16,6 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -33,9 +26,10 @@ import {
 import { toast } from 'sonner';
 
 const attendeeSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().optional(),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
-  status: z.enum(['active', 'cancelled', 'refunded', 'transferred']),
+  phone: z.string().optional(),
 });
 
 type AttendeeFormValues = z.infer<typeof attendeeSchema>;
@@ -58,18 +52,20 @@ export function AttendeeFormDialog({
   const form = useForm<AttendeeFormValues>({
     resolver: zodResolver(attendeeSchema),
     defaultValues: {
-      name: attendee?.name ?? '',
+      firstName: attendee?.firstName ?? '',
+      lastName: attendee?.lastName ?? '',
       email: attendee?.email ?? '',
-      status: attendee?.status ?? 'active',
+      phone: attendee?.phone ?? '',
     },
   });
 
   React.useEffect(() => {
     if (open && attendee) {
       form.reset({
-        name: attendee.name,
+        firstName: attendee.firstName ?? '',
+        lastName: attendee.lastName ?? '',
         email: attendee.email ?? '',
-        status: attendee.status,
+        phone: attendee.phone ?? '',
       });
     }
   }, [open, attendee, form]);
@@ -78,9 +74,10 @@ export function AttendeeFormDialog({
     if (!attendee) return;
     setSubmitting(true);
     const input: UpdateAttendeeInput = {
-      name: values.name,
+      firstName: values.firstName,
+      lastName: values.lastName || null,
       email: values.email || undefined,
-      status: values.status,
+      phone: values.phone || null,
     };
     const result = await adminApi.updateAttendee(attendee.id, input);
     setSubmitting(false);
@@ -104,10 +101,23 @@ export function AttendeeFormDialog({
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
               control={form.control}
-              name="name"
+              name="firstName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Name</FormLabel>
+                  <FormLabel>First name</FormLabel>
+                  <FormControl>
+                    <Input {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="lastName"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Last name</FormLabel>
                   <FormControl>
                     <Input {...field} />
                   </FormControl>
@@ -130,23 +140,13 @@ export function AttendeeFormDialog({
             />
             <FormField
               control={form.control}
-              name="status"
+              name="phone"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Status</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                      <SelectItem value="refunded">Refunded</SelectItem>
-                      <SelectItem value="transferred">Transferred</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <FormLabel>Phone</FormLabel>
+                  <FormControl>
+                    <Input type="tel" {...field} />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

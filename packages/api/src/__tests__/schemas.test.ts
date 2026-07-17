@@ -27,6 +27,7 @@ import {
   renderMessagePreviewSchema,
   sendMessageSchema,
   syncScanSchema,
+  updateAttendeeSchema,
 } from '../http/schemas.js';
 import { ValidationError } from '@tixkit/domain';
 
@@ -43,6 +44,28 @@ const makeOfflineScans = (count: number) =>
     scannedAt: '2026-06-01T12:00:00.000Z',
     offline: true,
   }));
+
+describe('attendee profile updates', () => {
+  it('accepts profile fields but rejects direct lifecycle and check-in status mutation', () => {
+    expect(
+      parseBody(updateAttendeeSchema, {
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@example.test',
+        phone: null,
+      }),
+    ).toEqual({
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.test',
+      phone: null,
+    });
+    expect(() => parseBody(updateAttendeeSchema, { status: 'checked_in' })).toThrow(
+      ValidationError,
+    );
+    expect(() => parseBody(updateAttendeeSchema, { status: 'refunded' })).toThrow(ValidationError);
+  });
+});
 
 describe('safeRedirectUrl / successUrl / cancelUrl validation', () => {
   it('requires exact current terms for resale checkout', () => {

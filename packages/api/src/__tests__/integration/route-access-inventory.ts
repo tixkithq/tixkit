@@ -123,6 +123,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'resale-settlement-concurrency-db.integration.test.ts',
     resolve(import.meta.dirname, 'resale-settlement-concurrency-db.integration.test.ts'),
   ],
+  [
+    'attendee-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'attendee-route-authorization-db.integration.test.ts'),
+  ],
 ]);
 
 type AuthorizationEvidenceBinding = Readonly<{
@@ -215,6 +219,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       persistenceSource: 'resale-settlement-concurrency-db.integration.test.ts',
     },
   ),
+  ...evidenceBindings(['patchAttendeesByAttendeeId'], {
+    source: 'attendee-route-authorization-db.integration.test.ts',
+    persistenceSource: 'attendee-route-authorization-db.integration.test.ts',
+  }),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);

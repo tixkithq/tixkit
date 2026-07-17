@@ -222,6 +222,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-13 resale settlement',
         routeId: 'apiMigration20260812To20260813',
       },
+      {
+        label: 'Adopt 2026-08-14 attendee lifecycle safety',
+        routeId: 'apiMigration20260813To20260814',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

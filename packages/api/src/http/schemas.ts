@@ -954,7 +954,6 @@ export const updateAttendeeSchema = z
     lastName: z.string().nullable().optional(),
     email: z.string().email().optional(),
     phone: z.string().nullable().optional(),
-    status: z.enum(['pending', 'confirmed', 'cancelled', 'refunded', 'checked_in']).optional(),
   })
   .strict();
 

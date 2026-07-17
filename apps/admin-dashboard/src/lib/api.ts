@@ -962,7 +962,10 @@ export type AdminAttendeeListItem = {
   ticketId: string;
   ticketTypeName: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   email?: string;
+  phone?: string;
   status: AttendeeStatus;
   checkInStatus: CheckInStatus;
   checkedInAt?: string;
@@ -1754,9 +1757,10 @@ export type RefundOrderResult = {
 };
 
 export type UpdateAttendeeInput = {
-  name?: string;
+  firstName?: string;
+  lastName?: string | null;
   email?: string;
-  status?: AttendeeStatus;
+  phone?: string | null;
 };
 
 export type ScanTicketInput = {
@@ -2607,7 +2611,10 @@ export function normalizeAdminAttendeeListItem(value: unknown): AdminAttendeeLis
       'Ticket',
     ),
     name: stringValue(record.name, fullName || email || 'Attendee'),
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
     email,
+    phone: stringValue(record.phone, undefined),
     status:
       status === 'cancelled' || status === 'refunded' || status === 'transferred'
         ? status

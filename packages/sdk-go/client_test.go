@@ -444,6 +444,32 @@ func TestOrderRefundSendsLifecycleFlagsAndDecodesQueuedResponse(t *testing.T) {
 	}
 }
 
+func TestAttendeeUpdateSendsProfileFieldsOnly(t *testing.T) {
+	t.Parallel()
+
+	firstName := "Ada"
+	lastName := "Lovelace"
+	phone := "+15555550123"
+	encoded, err := json.Marshal(UpdateAttendeeRequest{
+		FirstName: &firstName,
+		LastName:  &lastName,
+		Phone:     &phone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := body["status"]; exists {
+		t.Fatalf("profile update contains lifecycle status: %#v", body)
+	}
+	if body["firstName"] != "Ada" || body["lastName"] != "Lovelace" || body["phone"] != "+15555550123" {
+		t.Fatalf("body = %#v", body)
+	}
+}
+
 func TestResaleRoutesSendExpectedHeadersAndBodies(t *testing.T) {
 	t.Parallel()
 

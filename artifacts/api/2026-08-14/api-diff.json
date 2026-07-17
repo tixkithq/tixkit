@@ -1,0 +1,18 @@
+{
+  "from": "2026-08-13",
+  "to": "2026-08-14",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 1,
+    "compatible": 0
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.AttendeeUpdateInput.properties.status",
+      "message": "A property was removed."
+    }
+  ]
+}

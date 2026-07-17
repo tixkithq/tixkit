@@ -637,7 +637,6 @@ type UpdateAttendeeRequest struct {
 	LastName  *string `json:"lastName,omitempty"`
 	Email     *string `json:"email,omitempty"`
 	Phone     *string `json:"phone,omitempty"`
-	Status    *string `json:"status,omitempty"`
 }
 
 type Ticket struct {
