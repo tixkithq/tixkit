@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, EventRepository, type Database } from '@tixkit/db';
-import { ALL_PERMISSIONS, type Principal } from '@tixkit/domain';
+import { ALL_PERMISSIONS, humanAcknowledgementStepVersions, type Principal } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import { registerErrorHandler, type AppContext } from '../../app.js';
 import { checkInRoutes } from '../../routes/modules/checkin.js';
@@ -26,7 +26,9 @@ const eventReadContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
   (contract) => contract.method === 'GET',
 );
 const eventMutationContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
-  (contract) => contract.method === 'POST',
+  (contract) =>
+    contract.method === 'POST' &&
+    contract.operationId !== 'postEventsByEventIdReadinessAcknowledgementsByStepId',
 );
 
 type AuthorizationScenario = {
@@ -49,6 +51,8 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
   const forbiddenCheckInListName = `Forbidden list ${suffix}`;
   const forbiddenProductCategoryName = `Forbidden category ${suffix}`;
   const forbiddenQuestionLabel = `Forbidden question ${suffix}`;
+  const readinessStepId = 'preview_review';
+  const readinessSubjectFingerprint = 'a'.repeat(64);
   const tenantA = `tnt_auth_a_${suffix}`;
   const tenantB = `tnt_auth_b_${suffix}`;
   const organizationA = `org_auth_a_${suffix}`;
@@ -61,6 +65,62 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
   let eventAScoped: string;
   let eventB: string;
   const createdEventIds: string[] = [];
+  const acknowledgementSubject = vi.fn(
+    async (_input: {
+      tenantId: string;
+      organizationId: string;
+      brandId: string;
+      eventId: string;
+      stepId: string;
+    }) => readinessSubjectFingerprint,
+  );
+
+  async function readinessAcknowledgementSnapshot() {
+    const [acknowledgements, audits] = await Promise.all([
+      db
+        .selectFrom('event_readiness_acknowledgements')
+        .selectAll()
+        .where('event_id', 'in', createdEventIds)
+        .where('step_id', '=', readinessStepId)
+        .orderBy('event_id', 'asc')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .select([
+          'id',
+          'tenant_id',
+          'organization_id',
+          'brand_id',
+          'actor_type',
+          'actor_id',
+          'action',
+          'resource_type',
+          'resource_id',
+          'diff_summary',
+        ])
+        .where('actor_id', '=', basePrincipal.id)
+        .where('action', '=', 'event.readiness_acknowledged')
+        .where('resource_id', 'in', createdEventIds)
+        .orderBy('id', 'asc')
+        .execute(),
+    ]);
+    return { acknowledgements, audits };
+  }
+
+  async function clearReadinessAcknowledgementEvidence(): Promise<void> {
+    if (createdEventIds.length === 0) return;
+    await db
+      .deleteFrom('event_readiness_acknowledgements')
+      .where('event_id', 'in', createdEventIds)
+      .where('step_id', '=', readinessStepId)
+      .execute();
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', basePrincipal.id)
+      .where('action', '=', 'event.readiness_acknowledged')
+      .where('resource_id', 'in', createdEventIds)
+      .execute();
+  }
 
   async function insertTenant(id: string, name: string) {
     const now = new Date();
@@ -172,6 +232,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
             }
             return { launchable: false, requiredBlockers: [], steps: [] };
           },
+          acknowledgementSubject,
         }) as never,
     } as unknown as AppContext);
     app.addHook('onRequest', async (request) => {
@@ -205,6 +266,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     } finally {
       try {
         if (db) {
+          await attemptCleanup(clearReadinessAcknowledgementEvidence);
           await attemptCleanup(() =>
             db
               .deleteFrom('check_in_lists')
@@ -456,5 +518,128 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         .executeTakeFirstOrThrow(),
     };
     expect(after).toEqual(before);
+  });
+
+  describe('launch-readiness acknowledgement authorization', () => {
+    beforeEach(async () => {
+      principal = basePrincipal;
+      acknowledgementSubject.mockClear();
+      await clearReadinessAcknowledgementEvidence();
+    });
+
+    afterEach(clearReadinessAcknowledgementEvidence);
+
+    function invokeAcknowledgement(targetEventId: string) {
+      return app.inject({
+        method: 'POST',
+        url: `/events/${targetEventId}/readiness-acknowledgements/${readinessStepId}`,
+      });
+    }
+
+    it('allows the exact event principal and persists one bounded acknowledgement and audit', async () => {
+      const response = await invokeAcknowledgement(eventA);
+
+      expect(response.statusCode, response.body).toBe(201);
+      expect(response.json()).toMatchObject({
+        tenantId: tenantA,
+        organizationId: organizationA,
+        brandId: brandA,
+        eventId: eventA,
+        stepId: readinessStepId,
+        stepVersion: humanAcknowledgementStepVersions.preview_review,
+        subjectFingerprint: readinessSubjectFingerprint,
+        actorId: basePrincipal.id,
+      });
+      expect(acknowledgementSubject).toHaveBeenCalledTimes(1);
+      expect(acknowledgementSubject).toHaveBeenCalledWith({
+        tenantId: tenantA,
+        organizationId: organizationA,
+        brandId: brandA,
+        eventId: eventA,
+        stepId: readinessStepId,
+      });
+
+      const snapshot = await readinessAcknowledgementSnapshot();
+      expect(snapshot.acknowledgements).toHaveLength(1);
+      expect(snapshot.acknowledgements[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        event_id: eventA,
+        step_id: readinessStepId,
+        step_version: humanAcknowledgementStepVersions.preview_review,
+        subject_fingerprint: readinessSubjectFingerprint,
+        actor_id: basePrincipal.id,
+      });
+      expect(snapshot.audits).toHaveLength(1);
+      expect(snapshot.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_type: 'user',
+        actor_id: basePrincipal.id,
+        action: 'event.readiness_acknowledged',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      const storedDiff = snapshot.audits[0]!.diff_summary;
+      if (storedDiff === null) throw new Error('readiness acknowledgement audit omitted diff');
+      const diff =
+        typeof storedDiff === 'string'
+          ? (JSON.parse(storedDiff) as Record<string, unknown>)
+          : (storedDiff as Record<string, unknown>);
+      expect(diff).toEqual({
+        stepId: readinessStepId,
+        stepVersion: humanAcknowledgementStepVersions.preview_review,
+      });
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary before subject evaluation or persistence',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await readinessAcknowledgementSnapshot();
+
+        const response = await invokeAcknowledgement(targetEvent());
+
+        expect(response.statusCode).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        await expect(readinessAcknowledgementSnapshot()).resolves.toEqual(before);
+        expect(acknowledgementSubject).not.toHaveBeenCalled();
+      },
+    );
   });
 });

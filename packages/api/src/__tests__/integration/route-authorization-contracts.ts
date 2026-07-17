@@ -114,6 +114,19 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
       source: 'event-route-authorization-db.integration.test.ts',
     }),
   ),
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postEventsByEventIdReadinessAcknowledgementsByStepId',
+    path: '/events/{eventId}/readiness-acknowledgements/{stepId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'event-route-authorization-db.integration.test.ts',
+    resourceParameters: ['eventId', 'stepId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'event-route-authorization-db.integration.test.ts',
+  }),
 ]);
 
 export const ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
