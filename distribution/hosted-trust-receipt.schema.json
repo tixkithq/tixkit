@@ -39,6 +39,7 @@
         "path": {
           "enum": [
             ".github/workflows/performance-capacity.yml",
+            ".github/workflows/performance-profile-capacity.yml",
             ".github/workflows/performance-fault.yml",
             ".github/workflows/performance-nightly.yml",
             ".github/workflows/performance-soak.yml",
@@ -62,6 +63,7 @@
         "kind": {
           "enum": [
             "performance-capacity",
+            "performance-profile-capacity",
             "performance-fault",
             "performance-soak",
             "performance-temporal-fault",
@@ -81,6 +83,7 @@
         "validator": {
           "enum": [
             "scripts/performance-capacity.mjs#validateCapacityEvidence",
+            "scripts/performance-profile-capacity.mjs#verifySupportedProfileCapacityEvidence",
             "scripts/performance-fault.mjs#validateFaultEvidence",
             "scripts/performance-soak.mjs#validateSoakEvidenceDirectory",
             "scripts/performance-temporal-fault.mjs#validateTemporalFaultEvidence",

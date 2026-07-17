@@ -1,0 +1,97 @@
+{
+  "$schema": "./scripts/performance-profile-capacity.schema.json",
+  "schemaVersion": "tixkit-supported-profile-capacity-config-v1",
+  "claimScope": "supported-profile-capacity-eligibility",
+  "denials": [
+    "capacity proof without profile-scoped hosted evidence",
+    "Cloud capacity",
+    "SLA or SLO attainment",
+    "soak stability",
+    "fault tolerance"
+  ],
+  "profiles": [
+    {
+      "id": "compact",
+      "deployment": {
+        "kind": "compact-compose",
+        "files": ["infra/compact/.env.example", "infra/compact/compose.yml"],
+        "manifestSha256": "da5f0ea35631bccaec6e5388b95b0c8895030e636aa5f28429ea34956f1a4d2c"
+      },
+      "database": { "engine": "postgresql", "topology": "bundled-single-instance" },
+      "resources": {
+        "api": {
+          "replicas": 1,
+          "cpuQuotaMillis": 1000,
+          "memoryLimitMiB": 1024
+        },
+        "worker": {
+          "replicas": 1,
+          "cpuQuotaMillis": 1000,
+          "memoryLimitMiB": 1024
+        }
+      },
+      "workload": {
+        "id": "checkout-reservation-v1",
+        "inventory": 64,
+        "concurrencyPoints": [16, 32, 64, 128],
+        "samplesPerPoint": 3,
+        "minimumDurationSeconds": 900,
+        "maximumP95Ms": 2000,
+        "requireZeroPlatformFailures": true
+      }
+    },
+    {
+      "id": "production",
+      "deployment": {
+        "kind": "production-helm",
+        "files": [
+          "infra/helm/tixkit/Chart.yaml",
+          "infra/helm/tixkit/values.yaml",
+          "infra/helm/tixkit/values-production.yaml",
+          "infra/helm/tixkit/templates/_helpers.tpl",
+          "infra/helm/tixkit/templates/api.yaml",
+          "infra/helm/tixkit/templates/apps.yaml",
+          "infra/helm/tixkit/templates/availability.yaml",
+          "infra/helm/tixkit/templates/configmap.yaml",
+          "infra/helm/tixkit/templates/external-secret.yaml",
+          "infra/helm/tixkit/templates/ingress.yaml",
+          "infra/helm/tixkit/templates/migration-network-policy.yaml",
+          "infra/helm/tixkit/templates/migration-secret.yaml",
+          "infra/helm/tixkit/templates/migrations.yaml",
+          "infra/helm/tixkit/templates/minio.yaml",
+          "infra/helm/tixkit/templates/monitoring.yaml",
+          "infra/helm/tixkit/templates/network-policy.yaml",
+          "infra/helm/tixkit/templates/postgres.yaml",
+          "infra/helm/tixkit/templates/redis.yaml",
+          "infra/helm/tixkit/templates/secret.yaml",
+          "infra/helm/tixkit/templates/service-account.yaml",
+          "infra/helm/tixkit/templates/temporal.yaml",
+          "infra/helm/tixkit/templates/worker.yaml"
+        ],
+        "manifestSha256": "d266fcd3d467476831e00fc7c51655834bfb1a07f3f1f44d3aa1e9687a12ca29"
+      },
+      "database": { "engine": "postgresql", "topology": "external-high-availability" },
+      "resources": {
+        "api": {
+          "replicas": 2,
+          "cpuQuotaMillis": 1000,
+          "memoryLimitMiB": 1024
+        },
+        "worker": {
+          "replicas": 2,
+          "cpuQuotaMillis": 1000,
+          "memoryLimitMiB": 1024
+        }
+      },
+      "workload": {
+        "id": "checkout-reservation-v1",
+        "inventory": 64,
+        "concurrencyPoints": [16, 32, 64, 128],
+        "samplesPerPoint": 3,
+        "minimumDurationSeconds": 1800,
+        "maximumP95Ms": 2000,
+        "requireZeroPlatformFailures": true
+      }
+    }
+  ]
+}

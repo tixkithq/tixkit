@@ -127,6 +127,45 @@ test('verifies a signed receipt without mutating trust or evidence inputs', () =
   assert.equal('state' in result, false);
 });
 
+test('binds supported-profile capacity to its distinct semantic validator tuple', () => {
+  const profileReceipt = signedReceipt((receipt) => {
+    receipt.workflow.path = '.github/workflows/performance-profile-capacity.yml';
+    receipt.artifact.kind = 'performance-profile-capacity';
+    receipt.validation.validator =
+      'scripts/performance-profile-capacity.mjs#verifySupportedProfileCapacityEvidence';
+  });
+  assert.equal(violations(profileReceipt), '');
+  assert.equal(
+    verifyHostedTrustReceipt({
+      receipt: profileReceipt,
+      artifactBytes,
+      keyring,
+      options: { now },
+    }).artifactKind,
+    'performance-profile-capacity',
+  );
+
+  assert.match(
+    violations(
+      signedReceipt((receipt) => {
+        receipt.workflow.path = '.github/workflows/performance-profile-capacity.yml';
+        receipt.artifact.kind = 'performance-profile-capacity';
+      }),
+    ),
+    /disagree/u,
+  );
+  assert.match(
+    violations(
+      signedReceipt((receipt) => {
+        receipt.workflow.path = '.github/workflows/performance-profile-capacity.yml';
+        receipt.validation.validator =
+          'scripts/performance-profile-capacity.mjs#verifySupportedProfileCapacityEvidence';
+      }),
+    ),
+    /disagree/u,
+  );
+});
+
 test('rejects altered source, signature, artifact bytes, digest, and size', () => {
   const alteredSource = signedReceipt();
   alteredSource.source.commit = 'c'.repeat(40);

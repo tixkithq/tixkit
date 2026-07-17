@@ -26,6 +26,12 @@ const contracts = Object.freeze({
     workflow: '.github/workflows/performance-capacity.yml',
     validator: 'scripts/performance-capacity.mjs#validateCapacityEvidence',
   }),
+  'performance-profile-capacity': Object.freeze({
+    trustRecordId: 'performance-evidence',
+    scope: 'public-core',
+    workflow: '.github/workflows/performance-profile-capacity.yml',
+    validator: 'scripts/performance-profile-capacity.mjs#verifySupportedProfileCapacityEvidence',
+  }),
   'performance-fault': Object.freeze({
     trustRecordId: 'performance-evidence',
     scope: 'public-core',
