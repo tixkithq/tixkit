@@ -660,6 +660,29 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, order.brand_id);
     ClerkAuthService.requireEventScope(principal, order.event_id);
 
+    const resaleLine = await db
+      .selectFrom('order_line_items')
+      .select(['id', 'resale_listing_id'])
+      .where('order_id', '=', order.id)
+      .where('resale_listing_id', 'is not', null)
+      .executeTakeFirst();
+    if (resaleLine) {
+      return reply.status(409).send({
+        error: {
+          code: 'RESALE_REFUND_REQUIRES_MANUAL_RESOLUTION',
+          message:
+            'Resale refunds require coordinated manual resolution of seller settlement and ticket ownership before provider refund or credential mutation.',
+          details: {
+            orderId: order.id,
+            resaleListingId: resaleLine.resale_listing_id,
+            settlementModel: 'organizer_managed',
+            refundModel: 'manual_coordinated_resolution',
+          },
+          requestId: request.id,
+        },
+      });
+    }
+
     const result = await withIdempotency(
       db,
       {

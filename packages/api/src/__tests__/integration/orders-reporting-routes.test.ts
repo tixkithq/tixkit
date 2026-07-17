@@ -936,6 +936,58 @@ describe('order routes', () => {
     await app.close();
   });
 
+  it.each([
+    ['full default', { reason: 'Customer request' }],
+    ['partial', { reason: 'Customer request', amountCents: 5000 }],
+    ['credential retained', { reason: 'Customer request', voidTickets: false }],
+    ['inventory requested', { reason: 'Customer request', restoreInventory: true }],
+  ])(
+    'POST /orders/:orderId/refunds rejects resale %s before workflow, audit, or idempotency mutation',
+    async (_label, payload) => {
+      dbState.lineItems = [
+        {
+          id: 'oli_resale_1',
+          order_id: 'ord_1',
+          resale_listing_id: 'lst_1',
+          ticket_type_id: 'tt_1',
+          description: 'Resale ticket',
+          quantity: 1,
+          total_cents: 10700,
+        },
+      ];
+      const app = await setupApp(orderRoutes, makePrincipal());
+
+      const first = await app.inject({
+        method: 'POST',
+        url: '/orders/ord_1/refunds',
+        headers: { 'idempotency-key': `resale-refund-${String(_label).replaceAll(' ', '-')}` },
+        payload,
+      });
+      const replay = await app.inject({
+        method: 'POST',
+        url: '/orders/ord_1/refunds',
+        headers: { 'idempotency-key': `resale-refund-${String(_label).replaceAll(' ', '-')}` },
+        payload,
+      });
+
+      expect(first.statusCode).toBe(409);
+      expect(replay.statusCode).toBe(409);
+      expect(first.json().error).toMatchObject({
+        code: 'RESALE_REFUND_REQUIRES_MANUAL_RESOLUTION',
+        details: {
+          orderId: 'ord_1',
+          resaleListingId: 'lst_1',
+          settlementModel: 'organizer_managed',
+          refundModel: 'manual_coordinated_resolution',
+        },
+      });
+      expect(dbState.startRefundCalled).toBe(false);
+      expect(dbState.auditLogs).toEqual([]);
+      expect(dbState.idempotencyRecords).toEqual([]);
+      await app.close();
+    },
+  );
+
   it('POST /orders/:orderId/refunds replays completed idempotency after order state changes', async () => {
     dbState.order.status = 'refunded';
     dbState.order.refunded_cents = 10700;

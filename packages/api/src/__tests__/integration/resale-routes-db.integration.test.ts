@@ -9,6 +9,7 @@ import { checkoutRoutes } from '../../routes/modules/checkout.js';
 import { checkInRoutes } from '../../routes/modules/checkin.js';
 import { eventRoutes } from '../../routes/modules/events.js';
 import { publicRoutes } from '../../routes/modules/public.js';
+import { orderRoutes } from '../../routes/modules/orders.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import { QrService } from '../../services/qr.js';
 import {
@@ -90,7 +91,7 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
     organizationIds: [ORG_ID],
     brandIds: [BRAND_ID],
     eventIds: [EVENT_ID],
-    scopes: ['attendees.write', 'events.read', 'events.write', 'tickets.write'],
+    scopes: ['attendees.write', 'events.read', 'events.write', 'refunds.write', 'tickets.write'],
     ...overrides,
   };
 }
@@ -109,7 +110,7 @@ async function setupRouteApp(
       isLocalDevMode: vi.fn(() => true),
       authenticateLocalDev: vi.fn(async () => ({ principal })),
     },
-    temporalClient: {},
+    temporalClient: { startRefund: vi.fn() },
   } as unknown as AppContext);
   registerErrorHandler(routeApp);
   routeApp.addHook('onRequest', async (request) => {
@@ -120,6 +121,7 @@ async function setupRouteApp(
   await routeApp.register(eventRoutes);
   await routeApp.register(publicRoutes);
   await routeApp.register(checkoutRoutes);
+  await routeApp.register(orderRoutes);
   return routeApp;
 }
 
@@ -391,8 +393,11 @@ async function seedTenantGraph(database: Database): Promise<void> {
 }
 
 async function cleanupAll(database: Database): Promise<void> {
+  await database.deleteFrom('refunds').where('order_id', '=', ORDER_ID).execute();
+  await database.deleteFrom('order_line_items').where('order_id', '=', ORDER_ID).execute();
   await database.deleteFrom('ticket_listings').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('audit_logs').where('tenant_id', '=', TENANT_ID).execute();
   await database
     .deleteFrom('checkout_sessions')
     .where('tenant_id', '=', TENANT_ID)
@@ -414,8 +419,11 @@ async function cleanupAll(database: Database): Promise<void> {
 }
 
 async function resetListings(database: Database): Promise<void> {
+  await database.deleteFrom('refunds').where('order_id', '=', ORDER_ID).execute();
+  await database.deleteFrom('order_line_items').where('order_id', '=', ORDER_ID).execute();
   await database.deleteFrom('ticket_listings').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('idempotency_records').where('tenant_id', '=', TENANT_ID).execute();
+  await database.deleteFrom('audit_logs').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('questions').where('event_id', '=', EVENT_ID).execute();
   await database
     .deleteFrom('checkout_sessions')
@@ -2149,6 +2157,175 @@ describeWithIntegrationDatabase(
           .where('order_id', '=', ORDER_ID)
           .execute(),
       ).toEqual([]);
+    });
+
+    it('rejects mixed resale refunds before provider, workflow, audit, or persistence mutation', async () => {
+      const startRefund = vi.mocked(app.context.temporalClient.startRefund);
+      startRefund.mockClear();
+      const listed = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_refund_listing_${RUN_ID}` },
+        payload: { priceCents: 5500 },
+      });
+      expect(listed.statusCode, listed.body).toBe(201);
+      const listingId = listed.json().id as string;
+      const now = new Date();
+      await db
+        .insertInto('order_line_items')
+        .values([
+          {
+            id: `oli_primary_${RUN_ID}`,
+            order_id: ORDER_ID,
+            ticket_type_id: TICKET_TYPE_ID,
+            product_id: null,
+            event_occurrence_id: null,
+            resale_listing_id: null,
+            attendee_id: ATTENDEE_ID,
+            description: 'Primary ticket',
+            quantity: 1,
+            unit_price_cents: 5000,
+            subtotal_cents: 5000,
+            discount_cents: 0,
+            tax_cents: 0,
+            fee_cents: 0,
+            total_cents: 5000,
+            currency: 'USD',
+            created_at: now,
+            updated_at: now,
+          },
+          {
+            id: `oli_resale_${RUN_ID}`,
+            order_id: ORDER_ID,
+            ticket_type_id: TICKET_TYPE_ID,
+            product_id: null,
+            event_occurrence_id: null,
+            resale_listing_id: listingId,
+            attendee_id: ATTENDEE_ID,
+            description: 'Resale ticket',
+            quantity: 1,
+            unit_price_cents: 5500,
+            subtotal_cents: 5500,
+            discount_cents: 0,
+            tax_cents: 0,
+            fee_cents: 0,
+            total_cents: 5500,
+            currency: 'USD',
+            created_at: now,
+            updated_at: now,
+          },
+        ])
+        .execute();
+
+      const auditBefore = await db
+        .selectFrom('audit_logs')
+        .select('id')
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const refundKey = `resale_refund_${RUN_ID}`;
+      const rejected = await app.inject({
+        method: 'POST',
+        url: `/orders/${ORDER_ID}/refunds`,
+        headers: { 'Idempotency-Key': refundKey },
+        payload: {
+          reason: 'Buyer request',
+          amountCents: 2500,
+          voidTickets: false,
+          restoreInventory: true,
+        },
+      });
+      const replay = await app.inject({
+        method: 'POST',
+        url: `/orders/${ORDER_ID}/refunds`,
+        headers: { 'Idempotency-Key': refundKey },
+        payload: {
+          reason: 'Buyer request',
+          amountCents: 2500,
+          voidTickets: false,
+          restoreInventory: true,
+        },
+      });
+
+      expect(rejected.statusCode, rejected.body).toBe(409);
+      expect(replay.statusCode, replay.body).toBe(409);
+      expect(rejected.json().error).toMatchObject({
+        code: 'RESALE_REFUND_REQUIRES_MANUAL_RESOLUTION',
+        details: {
+          orderId: ORDER_ID,
+          resaleListingId: listingId,
+          settlementModel: 'organizer_managed',
+          refundModel: 'manual_coordinated_resolution',
+        },
+      });
+      expect(replay.json().error).toMatchObject({
+        code: 'RESALE_REFUND_REQUIRES_MANUAL_RESOLUTION',
+        details: {
+          orderId: ORDER_ID,
+          resaleListingId: listingId,
+          settlementModel: 'organizer_managed',
+          refundModel: 'manual_coordinated_resolution',
+        },
+      });
+      expect(startRefund).not.toHaveBeenCalled();
+
+      const denialPrincipals: Array<{ status: number; principal: Principal }> = [
+        { status: 403, principal: makePrincipal({ scopes: ['events.read'] }) },
+        { status: 404, principal: makePrincipal({ tenantId: OTHER_TENANT_ID }) },
+        {
+          status: 404,
+          principal: makePrincipal({ organizationIds: [`org_resale_other_${RUN_ID}`] }),
+        },
+        { status: 404, principal: makePrincipal({ brandIds: [`brd_resale_other_${RUN_ID}`] }) },
+        { status: 404, principal: makePrincipal({ eventIds: [`evt_resale_other_${RUN_ID}`] }) },
+      ];
+      for (const [index, denial] of denialPrincipals.entries()) {
+        const deniedApp = await setupRouteApp(db, denial.principal);
+        // eslint-disable-next-line no-await-in-loop -- each isolated principal proves its own denial boundary.
+        const response = await deniedApp.inject({
+          method: 'POST',
+          url: `/orders/${ORDER_ID}/refunds`,
+          headers: { 'Idempotency-Key': `resale_refund_denied_${index}_${RUN_ID}` },
+          payload: { reason: 'Denied request' },
+        });
+        expect(response.statusCode, response.body).toBe(denial.status);
+        expect(response.body).not.toContain(listingId);
+        expect(deniedApp.context.temporalClient.startRefund).not.toHaveBeenCalled();
+        // eslint-disable-next-line no-await-in-loop -- close the isolated route instance after its denial assertion.
+        await deniedApp.close();
+      }
+
+      expect(
+        await db.selectFrom('refunds').select('id').where('order_id', '=', ORDER_ID).execute(),
+      ).toEqual([]);
+      expect(
+        await db
+          .selectFrom('idempotency_records')
+          .select('key')
+          .where('tenant_id', '=', TENANT_ID)
+          .where('key', 'in', [
+            refundKey,
+            ...denialPrincipals.map((_, index) => `resale_refund_denied_${index}_${RUN_ID}`),
+          ])
+          .execute(),
+      ).toEqual([]);
+      expect(
+        await db.selectFrom('audit_logs').select('id').where('tenant_id', '=', TENANT_ID).execute(),
+      ).toEqual(auditBefore);
+      const persistedOrder = await db
+        .selectFrom('orders')
+        .select(['status', 'refunded_cents', 'refunded_at'])
+        .where('id', '=', ORDER_ID)
+        .executeTakeFirstOrThrow();
+      expect(persistedOrder.status).toBe('paid');
+      expect(Number(persistedOrder.refunded_cents)).toBe(0);
+      expect(persistedOrder.refunded_at).toBeNull();
+      expect(
+        await db
+          .selectFrom('tickets')
+          .select(['id', 'status'])
+          .where('id', '=', TICKET_ID)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ id: TICKET_ID, status: 'valid' });
     });
 
     it('rejects every concurrent legacy completion attempt without mutating resale state', async () => {
