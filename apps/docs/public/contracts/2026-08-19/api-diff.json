@@ -1,0 +1,18 @@
+{
+  "from": "2026-08-18",
+  "to": "2026-08-19",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 1,
+    "compatible": 0
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /events/{eventId}/messages",
+      "message": "The operation declares a conditional behavioral breaking change."
+    }
+  ]
+}
