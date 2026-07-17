@@ -373,7 +373,7 @@ export class InventoryPoolRepository extends BaseRepository {
   }) {
     const id = `inv_${ulid()}`;
     const now = new Date();
-    return this.insertReturning(
+    const pool = await this.insertReturning(
       'inventory_pools',
       {
         id,
@@ -388,6 +388,8 @@ export class InventoryPoolRepository extends BaseRepository {
       },
       id,
     );
+    await bumpEventPublicRevision(this.db, input.eventId, now);
+    return pool;
   }
 
   async findById(id: string) {

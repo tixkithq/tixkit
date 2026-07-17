@@ -102,6 +102,11 @@ export type AppContext = {
     eventId: string;
     occurrenceId?: string;
   }) => void | Promise<void>;
+  ticketConfigurationCheckpoint?: (input: {
+    stage: 'before_transaction';
+    operation: 'inventory_pool_create' | 'ticket_type_create' | 'ticket_type_batch_create';
+    eventId: string;
+  }) => void | Promise<void>;
   eventPagePublishCheckpoint?: (input: {
     stage: 'after_event_locked';
     eventId: string;

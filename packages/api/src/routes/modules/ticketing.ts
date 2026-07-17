@@ -314,6 +314,18 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     }
   };
 
+  const emitFirstTicketMilestone = (eventCreatedAt: Date | string) => {
+    app.observability?.metrics.metrics.onboardingEvents?.inc({
+      stage: 'first_ticket',
+      outcome: 'completed',
+      reason_code: 'none',
+    });
+    app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
+      { milestone: 'first_ticket' },
+      Math.max(0, (Date.now() - new Date(eventCreatedAt).getTime()) / 1000),
+    );
+  };
+
   app.get('/events/:eventId/resale-policy', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.read');
@@ -689,49 +701,82 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-
-    const repo = new TicketTypeRepository(db);
-    const pool = await new InventoryPoolRepository(db).findById(body.inventoryPoolId);
-    if (!pool || pool.event_id !== eventId) {
-      throw new NotFoundError('InventoryPool', body.inventoryPoolId);
-    }
-    await validateEventOccurrence(eventId, body.eventOccurrenceId);
-    const priorTicketCount = await db
-      .selectFrom('ticket_types')
-      .select(({ fn }) => fn.countAll<number>().as('count'))
-      .where('event_id', '=', eventId)
-      .executeTakeFirst();
-    const ticketType = await repo.create({
+    await app.context.ticketConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'ticket_type_create',
       eventId,
-      name: body.name,
-      kind: body.kind,
-      currency: body.currency,
-      priceCents: body.priceCents,
-      inventoryPoolId: body.inventoryPoolId,
-      visibility: body.visibility,
-      description: body.description,
-      minimumPriceCents: body.minimumPriceCents ?? undefined,
-      salesStartAt: body.salesStartAt ? new Date(body.salesStartAt) : undefined,
-      salesEndAt: body.salesEndAt ? new Date(body.salesEndAt) : undefined,
-      minPerOrder: body.minPerOrder,
-      maxPerOrder: body.maxPerOrder,
-      requiresAccessCode: body.requiresAccessCode,
-      accessCodeHint: body.accessCodeHint ?? undefined,
-      eventOccurrenceId: body.eventOccurrenceId,
     });
-    if (Number(priorTicketCount?.count ?? 0) === 0) {
-      app.observability?.metrics.metrics.onboardingEvents?.inc({
-        stage: 'first_ticket',
-        outcome: 'completed',
-        reason_code: 'none',
+
+    const result = await db.transaction().execute(async (transaction) => {
+      const currentEvent = await loadAuthorizedEventForUpdate(transaction, principal, eventId);
+      const pool = await transaction
+        .selectFrom('inventory_pools')
+        .selectAll()
+        .where('id', '=', body.inventoryPoolId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!pool || pool.event_id !== eventId) {
+        throw new NotFoundError('InventoryPool', body.inventoryPoolId);
+      }
+      if (body.eventOccurrenceId) {
+        const occurrence = await transaction
+          .selectFrom('event_occurrences')
+          .selectAll()
+          .where('id', '=', body.eventOccurrenceId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!occurrence || occurrence.event_id !== eventId) {
+          throw new NotFoundError('EventOccurrence', body.eventOccurrenceId);
+        }
+      }
+      const priorTicketCount = await transaction
+        .selectFrom('ticket_types')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('event_id', '=', eventId)
+        .executeTakeFirst();
+      const ticketType = await new TicketTypeRepository(transaction).create({
+        eventId,
+        name: body.name,
+        kind: body.kind,
+        currency: body.currency,
+        priceCents: body.priceCents,
+        inventoryPoolId: body.inventoryPoolId,
+        visibility: body.visibility,
+        description: body.description,
+        minimumPriceCents: body.minimumPriceCents ?? undefined,
+        salesStartAt: body.salesStartAt ? new Date(body.salesStartAt) : undefined,
+        salesEndAt: body.salesEndAt ? new Date(body.salesEndAt) : undefined,
+        minPerOrder: body.minPerOrder,
+        maxPerOrder: body.maxPerOrder,
+        requiresAccessCode: body.requiresAccessCode,
+        accessCodeHint: body.accessCodeHint ?? undefined,
+        eventOccurrenceId: body.eventOccurrenceId,
       });
-      app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
-        { milestone: 'first_ticket' },
-        Math.max(0, (Date.now() - new Date(event.created_at).getTime()) / 1000),
+      const serialized = serializeTicketType(ticketType);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'ticket_type.created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'TicketType',
+          resourceId: ticketType.id,
+          diffSummary: { eventId, after: serialized },
+        },
+        { failClosed: true },
       );
+      return {
+        firstTicket: Number(priorTicketCount?.count ?? 0) === 0,
+        serialized,
+      };
+    });
+    if (result.firstTicket) {
+      emitFirstTicketMilestone(event.created_at);
     }
 
-    return reply.status(201).send(serializeTicketType(ticketType));
+    return reply.status(201).send(result.serialized);
   });
 
   app.post('/events/:eventId/ticket-types/batch', async (request, reply) => {
@@ -743,19 +788,34 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-
-    if (body.ticketType.inventoryPoolId) {
-      const pool = await new InventoryPoolRepository(db).findById(body.ticketType.inventoryPoolId);
-      if (!pool || pool.event_id !== eventId) {
-        throw new NotFoundError('InventoryPool', body.ticketType.inventoryPoolId);
-      }
-    }
+    await app.context.ticketConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'ticket_type_batch_create',
+      eventId,
+    });
 
     const result = await db.transaction().execute(async (trx) => {
       const txDb = trx as typeof db;
+      const currentEvent = await loadAuthorizedEventForUpdate(txDb, principal, eventId);
+      const priorTicketCount = await txDb
+        .selectFrom('ticket_types')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('event_id', '=', eventId)
+        .executeTakeFirst();
       let inventoryPoolId = body.ticketType.inventoryPoolId;
+      let createdInventoryPool: ReturnType<typeof serializeInventoryPool> | null = null;
 
-      if (!inventoryPoolId && body.inventoryPool) {
+      if (inventoryPoolId) {
+        const pool = await txDb
+          .selectFrom('inventory_pools')
+          .selectAll()
+          .where('id', '=', inventoryPoolId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!pool || pool.event_id !== eventId) {
+          throw new NotFoundError('InventoryPool', inventoryPoolId);
+        }
+      } else if (body.inventoryPool) {
         const pool = await new InventoryPoolRepository(txDb).create({
           eventId,
           name: body.inventoryPool.name,
@@ -763,12 +823,23 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           holdTtlSeconds: body.inventoryPool.holdTtlSeconds,
         });
         inventoryPoolId = pool.id;
+        createdInventoryPool = serializeInventoryPool(pool);
       }
 
       if (!inventoryPoolId) {
         throw new ValidationError('Provide inventoryPoolId or inventoryPool');
       }
-      await validateEventOccurrence(eventId, body.ticketType.eventOccurrenceId);
+      if (body.ticketType.eventOccurrenceId) {
+        const occurrence = await txDb
+          .selectFrom('event_occurrences')
+          .selectAll()
+          .where('id', '=', body.ticketType.eventOccurrenceId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!occurrence || occurrence.event_id !== eventId) {
+          throw new NotFoundError('EventOccurrence', body.ticketType.eventOccurrenceId);
+        }
+      }
 
       const ticketType = await new TicketTypeRepository(txDb).create({
         eventId,
@@ -805,13 +876,35 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         createdRules.push(createdRule);
       }
 
-      return { ticketType, accessRules: createdRules };
+      const serialized = {
+        ticketType: serializeTicketType(ticketType),
+        accessRules: createdRules.map((rule) => serializeAccessRule(rule)),
+      };
+      await writeAuditLog(
+        new AuditLogRepository(txDb),
+        request,
+        principal,
+        {
+          action: 'ticket_type.batch_created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'TicketType',
+          resourceId: ticketType.id,
+          diffSummary: {
+            eventId,
+            after: { ...serialized, inventoryPool: createdInventoryPool },
+          },
+        },
+        { failClosed: true },
+      );
+      return {
+        firstTicket: Number(priorTicketCount?.count ?? 0) === 0,
+        serialized,
+      };
     });
 
-    return reply.status(201).send({
-      ticketType: serializeTicketType(result.ticketType),
-      accessRules: result.accessRules.map((rule) => serializeAccessRule(rule)),
-    });
+    if (result.firstTicket) emitFirstTicketMilestone(event.created_at);
+    return reply.status(201).send(result.serialized);
   });
 
   app.patch('/ticket-types/:ticketTypeId', async (request) => {
@@ -1132,16 +1225,39 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-
-    const repo = new InventoryPoolRepository(db);
-    const pool = await repo.create({
+    await app.context.ticketConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'inventory_pool_create',
       eventId,
-      name: body.name,
-      totalCapacity: body.totalCapacity,
-      holdTtlSeconds: body.holdTtlSeconds,
     });
 
-    return reply.status(201).send(serializeInventoryPool(pool));
+    const pool = await db.transaction().execute(async (transaction) => {
+      const currentEvent = await loadAuthorizedEventForUpdate(transaction, principal, eventId);
+      const created = await new InventoryPoolRepository(transaction).create({
+        eventId,
+        name: body.name,
+        totalCapacity: body.totalCapacity,
+        holdTtlSeconds: body.holdTtlSeconds,
+      });
+      const serialized = serializeInventoryPool(created);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'inventory_pool.created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'InventoryPool',
+          resourceId: created.id,
+          diffSummary: { eventId, after: serialized },
+        },
+        { failClosed: true },
+      );
+      return serialized;
+    });
+
+    return reply.status(201).send(pool);
   });
 
   app.get('/events/:eventId/inventory-pools', async (request) => {

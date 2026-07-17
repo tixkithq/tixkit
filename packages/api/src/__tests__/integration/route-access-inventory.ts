@@ -143,6 +143,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'event-occurrence-route-authorization-db.integration.test.ts'),
   ],
   [
+    'ticket-configuration-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'ticket-configuration-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'provider-incident-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'provider-incident-route-authorization-db.integration.test.ts'),
   ],
@@ -248,6 +252,17 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'getEventsByEventIdWaitlist',
     ],
     { source: 'event-route-authorization-db.integration.test.ts' },
+  ),
+  ...evidenceBindings(
+    [
+      'postEventsByEventIdInventoryPools',
+      'postEventsByEventIdTicketTypes',
+      'postEventsByEventIdTicketTypesBatch',
+    ],
+    {
+      source: 'ticket-configuration-route-authorization-db.integration.test.ts',
+      persistenceSource: 'ticket-configuration-route-authorization-db.integration.test.ts',
+    },
   ),
   ...evidenceBindings(['getOrganizations', 'getBrands'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
