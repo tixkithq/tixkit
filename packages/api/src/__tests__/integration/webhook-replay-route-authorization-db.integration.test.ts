@@ -33,6 +33,7 @@ describeWithIntegrationDatabase('webhook replay route authorization matrix', () 
   const userId = `usr_whr_${suffix}`;
   let eventId: string;
   let endpointId: string;
+  let testRequestSequence = 0;
   const startWebhookDelivery = vi.fn(async () => ({ runId: `run_${suffix}` }));
 
   function authorizedPrincipal(overrides: Partial<Principal> = {}): Principal {
@@ -61,6 +62,80 @@ describeWithIntegrationDatabase('webhook replay route authorization matrix', () 
         .executeTakeFirstOrThrow(),
     ]);
     return { audits: Number(auditRow.count), replays: Number(replayRow.count) };
+  }
+
+  async function testDeliverySnapshot() {
+    const [events, deliveries, audits] = await Promise.all([
+      db
+        .selectFrom('webhook_events')
+        .select(['id', 'tenant_id', 'organization_id', 'type', 'payload', 'status'])
+        .where('organization_id', '=', organizationId)
+        .where('type', '=', 'test.ping')
+        .orderBy('id', 'asc')
+        .execute(),
+      db
+        .selectFrom('webhook_deliveries')
+        .innerJoin('webhook_events', 'webhook_events.id', 'webhook_deliveries.event_id')
+        .select([
+          'webhook_deliveries.id',
+          'webhook_deliveries.endpoint_id',
+          'webhook_deliveries.requested_endpoint_id',
+          'webhook_deliveries.event_id',
+          'webhook_deliveries.delivery_key',
+          'webhook_deliveries.attempt',
+          'webhook_deliveries.status',
+        ])
+        .where('webhook_events.organization_id', '=', organizationId)
+        .where('webhook_events.type', '=', 'test.ping')
+        .orderBy('webhook_deliveries.id', 'asc')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .select([
+          'id',
+          'tenant_id',
+          'organization_id',
+          'actor_type',
+          'actor_id',
+          'action',
+          'resource_type',
+          'resource_id',
+          'diff_summary',
+        ])
+        .where('actor_id', '=', userId)
+        .where('action', 'like', 'webhook_endpoint.test_delivery_%')
+        .orderBy('id', 'asc')
+        .execute(),
+    ]);
+    return { events, deliveries, audits };
+  }
+
+  async function clearTestDeliveryEffects(): Promise<void> {
+    const testEvents = await db
+      .selectFrom('webhook_events')
+      .select('id')
+      .where('organization_id', '=', organizationId)
+      .where('type', '=', 'test.ping')
+      .execute();
+    const testEventIds = testEvents.map((event) => event.id);
+    if (testEventIds.length > 0) {
+      await db.deleteFrom('webhook_deliveries').where('event_id', 'in', testEventIds).execute();
+      await db.deleteFrom('webhook_events').where('id', 'in', testEventIds).execute();
+    }
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', userId)
+      .where('action', 'like', 'webhook_endpoint.test_delivery_%')
+      .execute();
+  }
+
+  function invokeTestDelivery() {
+    testRequestSequence += 1;
+    return app.inject({
+      method: 'POST',
+      url: `/webhook-endpoints/${endpointId}/test`,
+      remoteAddress: `198.51.100.${testRequestSequence}`,
+    });
   }
 
   function nextIdempotencyKey(label: string): string {
@@ -113,6 +188,7 @@ describeWithIntegrationDatabase('webhook replay route authorization matrix', () 
   beforeEach(async () => {
     activePrincipal = authorizedPrincipal();
     startWebhookDelivery.mockClear();
+    await clearTestDeliveryEffects();
     await db
       .deleteFrom('audit_logs')
       .where('actor_id', '=', userId)
@@ -124,6 +200,7 @@ describeWithIntegrationDatabase('webhook replay route authorization matrix', () 
   afterAll(async () => {
     await app?.close();
     if (db) {
+      await clearTestDeliveryEffects();
       await db
         .deleteFrom('audit_logs')
         .where('actor_id', '=', userId)
@@ -212,4 +289,115 @@ describeWithIntegrationDatabase('webhook replay route authorization matrix', () 
       );
     });
   }
+
+  describe('synthetic endpoint test delivery', () => {
+    it('allows the exact organization principal and records only the bounded test-delivery effects', async () => {
+      const endpoint = await db
+        .selectFrom('webhook_endpoints')
+        .select(['secret', 'url'])
+        .where('id', '=', endpointId)
+        .executeTakeFirstOrThrow();
+
+      const response = await invokeTestDelivery();
+
+      expect(response.statusCode, response.body).toBe(202);
+      expect(response.json()).toMatchObject({ queued: true, test: true, endpointId });
+      const snapshot = await testDeliverySnapshot();
+      expect(snapshot.events).toHaveLength(1);
+      expect(snapshot.events[0]).toMatchObject({
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        type: 'test.ping',
+        status: 'pending',
+      });
+      const storedPayload = snapshot.events[0]!.payload;
+      const payload =
+        typeof storedPayload === 'string'
+          ? (JSON.parse(storedPayload) as Record<string, unknown>)
+          : (storedPayload as Record<string, unknown>);
+      expect(payload).toMatchObject({
+        type: 'test.ping',
+        test: true,
+        data: { endpointId },
+      });
+      expect(snapshot.deliveries).toHaveLength(1);
+      expect(snapshot.deliveries[0]).toMatchObject({
+        endpoint_id: endpointId,
+        requested_endpoint_id: endpointId,
+        event_id: snapshot.events[0]!.id,
+        delivery_key: 'live',
+        attempt: 1,
+        status: 'pending',
+      });
+      expect(snapshot.audits).toHaveLength(1);
+      expect(snapshot.audits[0]).toMatchObject({
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        actor_type: 'user',
+        actor_id: userId,
+        action: 'webhook_endpoint.test_delivery_queued',
+        resource_type: 'WebhookEndpoint',
+        resource_id: endpointId,
+      });
+      const persistedEvidence = JSON.stringify(snapshot);
+      expect(persistedEvidence).not.toContain(endpoint.secret);
+      expect(persistedEvidence).not.toContain(endpoint.url);
+      expect(persistedEvidence).not.toMatch(/buyer|payment|order|ticket/iu);
+      expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
+      expect(startWebhookDelivery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpointId,
+          eventId: snapshot.events[0]!.id,
+          eventType: 'test.ping',
+          payload,
+          maxAttempts: 5,
+        }),
+      );
+    });
+
+    it('denies missing permission before persistence or workflow dispatch', async () => {
+      activePrincipal = authorizedPrincipal({ scopes: [] });
+      const before = await testDeliverySnapshot();
+
+      const response = await invokeTestDelivery();
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+      await expect(testDeliverySnapshot()).resolves.toEqual(before);
+      expect(startWebhookDelivery).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['tenant', { tenantId: `tnt_other_${suffix}` }],
+      ['organization', { organizationIds: [] }],
+    ])('returns indistinguishable not-found across the %s boundary', async (_label, overrides) => {
+      activePrincipal = authorizedPrincipal(overrides);
+      const before = await testDeliverySnapshot();
+
+      const response = await invokeTestDelivery();
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+      await expect(testDeliverySnapshot()).resolves.toEqual(before);
+      expect(startWebhookDelivery).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['brand', { brandIds: [`brd_whr_${suffix}`] }],
+      ['event', { eventIds: [eventId] }],
+    ])(
+      'rejects %s-scoped principals before persistence or workflow dispatch',
+      async (_label, scope) => {
+        activePrincipal = authorizedPrincipal(scope);
+        const before = await testDeliverySnapshot();
+
+        const response = await invokeTestDelivery();
+
+        expect(response.statusCode).toBe(403);
+        expect(response.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+        await expect(testDeliverySnapshot()).resolves.toEqual(before);
+        expect(startWebhookDelivery).not.toHaveBeenCalled();
+      },
+    );
+  });
 });

@@ -21,6 +21,7 @@ import {
   SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   type RouteAuthorizationDenialContract,
 } from './route-authorization-contracts.js';
 
@@ -103,7 +104,8 @@ describe('API route access inventory (C-123)', () => {
     expect(UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(6);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(41);
+    expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(42);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -119,8 +121,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(41);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(138);
+    expect(coveredRoutes).toHaveLength(42);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(143);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
@@ -136,6 +138,8 @@ describe('API route access inventory (C-123)', () => {
       { discriminator: 'purpose', value: 'user_avatar' },
       { discriminator: 'purpose', value: 'user_avatar' },
       { discriminator: 'purpose', value: 'user_avatar' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
       { discriminator: 'principal-scope', value: 'organization-wide' },
       { discriminator: 'principal-scope', value: 'organization-wide' },
       { discriminator: 'principal-scope', value: 'organization-wide' },

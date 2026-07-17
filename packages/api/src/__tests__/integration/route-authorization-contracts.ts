@@ -496,6 +496,25 @@ export const WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze
   ),
 );
 
+export const WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 202 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'POST',
+    operationId: 'postWebhookEndpointsByEndpointIdTest',
+    path: '/webhook-endpoints/{endpointId}/test',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyDeniedBoundaries: ['brand', 'event'],
+    persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
+    resourceParameters: ['endpointId'],
+    sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'webhook-replay-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -510,4 +529,5 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

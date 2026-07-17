@@ -277,6 +277,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
     },
   ),
+  ...evidenceBindings(['postWebhookEndpointsByEndpointIdTest'], {
+    source: 'webhook-replay-route-authorization-db.integration.test.ts',
+    persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
+  }),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
