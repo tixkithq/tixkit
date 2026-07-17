@@ -112,7 +112,7 @@ describe('API route access inventory (C-123)', () => {
     );
 
     expect(inventory.schemaVersion).toBe(4);
-    expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(21);
+    expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(22);
     expect(EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
@@ -147,7 +147,7 @@ describe('API route access inventory (C-123)', () => {
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(89);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(90);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -163,8 +163,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(89);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(353);
+    expect(coveredRoutes).toHaveLength(90);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(358);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))

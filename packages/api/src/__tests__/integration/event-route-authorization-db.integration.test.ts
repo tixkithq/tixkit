@@ -76,6 +76,13 @@ const eventUpdateContract = (() => {
   if (!contract) throw new Error('event update authorization contract is not registered');
   return contract;
 })();
+const feePolicyContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'putEventsByEventIdFeePolicy',
+  );
+  if (!contract) throw new Error('fee policy authorization contract is not registered');
+  return contract;
+})();
 
 type AuthorizationScenario = {
   name: string;
@@ -137,6 +144,9 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       undefined,
   );
   const eventUpdateCheckpoint = vi.fn(
+    async (_input: { stage: 'before_transaction'; eventId: string }) => undefined,
+  );
+  const eventFeePolicyCheckpoint = vi.fn(
     async (_input: { stage: 'before_transaction'; eventId: string }) => undefined,
   );
 
@@ -379,6 +389,72 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       .execute();
   }
 
+  async function feePolicySnapshot() {
+    const [events, rules, audits] = await Promise.all([
+      db
+        .selectFrom('events')
+        .select([
+          'id',
+          'organization_id',
+          'brand_id',
+          'pass_fees_to_buyer',
+          'version',
+          'public_revision',
+        ])
+        .where('id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('fee_rules')
+        .selectAll()
+        .where('event_id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+      db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('actor_id', '=', basePrincipal.id)
+        .where('action', '=', 'event.fee_policy_updated')
+        .where('resource_id', 'in', createdEventIds)
+        .orderBy('id')
+        .execute(),
+    ]);
+    return { events, rules, audits };
+  }
+
+  async function clearFeePolicyEvidence(): Promise<void> {
+    if (createdEventIds.length === 0) return;
+    await db
+      .updateTable('events')
+      .set({ pass_fees_to_buyer: false })
+      .where('id', 'in', createdEventIds)
+      .execute();
+    await db.deleteFrom('fee_rules').where('event_id', 'in', createdEventIds).execute();
+    const now = new Date('2026-07-17T12:00:00.000Z');
+    await db
+      .insertInto('fee_rules')
+      .values(
+        createdEventIds.map((eventId, index) => ({
+          id: `fee_auth_${index}_${suffix}`,
+          event_id: eventId,
+          name: `Original fee ${index}`,
+          type: 'fixed',
+          value: 100 + index,
+          applied_to: 'per_order',
+          absorb_into_price: true,
+          created_at: now,
+          updated_at: now,
+        })),
+      )
+      .execute();
+    await db
+      .deleteFrom('audit_logs')
+      .where('actor_id', '=', basePrincipal.id)
+      .where('action', '=', 'event.fee_policy_updated')
+      .where('resource_id', 'in', createdEventIds)
+      .execute();
+  }
+
   async function insertTenant(id: string, name: string) {
     const now = new Date();
     await db
@@ -576,6 +652,8 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       dashboardActionServiceFactory: () => ({ getFeed: getDashboardActions }) as never,
       eventUpdateCheckpoint: (input: { stage: 'before_transaction'; eventId: string }) =>
         eventUpdateCheckpoint(input),
+      eventFeePolicyCheckpoint: (input: { stage: 'before_transaction'; eventId: string }) =>
+        eventFeePolicyCheckpoint(input),
     } as unknown as AppContext);
     app.addHook('onRequest', async (request) => {
       request.principal = principal;
@@ -611,6 +689,9 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
           await attemptCleanup(clearReadinessAcknowledgementEvidence);
           await attemptCleanup(clearSetupSectionEvidence);
           await attemptCleanup(clearPublishEvidence);
+          await attemptCleanup(() =>
+            db.deleteFrom('fee_rules').where('event_id', 'in', createdEventIds).execute(),
+          );
           await attemptCleanup(() =>
             db
               .deleteFrom('check_in_lists')
@@ -1434,6 +1515,406 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
         expect(acknowledgementSubject).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('fee policy authorization and optimistic concurrency', () => {
+    beforeEach(async () => {
+      principal = basePrincipal;
+      eventFeePolicyCheckpoint.mockReset();
+      eventFeePolicyCheckpoint.mockResolvedValue(undefined);
+      await clearFeePolicyEvidence();
+    });
+    afterEach(clearFeePolicyEvidence);
+
+    async function feePolicyVersion(targetEventId: string): Promise<number> {
+      const row = await db
+        .selectFrom('events')
+        .select('version')
+        .where('id', '=', targetEventId)
+        .executeTakeFirstOrThrow();
+      return Number(row.version);
+    }
+
+    function invokeFeePolicy(
+      targetEventId: string,
+      expectedVersion: number,
+      name: string,
+      passFeesToBuyer = true,
+      rules: Array<{
+        name: string;
+        type: 'fixed' | 'percentage';
+        value: number;
+        appliedTo: 'per_order' | 'per_ticket';
+      }> = [{ name, type: 'fixed', value: 250, appliedTo: 'per_order' }],
+    ) {
+      return app.inject({
+        method: feePolicyContract.method,
+        url: feePolicyContract.path.replace('{eventId}', targetEventId),
+        payload: {
+          expectedVersion,
+          passFeesToBuyer,
+          rules,
+        },
+      });
+    }
+
+    function storedFeePolicyAudit(value: unknown): Record<string, unknown> {
+      return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
+    }
+
+    it('atomically replaces the exact fee policy with a monotonic revision and exact audit', async () => {
+      const before = await feePolicySnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA)!;
+      const response = await invokeFeePolicy(
+        eventA,
+        Number(eventBefore.version),
+        'Updated service fee',
+      );
+
+      expect(response.statusCode, response.body).toBe(feePolicyContract.authorizedControl.status);
+      expect(response.json()).toMatchObject({
+        eventId: eventA,
+        eventVersion: Number(eventBefore.version) + 1,
+        passFeesToBuyer: true,
+        rules: [
+          {
+            name: 'Updated service fee',
+            type: 'fixed',
+            value: 250,
+            appliedTo: 'per_order',
+            absorbIntoPrice: false,
+          },
+        ],
+      });
+      const after = await feePolicySnapshot();
+      const eventAfter = after.events.find((event) => event.id === eventA)!;
+      expect(Number(eventAfter.version)).toBe(Number(eventBefore.version) + 1);
+      expect(eventAfter.public_revision?.getTime() ?? 0).toBeGreaterThan(
+        eventBefore.public_revision?.getTime() ?? 0,
+      );
+      expect(after.rules.filter((rule) => rule.event_id === eventA)).toHaveLength(1);
+      expect(after.audits).toHaveLength(1);
+      expect(after.audits[0]).toMatchObject({
+        tenant_id: tenantA,
+        organization_id: organizationA,
+        brand_id: brandA,
+        actor_id: basePrincipal.id,
+        action: 'event.fee_policy_updated',
+        resource_type: 'Event',
+        resource_id: eventA,
+      });
+      expect(storedFeePolicyAudit(after.audits[0]!.diff_summary)).toEqual({
+        before: {
+          passFeesToBuyer: false,
+          rules: [
+            {
+              name: 'Original fee 0',
+              type: 'fixed',
+              value: 100,
+              appliedTo: 'per_order',
+              absorbIntoPrice: true,
+            },
+          ],
+        },
+        after: {
+          passFeesToBuyer: true,
+          rules: [
+            {
+              name: 'Updated service fee',
+              type: 'fixed',
+              value: 250,
+              appliedTo: 'per_order',
+              absorbIntoPrice: false,
+            },
+          ],
+        },
+        previousVersion: Number(eventBefore.version),
+        newVersion: Number(eventBefore.version) + 1,
+      });
+    });
+
+    it('replaces multiple mixed rules and then clears the complete set with exact audits', async () => {
+      const now = new Date('2026-07-17T12:00:00.000Z');
+      await db
+        .insertInto('fee_rules')
+        .values({
+          id: `fee_auth_extra_${suffix}`,
+          event_id: eventA,
+          name: 'Original percentage',
+          type: 'percentage',
+          value: 325,
+          applied_to: 'per_ticket',
+          absorb_into_price: true,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const before = await feePolicySnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA)!;
+      const replacementRules = [
+        { name: 'Venue fee', type: 'fixed' as const, value: 450, appliedTo: 'per_order' as const },
+        {
+          name: 'Percentage fee',
+          type: 'percentage' as const,
+          value: 575,
+          appliedTo: 'per_ticket' as const,
+        },
+      ];
+
+      const replacement = await invokeFeePolicy(
+        eventA,
+        Number(eventBefore.version),
+        'unused',
+        false,
+        replacementRules,
+      );
+      expect(replacement.statusCode, replacement.body).toBe(200);
+      expect(
+        replacement
+          .json()
+          .rules.map((rule: Record<string, unknown>) => ({
+            name: rule.name,
+            type: rule.type,
+            value: rule.value,
+            appliedTo: rule.appliedTo,
+            absorbIntoPrice: rule.absorbIntoPrice,
+          }))
+          .sort((left: { name: string }, right: { name: string }) =>
+            left.name.localeCompare(right.name),
+          ),
+      ).toEqual([
+        {
+          name: 'Percentage fee',
+          type: 'percentage',
+          value: 575,
+          appliedTo: 'per_ticket',
+          absorbIntoPrice: true,
+        },
+        {
+          name: 'Venue fee',
+          type: 'fixed',
+          value: 450,
+          appliedTo: 'per_order',
+          absorbIntoPrice: true,
+        },
+      ]);
+      const replaced = await feePolicySnapshot();
+      expect(replaced.rules.filter((rule) => rule.event_id === eventA)).toHaveLength(2);
+      expect(replaced.audits).toHaveLength(1);
+      expect(storedFeePolicyAudit(replaced.audits[0]!.diff_summary)).toEqual({
+        before: {
+          passFeesToBuyer: false,
+          rules: [
+            {
+              name: 'Original fee 0',
+              type: 'fixed',
+              value: 100,
+              appliedTo: 'per_order',
+              absorbIntoPrice: true,
+            },
+            {
+              name: 'Original percentage',
+              type: 'percentage',
+              value: 325,
+              appliedTo: 'per_ticket',
+              absorbIntoPrice: true,
+            },
+          ],
+        },
+        after: {
+          passFeesToBuyer: false,
+          rules: [
+            {
+              name: 'Percentage fee',
+              type: 'percentage',
+              value: 575,
+              appliedTo: 'per_ticket',
+              absorbIntoPrice: true,
+            },
+            {
+              name: 'Venue fee',
+              type: 'fixed',
+              value: 450,
+              appliedTo: 'per_order',
+              absorbIntoPrice: true,
+            },
+          ],
+        },
+        previousVersion: Number(eventBefore.version),
+        newVersion: Number(eventBefore.version) + 1,
+      });
+
+      const cleared = await invokeFeePolicy(
+        eventA,
+        Number(eventBefore.version) + 1,
+        'unused',
+        true,
+        [],
+      );
+      expect(cleared.statusCode, cleared.body).toBe(200);
+      expect(cleared.json()).toMatchObject({
+        eventId: eventA,
+        eventVersion: Number(eventBefore.version) + 2,
+        passFeesToBuyer: true,
+        rules: [],
+      });
+      const after = await feePolicySnapshot();
+      const eventAfter = after.events.find((event) => event.id === eventA)!;
+      expect(Number(eventAfter.version)).toBe(Number(eventBefore.version) + 2);
+      expect(eventAfter.public_revision?.getTime() ?? 0).toBeGreaterThan(
+        replaced.events.find((event) => event.id === eventA)!.public_revision?.getTime() ?? 0,
+      );
+      expect(after.rules.filter((rule) => rule.event_id === eventA)).toHaveLength(0);
+      expect(after.audits).toHaveLength(2);
+      expect(storedFeePolicyAudit(after.audits[1]!.diff_summary)).toEqual({
+        before: storedFeePolicyAudit(replaced.audits[0]!.diff_summary).after,
+        after: { passFeesToBuyer: true, rules: [] },
+        previousVersion: Number(eventBefore.version) + 1,
+        newVersion: Number(eventBefore.version) + 2,
+      });
+    });
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without fee, event, revision, or audit mutation',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const targetEventId = targetEvent();
+        const before = await feePolicySnapshot();
+        const response = await invokeFeePolicy(
+          targetEventId,
+          await feePolicyVersion(targetEventId),
+          'Forbidden fee',
+        );
+        expect(response.statusCode, response.body).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        await expect(feePolicySnapshot()).resolves.toEqual(before);
+      },
+    );
+
+    it('rejects a stale policy without fee, event, revision, or audit mutation', async () => {
+      const before = await feePolicySnapshot();
+      const version = await feePolicyVersion(eventA);
+      const response = await invokeFeePolicy(eventA, version - 1, 'Stale fee');
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'stale_event_version',
+          details: { expectedVersion: version - 1, currentVersion: version },
+        },
+      });
+      await expect(feePolicySnapshot()).resolves.toEqual(before);
+    });
+
+    it('rolls back the policy when its required audit cannot persist', async () => {
+      const before = await feePolicySnapshot();
+      const failure = vi
+        .spyOn(AuditLogRepository.prototype, 'create')
+        .mockRejectedValueOnce(new Error('injected fee policy audit failure'));
+      const response = await invokeFeePolicy(
+        eventA,
+        await feePolicyVersion(eventA),
+        'Rolled back fee',
+      );
+      expect(response.statusCode).toBe(500);
+      await expect(feePolicySnapshot()).resolves.toEqual(before);
+      failure.mockRestore();
+    });
+
+    it('revalidates scope against the locked fee-policy event', async () => {
+      let checkpointSnapshot: Awaited<ReturnType<typeof feePolicySnapshot>> | undefined;
+      eventFeePolicyCheckpoint.mockImplementationOnce(async () => {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+          .where('id', '=', eventA)
+          .execute();
+        checkpointSnapshot = await feePolicySnapshot();
+      });
+      try {
+        const response = await invokeFeePolicy(
+          eventA,
+          await feePolicyVersion(eventA),
+          'Scope race fee',
+        );
+        expect(response.statusCode).toBe(404);
+        expect(checkpointSnapshot).toBeDefined();
+        await expect(feePolicySnapshot()).resolves.toEqual(checkpointSnapshot);
+      } finally {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationA, brand_id: brandA })
+          .where('id', '=', eventA)
+          .execute();
+      }
+    });
+
+    it('allows one exact fee-policy winner at a shared expected version', async () => {
+      const before = await feePolicySnapshot();
+      const eventBefore = before.events.find((event) => event.id === eventA)!;
+      const version = Number(eventBefore.version);
+      const responses = await Promise.all([
+        invokeFeePolicy(eventA, version, 'Concurrent fee alpha', true),
+        invokeFeePolicy(eventA, version, 'Concurrent fee beta', false),
+      ]);
+      expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+      const winner = responses.find((response) => response.statusCode === 200)!.json();
+      const after = await feePolicySnapshot();
+      const eventAfter = after.events.find((event) => event.id === eventA)!;
+      expect(Number(eventAfter.version)).toBe(version + 1);
+      expect(eventAfter.public_revision?.getTime() ?? 0).toBeGreaterThan(
+        eventBefore.public_revision?.getTime() ?? 0,
+      );
+      expect(after.rules.filter((rule) => rule.event_id === eventA)).toHaveLength(1);
+      expect(after.audits).toHaveLength(1);
+      const audit = storedFeePolicyAudit(after.audits[0]!.diff_summary);
+      expect(audit).toMatchObject({
+        previousVersion: version,
+        newVersion: version + 1,
+        after: {
+          passFeesToBuyer: winner.passFeesToBuyer,
+          rules: [
+            {
+              name: winner.rules[0].name,
+              value: winner.rules[0].value,
+              absorbIntoPrice: winner.rules[0].absorbIntoPrice,
+            },
+          ],
+        },
+      });
+    });
   });
 
   describe('event update authorization and optimistic concurrency', () => {

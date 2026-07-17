@@ -423,6 +423,47 @@ function serializeFeePolicy(eventId: string, event: EventFeePolicyRow, rows: Fee
   };
 }
 
+function feePolicyAuditProjection(event: EventFeePolicyRow, rows: FeeRuleRow[]) {
+  const rules = rows
+    .map((row) => ({
+      name: row.name,
+      type: row.type,
+      value: Number(row.value),
+      appliedTo: row.applied_to,
+      absorbIntoPrice: boolValue(row.absorb_into_price),
+    }))
+    .sort((left, right) =>
+      JSON.stringify([
+        left.name,
+        left.type,
+        left.value,
+        left.appliedTo,
+        left.absorbIntoPrice,
+      ]).localeCompare(
+        JSON.stringify([
+          right.name,
+          right.type,
+          right.value,
+          right.appliedTo,
+          right.absorbIntoPrice,
+        ]),
+      ),
+    );
+  return {
+    passFeesToBuyer: boolValue(event.pass_fees_to_buyer),
+    rules,
+  };
+}
+
+function sortFeeRuleRows(rows: FeeRuleRow[]): FeeRuleRow[] {
+  return [...rows].sort((left, right) => {
+    const createdOrder = (serializeDate(left.created_at) ?? '').localeCompare(
+      serializeDate(right.created_at) ?? '',
+    );
+    return createdOrder !== 0 ? createdOrder : left.id.localeCompare(right.id);
+  });
+}
+
 export const eventRoutes: FastifyPluginAsync = async (app) => {
   app.post('/onboarding-events', async (request, reply) => {
     const principal = request.principal!;
@@ -1140,7 +1181,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
-    const rows = await new FeeRuleRepository(db).findByEvent(eventId);
+    const rows = sortFeeRuleRows(
+      (await new FeeRuleRepository(db).findByEvent(eventId)) as FeeRuleRow[],
+    );
     return serializeFeePolicy(eventId, event as EventFeePolicyRow, rows as FeeRuleRow[]);
   });
 
@@ -1157,8 +1200,22 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
+    await app.context.eventFeePolicyCheckpoint?.({ stage: 'before_transaction', eventId });
     const transactionResult = await db.transaction().execute(async (trx) => {
       const transactionEventRepository = new EventRepository(trx as typeof db);
+      const lockedEvent = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!lockedEvent) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, lockedEvent, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, lockedEvent.organization_id);
+      ClerkAuthService.requireBrandScope(principal, lockedEvent.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      if (Number(lockedEvent.version) !== body.expectedVersion) return null;
+      const beforeRows = await new FeeRuleRepository(trx as typeof db).findByEvent(eventId);
       const updated = await transactionEventRepository.updateIfVersion(
         eventId,
         body.expectedVersion,
@@ -1188,7 +1245,28 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
           )
           .execute();
       }
-      const feeRows = await new FeeRuleRepository(trx as typeof db).findByEvent(eventId);
+      const feeRows = sortFeeRuleRows(
+        (await new FeeRuleRepository(trx as typeof db).findByEvent(eventId)) as FeeRuleRow[],
+      );
+      await writeAuditLog(
+        new AuditLogRepository(trx as typeof db),
+        request,
+        principal,
+        {
+          action: 'event.fee_policy_updated',
+          organizationId: lockedEvent.organization_id,
+          brandId: lockedEvent.brand_id,
+          resourceType: 'Event',
+          resourceId: eventId,
+          diffSummary: {
+            before: feePolicyAuditProjection(lockedEvent, beforeRows as FeeRuleRow[]),
+            after: feePolicyAuditProjection(updated, feeRows as FeeRuleRow[]),
+            previousVersion: Number(lockedEvent.version),
+            newVersion: Number(updated.version),
+          },
+        },
+        { failClosed: true },
+      );
       return { rows: feeRows, updatedEvent: updated };
     });
     if (!transactionResult) {
@@ -1206,18 +1284,6 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const { rows, updatedEvent } = transactionResult;
-
-    await writeAuditLog(audit(), request, principal, {
-      action: 'event.fee_policy_updated',
-      organizationId: event.organization_id,
-      brandId: event.brand_id,
-      resourceType: 'Event',
-      resourceId: eventId,
-      diffSummary: {
-        passFeesToBuyer: body.passFeesToBuyer,
-        ruleCount: body.rules.length,
-      },
-    });
 
     return serializeFeePolicy(
       eventId,
