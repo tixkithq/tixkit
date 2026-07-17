@@ -16,6 +16,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   jsonSchemaViolations,
+  agentIntegrationSkillViolations,
   loadPublicDistribution,
   validatePublicDistribution,
 } from './lib/public-distribution.mjs';
@@ -114,6 +115,66 @@ export function stagePublicContractArtifacts(
     writeFileSync(outputPath, bytes);
   }
   return [...sources.keys()].sort().map((sha256) => `contract-${sha256}.json`);
+}
+
+export function stageAgentIntegrationSkillArtifacts(
+  distribution,
+  artifactDirectory,
+  sourceRoot = root,
+) {
+  const violations = agentIntegrationSkillViolations(distribution, sourceRoot);
+  if (violations.length > 0) {
+    throw new Error(`agent integration skill validation failed:\n${violations.join('\n')}`);
+  }
+  mkdirSync(artifactDirectory, { recursive: true });
+  const staged = [];
+  for (const entry of distribution.release.agentIntegrationSkills ?? []) {
+    const directory = resolve(sourceRoot, entry.path);
+    const manifestBytes = readFileSync(resolve(directory, 'artifact-manifest.json'));
+    const manifest = JSON.parse(manifestBytes.toString('utf8'));
+    const artifactNames = new Set();
+    for (const artifact of manifest.artifacts) {
+      if (
+        !artifact ||
+        typeof artifact.name !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/u.test(artifact.name) ||
+        artifact.name.split('/').some((segment) => segment === '.' || segment === '..') ||
+        artifactNames.has(artifact.name)
+      ) {
+        throw new Error('agent integration skill contains an unsafe or duplicate artifact name');
+      }
+      artifactNames.add(artifact.name);
+    }
+    const files = [
+      ...manifest.artifacts.map(({ name }) => name),
+      'artifact-manifest.json',
+      'CHECKSUMS.sha256',
+    ].sort();
+    const envelope = `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        apiVersion: entry.apiVersion,
+        sourceReleaseManifestSha256: entry.releaseManifestSha256,
+        artifactManifestSha256: digest('sha256', manifestBytes),
+        files: files.map((name) => {
+          const bytes = readFileSync(resolve(directory, name));
+          return {
+            name,
+            sha256: digest('sha256', bytes),
+            size: bytes.byteLength,
+            base64: bytes.toString('base64'),
+          };
+        }),
+      },
+      null,
+      2,
+    )}\n`;
+    const envelopeSha256 = digest('sha256', envelope);
+    const name = `contract-agent-skill-${entry.apiVersion}-${envelopeSha256}.json`;
+    writeFileSync(resolve(artifactDirectory, name), envelope, { flag: 'wx' });
+    staged.push(name);
+  }
+  return staged.sort();
 }
 
 function packPublicPackages(distribution, sourceRoot, artifactDirectory) {
@@ -321,6 +382,8 @@ export function buildPublicReleaseManifestFromArchive({
       throw new Error(`generated public release manifest is invalid:\n${violations.join('\n')}`);
     if (contractArtifactDirectory)
       stagePublicContractArtifacts(distribution, manifest, contractArtifactDirectory, sourceRoot);
+    if (contractArtifactDirectory)
+      stageAgentIntegrationSkillArtifacts(distribution, contractArtifactDirectory, sourceRoot);
     return manifest;
   } finally {
     rmSync(sourceRoot, { recursive: true, force: true });

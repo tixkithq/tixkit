@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import {
   buildProviderDependencyInventoryArtifact,
+  providerDependencyInventory,
   providerDependencyViolations,
   renderProviderDependencyInventory,
   validateProviderDependencyInventoryArtifact,
@@ -93,8 +94,9 @@ function fixture({
 
 test('checked-in manifests and provider SDK imports match the registry', () => {
   const registry = loadProviderIntegrationRegistry(repositoryRoot);
-  assert.deepEqual(providerDependencyViolations(repositoryRoot, registry), []);
-  const inventory = renderProviderDependencyInventory(repositoryRoot, registry);
+  const audit = providerDependencyInventory(repositoryRoot, registry);
+  assert.deepEqual(providerDependencyViolations(repositoryRoot, registry, audit), []);
+  const inventory = renderProviderDependencyInventory(repositoryRoot, registry, audit);
   assert.ok(
     inventory.some(({ dependency, usage }) => dependency === 'stripe' && usage === 'runtime'),
   );
@@ -271,6 +273,97 @@ test('rejects SDK imports outside approved paths and missing direct dependencies
       'packages/api/provider.integration.test.ts',
       "await import(String('mystery-sdk'));\n",
     );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/split-binding.test.ts',
+      "const prefix = 'mystery-'; const suffix = 'sdk'; await import(prefix + suffix);\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/split-template.test.ts',
+      "const prefix = 'mystery-'; await import(`${prefix}sdk`);\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/multiline-bare.test.ts',
+      "import\n'mystery-sdk';\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/multiline-from.test.ts',
+      "import { Provider }\nfrom\n'mystery-sdk';\nvoid Provider;\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/multiline-import-equals.test.ts',
+      "import Provider = require(\n'mystery-sdk'\n);\nvoid Provider;\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/computed-require.test.ts',
+      "module['requ' + 'ire']('mystery-sdk');\n",
+    );
+    const longComment = `/*${'x'.repeat(700)}*/`;
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/comment-gap-bare.test.ts',
+      `import ${longComment} 'mystery-sdk';\n`,
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/comment-gap-from.test.ts',
+      `import { Provider } from ${longComment} 'mystery-sdk';\nvoid Provider;\n`,
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/aliased-module.test.ts',
+      "const mod = module; mod['requ' + 'ire']('mystery-sdk');\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/destructured-module.test.ts',
+      "const { require: load } = module; load('mystery-sdk');\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/assigned-module.test.ts',
+      "let mod; mod = module; mod['requ' + 'ire']('mystery-sdk');\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/assigned-destructured-module.test.ts',
+      "let load; ({ require: load } = module); load('mystery-sdk');\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/conditional-module.test.ts',
+      "const mod = enabled ? module : fallback; mod['requ' + 'ire']('mystery-sdk');\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/array-module.test.ts',
+      "const mod = [module][0]; mod['requ' + 'ire']('mystery-sdk');\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/comment-semicolon-import.test.ts',
+      "import { Provider /* ; */ } from 'mystery-sdk';\nvoid Provider;\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/comment-semicolon-export.test.ts',
+      "export { Provider /* ; */ } from 'mystery-sdk';\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/url-string-before-import.test.ts',
+      "const documentation = 'https://example.test/path'; import 'mystery-sdk'; void documentation;\n",
+    );
+    write(
+      dynamic.root,
+      'packages/api/src/__tests__/literal-dynamic-import.test.ts',
+      "const Provider = (await import('mystery-sdk')).default; void Provider;\n",
+    );
     const violations = providerDependencyViolations(dynamic.root, dynamic.registry);
     assert.ok(
       violations.some((violation) => violation.includes('unapproved.test.ts')),
@@ -284,6 +377,37 @@ test('rejects SDK imports outside approved paths and missing direct dependencies
       violations.some((violation) => violation.includes('provider.integration.test.ts')),
       violations.join('\n'),
     );
+    assert.ok(
+      violations.some((violation) => violation.includes('split-binding.test.ts')),
+      violations.join('\n'),
+    );
+    assert.ok(
+      violations.some((violation) => violation.includes('split-template.test.ts')),
+      violations.join('\n'),
+    );
+    for (const path of [
+      'multiline-bare.test.ts',
+      'multiline-from.test.ts',
+      'multiline-import-equals.test.ts',
+      'computed-require.test.ts',
+      'comment-gap-bare.test.ts',
+      'comment-gap-from.test.ts',
+      'aliased-module.test.ts',
+      'destructured-module.test.ts',
+      'assigned-module.test.ts',
+      'assigned-destructured-module.test.ts',
+      'conditional-module.test.ts',
+      'array-module.test.ts',
+      'comment-semicolon-import.test.ts',
+      'comment-semicolon-export.test.ts',
+      'url-string-before-import.test.ts',
+      'literal-dynamic-import.test.ts',
+    ]) {
+      assert.ok(
+        violations.some((violation) => violation.includes(path)),
+        `${path}:\n${violations.join('\n')}`,
+      );
+    }
   } finally {
     rmSync(dynamic.root, { recursive: true, force: true });
   }

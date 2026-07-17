@@ -83,6 +83,7 @@
       "packages/admin-table-core",
       "packages/agent-protocol",
       "packages/api",
+      "packages/api-integration-skill",
       "packages/checkout-headless",
       "packages/cli",
       "packages/content-core",
@@ -217,6 +218,7 @@
       "apps/docs/public/contracts",
       "apps/docs/src/generated",
       "artifacts/api",
+      "artifacts/api-integration-skills",
       "graphify-out"
     ],
     "historyValidation": "full",
@@ -269,6 +271,7 @@
     "packages": [
       { "path": "packages/admin-table-core", "ecosystem": "npm" },
       { "path": "packages/agent-protocol", "ecosystem": "npm" },
+      { "path": "packages/api-integration-skill", "ecosystem": "npm" },
       { "path": "packages/checkout-headless", "ecosystem": "npm" },
       { "path": "packages/content-core", "ecosystem": "npm" },
       { "path": "packages/content-email", "ecosystem": "npm" },
@@ -302,6 +305,7 @@
       { "name": "checkout", "dockerfile": "Dockerfile.checkout" }
     ],
     "contracts": [
+      "artifacts/api/2026-08-21",
       "artifacts/api/2026-08-20",
       "artifacts/api/2026-08-19",
       "artifacts/api/2026-08-18",
@@ -371,6 +375,18 @@
       "packages/portability/schemas/canonical-json-v1-vectors.json",
       "packages/embed-core/schemas/checkout-message.schema.json",
       "packages/embed-core/schemas/lifecycle.schema.json"
+    ],
+    "agentIntegrationSkills": [
+      {
+        "path": "artifacts/api-integration-skills/tixkit-api-2026-08-21",
+        "apiVersion": "2026-08-21",
+        "releaseManifestSha256": "52f02b8845d16339ad2dc6594b1d4a41495ccd574205f57ccc2be8a785672c5d"
+      },
+      {
+        "path": "artifacts/api-integration-skills/tixkit-api-2026-08-20",
+        "apiVersion": "2026-08-20",
+        "releaseManifestSha256": "1ce1155c2a9661c394b97ef12bba0aec62f49c5cf1d737704e29df8a777c4c62"
+      }
     ],
     "selfHostedProfiles": {
       "compact": "infra/compact/compose.yml",

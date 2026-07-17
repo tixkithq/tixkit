@@ -1,0 +1,51 @@
+{
+  "name": "@tixkit/api-integration-skill",
+  "version": "0.1.0",
+  "description": "Generate a version-bound coding-agent skill from an immutable Tixkit API release",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/api-integration-skill"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "tixkit-api-skill": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "!dist/.tsbuildinfo",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "lint": "oxlint src",
+    "test:unit": "vitest run",
+    "prepack": "bun run build && chmod +x dist/cli.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "^4.1.0"
+  }
+}

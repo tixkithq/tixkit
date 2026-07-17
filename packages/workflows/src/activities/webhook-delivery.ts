@@ -39,6 +39,23 @@ type WebhookHttpResponse = {
   response: string;
 };
 
+export type ValidatedWebhookTarget = Readonly<{
+  protocol: 'https:';
+  hostname: string;
+  port: number;
+  path: string;
+}>;
+
+export function createValidatedWebhookTarget(rawUrl: string): ValidatedWebhookTarget {
+  const url = parseWebhookDeliveryUrl(rawUrl);
+  return Object.freeze({
+    protocol: 'https:' as const,
+    hostname: url.hostname,
+    port: url.port ? Number(url.port) : 443,
+    path: `${url.pathname}${url.search}`,
+  });
+}
+
 type WebhookDeliveryAttempt = Awaited<ReturnType<WebhookDeliveryRepository['findByAttempt']>>;
 type WebhookDeliveryResult = WorkflowActivityResult<{ statusCode: number; response: string }>;
 type EndpointDeadLetterResult = {
@@ -445,7 +462,7 @@ function postWebhook(
   rawUrl: string,
   input: { headers: Record<string, string>; body: string },
 ): Promise<WebhookHttpResponse> {
-  const url = parseWebhookDeliveryUrl(rawUrl);
+  const target = createValidatedWebhookTarget(rawUrl);
   const requestBody = input.body;
 
   return new Promise((resolve, reject) => {
@@ -469,10 +486,10 @@ function postWebhook(
     try {
       const request = httpsRequest(
         {
-          protocol: 'https:',
-          hostname: url.hostname,
-          port: url.port ? Number(url.port) : 443,
-          path: `${url.pathname}${url.search}`,
+          protocol: target.protocol,
+          hostname: target.hostname,
+          port: target.port,
+          path: target.path,
           method: 'POST',
           headers: {
             ...input.headers,

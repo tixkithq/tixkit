@@ -1,8 +1,174 @@
 import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { basename, join, relative, resolve, sep } from 'node:path';
 
 const gitExecutable = '/usr/bin/git';
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const generatedArtifactNamePattern =
+  /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/u;
+const agentSkillGeneratorMarker = '@tixkit/api-integration-skill:local-evaluation:v1';
+
+function safeGeneratedArtifactName(name) {
+  return (
+    typeof name === 'string' &&
+    generatedArtifactNamePattern.test(name) &&
+    !name.split('/').some((segment) => segment === '.' || segment === '..')
+  );
+}
+
+function regularTreeFiles(directory, root = directory) {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`${relative(root, path)} is a symbolic link`);
+    if (entry.isDirectory()) files.push(...regularTreeFiles(path, root));
+    else if (entry.isFile()) files.push(relative(root, path).split(sep).join('/'));
+    else throw new Error(`${relative(root, path)} is not a regular file`);
+  }
+  return files.sort();
+}
+
+export function agentIntegrationSkillViolations(manifest, root) {
+  const violations = [];
+  const declaredSkills = manifest.release.agentIntegrationSkills ?? [];
+  const declaredPaths = declaredSkills.map((entry) => entry.path);
+  const declaredVersions = declaredSkills.map((entry) => entry.apiVersion);
+  const duplicatePaths = declaredPaths.filter(
+    (path, index) => declaredPaths.indexOf(path) !== index,
+  );
+  const duplicateVersions = declaredVersions.filter(
+    (version, index) => declaredVersions.indexOf(version) !== index,
+  );
+  if (duplicatePaths.length > 0 || duplicateVersions.length > 0) {
+    violations.push('agent integration skills must declare every retained version exactly once');
+  }
+  try {
+    const retainedPaths = readdirSync(resolve(root, 'artifacts/api-integration-skills'), {
+      withFileTypes: true,
+    })
+      .filter((entry) => {
+        if (!/^tixkit-api-\d{4}-\d{2}-\d{2}$/u.test(entry.name)) return false;
+        if (!entry.isDirectory()) {
+          violations.push(
+            `artifacts/api-integration-skills/${entry.name}: retained skill is not a directory`,
+          );
+          return false;
+        }
+        return true;
+      })
+      .map((entry) => `artifacts/api-integration-skills/${entry.name}`)
+      .sort((left, right) => right.localeCompare(left));
+    if (JSON.stringify(declaredPaths) !== JSON.stringify(retainedPaths)) {
+      violations.push(
+        'agent integration skill declarations must exactly match retained directories in newest-first order',
+      );
+    }
+    const activeApiVersion = JSON.parse(
+      readFileSync(resolve(root, 'apps/docs/public/openapi.json'), 'utf8'),
+    ).info?.version;
+    if (
+      typeof activeApiVersion !== 'string' ||
+      declaredSkills[0]?.apiVersion !== activeApiVersion ||
+      declaredSkills[0]?.path !== `artifacts/api-integration-skills/tixkit-api-${activeApiVersion}`
+    ) {
+      violations.push('active OpenAPI version must be the first declared agent integration skill');
+    }
+  } catch (error) {
+    violations.push(
+      `agent integration skill inventory cannot be verified: ${error instanceof Error ? error.message : 'invalid inventory'}`,
+    );
+  }
+  for (const entry of declaredSkills) {
+    const expectedPath = `artifacts/api-integration-skills/tixkit-api-${entry.apiVersion}`;
+    if (entry.path !== expectedPath) {
+      violations.push(`${entry.path}: agent integration skill path must be ${expectedPath}`);
+      continue;
+    }
+    const directory = resolve(root, entry.path);
+    try {
+      const releaseManifest = readFileSync(
+        resolve(root, `artifacts/api/${entry.apiVersion}/release-manifest.json`),
+      );
+      if (sha256(releaseManifest) !== entry.releaseManifestSha256) {
+        violations.push(`${entry.path}: source API release manifest digest does not match`);
+      }
+      const artifactManifestBytes = readFileSync(resolve(directory, 'artifact-manifest.json'));
+      const artifactManifest = JSON.parse(artifactManifestBytes.toString('utf8'));
+      if (
+        artifactManifest.schemaVersion !== 1 ||
+        artifactManifest.generator !== agentSkillGeneratorMarker ||
+        artifactManifest.apiVersion !== entry.apiVersion ||
+        artifactManifest.sourceReleaseManifestSha256 !== entry.releaseManifestSha256
+      ) {
+        violations.push(`${entry.path}: generated artifact manifest identity does not match`);
+      }
+      if (artifactManifest.generationMode !== 'local-evaluation') {
+        violations.push(`${entry.path}: checked-in skill must remain local-evaluation evidence`);
+      }
+      const checksums = new Map();
+      for (const line of readFileSync(resolve(directory, 'CHECKSUMS.sha256'), 'utf8')
+        .trim()
+        .split('\n')) {
+        const match =
+          /^([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*)$/u.exec(
+            line,
+          );
+        if (!match || !safeGeneratedArtifactName(match[2])) {
+          throw new Error('invalid checksum entry');
+        }
+        if (checksums.has(match[2])) throw new Error('duplicate checksum entry');
+        checksums.set(match[2], match[1]);
+      }
+      const declared = Array.isArray(artifactManifest.artifacts) ? artifactManifest.artifacts : [];
+      const declaredNames = new Set();
+      for (const artifact of declared) {
+        if (
+          !artifact ||
+          typeof artifact !== 'object' ||
+          !safeGeneratedArtifactName(artifact.name) ||
+          declaredNames.has(artifact.name) ||
+          typeof artifact.sha256 !== 'string' ||
+          !/^[a-f0-9]{64}$/u.test(artifact.sha256) ||
+          !Number.isSafeInteger(artifact.size) ||
+          artifact.size < 0
+        ) {
+          throw new Error('invalid or duplicate generated artifact metadata');
+        }
+        declaredNames.add(artifact.name);
+        const bytes = readFileSync(resolve(directory, artifact.name));
+        if (
+          bytes.byteLength !== artifact.size ||
+          sha256(bytes) !== artifact.sha256 ||
+          checksums.get(artifact.name) !== artifact.sha256
+        ) {
+          violations.push(`${entry.path}: ${artifact.name} does not match generated metadata`);
+        }
+      }
+      if (checksums.get('artifact-manifest.json') !== sha256(artifactManifestBytes)) {
+        violations.push(`${entry.path}: artifact-manifest.json checksum does not match`);
+      }
+      const expectedFiles = [
+        ...declared.map((artifact) => artifact.name),
+        'artifact-manifest.json',
+        'CHECKSUMS.sha256',
+      ].sort();
+      if (JSON.stringify(regularTreeFiles(directory)) !== JSON.stringify(expectedFiles)) {
+        violations.push(`${entry.path}: generated file inventory is incomplete or contains extras`);
+      }
+      if (
+        JSON.stringify([...checksums.keys()].sort()) !==
+        JSON.stringify(expectedFiles.filter((name) => name !== 'CHECKSUMS.sha256'))
+      ) {
+        violations.push(`${entry.path}: checksum inventory is incomplete or contains extras`);
+      }
+    } catch (error) {
+      violations.push(`${entry.path}: ${error instanceof Error ? error.message : 'invalid skill'}`);
+    }
+  }
+  return violations;
+}
 
 const boundaryControlPaths = new Set([
   'distribution/public-distribution.json',
@@ -763,6 +929,11 @@ export function validatePublicDistribution(manifest, root, schema) {
       violations.push(`stale release image Dockerfile classification: ${dockerfile}`);
   for (const contract of manifest.release.contracts)
     validateExistingPath(root, contract, 'release.contracts', violations);
+  for (const skill of manifest.release.agentIntegrationSkills ?? [])
+    validateExistingPath(root, skill.path, 'release.agentIntegrationSkills', violations, {
+      kind: 'directory',
+    });
+  violations.push(...agentIntegrationSkillViolations(manifest, root));
   const apiContractPaths = manifest.release.contracts.filter((contract) =>
     /^artifacts\/api\/\d{4}-\d{2}-\d{2}$/u.test(contract),
   );

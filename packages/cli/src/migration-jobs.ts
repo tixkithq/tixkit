@@ -44,7 +44,7 @@ export type MigrationCommandResult = {
 const JOB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u;
 
 export class MigrationJobClient {
-  readonly #apiBaseUrl: URL;
+  readonly #apiBaseUrl: string;
   readonly #apiKey: string;
   readonly #fetch: typeof globalThis.fetch;
 
@@ -113,7 +113,7 @@ export class MigrationJobClient {
   async #request(path: string, init: RequestInit = {}): Promise<MigrationCommandResult> {
     let response: Response;
     try {
-      response = await this.#fetch(new URL(path, this.#apiBaseUrl), {
+      response = await this.#fetch(issueMigrationJobRequestUrl(this.#apiBaseUrl, path), {
         ...init,
         headers: {
           accept: 'application/json',
@@ -185,8 +185,14 @@ export function formatMigrationResult(result: MigrationCommandResult, json: bool
   return JSON.stringify(result.data ?? { ok: true, status: result.status }, null, 2);
 }
 
-function normalizeApiBaseUrl(value: string): URL {
-  const url = new URL(value);
+export function issueMigrationJobRequestUrl(apiBaseUrl: string, path: string): string {
+  if (containsControlCharacter(apiBaseUrl) || containsControlCharacter(path)) {
+    throw new Error('Migration API URLs must not contain control characters.');
+  }
+  if (!path || path.startsWith('/') || path.includes('\\')) {
+    throw new Error('Migration API path must be relative to the configured API base.');
+  }
+  const url = new URL(apiBaseUrl);
   if (!['http:', 'https:'].includes(url.protocol))
     throw new Error('API base URL must use HTTP or HTTPS.');
   if (url.username || url.password) throw new Error('API base URL must not contain credentials.');
@@ -198,8 +204,17 @@ function normalizeApiBaseUrl(value: string): URL {
   }
   url.search = '';
   url.hash = '';
-  if (!url.pathname.endsWith('/')) url.pathname += '/';
-  return url;
+  url.pathname = `${url.pathname.replace(/\/+$/u, '')}/`;
+  const basePath = url.pathname;
+  const target = new URL(path, url);
+  if (target.origin !== url.origin || !target.pathname.startsWith(basePath)) {
+    throw new Error('Migration API path escapes the configured API base.');
+  }
+  return target.toString();
+}
+
+function normalizeApiBaseUrl(value: string): string {
+  return issueMigrationJobRequestUrl(value, '.').replace(/\.$/u, '');
 }
 
 function encodeJobId(jobId: string): string {
@@ -222,4 +237,11 @@ function safeErrorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function containsControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
 }

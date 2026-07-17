@@ -9,7 +9,7 @@ import { acquireRepositoryMutationLock } from './helpers/repository-mutation-loc
 const root = resolve(import.meta.dirname, '../..');
 const releaseRepositoryMutationLock = await acquireRepositoryMutationLock(root);
 after(releaseRepositoryMutationLock);
-const currentVersion = '2026-08-20';
+const currentVersion = '2026-08-21';
 const currentReleaseManifest = JSON.parse(
   readFileSync(resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`), 'utf8'),
 );
@@ -79,6 +79,12 @@ test(
     assert.equal(manifest.provenance.reproducible, true);
     assert.ok(
       manifest.provenance.excludedGeneratedPaths.includes('apps/admin-dashboard/next-env.d.ts'),
+    );
+    assert.ok(
+      manifest.provenance.excludedGeneratedPaths.includes('artifacts/api-integration-skills/'),
+    );
+    assert.ok(
+      manifest.provenance.excludedGeneratedPaths.includes('distribution/public-distribution.json'),
     );
     if (manifest.provenance.worktreeState === 'modified') {
       assert.equal(manifest.commit, null);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getServerEventPageBootstrap } from '@/lib/api-server';
+import { getServerEventPageBootstrap, issueCheckoutServerApiUrl } from '@/lib/api-server';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -49,5 +49,16 @@ describe('checkout server API transport', () => {
     expect(result.event.mediaAssets?.[0]?.renditions[0]?.url).toBe(
       'http://localhost:4000/media/cover',
     );
+  });
+
+  it.each([
+    ['https://user:secret@api.example.test', '/v1/public/events/evt_1/page-bootstrap'],
+    ['file:///tmp/socket', '/v1/public/events/evt_1/page-bootstrap'],
+    ['https://api.example.test/base', '/v1/public/events/evt_1/page-bootstrap'],
+    ['https://api.example.test', '//evil.example/v1/public/events/evt_1/page-bootstrap'],
+    ['https://api.example.test', '/v1/public/events/%2e%2e/page-bootstrap'],
+    ['https://api.example.test', '/v1/public/events/evt_1/page-bootstrap\nX-Test: yes'],
+  ])('rejects a hostile origin or path before transport: %s %s', (origin, path) => {
+    expect(() => issueCheckoutServerApiUrl(origin, path)).toThrow();
   });
 });

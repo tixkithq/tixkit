@@ -13,6 +13,7 @@
     "apps/sdk-sveltekit-demo/package.json",
     "packages/admin-table-core/package.json",
     "packages/agent-protocol/package.json",
+    "packages/api-integration-skill/package.json",
     "packages/api/package.json",
     "packages/checkout-headless/package.json",
     "packages/cli/package.json",
@@ -42,6 +43,593 @@
     "packages/shared/package.json",
     "packages/widget/package.json",
     "packages/workflows/package.json"
+  ],
+  "transportExecutors": [
+    {
+      "path": "packages/provider-clients/src/index.ts",
+      "export": "executeProviderHttp",
+      "allowedCallPaths": ["packages/provider-clients/src/index.ts"],
+      "allowedAuthorityIds": ["provider-base-url"]
+    }
+  ],
+  "networkTargetAuthorities": [
+    {
+      "id": "admin-platform-api-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/admin-dashboard/src/lib/api-http.ts",
+        "export": "resolveAdminApiUrl",
+        "sha256": "d0db36f38c2276c7fc8863b930eb705489a08c3787f9b8e32c48b18c93cdcf68"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/admin-dashboard/src/lib/api-http.ts",
+          "methods": ["DELETE", "GET", "PATCH", "POST", "PUT"]
+        },
+        {
+          "path": "apps/admin-dashboard/src/lib/export-jobs.ts",
+          "methods": ["GET"]
+        },
+        {
+          "path": "apps/admin-dashboard/src/lib/scan-activity.ts",
+          "methods": ["GET"]
+        }
+      ],
+      "outputShape": "absolute-url-string-or-undefined",
+      "runtimeEvidencePaths": ["apps/admin-dashboard/src/lib/api-http.test.ts"]
+    },
+    {
+      "id": "admin-server-api-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/admin-dashboard/src/lib/api-server.ts",
+        "export": "issueServerAdminApiUrl",
+        "sha256": "5c09182c8b09895ebd8a67d05573abc7e553384f084ab80ca0016c297be8a71e"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/admin-dashboard/src/lib/api-server.ts",
+          "methods": ["GET"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/admin-dashboard/src/lib/api-server.test.ts"]
+    },
+    {
+      "id": "admin-upload-completion-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/admin-dashboard/src/lib/api.ts",
+        "export": "issueAdminUploadCompletionUrl",
+        "sha256": "a1c241be290c9cd9c57b324114ae785870da5105d8a677b0b99075c5dd9c4c4d"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/admin-dashboard/src/lib/api.ts",
+          "methods": ["POST"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/admin-dashboard/src/lib/api-network-targets.test.ts"]
+    },
+    {
+      "id": "admin-upload-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/admin-dashboard/src/lib/api.ts",
+        "export": "issueAdminUploadUrl",
+        "sha256": "a1c241be290c9cd9c57b324114ae785870da5105d8a677b0b99075c5dd9c4c4d"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/admin-dashboard/src/lib/api.ts",
+          "methods": ["PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/admin-dashboard/src/lib/api-network-targets.test.ts"]
+    },
+    {
+      "id": "api-explorer-request-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/docs/src/components/api-explorer-target.ts",
+        "export": "issueApiExplorerRequestUrl",
+        "sha256": "84bbffacc90e81eb5ca8f2babf3f3a2d018b9cbcf3ca385867a0833c0b31f603"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/docs/src/components/api-explorer-target.ts",
+          "methods": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/docs/src/__tests__/api-explorer-target.test.ts"]
+    },
+    {
+      "id": "checkout-api-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/checkout/src/lib/api.ts",
+        "export": "issueCheckoutApiUrl",
+        "sha256": "220291929abbf4830a62395fc0012fb07e0cdb44d5f5d55bc1e5766964f972a2"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/checkout/src/lib/api.ts",
+          "methods": ["DELETE", "GET", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/checkout/src/__tests__/api.test.ts"]
+    },
+    {
+      "id": "checkout-headless-request-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/checkout-headless/src/request-target.ts",
+        "export": "issueCheckoutHeadlessRequestUrl",
+        "sha256": "613940e919e292f6c3a1115a83abe0df2d994bb796aa96359d73aefce0b25b7f"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/checkout-headless/src/index.ts",
+          "methods": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/checkout-headless/src/__tests__/controller.test.ts"]
+    },
+    {
+      "id": "checkout-public-widget-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/checkout/public/tixkit-widget.js",
+        "export": "issueWidgetRuntimeUrl",
+        "sha256": "ea97a3a11ae791c004f0fbb484fdd8a80c0a66ad94c3bab125bc3227e04ae71c"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/checkout/public/tixkit-widget.js",
+          "methods": ["GET", "POST"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/widget/src/__tests__/index.test.ts"]
+    },
+    {
+      "id": "checkout-rum-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/checkout/src/components/web-vitals-reporter.tsx",
+        "export": "issueBuyerRumUrl",
+        "sha256": "74f327ea05eb50a712720cba5035fee7ad303fce36c1151d98cfea5ec32062d8"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/checkout/src/components/web-vitals-reporter.tsx",
+          "methods": ["POST"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/checkout/src/__tests__/web-vitals-reporter.test.tsx"]
+    },
+    {
+      "id": "checkout-server-api-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/checkout/src/lib/api-server.ts",
+        "export": "issueCheckoutServerApiUrl",
+        "sha256": "9c39c83098885a0ed31129d78e837a662edebb96fb7ad8852d1d42a0a9db216b"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/checkout/src/lib/api-server.ts",
+          "methods": ["GET"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/checkout/src/__tests__/api-server.test.ts"]
+    },
+    {
+      "id": "checkout-upload-completion-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/checkout/src/lib/api.ts",
+        "export": "issueCheckoutUploadCompletionUrl",
+        "sha256": "220291929abbf4830a62395fc0012fb07e0cdb44d5f5d55bc1e5766964f972a2"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/checkout/src/lib/api.ts",
+          "methods": ["POST"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/checkout/src/__tests__/api.test.ts"]
+    },
+    {
+      "id": "checkout-upload-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/checkout/src/lib/api.ts",
+        "export": "issueCheckoutUploadUrl",
+        "sha256": "220291929abbf4830a62395fc0012fb07e0cdb44d5f5d55bc1e5766964f972a2"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/checkout/src/lib/api.ts",
+          "methods": ["PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["apps/checkout/src/__tests__/api.test.ts"]
+    },
+    {
+      "id": "contract-test-request-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/contract-tests/src/runtime-target.ts",
+        "export": "issueContractTestRequestUrl",
+        "sha256": "bf8a6dcbbcdf434970aa64ea1d016020ab05bb4ad9cf0d7ac85c71b07b60e276"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/contract-tests/src/runtime-target.ts",
+          "methods": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/contract-tests/src/__tests__/runtime-target.test.ts"]
+    },
+    {
+      "id": "developer-api-health-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "apps/admin-dashboard/src/features/developer/developer-console-guide.tsx",
+        "export": "issueDeveloperApiHealthUrl",
+        "sha256": "d5e72978734829aaa3662361427782cbd78aa730bec17f662ab7be4cfe6a3fb5"
+      },
+      "allowedSinks": [
+        {
+          "path": "apps/admin-dashboard/src/features/developer/developer-console-guide.tsx",
+          "methods": ["GET"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": [
+        "apps/admin-dashboard/src/features/developer/developer-console-guide.network.test.ts"
+      ]
+    },
+    {
+      "id": "migration-pinned-fetch",
+      "kind": "validated-migration-source-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/workflows/src/activities/migration-preparation.ts",
+        "export": "createPinnedMigrationFetch",
+        "sha256": "12028e61e68c5f8d1b8cd4286784dbbbc842d8f34059ed0b104b9585150e29aa"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/workflows/src/activities/migration-preparation.ts",
+          "methods": ["GET"]
+        }
+      ],
+      "outputShape": "pinned-fetch-function",
+      "runtimeEvidencePaths": ["packages/workflows/src/__tests__/migration-preparation.test.ts"]
+    },
+    {
+      "id": "migration-request-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/cli/src/migration-jobs.ts",
+        "export": "issueMigrationJobRequestUrl",
+        "sha256": "a6eddbc4943d118ea24a11d31f57a120bab088ca9d7e893e802e7073730bb0d8"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/cli/src/migration-jobs.ts",
+          "methods": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/cli/src/__tests__/migration-jobs.test.ts"]
+    },
+    {
+      "id": "prometheus-pushgateway-client",
+      "kind": "configured-pushgateway-origin",
+      "issuer": {
+        "type": "package-export",
+        "package": "prom-client",
+        "export": "Pushgateway"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/shared/src/observability.ts",
+          "methods": ["DELETE", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "runtime-client-instance",
+      "runtimeEvidencePaths": ["packages/shared/src/__tests__/observability.test.ts"]
+    },
+    {
+      "id": "provider-base-url",
+      "kind": "provider-validated-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/provider-clients/src/index.ts",
+        "export": "providerBaseUrl",
+        "sha256": "03e5bfa4311d9b1ea8afc705db0eae794de9093106222c6fea947016bbe438cc"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/provider-clients/src/index.ts",
+          "methods": ["DELETE", "GET", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/provider-clients/src/__tests__/index.test.ts"]
+    },
+    {
+      "id": "provider-http-executor",
+      "kind": "provider-validated-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/provider-clients/src/index.ts",
+        "export": "executeProviderHttp",
+        "sha256": "03e5bfa4311d9b1ea8afc705db0eae794de9093106222c6fea947016bbe438cc"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/provider-clients/src/index.ts",
+          "methods": ["DELETE", "GET", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "network-operation-result",
+      "runtimeEvidencePaths": ["packages/provider-clients/src/__tests__/index.test.ts"]
+    },
+    {
+      "id": "quickstart-health-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/cli/src/quickstart.ts",
+        "export": "issueQuickstartHealthUrl",
+        "sha256": "217c763a131f249a9c1e86f352064b9684f092035c0ff41a24e521e89707ddf7"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/cli/src/quickstart.ts",
+          "methods": ["GET"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/cli/src/__tests__/quickstart-network.test.ts"]
+    },
+    {
+      "id": "sdk-js-request-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/sdk-js/src/index.ts",
+        "export": "issueTixkitApiRequestUrl",
+        "sha256": "7e99dbe2c9adee3cde22c10ef2105cb92b7b6839d2877e9fed5ad3f5e53e6d68"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/sdk-js/src/index.ts",
+          "methods": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/sdk-js/src/__tests__/index.test.ts"]
+    },
+    {
+      "id": "validated-webhook-delivery",
+      "kind": "validated-webhook-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/workflows/src/activities/webhook-delivery.ts",
+        "export": "createValidatedWebhookTarget",
+        "sha256": "70f4eb8463991fb97f2d9d8c408ede548f64550d842f00078f9609e2aafb610f"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/workflows/src/activities/webhook-delivery.ts",
+          "methods": ["POST"]
+        }
+      ],
+      "outputShape": "url-properties",
+      "runtimeEvidencePaths": ["packages/workflows/src/__tests__/webhook-delivery-activity.test.ts"]
+    },
+    {
+      "id": "widget-runtime-url",
+      "kind": "configured-tixkit-origin",
+      "issuer": {
+        "type": "workspace-export",
+        "path": "packages/widget/src/index.ts",
+        "export": "issueWidgetRuntimeUrl",
+        "sha256": "20590d2d9d32be523704c912fe2351f3bf2574727f8e7fd961b6ce5bd3fda610"
+      },
+      "allowedSinks": [
+        {
+          "path": "packages/widget/src/index.ts",
+          "methods": ["GET", "POST"]
+        }
+      ],
+      "outputShape": "absolute-url-string",
+      "runtimeEvidencePaths": ["packages/widget/src/__tests__/index.test.ts"]
+    }
+  ],
+  "nonNetworkReceiverTypes": [
+    {
+      "id": "checkout-headless-storage",
+      "path": "packages/checkout-headless/src/index.ts",
+      "typeName": "CheckoutStorage",
+      "sha256": "0574d1d181209266cabd5f8993f7e2c513e7f85ccfc11e7078dcea48694d73fb",
+      "allowedMethods": ["get"],
+      "runtimeEvidencePaths": ["packages/checkout-headless/src/__tests__/controller.test.ts"]
+    },
+    {
+      "id": "migration-media-object-store",
+      "path": "packages/workflows/src/activities/migration-domain-committers.ts",
+      "typeName": "MigrationMediaObjectStore",
+      "sha256": "e7b6df8f3b0cde2042c01c9637f5fcf5e62c74778f48a90dcb38fb7fe965bf3c",
+      "allowedMethods": ["delete"],
+      "runtimeEvidencePaths": [
+        "packages/workflows/src/__tests__/migration-domain-committers.integration.test.ts"
+      ]
+    },
+    {
+      "id": "sdk-astro-tixkit-client",
+      "path": "packages/sdk-astro/src/server.ts",
+      "typeName": "TixkitClient",
+      "sha256": "39077f69c50802c3b899784be01d5e2bb3350accc17db4da8b58ad20af254711",
+      "allowedMethods": ["get"],
+      "runtimeEvidencePaths": ["packages/sdk-astro/src/__tests__/server.test.ts"]
+    }
+  ],
+  "nonProviderDynamicNetworkAllowances": [
+    {
+      "path": "apps/admin-dashboard/src/features/developer/developer-console-guide.tsx",
+      "allowedAuthorityIds": ["developer-api-health-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The developer console health probe accepts only URLs issued by its exact Platform API health resolver."
+    },
+    {
+      "path": "apps/admin-dashboard/src/lib/api-http.ts",
+      "allowedAuthorityIds": ["admin-platform-api-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The admin browser HTTP helper accepts only URLs issued by the exact shared Platform API resolver."
+    },
+    {
+      "path": "apps/admin-dashboard/src/lib/api-server.ts",
+      "allowedAuthorityIds": ["admin-server-api-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The admin server principal request accepts only URLs issued by its exact internal Platform API resolver."
+    },
+    {
+      "path": "apps/admin-dashboard/src/lib/api.ts",
+      "allowedAuthorityIds": ["admin-upload-completion-url", "admin-upload-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Admin artifact upload and completion requests accept only targets issued by their exact runtime-configured validators."
+    },
+    {
+      "path": "apps/admin-dashboard/src/lib/export-jobs.ts",
+      "allowedAuthorityIds": ["admin-platform-api-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The export stream accepts only URLs issued by the exact shared Platform API resolver."
+    },
+    {
+      "path": "apps/admin-dashboard/src/lib/scan-activity.ts",
+      "allowedAuthorityIds": ["admin-platform-api-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The check-in stream accepts only URLs issued by the exact shared Platform API resolver."
+    },
+    {
+      "path": "apps/checkout/public/tixkit-widget.js",
+      "allowedAuthorityIds": ["checkout-public-widget-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The reproducible public widget bundle accepts only targets issued by its exported runtime URL validator."
+    },
+    {
+      "path": "apps/checkout/src/components/web-vitals-reporter.tsx",
+      "allowedAuthorityIds": ["checkout-rum-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Buyer performance reports accept only URLs issued by the exact runtime-configured RUM endpoint resolver."
+    },
+    {
+      "path": "apps/checkout/src/lib/api-server.ts",
+      "allowedAuthorityIds": ["checkout-server-api-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Checkout server bootstrap requests accept only URLs issued by the exact internal Platform API resolver."
+    },
+    {
+      "path": "apps/checkout/src/lib/api.ts",
+      "allowedAuthorityIds": [
+        "checkout-api-url",
+        "checkout-upload-completion-url",
+        "checkout-upload-url"
+      ],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Checkout API and artifact requests accept only targets issued by their exact runtime-configured validators."
+    },
+    {
+      "path": "apps/docs/src/components/api-explorer-target.ts",
+      "allowedAuthorityIds": ["api-explorer-request-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The API explorer accepts only request URLs issued by its exact configured-origin and path validator."
+    },
+    {
+      "path": "packages/checkout-headless/src/index.ts",
+      "allowedAuthorityIds": ["checkout-headless-request-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The headless checkout client accepts only request URLs issued by its exact configured-origin validator."
+    },
+    {
+      "path": "packages/cli/src/migration-jobs.ts",
+      "allowedAuthorityIds": ["migration-request-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Migration commands accept only request URLs issued by the exact configured Platform API validator."
+    },
+    {
+      "path": "packages/cli/src/quickstart.ts",
+      "allowedAuthorityIds": ["quickstart-health-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Quickstart health checks accept only URLs issued from the exact fixed local-service target map."
+    },
+    {
+      "path": "packages/contract-tests/src/runtime-target.ts",
+      "allowedAuthorityIds": ["contract-test-request-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Contract-test requests accept only URLs issued by the exact configured runtime-target validator."
+    },
+    {
+      "path": "packages/sdk-js/src/index.ts",
+      "allowedAuthorityIds": ["sdk-js-request-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The JavaScript SDK accepts only request URLs issued by its exact configured Platform API validator."
+    },
+    {
+      "path": "packages/shared/src/observability.ts",
+      "allowedAuthorityIds": ["prometheus-pushgateway-client"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Metrics push and deletion use the exact prom-client Pushgateway runtime boundary."
+    },
+    {
+      "path": "packages/widget/src/index.ts",
+      "allowedAuthorityIds": ["widget-runtime-url"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "The embeddable widget accepts only navigation and API URLs issued by its exact runtime-target validator."
+    },
+    {
+      "path": "packages/workflows/src/activities/migration-preparation.ts",
+      "allowedAuthorityIds": ["migration-pinned-fetch"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Migration preparation uses the exact DNS-pinned HTTPS fetch capability with SSRF enforcement."
+    },
+    {
+      "path": "packages/workflows/src/activities/webhook-delivery.ts",
+      "allowedAuthorityIds": ["validated-webhook-delivery"],
+      "allowedEnvironmentVariables": [],
+      "rationale": "Webhook delivery is confined to the exact audited HTTPS delivery activity boundary."
+    }
   ],
   "nonProviderDependencies": [
     "@astrojs/check",
@@ -218,7 +806,10 @@
             "packages/workflows/src/**"
           ]
         },
-        { "package": "@opentelemetry/core", "paths": ["packages/workflows/src/**"] },
+        {
+          "package": "@opentelemetry/core",
+          "paths": ["packages/workflows/src/**"]
+        },
         {
           "package": "@opentelemetry/exporter-trace-otlp-http",
           "paths": ["packages/shared/src/**"]
@@ -227,7 +818,10 @@
           "package": "@opentelemetry/resources",
           "paths": ["packages/shared/src/**", "packages/workflows/src/**"]
         },
-        { "package": "@opentelemetry/sdk-node", "paths": ["packages/shared/src/**"] },
+        {
+          "package": "@opentelemetry/sdk-node",
+          "paths": ["packages/shared/src/**"]
+        },
         {
           "package": "@opentelemetry/sdk-trace-base",
           "paths": ["packages/shared/src/**", "packages/workflows/src/**"]
@@ -305,7 +899,7 @@
       "classification": "direct-http",
       "ownerPackages": ["packages/provider-clients/package.json"],
       "providerHosts": ["api.plivo.com"],
-      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedHostPaths": ["packages/provider-clients/src/index.ts"],
       "allowedNonExecutionHostPaths": [],
       "allowedImports": [],
       "allowedDependencies": [],
@@ -324,7 +918,7 @@
       "classification": "direct-http",
       "ownerPackages": ["packages/provider-clients/package.json"],
       "providerHosts": ["api.resend.com"],
-      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedHostPaths": ["packages/provider-clients/src/index.ts"],
       "allowedNonExecutionHostPaths": [],
       "allowedImports": [],
       "allowedDependencies": [],
@@ -350,7 +944,10 @@
           "package": "@aws-sdk/client-s3",
           "paths": ["packages/api/src/**", "packages/workflows/src/**"]
         },
-        { "package": "@aws-sdk/s3-request-presigner", "paths": ["packages/api/src/**"] }
+        {
+          "package": "@aws-sdk/s3-request-presigner",
+          "paths": ["packages/api/src/**"]
+        }
       ],
       "allowedDependencies": [
         {
@@ -409,7 +1006,7 @@
       "classification": "contained-sdk",
       "ownerPackages": ["packages/provider-clients/package.json"],
       "providerHosts": ["api.stripe.com"],
-      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedHostPaths": ["packages/provider-clients/src/index.ts"],
       "allowedNonExecutionHostPaths": ["apps/checkout/src/lib/checkout-security-headers.ts"],
       "allowedImports": [
         {
@@ -456,7 +1053,10 @@
       "allowedHostPaths": [],
       "allowedNonExecutionHostPaths": [],
       "allowedImports": [
-        { "package": "stripe", "paths": ["packages/provider-clients/src/stripe.ts"] }
+        {
+          "package": "stripe",
+          "paths": ["packages/provider-clients/src/stripe.ts"]
+        }
       ],
       "allowedDependencies": [
         {
@@ -480,7 +1080,7 @@
       "classification": "direct-http",
       "ownerPackages": ["packages/provider-clients/package.json"],
       "providerHosts": ["api.telnyx.com"],
-      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedHostPaths": ["packages/provider-clients/src/index.ts"],
       "allowedNonExecutionHostPaths": [],
       "allowedImports": [],
       "allowedDependencies": [],
@@ -502,19 +1102,34 @@
       "allowedHostPaths": [],
       "allowedNonExecutionHostPaths": [],
       "allowedImports": [
-        { "package": "@temporalio/activity", "paths": ["packages/workflows/src/**"] },
+        {
+          "package": "@temporalio/activity",
+          "paths": ["packages/workflows/src/**"]
+        },
         {
           "package": "@temporalio/client",
           "paths": ["packages/api/src/**", "packages/workflows/src/**"]
         },
-        { "package": "@temporalio/common", "paths": ["packages/workflows/src/**"] },
+        {
+          "package": "@temporalio/common",
+          "paths": ["packages/workflows/src/**"]
+        },
         {
           "package": "@temporalio/interceptors-opentelemetry",
           "paths": ["packages/api/src/**", "packages/workflows/src/**"]
         },
-        { "package": "@temporalio/testing", "paths": ["packages/workflows/src/__tests__/**"] },
-        { "package": "@temporalio/worker", "paths": ["packages/workflows/src/**"] },
-        { "package": "@temporalio/workflow", "paths": ["packages/workflows/src/**"] }
+        {
+          "package": "@temporalio/testing",
+          "paths": ["packages/workflows/src/__tests__/**"]
+        },
+        {
+          "package": "@temporalio/worker",
+          "paths": ["packages/workflows/src/**"]
+        },
+        {
+          "package": "@temporalio/workflow",
+          "paths": ["packages/workflows/src/**"]
+        }
       ],
       "allowedDependencies": [
         {
@@ -578,7 +1193,7 @@
       "classification": "direct-http",
       "ownerPackages": ["packages/provider-clients/package.json"],
       "providerHosts": ["api.twilio.com"],
-      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedHostPaths": ["packages/provider-clients/src/index.ts"],
       "allowedNonExecutionHostPaths": [],
       "allowedImports": [],
       "allowedDependencies": [],
@@ -597,7 +1212,7 @@
       "classification": "direct-http",
       "ownerPackages": ["packages/provider-clients/package.json"],
       "providerHosts": ["api.vonage.com", "rest.nexmo.com"],
-      "allowedHostPaths": ["packages/provider-clients/src/**"],
+      "allowedHostPaths": ["packages/provider-clients/src/index.ts"],
       "allowedNonExecutionHostPaths": [],
       "allowedImports": [],
       "allowedDependencies": [],

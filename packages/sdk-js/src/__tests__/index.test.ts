@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
   TixkitClient,
+  issueTixkitApiRequestUrl,
   TixkitApiError,
   isLaunchReadinessFailure,
   isArchivedEventFailure,
@@ -116,6 +117,35 @@ acceptMigrationJobInput({
 });
 
 describe('TixkitClient', () => {
+  it('issues contained API targets and rejects hostile origins and paths before fetch', async () => {
+    expect(issueTixkitApiRequestUrl('https://api.test', '/health')).toBe(
+      'https://api.test/v1/health',
+    );
+    expect(issueTixkitApiRequestUrl('http://localhost:4000', '/health')).toBe(
+      'http://localhost:4000/v1/health',
+    );
+    const fetchMock = vi.fn<typeof globalThis.fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      for (const apiBaseUrl of [
+        'http://api.test',
+        'https://user:secret@api.test',
+        'javascript:alert(1)',
+        'https://api.test\n',
+      ]) {
+        expect(() => new TixkitClient({ apiBaseUrl, maxRetries: 0 })).toThrow();
+      }
+      const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+      await expect(client.request('GET', '//attacker.test/orders')).rejects.toThrow(
+        /root-relative/u,
+      );
+      await expect(client.request('GET', '/%2e%2e/orders')).rejects.toThrow(/escapes/u);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('sends explicit test checkout mode only as a header', async () => {
     const fetchMock = mockFetch(201, { id: 'cs_1' });
     const client = new TixkitClient({
@@ -3907,7 +3937,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-20',
+        'X-Tixkit-Version': '2026-08-21',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
@@ -4008,7 +4038,7 @@ describe('TixkitClient new resource methods', () => {
       namespace,
       key: 'event_context',
       content,
-      retentionExpiresAt: '2026-08-20T00:00:00.000Z',
+      retentionExpiresAt: '2026-08-21T00:00:00.000Z',
       idempotencyKey: 'memory-create-000001',
     });
     await c.agentMemory.inspect(namespace, 'memory-inspect-00001');

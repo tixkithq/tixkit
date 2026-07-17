@@ -8,6 +8,7 @@ on:
       - 'packages/sdk-*/**'
       - 'packages/domain/**'
       - 'packages/contract-tests/**'
+      - 'packages/api-integration-skill/**'
       - 'apps/docs/src/components/**'
       - 'scripts/docs/generate-openapi-reference.mjs'
       - 'scripts/lib/openapi-compatibility.ts'
@@ -16,7 +17,10 @@ on:
       - 'scripts/__tests__/openapi-compatibility.test.ts'
       - 'scripts/__tests__/public-artifact-safety.test.ts'
       - 'artifacts/api/**'
+      - 'artifacts/api-integration-skills/**'
       - 'scripts/build-api-release.ts'
+      - 'scripts/build-api-integration-skill.ts'
+      - 'scripts/test-api-integration-skill-consumer.mjs'
       - 'scripts/__tests__/api-release.test.mjs'
       - 'apps/docs/public/contracts/**'
       - 'apps/docs/src/generated/api-release-index.ts'
@@ -55,6 +59,10 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Build release artifacts and fail on breaking changes
         run: bun run scripts/build-api-release.ts
+      - name: Build version-bound API integration skill
+        env:
+          ALLOW_LOCAL_API_SKILL_EVALUATION: '1'
+        run: bun run build:api-integration-skill
       - name: Resolve exact release directory
         id: release
         run: |
@@ -64,8 +72,9 @@ jobs:
           echo "dir=artifacts/api/${version}" >> "$GITHUB_OUTPUT"
       - name: Require synchronized checked-in artifacts and docs copies
         run: |
-          git diff --exit-code -- "${{ steps.release.outputs.dir }}" "apps/docs/public/contracts/${{ steps.release.outputs.version }}" "apps/docs/src/generated/api-release-index.ts"
-          test -z "$(git ls-files --others --exclude-standard -- "${{ steps.release.outputs.dir }}" "apps/docs/public/contracts/${{ steps.release.outputs.version }}" "apps/docs/src/generated/api-release-index.ts")"
+          skill_dir="artifacts/api-integration-skills/tixkit-api-${{ steps.release.outputs.version }}"
+          git diff --exit-code -- "${{ steps.release.outputs.dir }}" "$skill_dir" "apps/docs/public/contracts/${{ steps.release.outputs.version }}" "apps/docs/src/generated/api-release-index.ts"
+          test -z "$(git ls-files --others --exclude-standard -- "${{ steps.release.outputs.dir }}" "$skill_dir" "apps/docs/public/contracts/${{ steps.release.outputs.version }}" "apps/docs/src/generated/api-release-index.ts")"
       - name: Verify release checksums
         run: |
           (cd "${{ steps.release.outputs.dir }}" && sha256sum --check CHECKSUMS.sha256)
@@ -76,6 +85,7 @@ jobs:
           bun run --filter @tixkit/openapi test:unit
           node scripts/sdk-parity-matrix.mjs
           node scripts/test-contract-test-consumers.mjs
+          node scripts/test-api-integration-skill-consumer.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tixkit-api-contracts-${{ github.sha }}
@@ -102,6 +112,10 @@ jobs:
         env:
           ALLOW_BREAKING_API_RELEASE: '1'
         run: bun run scripts/build-api-release.ts
+      - name: Build version-bound API integration skill
+        env:
+          ALLOW_LOCAL_API_SKILL_EVALUATION: '1'
+        run: bun run build:api-integration-skill
       - name: Resolve and verify exact candidate
         id: release
         run: |
@@ -117,6 +131,7 @@ jobs:
           bun run --filter @tixkit/openapi test:unit
           node scripts/sdk-parity-matrix.mjs
           node scripts/test-contract-test-consumers.mjs
+          node scripts/test-api-integration-skill-consumer.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tixkit-api-contracts-${{ github.sha }}

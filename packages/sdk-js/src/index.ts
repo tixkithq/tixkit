@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-20';
+export const TIXKIT_API_VERSION = '2026-08-21';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -3619,7 +3619,7 @@ export class TixkitClient {
     },
   ): Promise<T> {
     const normalizedMethod = normalizeHttpMethod(method);
-    const url = new URL(`${this.apiBaseUrl}/v1${path}`);
+    const url = new URL(issueTixkitApiRequestUrl(this.apiBaseUrl, path));
 
     if (options?.params) {
       for (const [key, value] of Object.entries(options.params)) {
@@ -3716,7 +3716,7 @@ export class TixkitClient {
     },
   ): Promise<Response> {
     const normalizedMethod = normalizeHttpMethod(method);
-    const url = new URL(`${this.apiBaseUrl}/v1${path}`);
+    const url = new URL(issueTixkitApiRequestUrl(this.apiBaseUrl, path));
 
     if (options?.params) {
       for (const [key, value] of Object.entries(options.params)) {
@@ -3807,8 +3807,47 @@ function isBrowserRuntime(): boolean {
   return runtime.window !== undefined && runtime.document !== undefined;
 }
 
+const LOOPBACK_API_HOSTS = new Set(['127.0.0.1', '[::1]', '::1', 'localhost']);
+
+export function issueTixkitApiRequestUrl(apiBaseUrl: string, path: string): string {
+  if (containsUrlControlCharacter(apiBaseUrl) || containsUrlControlCharacter(path)) {
+    throw new Error('Tixkit API URLs must not contain control characters');
+  }
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) {
+    throw new Error('Tixkit API path must be root-relative within the configured API base');
+  }
+  const base = new URL(apiBaseUrl);
+  if (base.username || base.password) {
+    throw new Error('Tixkit API base URL must not contain credentials');
+  }
+  if (
+    base.protocol !== 'https:' &&
+    !(base.protocol === 'http:' && LOOPBACK_API_HOSTS.has(base.hostname))
+  ) {
+    throw new Error('Tixkit API base URL must use HTTPS, or HTTP on loopback only');
+  }
+  if (base.search || base.hash) {
+    throw new Error('Tixkit API base URL must not contain a query or fragment');
+  }
+  base.pathname = `${base.pathname.replace(/\/+$/u, '')}/`;
+  const apiRoot = new URL('v1/', base);
+  const target = new URL(path.slice(1), apiRoot);
+  if (target.origin !== apiRoot.origin || !target.pathname.startsWith(apiRoot.pathname)) {
+    throw new Error('Tixkit API path escapes the configured API base');
+  }
+  return target.toString();
+}
+
 function normalizeApiBaseUrl(value: string): string {
-  return value.replace(/\/+$/, '');
+  const sentinel = issueTixkitApiRequestUrl(value, '/__tixkit_base_validation__');
+  return sentinel.slice(0, -'/v1/__tixkit_base_validation__'.length);
+}
+
+function containsUrlControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
 }
 
 function validateTimeout(value: number): number {

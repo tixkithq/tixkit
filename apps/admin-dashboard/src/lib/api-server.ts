@@ -1,10 +1,49 @@
 import type { ApiResult, TixkitPrincipal } from './api';
 import { parseAdminServerRuntimeConfig } from './runtime-config-server';
 
+export function issueServerAdminApiUrl(origin: string, path: string): string {
+  const hasUnsafeCharacter = [...path].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 32 || codePoint === 127;
+  });
+  if (
+    hasUnsafeCharacter ||
+    !path.startsWith('/v1/') ||
+    path.startsWith('//') ||
+    path.includes('\\') ||
+    path.includes('@') ||
+    path.includes('#')
+  ) {
+    throw new Error('The server admin API path is invalid');
+  }
+  const base = new URL(origin);
+  if (
+    (base.protocol !== 'https:' && base.protocol !== 'http:') ||
+    base.username ||
+    base.password ||
+    base.pathname !== '/' ||
+    base.search ||
+    base.hash ||
+    /%(?:2e|2f|5c)/iu.test(path)
+  ) {
+    throw new Error('The server admin API origin or path is invalid');
+  }
+  const resolved = new URL(path, `${base.origin}/`);
+  if (
+    resolved.origin !== base.origin ||
+    resolved.username ||
+    resolved.password ||
+    !resolved.pathname.startsWith('/v1/')
+  ) {
+    throw new Error('The server admin API path is invalid');
+  }
+  return resolved.toString();
+}
+
 export async function getServerPrincipal(token: string): Promise<ApiResult<TixkitPrincipal>> {
   const config = parseAdminServerRuntimeConfig();
   try {
-    const response = await fetch(`${config.internalApiBaseUrl}/v1/me`, {
+    const response = await fetch(issueServerAdminApiUrl(config.internalApiBaseUrl, '/v1/me'), {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -5,13 +6,16 @@ import Ajv2020 from 'ajv/dist/2020.js';
 export const PROVIDER_REGISTRY_PATH = 'distribution/provider-integration-registry.json';
 export const PROVIDER_REGISTRY_SCHEMA_PATH =
   'distribution/provider-integration-registry.schema.json';
+const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'];
 
 export function discoverWorkspacePackageManifests(root) {
   const repositoryRoot = resolve(root);
   const manifests = [];
   for (const workspaceRoot of ['apps', 'packages']) {
     const absoluteWorkspaceRoot = resolve(repositoryRoot, workspaceRoot);
-    for (const entry of readdirSync(absoluteWorkspaceRoot, { withFileTypes: true })) {
+    for (const entry of readdirSync(absoluteWorkspaceRoot, {
+      withFileTypes: true,
+    })) {
       if (!entry.isDirectory()) continue;
       const manifest = join(absoluteWorkspaceRoot, entry.name, 'package.json');
       if (existsSync(manifest)) {
@@ -32,6 +36,85 @@ export function registrySdkPackages(registry) {
     registry.integrations.flatMap(({ allowedImports }) =>
       allowedImports.map(({ package: packageName }) => packageName),
     ),
+  );
+}
+
+export function registryTransportExecutors(registry) {
+  const executors = new Map();
+  for (const executor of registry.transportExecutors) {
+    const exports = executors.get(executor.path) ?? new Set();
+    exports.add(executor.export);
+    executors.set(executor.path, exports);
+  }
+  return executors;
+}
+
+export function registryTransportExecutorPolicies(registry) {
+  return new Map(registry.transportExecutors.map((executor) => [executor.export, executor]));
+}
+
+export function registryNonProviderDynamicNetworkAllowances(registry) {
+  return new Map(
+    registry.nonProviderDynamicNetworkAllowances.map((allowance) => [allowance.path, allowance]),
+  );
+}
+
+export function registryNetworkTargetAuthorities(registry) {
+  return new Map(registry.networkTargetAuthorities.map((authority) => [authority.id, authority]));
+}
+
+export function registryNonNetworkReceiverTypes(registry) {
+  return new Map(
+    registry.nonNetworkReceiverTypes.map((receiver) => [
+      `${receiver.path}#${receiver.typeName}`,
+      receiver,
+    ]),
+  );
+}
+
+export function sourceSha256(source) {
+  return createHash('sha256').update(source).digest('hex');
+}
+
+export function dynamicNetworkTargetAllowed(allowance, authority, target) {
+  if (
+    allowance === undefined ||
+    authority === undefined ||
+    target === undefined ||
+    typeof target.authorityId !== 'string' ||
+    target.authorityId !== authority.id ||
+    !allowance.allowedAuthorityIds.includes(authority.id) ||
+    typeof target.method !== 'string' ||
+    typeof target.kind !== 'string' ||
+    target.kind !== authority.kind ||
+    typeof target.outputShape !== 'string' ||
+    target.outputShape !== authority.outputShape ||
+    target.mutated === true ||
+    (Array.isArray(target.unknownConstituents) && target.unknownConstituents.length > 0) ||
+    !Array.isArray(target.environmentVariables) ||
+    !authority.allowedSinks.some((sink) => {
+      if (sink.path !== allowance.path) return false;
+      return target.method === '*'
+        ? HTTP_METHODS.every((method) => sink.methods.includes(method))
+        : sink.methods.includes(target.method);
+    })
+  ) {
+    return false;
+  }
+  return target.environmentVariables.every((name) =>
+    allowance.allowedEnvironmentVariables.includes(name),
+  );
+}
+
+export function registryAllowsDynamicNetworkTarget(registry, path, target) {
+  const authority =
+    typeof target?.authorityId === 'string'
+      ? registryNetworkTargetAuthorities(registry).get(target.authorityId)
+      : undefined;
+  return dynamicNetworkTargetAllowed(
+    registryNonProviderDynamicNetworkAllowances(registry).get(path),
+    authority,
+    target,
   );
 }
 
@@ -81,6 +164,9 @@ export function providerIntegrationRegistryViolations(registry, root, { checkPat
   const hosts = new Map();
   const auditedPackages = new Set(registry.dependencyAuditPackages);
   const nonProviderDependencies = new Set(registry.nonProviderDependencies);
+  const transportExecutorPaths = new Set(registry.transportExecutors.map(({ path }) => path));
+  const authorityIds = new Set();
+  const authorityIssuerTuples = new Set();
 
   const sortedUnique = (values) =>
     values.length === new Set(values).size &&
@@ -91,6 +177,206 @@ export function providerIntegrationRegistryViolations(registry, root, { checkPat
   }
   if (!sortedUnique(registry.nonProviderDependencies)) {
     violations.push('nonProviderDependencies must be unique and sorted');
+  }
+  const transportExecutorKeys = registry.transportExecutors.map(
+    (executor) => `${executor.path}#${executor.export}`,
+  );
+  if (!sortedUnique(transportExecutorKeys)) {
+    violations.push('transportExecutors must be unique and sorted by path and export');
+  }
+  for (const executor of registry.transportExecutors) {
+    if (executor.path.endsWith('/**')) {
+      violations.push(`transport executor must target an exact source file: ${executor.path}`);
+    }
+    if (checkPaths && !existsSync(resolve(root, executor.path))) {
+      violations.push(`transport executor source does not exist: ${executor.path}`);
+    } else if (checkPaths) {
+      const source = readFileSync(resolve(root, executor.path), 'utf8');
+      const escapedExport = executor.export.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+      if (
+        !new RegExp(`\\bexport\\s+(?:async\\s+)?function\\s+${escapedExport}\\b`, 'u').test(source)
+      ) {
+        violations.push(
+          `transport executor export does not exist: ${executor.path}#${executor.export}`,
+        );
+      }
+    }
+    if (!sortedUnique(executor.allowedCallPaths)) {
+      violations.push(
+        `transport executor allowedCallPaths must be unique and sorted: ${executor.export}`,
+      );
+    }
+    if (!sortedUnique(executor.allowedAuthorityIds)) {
+      violations.push(
+        `transport executor allowedAuthorityIds must be unique and sorted: ${executor.export}`,
+      );
+    }
+    for (const authorityId of executor.allowedAuthorityIds) {
+      if (!registry.networkTargetAuthorities.some(({ id }) => id === authorityId)) {
+        violations.push(
+          `transport executor references unknown authority: ${executor.export}#${authorityId}`,
+        );
+      }
+    }
+    for (const callPath of executor.allowedCallPaths) {
+      if (callPath.endsWith('/**')) {
+        violations.push(`transport executor caller must target an exact source file: ${callPath}`);
+      }
+      if (checkPaths && !existsSync(resolve(root, callPath))) {
+        violations.push(`transport executor caller source does not exist: ${callPath}`);
+      }
+    }
+  }
+  const authorityKeys = registry.networkTargetAuthorities.map(({ id }) => id);
+  if (!sortedUnique(authorityKeys)) {
+    violations.push('networkTargetAuthorities must have unique sorted ids');
+  }
+  for (const authority of registry.networkTargetAuthorities) {
+    if (authorityIds.has(authority.id)) {
+      violations.push(`duplicate network target authority id: ${authority.id}`);
+    }
+    authorityIds.add(authority.id);
+    const issuerTuple =
+      authority.issuer.type === 'workspace-export'
+        ? `workspace:${authority.issuer.path}#${authority.issuer.export}`
+        : `package:${authority.issuer.package}#${authority.issuer.export}`;
+    if (authorityIssuerTuples.has(issuerTuple)) {
+      violations.push(`duplicate network target authority issuer: ${issuerTuple}`);
+    }
+    authorityIssuerTuples.add(issuerTuple);
+
+    if (authority.issuer.type === 'workspace-export') {
+      if (authority.issuer.path.includes('*')) {
+        violations.push(`network target authority issuer must be exact: ${authority.id}`);
+      } else if (checkPaths && !existsSync(resolve(root, authority.issuer.path))) {
+        violations.push(`network target authority issuer does not exist: ${authority.issuer.path}`);
+      } else if (checkPaths) {
+        const source = readFileSync(resolve(root, authority.issuer.path), 'utf8');
+        if (sourceSha256(source) !== authority.issuer.sha256) {
+          violations.push(`network target authority issuer digest is stale: ${authority.id}`);
+        }
+        const escapedExport = authority.issuer.export.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+        if (
+          !new RegExp(
+            `\\bexport\\s+(?:async\\s+)?(?:function|class|const|let|var)\\s+${escapedExport}\\b`,
+            'u',
+          ).test(source) &&
+          !new RegExp(`\\bexport\\s*\\{[^}]*\\b(?:as\\s+)?${escapedExport}\\b[^}]*\\}`, 'u').test(
+            source,
+          )
+        ) {
+          violations.push(
+            `network target authority export does not exist: ${authority.issuer.path}#${authority.issuer.export}`,
+          );
+        }
+      }
+    }
+
+    const sinkPaths = authority.allowedSinks.map(({ path }) => path);
+    if (!sortedUnique(sinkPaths)) {
+      violations.push(`network target authority sinks must be unique and sorted: ${authority.id}`);
+    }
+    for (const sink of authority.allowedSinks) {
+      if (sink.path.includes('*')) {
+        violations.push(`network target authority sink must be exact: ${authority.id}`);
+      }
+      if (!sortedUnique(sink.methods)) {
+        violations.push(
+          `network target authority methods must be unique and sorted: ${authority.id}#${sink.path}`,
+        );
+      }
+      if (checkPaths && !existsSync(resolve(root, sink.path))) {
+        violations.push(`network target authority sink does not exist: ${sink.path}`);
+      }
+    }
+    if (!sortedUnique(authority.runtimeEvidencePaths)) {
+      violations.push(
+        `network target authority evidence must be unique and sorted: ${authority.id}`,
+      );
+    }
+    for (const evidencePath of authority.runtimeEvidencePaths) {
+      if (evidencePath.includes('*')) {
+        violations.push(`network target authority evidence must be exact: ${authority.id}`);
+      }
+      if (checkPaths && !existsSync(resolve(root, evidencePath))) {
+        violations.push(`network target authority evidence does not exist: ${evidencePath}`);
+      }
+    }
+  }
+  const receiverKeys = registry.nonNetworkReceiverTypes.map(
+    ({ id, path, typeName }) => `${id}:${path}#${typeName}`,
+  );
+  if (!sortedUnique(receiverKeys)) {
+    violations.push('nonNetworkReceiverTypes must have unique sorted ids and identities');
+  }
+  for (const receiver of registry.nonNetworkReceiverTypes) {
+    if (!sortedUnique(receiver.allowedMethods)) {
+      violations.push(`non-network receiver methods must be unique and sorted: ${receiver.id}`);
+    }
+    if (!sortedUnique(receiver.runtimeEvidencePaths)) {
+      violations.push(`non-network receiver evidence must be unique and sorted: ${receiver.id}`);
+    }
+    const absolutePath = resolve(root, receiver.path);
+    if (checkPaths && !existsSync(absolutePath)) {
+      violations.push(`non-network receiver source does not exist: ${receiver.path}`);
+      continue;
+    }
+    if (checkPaths) {
+      const source = readFileSync(absolutePath, 'utf8');
+      if (sourceSha256(source) !== receiver.sha256) {
+        violations.push(`non-network receiver digest is stale: ${receiver.id}`);
+      }
+      const escapedType = receiver.typeName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+      if (
+        !new RegExp(`\\b(?:interface|type)\\s+${escapedType}\\b`, 'u').test(source) &&
+        !new RegExp(`\\bimport\\s*\\{[^}]*\\b${escapedType}\\b[^}]*\\}\\s*from\\b`, 'u').test(
+          source,
+        )
+      ) {
+        violations.push(
+          `non-network receiver type does not exist: ${receiver.path}#${receiver.typeName}`,
+        );
+      }
+    }
+    for (const evidencePath of receiver.runtimeEvidencePaths) {
+      if (checkPaths && !existsSync(resolve(root, evidencePath))) {
+        violations.push(`non-network receiver evidence does not exist: ${evidencePath}`);
+      }
+    }
+  }
+  const dynamicNetworkPaths = registry.nonProviderDynamicNetworkAllowances.map(({ path }) => path);
+  if (!sortedUnique(dynamicNetworkPaths)) {
+    violations.push('nonProviderDynamicNetworkAllowances must be unique and sorted by path');
+  }
+  for (const path of dynamicNetworkPaths) {
+    if (path.endsWith('/**')) {
+      violations.push(`non-provider dynamic network allowance must target an exact file: ${path}`);
+    }
+    if (checkPaths && !existsSync(resolve(root, path))) {
+      violations.push(`non-provider dynamic network allowance does not exist: ${path}`);
+    }
+  }
+  for (const allowance of registry.nonProviderDynamicNetworkAllowances) {
+    if (!sortedUnique(allowance.allowedAuthorityIds)) {
+      violations.push(`non-provider authority ids must be unique and sorted: ${allowance.path}`);
+    }
+    if (!sortedUnique(allowance.allowedEnvironmentVariables)) {
+      violations.push(
+        `non-provider environment variables must be unique and sorted: ${allowance.path}`,
+      );
+    }
+    for (const authorityId of allowance.allowedAuthorityIds) {
+      const authority = registry.networkTargetAuthorities.find(({ id }) => id === authorityId);
+      if (!authority) {
+        violations.push(
+          `non-provider allowance references unknown authority: ${allowance.path}#${authorityId}`,
+        );
+      } else if (!authority.allowedSinks.some(({ path }) => path === allowance.path)) {
+        violations.push(
+          `non-provider allowance is not an authority sink: ${allowance.path}#${authorityId}`,
+        );
+      }
+    }
   }
 
   for (const packagePath of registry.dependencyAuditPackages) {
@@ -145,6 +431,13 @@ export function providerIntegrationRegistryViolations(registry, root, { checkPat
           `provider host ${host} is classified by both ${existing} and ${integration.id}`,
         );
       hosts.set(host, integration.id);
+    }
+    for (const path of integration.allowedHostPaths) {
+      if (!transportExecutorPaths.has(path)) {
+        violations.push(
+          `${integration.id}: provider network execution must target an exact transport executor: ${path}`,
+        );
+      }
     }
 
     const importedPackages = new Set(

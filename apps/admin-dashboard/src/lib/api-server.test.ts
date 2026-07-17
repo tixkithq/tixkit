@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getServerPrincipal } from './api-server';
+import { getServerPrincipal, issueServerAdminApiUrl } from './api-server';
 
 function configure(origin: string) {
   vi.stubEnv('NODE_ENV', 'production');
@@ -46,5 +46,16 @@ describe('server admin API transport', () => {
       redirect: 'error',
       cache: 'no-store',
     });
+  });
+
+  it.each([
+    ['https://user:secret@api.example.test', '/v1/me'],
+    ['file:///tmp/socket', '/v1/me'],
+    ['https://api.example.test/base', '/v1/me'],
+    ['https://api.example.test', '//evil.example/v1/me'],
+    ['https://api.example.test', '/v1/%2e%2e/health'],
+    ['https://api.example.test', '/v1/me\nInjected: yes'],
+  ])('rejects a hostile origin or path before transport: %s %s', (origin, path) => {
+    expect(() => issueServerAdminApiUrl(origin, path)).toThrow();
   });
 });

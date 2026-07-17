@@ -15,8 +15,46 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { dashboardDocUrl } from '@/lib/docs';
 import { routes } from '@/lib/routes';
 import { useRuntimeConfig } from '@/context/runtime-config-provider';
+import { isLoopbackHostname } from '@/lib/runtime-config-contract';
 
 const apiVersion = sdkSnippetRegistry[0].apiVersion;
+
+export function issueDeveloperApiHealthUrl(platformApiBaseUrl: string): string {
+  if (
+    !platformApiBaseUrl ||
+    platformApiBaseUrl.length > 512 ||
+    platformApiBaseUrl !== platformApiBaseUrl.trim() ||
+    [...platformApiBaseUrl].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 32 || codePoint === 127 || character === '\\';
+    })
+  ) {
+    throw new Error('The configured Platform API URL is invalid');
+  }
+  const parsed = new URL(platformApiBaseUrl);
+  if (
+    (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.pathname.replace(/\/+$/u, '') !== '/v1' ||
+    (parsed.protocol === 'http:' && !isLoopbackHostname(parsed.hostname))
+  ) {
+    throw new Error('The configured Platform API URL is invalid');
+  }
+  return new URL('/health', parsed.origin).toString();
+}
+
+export async function probeDeveloperApiHealth(
+  platformApiBaseUrl: string,
+  transport: typeof fetch = fetch,
+): Promise<boolean> {
+  const response = await transport(issueDeveloperApiHealthUrl(platformApiBaseUrl), {
+    credentials: 'omit',
+  });
+  return response.ok;
+}
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = React.useState(false);
@@ -58,9 +96,7 @@ export function DeveloperConsoleGuide({
   async function checkHealth() {
     setHealth('checking');
     try {
-      const apiUrl = new URL(configuredApiBaseUrl);
-      const response = await fetch(`${apiUrl.origin}/health`, { credentials: 'omit' });
-      setHealth(response.ok ? 'healthy' : 'unavailable');
+      setHealth((await probeDeveloperApiHealth(configuredApiBaseUrl)) ? 'healthy' : 'unavailable');
     } catch {
       setHealth('unavailable');
     }

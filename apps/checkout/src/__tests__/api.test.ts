@@ -8,6 +8,9 @@ import {
   userFacingMessage,
   newCheckoutIdempotencyKey,
   newConfirmIdempotencyKey,
+  issueCheckoutApiUrl,
+  issueCheckoutUploadCompletionUrl,
+  issueCheckoutUploadUrl,
 } from '../lib/api';
 import type { CartItem, AvailabilityItem, CheckoutQuestion } from '../lib/api';
 
@@ -127,6 +130,61 @@ describe('idempotency keys', () => {
     expect(checkoutKey.startsWith('checkout_')).toBe(true);
     expect(confirmKey.startsWith('confirm_')).toBe(true);
     expect(checkoutKey).not.toEqual(newCheckoutIdempotencyKey());
+  });
+});
+
+describe('checkout network target issuers', () => {
+  it('normalizes same-origin API, media upload, and completion targets', () => {
+    expect(issueCheckoutApiUrl('/public/events/evt_1')).toBe(
+      'http://localhost:4000/v1/public/events/evt_1',
+    );
+    expect(issueCheckoutUploadUrl('http://localhost:9000/uploads/object?signature=abc')).toBe(
+      'http://localhost:9000/uploads/object?signature=abc',
+    );
+    expect(issueCheckoutUploadCompletionUrl('/v1/public/upload-artifacts/upl_1/complete')).toBe(
+      'http://localhost:4000/v1/public/upload-artifacts/upl_1/complete',
+    );
+  });
+
+  it.each([
+    'https://evil.example.test/object',
+    'http://user:secret@localhost:9000/object',
+    'javascript:alert(1)',
+    'http://localhost:9000/object#fragment',
+    'http://localhost:9000/object\nX-Test: yes',
+  ])('rejects a hostile upload target: %s', (target) => {
+    expect(() => issueCheckoutUploadUrl(target)).toThrowError(CheckoutApiError);
+  });
+
+  it.each([
+    '//evil.example.test/v1/public/upload-artifacts/upl_1/complete',
+    'https://evil.example.test/v1/public/upload-artifacts/upl_1/complete',
+    '/v1/public/upload-artifacts/upl_1/complete?redirect=evil',
+    '/v1/public/upload-artifacts/../complete',
+  ])('rejects a hostile completion target: %s', (target) => {
+    expect(() => issueCheckoutUploadCompletionUrl(target)).toThrowError(CheckoutApiError);
+  });
+
+  it('does not issue the upload request when the API returns an untrusted target', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        artifactId: 'upl_1',
+        uploadUrl: 'https://evil.example.test/steal',
+        uploadHeaders: {},
+        completeUrl: '/v1/public/upload-artifacts/upl_1/complete',
+        expiresAt: '2026-08-21T00:00:00.000Z',
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      publicApi.uploadCheckoutArtifact(
+        'evt_1',
+        new File(['safe'], 'proof.txt', { type: 'text/plain' }),
+        'que_1',
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_UPLOAD_URL' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

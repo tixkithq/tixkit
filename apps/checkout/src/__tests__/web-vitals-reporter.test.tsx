@@ -2,7 +2,11 @@ import './test-dom';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { RUM_MAXIMUM_VALUES, RUM_SCHEMA_VERSION, RUM_WEB_VITALS } from '@tixkit/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { classifyBuyerSurface, WebVitalsReporter } from '@/components/web-vitals-reporter';
+import {
+  classifyBuyerSurface,
+  issueBuyerRumUrl,
+  WebVitalsReporter,
+} from '@/components/web-vitals-reporter';
 import {
   initializeBrowserRuntimeConfig,
   resetBrowserRuntimeConfigForTests,
@@ -168,5 +172,17 @@ describe('privacy-safe web-vitals reporter', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'https://user:secret@api.example.test/v1',
+    'https://api.example.test/v1/escape',
+    'https://api.example.test/v1?target=rum',
+    'http://api.example.test/v1',
+    'https://api.example.test/v1\nX-Test: yes',
+  ])('rejects a hostile RUM base without issuing a request: %s', (baseUrl) => {
+    expect(() => issueBuyerRumUrl(baseUrl)).toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

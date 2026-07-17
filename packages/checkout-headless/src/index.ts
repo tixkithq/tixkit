@@ -1,3 +1,7 @@
+import { issueCheckoutHeadlessRequestUrl } from './request-target.js';
+
+export { issueCheckoutHeadlessRequestUrl } from './request-target.js';
+
 export const CHECKOUT_HEADLESS_VERSION = '0.1.0' as const;
 
 export type CheckoutPhase =
@@ -188,6 +192,13 @@ export interface CheckoutStorage {
   get(key: string): string | null | Promise<string | null>;
   set(key: string, value: string): void | Promise<void>;
   remove(key: string): void | Promise<void>;
+}
+
+async function readCheckoutStorage(
+  storage: CheckoutStorage | undefined,
+  key: string,
+): Promise<string | null | undefined> {
+  return storage?.get(key);
 }
 
 export type CheckoutSnapshot = {
@@ -718,7 +729,7 @@ export class CheckoutController {
   private async hydrateStorage(): Promise<void> {
     if (this.storageHydrated) return;
     this.storageHydrated = true;
-    const value = await this.options.storage?.get(this.storageKey());
+    const value = await readCheckoutStorage(this.options.storage, this.storageKey());
     if (!value) return;
     try {
       const parsed = JSON.parse(value) as Record<string, unknown>;
@@ -776,9 +787,9 @@ export function createFetchCheckoutTransport(options: {
 }): CheckoutTransport {
   const request = options.fetch ?? globalThis.fetch;
   if (!request) throw new Error('A fetch implementation is required.');
-  const base = options.apiBaseUrl.replace(/\/$/u, '');
   const call = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-    const response = await request(`${base}${path}`, {
+    const requestUrl = issueCheckoutHeadlessRequestUrl(options.apiBaseUrl, path);
+    const response = await request(requestUrl, {
       ...init,
       headers: { accept: 'application/json', ...options.headers, ...init.headers },
     });

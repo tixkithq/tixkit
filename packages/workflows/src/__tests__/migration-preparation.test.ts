@@ -204,6 +204,18 @@ describe('migration source origin policy', () => {
     ).rejects.toThrow('MIGRATION_SOURCE_ORIGIN_REJECTED');
   });
 
+  it('rejects non-GET pinned migration requests before DNS or network activity', async () => {
+    let resolutions = 0;
+    const resolveHost = (async () => {
+      resolutions += 1;
+      return [{ address: '8.8.8.8', family: 4 }];
+    }) as never;
+    await expect(
+      createPinnedMigrationFetch(resolveHost)('https://source.example/data', { method: 'POST' }),
+    ).rejects.toThrow('MIGRATION_SOURCE_METHOD_REJECTED');
+    expect(resolutions).toBe(0);
+  });
+
   it('uses source-specific authorization without accepting header injection', () => {
     expect(migrationAuthorizationHeader('pretix', 'token')).toBe('Token token');
     expect(migrationAuthorizationHeader('eventbrite', 'token')).toBe('Bearer token');

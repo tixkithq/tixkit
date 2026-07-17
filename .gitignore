@@ -87,7 +87,6 @@ graphify-out/
 # Generated implementation-plan render artifacts
 implementation-plan.html
 implementation-plan.css
-apps/checkout/public/tixkit-widget.js
 .codex
 .cursor
 .droid
@@ -98,6 +97,8 @@ apps/checkout/public/tixkit-widget.js
 artifacts/*
 !artifacts/api/
 !artifacts/api/**
+!artifacts/api-integration-skills/
+!artifacts/api-integration-skills/**
 .continue-*
 .next-codex-cdp*/
 .next-*/

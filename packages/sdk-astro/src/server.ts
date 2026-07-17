@@ -287,7 +287,7 @@ export function createCheckoutFormAction(
   return async function checkoutFormAction(
     event: CheckoutFormActionRequest,
   ): Promise<CheckoutFormActionResult> {
-    const formData = await event.request.formData();
+    const formData: FormData = await event.request.formData();
     const eventId = optionalString(formData.get('eventId'));
     const idempotencyKey = optionalString(formData.get('idempotencyKey'));
     const { items, fieldErrors } = parseCheckoutItems(formData);

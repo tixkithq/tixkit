@@ -2,8 +2,8 @@ import {
   type CheckInActivityItem,
   type CheckInActivitySummary,
   getAdminApiAuthHeaders,
-  resolveAdminApiUrl,
 } from '@/lib/api';
+import { resolveAdminApiUrl } from './api-http';
 
 type ScanActivityHandlers = {
   onScan: (item: CheckInActivityItem) => void;

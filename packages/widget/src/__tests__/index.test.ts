@@ -5,6 +5,7 @@ import {
   createCheckoutCloseRequestedMessage,
   createCheckoutLifecycleMessage,
   createCheckoutReadyMessage,
+  issueWidgetRuntimeUrl,
 } from '../index.js';
 
 const CHECKOUT_BASE = 'https://checkout.tixkit.com';
@@ -625,6 +626,32 @@ describe('widget lifecycle events (runtime)', () => {
     });
 
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('widget runtime target authority', () => {
+  it('issues checkout and reporting targets only within an exact safe origin', () => {
+    expect(issueWidgetRuntimeUrl('https://checkout.test', '/checkout?eventId=evt_1')).toBe(
+      'https://checkout.test/checkout?eventId=evt_1',
+    );
+    expect(issueWidgetRuntimeUrl('http://localhost:4000', '/v1/health')).toBe(
+      'http://localhost:4000/v1/health',
+    );
+    for (const [baseUrl, path] of [
+      ['http://checkout.test', '/checkout'],
+      ['https://user:secret@checkout.test', '/checkout'],
+      ['https://checkout.test/path', '/checkout'],
+      ['https://checkout.test', '//attacker.test/checkout'],
+      ['https://checkout.test', '/checkout\n'],
+    ]) {
+      expect(() => issueWidgetRuntimeUrl(baseUrl, path)).toThrow();
+    }
+  });
+
+  it('does not report or load marketing configuration when reporting origin is rejected', () => {
+    const el = createWidget({ 'reporting-api-url': 'https://user:secret@api.test' });
+    el.connectedCallback();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
 

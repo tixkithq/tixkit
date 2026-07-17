@@ -3,6 +3,7 @@ import {
   CheckoutController,
   CheckoutHeadlessError,
   createFetchCheckoutTransport,
+  issueCheckoutHeadlessRequestUrl,
   createMemoryCheckoutStorage,
   type CheckoutTransport,
 } from '../index.js';
@@ -417,6 +418,32 @@ describe('CheckoutController', () => {
 });
 
 describe('createFetchCheckoutTransport', () => {
+  it('issues contained HTTPS or loopback targets and rejects hostile targets before fetch', async () => {
+    expect(issueCheckoutHeadlessRequestUrl('https://api.example.test/v1', '/public/events')).toBe(
+      'https://api.example.test/v1/public/events',
+    );
+    expect(issueCheckoutHeadlessRequestUrl('http://localhost:4000/v1', '/health')).toBe(
+      'http://localhost:4000/v1/health',
+    );
+    for (const apiBaseUrl of [
+      'http://api.example.test/v1',
+      'https://user:secret@api.example.test/v1',
+      'javascript:alert(1)',
+      'https://api.example.test/v1\n',
+    ]) {
+      const fetchMock = vi.fn<typeof globalThis.fetch>();
+      const api = createFetchCheckoutTransport({ apiBaseUrl, fetch: fetchMock });
+      await expect(api.bootstrap('evt_1', {})).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+    expect(() =>
+      issueCheckoutHeadlessRequestUrl('https://api.example.test/v1', '//attacker.test/path'),
+    ).toThrow(/root-relative/u);
+    expect(() =>
+      issueCheckoutHeadlessRequestUrl('https://api.example.test/v1', '/%2e%2e/orders'),
+    ).toThrow(/escapes/u);
+  });
+
   it('matches access-code, product reveal, token, and idempotency contracts', async () => {
     const fetchMock = vi
       .fn()

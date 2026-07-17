@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   MigrationJobClient,
   formatMigrationResult,
+  issueMigrationJobRequestUrl,
   requireMigrationConfirmation,
 } from '../migration-jobs.js';
 
@@ -124,11 +125,13 @@ describe('MigrationJobClient', () => {
   });
 
   it('requires TLS for remote APIs and rejects URL credentials', () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
     expect(
       () =>
         new MigrationJobClient({
           apiBaseUrl: 'http://api.example.test',
           apiKey: 'test',
+          fetch,
         }),
     ).toThrow('must use HTTPS');
     expect(
@@ -136,8 +139,25 @@ describe('MigrationJobClient', () => {
         new MigrationJobClient({
           apiBaseUrl: 'https://user:password@api.example.test',
           apiKey: 'test',
+          fetch,
         }),
     ).toThrow('must not contain credentials');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('issues only contained relative migration API targets', () => {
+    expect(issueMigrationJobRequestUrl('https://api.example.test/v1', 'migration-jobs')).toBe(
+      'https://api.example.test/v1/migration-jobs',
+    );
+    expect(() =>
+      issueMigrationJobRequestUrl('https://api.example.test/v1', '//attacker.test/jobs'),
+    ).toThrow(/relative/u);
+    expect(() => issueMigrationJobRequestUrl('https://api.example.test/v1', '../orders')).toThrow(
+      /escapes/u,
+    );
+    expect(() =>
+      issueMigrationJobRequestUrl('https://api.example.test/v1', 'https://attacker.test/jobs'),
+    ).toThrow(/escapes/u);
   });
 });
 

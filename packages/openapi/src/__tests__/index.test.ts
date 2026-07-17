@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-20');
+    expect(openApiSpec.info.version).toBe('2026-08-21');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1223,7 +1223,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-20');
+    expect(openApiSpec.info.version).toBe('2026-08-21');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',
@@ -1367,10 +1367,20 @@ describe('openApiSpec', () => {
       ],
     ).toEqual(['billing.write']);
     expect(
+      openApiSpec.paths['/organizations/{organizationId}/payment-accounts'].get[
+        'x-required-permissions'
+      ],
+    ).toEqual(['billing.write']);
+    expect(
       openApiSpec.paths[
         '/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh'
       ].post.responses,
     ).toHaveProperty('200');
+    expect(
+      openApiSpec.paths[
+        '/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh'
+      ].post['x-required-permissions'],
+    ).toEqual(['billing.write']);
   });
 
   it('documents signed QR payloads for online check-in scans', () => {

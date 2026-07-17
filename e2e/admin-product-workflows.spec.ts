@@ -225,8 +225,8 @@ test.describe('admin product workflow coverage', () => {
     await expect(createEventDialog).toBeVisible();
     await createEventDialog.getByRole('textbox', { name: 'Title', exact: true }).fill(title);
     await createEventDialog.getByLabel('Slug').fill(`e2e-admin-lifecycle-${suffix}`);
-    await createEventDialog.getByLabel('Start Date').fill('2026-08-20T19:00');
-    await createEventDialog.getByLabel('End Date').fill('2026-08-20T22:00');
+    await createEventDialog.getByLabel('Start Date').fill('2026-08-21T19:00');
+    await createEventDialog.getByLabel('End Date').fill('2026-08-21T22:00');
     await createEventDialog.getByLabel('Venue Name').fill('Browser Hall');
     const submitCreateEvent = createEventDialog.getByRole('button', { name: 'Create Event' });
     await expect(submitCreateEvent).toBeEnabled();

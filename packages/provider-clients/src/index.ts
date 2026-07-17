@@ -1187,7 +1187,7 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-function providerBaseUrl(
+export function providerBaseUrl(
   value: string,
   expectedHostname: string,
   dependency: string,

@@ -528,6 +528,8 @@ export async function assertSafeMigrationOrigin(
 export function createPinnedMigrationFetch(resolveHost: HostLookup): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = new URL(String(input));
+    const method = (init?.method ?? 'GET').toUpperCase();
+    if (method !== 'GET') throw new Error('MIGRATION_SOURCE_METHOD_REJECTED');
     const addresses = await resolveHost(url.hostname, {
       all: true,
       verbatim: true,
@@ -542,7 +544,7 @@ export function createPinnedMigrationFetch(resolveHost: HostLookup): typeof fetc
       const request = httpsRequest(
         url,
         {
-          method: init?.method ?? 'GET',
+          method: 'GET',
           headers: init?.headers as Record<string, string> | undefined,
           signal: init?.signal ?? undefined,
           lookup: (_hostname, options, callback) => {

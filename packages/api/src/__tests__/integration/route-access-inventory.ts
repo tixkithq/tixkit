@@ -393,10 +393,19 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['getUploadArtifactsByArtifactIdDownload'], {
     source: 'upload-artifact-route-authorization-db.integration.test.ts',
   }),
-  ...evidenceBindings(['postOrganizationsByOrganizationIdPaymentAccountsStripeConnect'], {
+  ...evidenceBindings(['getOrganizationsByOrganizationIdPaymentAccounts'], {
     source: 'payment-account-route-authorization-db.integration.test.ts',
-    persistenceSource: 'payment-account-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    [
+      'postOrganizationsByOrganizationIdPaymentAccountsStripeConnect',
+      'postOrganizationsByOrganizationIdPaymentAccountsByPaymentAccountIdStripeConnectRefresh',
+    ],
+    {
+      source: 'payment-account-route-authorization-db.integration.test.ts',
+      persistenceSource: 'payment-account-route-authorization-db.integration.test.ts',
+    },
+  ),
   ...evidenceBindings(
     ['postWebhookEndpointsByEndpointIdEventsByEventIdReplay', 'postWebhookEventsByEventIdReplay'],
     {

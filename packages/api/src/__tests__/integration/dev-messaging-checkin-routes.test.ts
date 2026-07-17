@@ -2498,6 +2498,7 @@ describe('brand domain creation', () => {
           payouts_enabled: true,
           requirements: JSON.stringify({}),
           disabled_reason: null,
+          refresh_generation: 0,
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -2848,6 +2849,9 @@ describe('brand domain creation', () => {
           updated_at: new Date(),
         },
       ],
+      payment_account_refresh_control: [
+        { id: 'singleton', maintenance: 0, updated_at: new Date() },
+      ],
       payment_accounts: [
         {
           id: 'pa_legacy',
@@ -2862,6 +2866,7 @@ describe('brand domain creation', () => {
           payouts_enabled: true,
           requirements: JSON.stringify({}),
           disabled_reason: null,
+          refresh_generation: 0,
           created_at: new Date(),
           updated_at: new Date(),
         },
@@ -2884,8 +2889,12 @@ describe('brand domain creation', () => {
       headers: { 'idempotency-key': 'stripe-connect-test-legacy' },
     });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.json().message).toContain('Stripe Connect account');
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({
+      statusCode: 404,
+      error: 'Not Found',
+      message: 'PaymentAccount not found: pa_legacy',
+    });
     expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
     expect(stripe.accountLinks.create).not.toHaveBeenCalled();
     await app.close();
@@ -2946,6 +2955,9 @@ describe('brand domain creation', () => {
           updated_at: new Date(),
         },
       ],
+      payment_account_refresh_control: [
+        { id: 'singleton', maintenance: 0, updated_at: new Date() },
+      ],
       payment_accounts: [
         {
           id: 'pa_1',
@@ -2960,6 +2972,7 @@ describe('brand domain creation', () => {
           payouts_enabled: false,
           requirements: null,
           disabled_reason: null,
+          refresh_generation: 0,
           created_at: new Date(),
           updated_at: new Date(),
         },

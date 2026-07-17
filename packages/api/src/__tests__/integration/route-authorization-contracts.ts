@@ -765,6 +765,18 @@ export const BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
 
 export const PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'GET',
+    operationId: 'getOrganizationsByOrganizationIdPaymentAccounts',
+    path: '/organizations/{organizationId}/payment-accounts',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: ['organizationId'],
+    sideEffectAssertions: [],
+    source: 'payment-account-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
     authorizedControl: { required: true, status: 201 },
     denialResponse: { code: 'NOT_FOUND', status: 404 },
     deniedBoundaries: ['tenant', 'organization'],
@@ -774,6 +786,20 @@ export const PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freez
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     persistenceSource: 'payment-account-route-authorization-db.integration.test.ts',
     resourceParameters: ['organizationId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'payment-account-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'POST',
+    operationId:
+      'postOrganizationsByOrganizationIdPaymentAccountsByPaymentAccountIdStripeConnectRefresh',
+    path: '/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'payment-account-route-authorization-db.integration.test.ts',
+    resourceParameters: ['organizationId', 'paymentAccountId'],
     sideEffectAssertions: ['persistence'],
     source: 'payment-account-route-authorization-db.integration.test.ts',
   }),

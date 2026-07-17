@@ -126,6 +126,39 @@ function checkoutBase(element: HTMLElement): string {
   return (element.getAttribute('api-base-url') ?? 'https://checkout.tixkit.com').replace(/\/$/, '');
 }
 
+const LOOPBACK_HTTP_HOSTS = new Set(['127.0.0.1', '[::1]', '::1', 'localhost']);
+
+export function issueWidgetRuntimeUrl(baseUrl: string, path: string): string {
+  if (containsUrlControlCharacter(baseUrl) || containsUrlControlCharacter(path)) {
+    throw new Error('Widget runtime URLs must not contain control characters.');
+  }
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) {
+    throw new Error('Widget runtime paths must remain within the configured origin.');
+  }
+  const origin = new URL(baseUrl);
+  if (origin.username || origin.password || origin.origin !== baseUrl) {
+    throw new Error('Widget runtime base URL must be an exact credential-free origin.');
+  }
+  if (
+    origin.protocol !== 'https:' &&
+    !(origin.protocol === 'http:' && LOOPBACK_HTTP_HOSTS.has(origin.hostname))
+  ) {
+    throw new Error('Widget runtime base URL must use HTTPS, or HTTP on loopback only.');
+  }
+  const target = new URL(path.slice(1), `${origin.origin}/`);
+  if (target.origin !== origin.origin) {
+    throw new Error('Widget runtime path escapes the configured origin.');
+  }
+  return target.toString();
+}
+
+function containsUrlControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
+}
+
 function readElementConfiguration(
   element: HTMLElement,
   defaultMode: CheckoutMode,
@@ -265,6 +298,15 @@ function recordWidgetImpression(
   input: { eventId: string; trackingId?: string; affiliateCode?: string },
 ): void {
   if (!input.eventId || typeof fetch !== 'function') return;
+  let requestUrl: string;
+  try {
+    requestUrl = issueWidgetRuntimeUrl(
+      reportingApiBase(element),
+      `/v1/public/events/${encodeURIComponent(input.eventId)}/widget-impressions`,
+    );
+  } catch {
+    return;
+  }
   const body = {
     visitorId: widgetVisitorId(),
     instanceId: element.id || undefined,
@@ -274,16 +316,13 @@ function recordWidgetImpression(
     pageUrl: normalizeAnalyticsUrl(window.location.href),
     referrer: normalizeAnalyticsUrl(document.referrer),
   };
-  void fetch(
-    `${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(input.eventId)}/widget-impressions`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      keepalive: true,
-      credentials: 'omit',
-    },
-  ).catch(() => {
+  void fetch(requestUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    keepalive: true,
+    credentials: 'omit',
+  }).catch(() => {
     // Analytics must never block checkout rendering.
   });
 }
@@ -392,15 +431,21 @@ function fetchMarketingIntegrations(
   eventId: string,
 ): Promise<MarketingIntegration[]> {
   if (!eventId || typeof fetch !== 'function') return Promise.resolve([]);
-  const cacheKey = `${reportingApiBase(element)}:${eventId}`;
+  let requestUrl: string;
+  try {
+    requestUrl = issueWidgetRuntimeUrl(
+      reportingApiBase(element),
+      `/v1/public/events/${encodeURIComponent(eventId)}/marketing-integrations`,
+    );
+  } catch {
+    return Promise.resolve([]);
+  }
+  const cacheKey = requestUrl;
   const existing = marketingCache.get(cacheKey);
   if (existing) return existing;
-  const request = fetch(
-    `${reportingApiBase(element)}/v1/public/events/${encodeURIComponent(eventId)}/marketing-integrations`,
-    {
-      credentials: 'omit',
-    },
-  )
+  const request = fetch(requestUrl, {
+    credentials: 'omit',
+  })
     .then(async (response) => {
       if (!response.ok) return [];
       const body = (await response.json()) as
@@ -508,7 +553,7 @@ function beginHandshake(
   if (!hostOrigin || !frame.contentWindow) return false;
   frame.contentWindow.postMessage(
     createHostHelloMessage({ widgetId, eventId, nonce, hostOrigin }),
-    new URL(checkoutBase(element)).origin,
+    new URL(issueWidgetRuntimeUrl(checkoutBase(element), '/checkout')).origin,
   );
   return true;
 }
@@ -641,7 +686,7 @@ class TixkitWidget extends HTMLElement {
       const source = this.activeFrame?.contentWindow;
       if (!source) return;
       const validation = validateCheckoutMessageEvent(event, {
-        origin: new URL(checkoutBase(this)).origin,
+        origin: new URL(issueWidgetRuntimeUrl(checkoutBase(this), '/checkout')).origin,
         source,
         widgetId: this.widgetId,
         eventId: this.config.event,
@@ -752,7 +797,7 @@ class TixkitWidget extends HTMLElement {
     params.set('embedNonce', this.handshakeNonce);
     const hostOrigin = expectedHostOrigin(this);
     if (hostOrigin) params.set('embedHostOrigin', hostOrigin);
-    return `${checkoutBase(this)}/checkout?${params.toString()}`;
+    return issueWidgetRuntimeUrl(checkoutBase(this), `/checkout?${params.toString()}`);
   }
 
   private render(): void {
@@ -1132,7 +1177,7 @@ class TixkitButton extends HTMLElement {
       const source = this.activeFrame?.contentWindow;
       if (!source) return;
       const validation = validateCheckoutMessageEvent(event, {
-        origin: new URL(checkoutBase(this)).origin,
+        origin: new URL(issueWidgetRuntimeUrl(checkoutBase(this), '/checkout')).origin,
         source,
         widgetId: this.widgetId,
         eventId: this.eventId,
@@ -1228,7 +1273,7 @@ class TixkitButton extends HTMLElement {
     params.set('embedNonce', this.handshakeNonce);
     const hostOrigin = expectedHostOrigin(this);
     if (hostOrigin) params.set('embedHostOrigin', hostOrigin);
-    return `${checkoutBase(this)}/checkout?${params.toString()}`;
+    return issueWidgetRuntimeUrl(checkoutBase(this), `/checkout?${params.toString()}`);
   }
 
   openCheckout(): void {

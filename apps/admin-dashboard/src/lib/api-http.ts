@@ -69,26 +69,26 @@ export function getAdminApiBaseUrl(): string {
   return getBrowserRuntimeConfig().apiBaseUrl;
 }
 
-export function resolveAdminApiUrl(path: string): string | undefined {
+export function resolveAdminApiUrl(target: string): string | undefined {
   const config = getBrowserRuntimeConfig();
-  const hasUnsafeCharacter = [...path].some((character) => {
+  const hasUnsafeCharacter = [...target].some((character) => {
     const codePoint = character.codePointAt(0) ?? 0;
     return codePoint <= 32 || codePoint === 127;
   });
   if (
     !Object.isFrozen(config) ||
-    !path.startsWith('/v1/') ||
-    path.startsWith('//') ||
-    path.includes('\\') ||
-    path.includes('@') ||
-    path.includes('#') ||
+    !target ||
+    target.startsWith('//') ||
+    target.includes('\\') ||
+    target.includes('@') ||
+    target.includes('#') ||
     hasUnsafeCharacter
   ) {
     return undefined;
   }
   try {
     const base = new URL(config.apiBaseUrl);
-    const resolved = new URL(path, `${base.origin}/`);
+    const resolved = new URL(target, `${base.origin}/`);
     if (
       resolved.origin !== base.origin ||
       resolved.username ||

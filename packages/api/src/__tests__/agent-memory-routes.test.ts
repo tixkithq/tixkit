@@ -59,7 +59,7 @@ function entry(
       observedAt: now.toISOString(),
     },
     version: 1,
-    retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+    retentionExpiresAt: '2026-08-21T12:00:00.000Z',
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -111,7 +111,7 @@ describe('agent memory routes', () => {
         namespace: workspaceNamespace,
         key: 'copy_preferences',
         content,
-        retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+        retentionExpiresAt: '2026-08-21T12:00:00.000Z',
       },
     };
     const first = await app.inject(request);
@@ -159,7 +159,7 @@ describe('agent memory routes', () => {
         namespace: workspaceNamespace,
         key: 'copy_preferences',
         content,
-        retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+        retentionExpiresAt: '2026-08-21T12:00:00.000Z',
       },
     });
     expect(response.statusCode).toBe(403);
@@ -198,7 +198,7 @@ describe('agent memory routes', () => {
         namespace: { ...workspaceNamespace, tenantId, sponsorPrincipalId: sponsorId },
         key: 'copy_preferences',
         content,
-        retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+        retentionExpiresAt: '2026-08-21T12:00:00.000Z',
       },
     });
     const sensitive = await app.inject({
@@ -209,7 +209,7 @@ describe('agent memory routes', () => {
         namespace: workspaceNamespace,
         key: 'copy_preferences',
         content: { ...content, summary: 'Email buyer@example.com' },
-        retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+        retentionExpiresAt: '2026-08-21T12:00:00.000Z',
       },
     });
     const weak = await app.inject({
@@ -220,7 +220,7 @@ describe('agent memory routes', () => {
         namespace: workspaceNamespace,
         key: 'copy_preferences',
         content,
-        retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+        retentionExpiresAt: '2026-08-21T12:00:00.000Z',
       },
     });
     expect(serverOwned.statusCode).toBe(400);
@@ -251,7 +251,7 @@ describe('agent memory routes', () => {
           payload: {
             expectedVersion: 1,
             content,
-            retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+            retentionExpiresAt: '2026-08-21T12:00:00.000Z',
           },
         },
         {
@@ -285,7 +285,7 @@ describe('agent memory routes', () => {
         namespace: workspaceNamespace,
         key: 'event_context',
         content: { kind: 'project_context', summary: 'Prepare the event launch' },
-        retentionExpiresAt: '2026-08-20T12:00:00.000Z',
+        retentionExpiresAt: '2026-08-21T12:00:00.000Z',
       },
     });
     expect(response.statusCode).toBe(400);

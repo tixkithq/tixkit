@@ -1,0 +1,24 @@
+{
+  "from": "2026-08-20",
+  "to": "2026-08-21",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /organizations/{organizationId}/payment-accounts",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    }
+  ]
+}

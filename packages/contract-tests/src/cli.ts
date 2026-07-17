@@ -7,6 +7,7 @@ import {
   runSdkApiConsumerContract,
   runAgentPlatformContract,
 } from './index.js';
+import { executeContractTestRequest, issueContractTestRequestUrl } from './runtime-target.js';
 
 const [profile, fixturePath] = process.argv.slice(2);
 if (!profile || !fixturePath)
@@ -59,7 +60,7 @@ if (profile === 'sdk-consumer' && fixture && typeof fixture === 'object' && 'bas
     apiVersion: live.apiVersion,
     endpointId: live.endpointId,
     execute: async (request) => {
-      const response = await fetch(`${live.baseUrl.replace(/\/$/u, '')}${request.path}`, {
+      const response = await executeContractTestRequest(live.baseUrl, request.path, {
         method: request.method,
         headers: request.headers,
       });
@@ -88,26 +89,13 @@ if (profile === 'agent-platform' && fixture && typeof fixture === 'object') {
   const agentClientSecret = process.env[live.agentClientSecretEnv];
   if (!sponsorAccessToken || !agentClientSecret)
     throw new Error('Agent platform credential environment variables are not set.');
-  let baseUrl: URL;
-  try {
-    baseUrl = new URL(live.baseUrl);
-  } catch {
-    throw new Error('Agent platform baseUrl must be an absolute URL.');
-  }
-  const loopbackHosts = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
-  if (
-    baseUrl.username ||
-    baseUrl.password ||
-    (baseUrl.protocol !== 'https:' &&
-      !(baseUrl.protocol === 'http:' && loopbackHosts.has(baseUrl.hostname)))
-  )
-    throw new Error('Agent platform baseUrl must use HTTPS, or HTTP on loopback only.');
+  issueContractTestRequestUrl(live.baseUrl, '/');
   output = await runAgentPlatformContract({
     ...live,
     sponsorAccessToken,
     agentClientSecret,
     execute: async (request) => {
-      const response = await fetch(new URL(request.path, baseUrl), {
+      const response = await executeContractTestRequest(live.baseUrl, request.path, {
         method: request.method,
         headers: request.headers,
         ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),

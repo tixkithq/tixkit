@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { createElement } from 'react';
-import { request, requestBlob } from './api-http';
+import { request, requestBlob, resolveAdminApiUrl } from './api-http';
 import { installTestRuntimeConfig } from '@/test/runtime-config';
 import {
   initializeBrowserRuntimeConfig,
@@ -15,6 +15,17 @@ describe('request', () => {
     vi.unstubAllEnvs();
     vi.useRealTimers();
     delete window.Clerk;
+  });
+
+  it('accepts same-origin absolute API targets and rejects authority changes', () => {
+    expect(resolveAdminApiUrl('http://localhost:4000/v1/upload-artifacts/upl_1/complete')).toBe(
+      'http://localhost:4000/v1/upload-artifacts/upl_1/complete',
+    );
+    expect(resolveAdminApiUrl('https://evil.example.test/v1/upload-artifacts/upl_1/complete')).toBe(
+      undefined,
+    );
+    expect(resolveAdminApiUrl('http://localhost:4000@evil.example.test/v1/me')).toBe(undefined);
+    expect(resolveAdminApiUrl('http://localhost:4000/not-v1')).toBe(undefined);
   });
 
   it('does not send a JSON content type for empty-body requests', async () => {

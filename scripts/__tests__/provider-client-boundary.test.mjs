@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { providerClientBoundaryViolations as inspectProviderClientBoundary } from '../lib/provider-client-boundary.mjs';
-import { loadProviderIntegrationRegistry } from '../lib/provider-integration-registry.mjs';
+import {
+  loadProviderIntegrationRegistry,
+  sourceSha256,
+} from '../lib/provider-integration-registry.mjs';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const registry = loadProviderIntegrationRegistry(repositoryRoot);
@@ -23,12 +26,25 @@ function fixture(files) {
   return root;
 }
 
+function registryWithFixtureDigests(files) {
+  const candidate = structuredClone(registry);
+  for (const authority of candidate.networkTargetAuthorities) {
+    if (authority.issuer.type === 'workspace-export' && files[authority.issuer.path]) {
+      authority.issuer.sha256 = sourceSha256(files[authority.issuer.path]);
+    }
+  }
+  for (const receiver of candidate.nonNetworkReceiverTypes) {
+    if (files[receiver.path]) receiver.sha256 = sourceSha256(files[receiver.path]);
+  }
+  return candidate;
+}
+
 test('accepts provider-owned clients with webhook verification behind the boundary', () => {
   const root = fixture({
     'packages/provider-clients/src/stripe.ts':
       "import Stripe from 'stripe';\nnew Stripe('test');\n",
-    'packages/provider-clients/src/resend.ts':
-      "export const endpoint = 'https://api.resend.com/emails';\n",
+    'packages/provider-clients/src/index.ts':
+      "export async function executeProviderHttp() { return fetch('https://api.resend.com/emails'); }\n",
     'packages/api/src/routes/modules/stripe-webhooks.ts':
       "import { verifyStripeWebhookEvent } from '@tixkit/provider-clients';\nverifyStripeWebhookEvent({ rawBody: 'body', signature: 'signature', webhookSecret: 'secret' });\n",
   });
@@ -106,6 +122,660 @@ test('rejects unclassified provider hosts and registry-owned hosts outside their
   }
 });
 
+test('rejects runtime-configured provider HTTP outside the exact approved transport export', () => {
+  const root = fixture({
+    'packages/api/src/services/environment-provider.ts':
+      "await fetch(process.env.ROGUE_PROVIDER_URL + '/charge');\n",
+    'packages/api/src/services/environment-alias.ts':
+      'const endpoint = process.env.ROGUE_PROVIDER_URL; const send = fetch; await send(endpoint);\n',
+    'packages/api/src/services/url-provider.ts':
+      "const endpoint = new URL('/charge', process.env.ROGUE_PROVIDER_URL); await fetch(endpoint);\n",
+    'packages/api/src/services/request-provider.ts':
+      'export async function escape(request) { return fetch(request.url); }\n',
+    'packages/api/src/services/relative-api.ts': "await fetch('/v1/internal-status');\n",
+    'packages/provider-clients/src/index.ts':
+      'export async function executeProviderHttp() { return undefined; } export async function hiddenTransport(request) { return fetch(request.url); }\n',
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      'packages/api/src/services/environment-alias.ts: runtime-configured provider HTTP execution must use a registry-approved transport executor',
+      'packages/api/src/services/environment-provider.ts: runtime-configured provider HTTP execution must use a registry-approved transport executor',
+      'packages/api/src/services/request-provider.ts: runtime-configured provider HTTP execution must use a registry-approved transport executor',
+      'packages/api/src/services/url-provider.ts: runtime-configured provider HTTP execution must use a registry-approved transport executor',
+      'packages/provider-clients/src/index.ts: runtime-configured provider HTTP execution must use a registry-approved transport executor',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('permits runtime-configured provider HTTP only inside the exact approved transport export', () => {
+  const files = {
+    'packages/provider-clients/src/index.ts':
+      'export function providerBaseUrl(value) { return value; }\nexport async function executeProviderHttp(request) { return fetch(providerBaseUrl(request.url)); }\n',
+  };
+  const root = fixture(files);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root, { registry: registryWithFixtureDigests(files) }),
+      [],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('confines the raw provider transport executor to exact typed-operation callers', () => {
+  const cases = {
+    'packages/api/src/services/raw-provider.ts':
+      "import { executeProviderHttp } from '@tixkit/provider-clients'; executeProviderHttp({ url: 'https://api.resend.com/emails' });\n",
+    'packages/provider-clients/src/rogue.ts':
+      "import { executeProviderHttp } from './index.js'; executeProviderHttp({ url: process.env.ROGUE_PROVIDER_URL });\n",
+    'packages/provider-clients/src/index.ts':
+      'export async function executeProviderHttp() {} function hidden() { executeProviderHttp({ url: process.env.ROGUE_PROVIDER_URL }); }\n',
+    'packages/api/src/services/raw-provider-call.ts':
+      "import { executeProviderHttp } from '@tixkit/provider-clients'; executeProviderHttp.call(null, { url: 'https://api.resend.com/emails' });\n",
+    'packages/api/src/services/raw-provider-reflect.ts':
+      "import { executeProviderHttp } from '@tixkit/provider-clients'; Reflect.apply(executeProviderHttp, null, [{ url: 'https://api.resend.com/emails' }]);\n",
+    'packages/api/src/services/raw-provider-object.ts':
+      "import { executeProviderHttp } from '@tixkit/provider-clients'; ({ run: executeProviderHttp }).run({ url: 'https://api.resend.com/emails' });\n",
+    'packages/api/src/services/raw-provider-array.ts':
+      "import { executeProviderHttp } from '@tixkit/provider-clients'; [executeProviderHttp][0]({ url: 'https://api.resend.com/emails' });\n",
+    'packages/api/src/services/raw-provider-callback.ts':
+      "import { executeProviderHttp } from '@tixkit/provider-clients'; requests.map(executeProviderHttp);\n",
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      'packages/api/src/services/raw-provider-array.ts: migrated messaging provider endpoints must be owned by @tixkit/provider-clients',
+      'packages/api/src/services/raw-provider-array.ts: provider transport executor use is outside its exact typed-operation boundary',
+      'packages/api/src/services/raw-provider-call.ts: migrated messaging provider endpoints must be owned by @tixkit/provider-clients',
+      'packages/api/src/services/raw-provider-call.ts: provider transport executor use is outside its exact typed-operation boundary',
+      'packages/api/src/services/raw-provider-callback.ts: provider transport executor use is outside its exact typed-operation boundary',
+      'packages/api/src/services/raw-provider-object.ts: migrated messaging provider endpoints must be owned by @tixkit/provider-clients',
+      'packages/api/src/services/raw-provider-object.ts: provider transport executor use is outside its exact typed-operation boundary',
+      'packages/api/src/services/raw-provider-reflect.ts: migrated messaging provider endpoints must be owned by @tixkit/provider-clients',
+      'packages/api/src/services/raw-provider-reflect.ts: provider transport executor use is outside its exact typed-operation boundary',
+      'packages/api/src/services/raw-provider.ts: migrated messaging provider endpoints must be owned by @tixkit/provider-clients',
+      'packages/api/src/services/raw-provider.ts: provider transport executor use is outside its exact typed-operation boundary',
+      'packages/provider-clients/src/index.ts: provider transport executor use is outside its exact typed-operation boundary',
+      'packages/provider-clients/src/rogue.ts: provider transport executor use is outside its exact typed-operation boundary',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('requires every raw executor destination alternative to be approved', () => {
+  const path = 'packages/provider-clients/src/index.ts';
+  const root = fixture({
+    [path]: [
+      'export async function executeProviderHttp() {}',
+      'function providerBaseUrl(value) { return value; }',
+      "executeProviderHttp({ url: approved ? providerBaseUrl('https://api.resend.com') : opaqueDestination });",
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      `${path}: provider transport executor use is outside its exact typed-operation boundary`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects mixed raw executor provenance within one compound target', () => {
+  const path = 'packages/provider-clients/src/index.ts';
+  const rejected = [
+    "providerBaseUrl('https://api.resend.com') + rogueUrl",
+    "[rogueUrl, providerBaseUrl('https://api.resend.com')][0]",
+  ];
+  for (const target of rejected) {
+    const root = fixture({
+      [path]: [
+        'export async function executeProviderHttp() {}',
+        'function providerBaseUrl(value) { return value; }',
+        `executeProviderHttp({ url: ${target} });`,
+      ].join('\n'),
+    });
+    try {
+      assert.deepEqual(providerClientBoundaryViolations(root), [
+        `${path}: provider transport executor use is outside its exact typed-operation boundary`,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('rejects aliased and generic network primitives with unresolved destinations', () => {
+  const cases = {
+    'packages/api/src/services/sequence-fetch.ts':
+      'void (0, fetch)(process.env.ROGUE_PROVIDER_URL);\n',
+    'packages/api/src/services/computed-fetch.ts':
+      "void globalThis['fe' + 'tch'](process.env.ROGUE_PROVIDER_URL);\n",
+    'packages/api/src/services/http-request.ts':
+      "import * as http from 'node:http'; http.request(new URL(process.env.ROGUE_PROVIDER_URL));\n",
+    'packages/api/src/services/https-get.ts':
+      "import { get as send } from 'node:https'; send(process.env.ROGUE_PROVIDER_URL);\n",
+    'packages/api/src/services/generic-request.ts':
+      'client.request({ url: process.env.ROGUE_PROVIDER_URL });\n',
+    'packages/api/src/services/imported-fetch.ts':
+      "import { fetch as send } from 'undici'; send(process.env.ROGUE_PROVIDER_URL);\n",
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      Object.keys(cases)
+        .sort()
+        .map(
+          (path) =>
+            `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+        ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('binds non-provider allowances to destinations rather than blanket client files', () => {
+  const allowedPath = 'apps/admin-dashboard/src/lib/api-http.ts';
+  const files = {
+    [allowedPath]: [
+      "export function resolveAdminApiUrl(path) { return new URL(path, 'https://admin.invalid').toString(); }",
+      "const configuredTixkitOrigin = resolveAdminApiUrl('/v1/events');",
+      'fetch(configuredTixkitOrigin);',
+      "fetch('/v1/health');",
+    ].join('\n'),
+  };
+  const root = fixture(files);
+  try {
+    const trustedRegistry = registryWithFixtureDigests(files);
+    assert.deepEqual(providerClientBoundaryViolations(root, { registry: trustedRegistry }), []);
+    const uploadOnlyRegistry = structuredClone(trustedRegistry);
+    const allowance = uploadOnlyRegistry.nonProviderDynamicNetworkAllowances.find(
+      ({ path }) => path === allowedPath,
+    );
+    allowance.allowedAuthorityIds = ['prometheus-pushgateway-client'];
+    assert.deepEqual(providerClientBoundaryViolations(root, { registry: uploadOnlyRegistry }), [
+      `${allowedPath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const rogueRoot = fixture({
+    [allowedPath]: [
+      "fetch(process.env.ROGUE_PROVIDER_URL + '/v1/events');",
+      'fetch(opaqueDestination);',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(rogueRoot), [
+      `${allowedPath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+    ]);
+  } finally {
+    rmSync(rogueRoot, { recursive: true, force: true });
+  }
+
+  const mixedRoot = fixture({
+    [allowedPath]: "fetch(useConfigured ? resolveAdminApiUrl('/v1/events') : opaqueDestination);\n",
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(mixedRoot), [
+      `${allowedPath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+    ]);
+  } finally {
+    rmSync(mixedRoot, { recursive: true, force: true });
+  }
+});
+
+test('rejects generic client methods with unresolved destinations', () => {
+  const methods = ['delete', 'get', 'patch', 'post', 'put'];
+  const files = Object.fromEntries(
+    methods.map((method) => [
+      `packages/api/src/services/client-${method}.ts`,
+      method === 'get'
+        ? `const gateway = { get: (url) => fetch(url) }; gateway.get(process.env.ROGUE_PROVIDER_URL);\n`
+        : `gateway.${method}(process.env.ROGUE_PROVIDER_URL);\n`,
+    ]),
+  );
+  const root = fixture(files);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      methods.map(
+        (method) =>
+          `packages/api/src/services/client-${method}.ts: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects receiver-independent GET HEAD and OPTIONS URL targets without flagging Map.get', () => {
+  const cases = {
+    'packages/api/src/services/axios-get.ts': 'axios.get(destination);\n',
+    'packages/api/src/services/got-head.ts': 'got.head(target);\n',
+    'packages/api/src/services/ky-options.ts': 'ky.options(address);\n',
+    'packages/api/src/services/shadowed-map.ts':
+      'const Map = AxiosClient; new Map().get(destination);\n',
+    'packages/api/src/services/shadowed-weak-map.ts':
+      'function WeakMap() { return got; } new WeakMap().get(target);\n',
+    'packages/api/src/services/shadowed-global-this.ts':
+      'const globalThis = { Map: AxiosClient }; new globalThis.Map().get(destination);\n',
+    'packages/api/src/services/catch-global-this.ts':
+      'try { throw { Map: AxiosClient }; } catch (globalThis) { new globalThis.Map().get(destination); }\n',
+    'packages/api/src/services/catch-map.ts':
+      'try { throw AxiosClient; } catch (Map) { new Map().get(destination); }\n',
+    'packages/api/src/services/catch-weak-map.ts':
+      'try { throw GotClient; } catch (WeakMap) { new WeakMap().get(target); }\n',
+    'packages/api/src/services/catch-destructured-map.ts':
+      'try { throw { Map: AxiosClient }; } catch ({ Map }) { new Map().get(destination); }\n',
+    'packages/api/src/services/runtime-get.ts':
+      "whatever['g' + 'et'](process.env.ROGUE_PROVIDER_URL);\n",
+    'packages/api/src/services/runtime-head.ts':
+      'axios.head(new URL(process.env.ROGUE_PROVIDER_URL));\n',
+    'packages/api/src/services/runtime-options.ts': "transport['options'](rogueEndpoint);\n",
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      Object.keys(cases)
+        .sort()
+        .map(
+          (path) =>
+            `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+        ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const mapRoot = fixture({
+    'packages/api/src/services/cache.ts': [
+      'async function loadCache(): Promise<Map<string, string>> { const result = new Map<string, string>(); return result; }',
+      'const cache = new Map(); const weak = new WeakMap(); const values = new Set(); const globalCache = new globalThis.Map(); const globalWeak = new globalThis.WeakMap();',
+      'const loaded = await loadCache(); const value = cache.get(cacheKey); const loadedValue = loaded.get(cacheKey); const other = weak.get(objectKey); const deleted = values.delete(cacheKey); const globalValue = globalCache.get(cacheKey); const globalOther = globalWeak.get(objectKey); void value; void loadedValue; void other; void deleted; void globalValue; void globalOther;',
+      ...Array.from(
+        { length: 300 },
+        (_, index) =>
+          `function unrelated${index}(request) { const cacheKey = request.params.id; return cacheKey; }`,
+      ),
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(mapRoot), []);
+  } finally {
+    rmSync(mapRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolves same-name receivers within their lexical function scopes', () => {
+  const path = 'packages/api/src/services/scoped-receivers.ts';
+  const root = fixture({
+    [path]: [
+      'function cached(cacheKey) { const gateway = new Map(); return gateway.get(cacheKey); }',
+      'function outbound(destination) { const gateway = { get: (url) => fetch(url) }; return gateway.get(destination); }',
+      'void cached; void outbound;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('distinguishes optional typed storage reads from typed HTTP clients', () => {
+  const safePath = 'packages/api/src/services/storage-reader.ts';
+  const unsafePath = 'packages/api/src/services/http-reader.ts';
+  const disguisedPath = 'packages/api/src/services/disguised-http-reader.ts';
+  const root = fixture({
+    [safePath]: [
+      'interface CheckoutStorage {',
+      '  get(key: string): string | null | Promise<string | null>;',
+      '  set(key: string, value: string): void | Promise<void>;',
+      '  remove(key: string): void | Promise<void>;',
+      '}',
+      'async function read(storage: CheckoutStorage | undefined, key: string) {',
+      '  return storage?.get(key);',
+      '}',
+      'void read;',
+    ].join('\n'),
+    [unsafePath]: [
+      'interface HttpClient {',
+      '  get(url: string): Promise<Response>;',
+      '  post(url: string): Promise<Response>;',
+      '}',
+      'function request(client: HttpClient, destination: string) {',
+      '  return client.get(destination);',
+      '}',
+      'void request;',
+    ].join('\n'),
+    [disguisedPath]: [
+      'interface CacheLikeHttpClient {',
+      '  get(url: string): Promise<Response>;',
+      '  set(key: string, value: string): void;',
+      '  request(url: string): Promise<Response>;',
+      '}',
+      'function request(client: CacheLikeHttpClient, destination: string) {',
+      '  return client.get(destination);',
+      '}',
+      'void request;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      `${disguisedPath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+      `${unsafePath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+      `${safePath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('requires exact issuer bytes and collision-free module resolution', () => {
+  const cases = [
+    {
+      files: {
+        'apps/admin-dashboard/src/lib/api.ts': [
+          'export function issueAdminUploadUrl(candidate) { return candidate; }',
+          "fetch(issueAdminUploadUrl(candidate), { method: 'PUT' });",
+        ].join('\n'),
+      },
+      path: 'apps/admin-dashboard/src/lib/api.ts',
+    },
+    {
+      files: {
+        'apps/admin-dashboard/src/lib/api.ts': [
+          "import { issueAdminUploadUrl } from './api/index.js';",
+          "fetch(issueAdminUploadUrl(candidate), { method: 'PUT' });",
+        ].join('\n'),
+        'apps/admin-dashboard/src/lib/api/index.ts':
+          'export function issueAdminUploadUrl(candidate) { return candidate; }',
+      },
+      path: 'apps/admin-dashboard/src/lib/api.ts',
+    },
+    {
+      files: {
+        'apps/admin-dashboard/src/lib/api.ts': [
+          "import { issueAdminUploadUrl } from './api.js';",
+          "fetch(issueAdminUploadUrl(candidate), { method: 'PUT' });",
+        ].join('\n'),
+        'apps/admin-dashboard/src/lib/api.js':
+          'export function issueAdminUploadUrl(candidate) { return candidate; }',
+      },
+      path: 'apps/admin-dashboard/src/lib/api.ts',
+    },
+  ];
+  for (const { files, path } of cases) {
+    const root = fixture(files);
+    try {
+      assert.deepEqual(providerClientBoundaryViolations(root), [
+        `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('rejects dynamic methods even for an exact issued target', () => {
+  const path = 'apps/admin-dashboard/src/lib/export-jobs.ts';
+  const files = {
+    'apps/admin-dashboard/src/lib/api-http.ts':
+      "export function resolveAdminApiUrl(path) { return new URL(path, 'https://admin.invalid').toString(); }",
+    [path]: [
+      "import { resolveAdminApiUrl } from './api-http.js';",
+      "fetch(resolveAdminApiUrl('/v1/exports'), { method });",
+    ].join('\n'),
+  };
+  const root = fixture(files);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root, { registry: registryWithFixtureDigests(files) }),
+      [
+        `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects network callables forwarded through wrappers and callbacks', () => {
+  const cases = {
+    'packages/api/src/services/callback-map.ts': 'urls.map(fetch);',
+    'packages/api/src/services/callback-then.ts': 'Promise.resolve(url).then(fetch);',
+    'packages/api/src/services/default-transport.ts':
+      'function go(url, send = fetch) { return send(url); } void go;',
+    'packages/api/src/services/destructured-transport.ts':
+      'function dispatch({ send }, url) { return send(url); } dispatch({ send: fetch }, url);',
+    'packages/api/src/services/forwarded-transport.ts':
+      'function dispatch(send, url) { return send(url); } dispatch(fetch, url);',
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      Object.keys(cases)
+        .sort()
+        .map(
+          (path) =>
+            `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+        ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects unclassified browser outbound transports', () => {
+  const cases = {
+    'apps/checkout/src/lib/event-source.ts': 'new EventSource(url);',
+    'apps/checkout/src/lib/send-beacon.ts': "navigator.sendBeacon(url, 'x');",
+    'apps/checkout/src/lib/web-socket.ts': 'new WebSocket(url);',
+    'apps/checkout/src/lib/xhr.ts': [
+      'const request = new XMLHttpRequest();',
+      "request.open('POST', url);",
+      "request.send('x');",
+    ].join('\n'),
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      Object.keys(cases)
+        .sort()
+        .map(
+          (path) =>
+            `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+        ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects mixed approved and rogue non-provider target constituents', () => {
+  const path = 'apps/admin-dashboard/src/lib/api.ts';
+  const rejected = ['ticket.uploadUrl + rogueProviderUrl', '[rogueProviderUrl, apiBaseUrl()][0]'];
+  for (const target of rejected) {
+    const root = fixture({ [path]: `fetch(${target});\n` });
+    try {
+      assert.deepEqual(providerClientBoundaryViolations(root), [
+        `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('does not authorize dynamic destinations from approved source spellings alone', () => {
+  const cases = {
+    'apps/admin-dashboard/src/lib/api.ts': [
+      'export async function forgedUpload(uploadUrl, request) {',
+      '  const completeUrl = request.completeUrl;',
+      '  await fetch(uploadUrl);',
+      '  await fetch(completeUrl);',
+      '}',
+    ].join('\n'),
+    'apps/checkout/src/lib/api.ts': [
+      'export async function forgedCheckoutOrigin() {',
+      '  const apiBaseUrl = process.env.ROGUE_PROVIDER_URL;',
+      '  return fetch(apiBaseUrl);',
+      '}',
+    ].join('\n'),
+    'apps/docs/src/components/api-explorer.tsx': [
+      'export async function forgedExplorer(opaqueCallback) {',
+      '  return opaqueCallback((baseUrl) => fetch(baseUrl));',
+      '}',
+    ].join('\n'),
+    'packages/shared/src/observability.ts': [
+      'export async function forgedPushgateway(gatewayUrl, opaqueDestination, enabled) {',
+      '  return fetch(enabled ? gatewayUrl : opaqueDestination);',
+      '}',
+    ].join('\n'),
+    'packages/workflows/src/activities/webhook-delivery.ts': [
+      "import { parseWebhookDeliveryUrl } from './trusted-validator.js';",
+      'export async function forgedWebhook(rawUrl) {',
+      '  const parseWebhookDeliveryUrl = (value) => value;',
+      '  return fetch(parseWebhookDeliveryUrl(rawUrl));',
+      '}',
+    ].join('\n'),
+    'packages/workflows/src/activities/migration-preparation.ts': [
+      "import { validateMigrationSource } from './trusted-validator.js';",
+      'export async function forgedMigration(input, opaqueDestination, useInput) {',
+      '  const validateMigrationSource = (value) => value;',
+      '  const destination = validateMigrationSource(input);',
+      '  return fetch(useInput ? destination : input + opaqueDestination);',
+      '}',
+    ].join('\n'),
+    'packages/api/src/services/portable-export.ts': [
+      'export async function forgedObjectStore(store) {',
+      '  const localAlias = store;',
+      '  return fetch(localAlias);',
+      '}',
+    ].join('\n'),
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      Object.keys(cases)
+        .sort()
+        .map(
+          (path) =>
+            `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+        ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('invalidates issued target authority after object mutation', () => {
+  const path = 'packages/workflows/src/activities/webhook-delivery.ts';
+  const root = fixture({
+    [path]: [
+      'export function createValidatedWebhookTarget(rawUrl) { return Object.freeze({ hostname: rawUrl }); }',
+      'export async function forgedMutation(rawUrl, rogueUrl) {',
+      '  const target = createValidatedWebhookTarget(rawUrl);',
+      '  target.hostname = rogueUrl;',
+      "  return fetch(target.hostname, { method: 'POST' });",
+      '}',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      `${path}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects unresolved dynamic loaders in every authored production source', () => {
+  const cases = {
+    'packages/api/src/services/dynamic-import.ts':
+      "const Vendor = (await import(process.env.PROVIDER_SDK)).default; new Vendor('secret');\n",
+    'packages/api/src/services/dynamic-require.cts':
+      "const Vendor = require(process.env.PROVIDER_SDK); new Vendor('secret');\n",
+    'packages/workflows/src/activities/aliased-require.cts':
+      "const load = require; const Vendor = load(process.env.PROVIDER_SDK); new Vendor('secret');\n",
+    'packages/provider-clients/src/created-require.ts':
+      "import { createRequire } from 'node:module'; const load = createRequire(import.meta.url); const Vendor = load(process.env.PROVIDER_SDK); new Vendor('secret');\n",
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      Object.keys(cases)
+        .sort()
+        .map((path) => `${path}: unresolved dynamic module loading is prohibited`),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects SDK loading through object properties and bound module.require aliases', () => {
+  const root = fixture({
+    'packages/api/src/services/object-require.cts':
+      "const holder = { load: require }; const Stripe = holder.load('stripe'); new Stripe('secret');\n",
+    'packages/api/src/services/bound-module-require.cts':
+      "const load = module.require.bind(module); const Stripe = load('stripe'); new Stripe('secret');\n",
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      'packages/api/src/services/bound-module-require.cts: server-side Stripe SDK execution must cross @tixkit/provider-clients',
+      'packages/api/src/services/object-require.cts: server-side Stripe SDK execution must cross @tixkit/provider-clients',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects unresolved dynamic loaders through createRequire, Reflect, call, and bind', () => {
+  const cases = {
+    'apps/docs/src/dynamic-import.ts': 'void import(process.env.PROVIDER_SDK);\n',
+    'packages/domain/src/create-require.cts':
+      "const { createRequire: make } = require('node:module'); const load = make(import.meta.url); load(process.env.PROVIDER_SDK);\n",
+    'packages/shared/src/reflect-require.cts':
+      'Reflect.apply(require, null, [process.env.PROVIDER_SDK]);\n',
+    'packages/shared/src/call-require.cts': 'require.call(null, process.env.PROVIDER_SDK);\n',
+    'packages/shared/src/bind-require.cts':
+      'const load = require.bind(null); load(process.env.PROVIDER_SDK);\n',
+    'packages/shared/src/array-require.cts':
+      'const [load] = [require]; load(process.env.PROVIDER_SDK);\n',
+    'packages/shared/src/default-require.cts':
+      'const { load = require } = {}; load(process.env.PROVIDER_SDK);\n',
+    'packages/shared/src/computed-require.cts':
+      "module['re' + 'quire'](process.env.PROVIDER_SDK);\n",
+    'packages/shared/src/eval.ts': "eval('1');\n",
+    'packages/shared/src/function.ts': "new Function('return 1');\n",
+  };
+  const root = fixture(cases);
+  try {
+    assert.deepEqual(
+      providerClientBoundaryViolations(root),
+      Object.keys(cases)
+        .sort()
+        .map((path) => `${path}: unresolved dynamic module loading is prohibited`),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('rejects every direct Stripe SDK execution in the webhook owner', () => {
   const webhookPath = 'packages/api/src/routes/modules/stripe-webhooks.ts';
   const violation = `${webhookPath}: server-side Stripe SDK execution must cross @tixkit/provider-clients`;
@@ -136,7 +806,13 @@ test('rejects every direct Stripe SDK execution in the webhook owner', () => {
   for (const source of rejected) {
     const root = fixture({ [webhookPath]: source });
     try {
-      assert.deepEqual(providerClientBoundaryViolations(root), [violation], source);
+      assert.deepEqual(
+        providerClientBoundaryViolations(root),
+        source.startsWith('eval(')
+          ? [violation, `${webhookPath}: unresolved dynamic module loading is prohibited`]
+          : [violation],
+        source,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -165,7 +841,7 @@ test('rejects direct runtime Stripe and migrated messaging provider execution', 
   }
 });
 
-test('permits the browser Stripe CSP origin without permitting server-side REST execution', () => {
+test('permits the browser Stripe CSP origin and confines direct REST to the exact executor', () => {
   const root = fixture({
     'apps/checkout/src/lib/checkout-security-headers.ts':
       'export function checkoutContentSecurityPolicy() { return ["connect-src \'self\' https://api.stripe.com"]; }\n',
@@ -173,7 +849,9 @@ test('permits the browser Stripe CSP origin without permitting server-side REST 
       "fetch('https://api.stripe.com/v1/payment_intents');\n",
   });
   try {
-    assert.deepEqual(providerClientBoundaryViolations(root), []);
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      'packages/provider-clients/src/stripe-rest.ts: server-side Stripe REST execution must cross @tixkit/provider-clients',
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

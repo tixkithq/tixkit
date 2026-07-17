@@ -18,6 +18,8 @@ export const API_PROVENANCE_EXCLUSIONS = [
   'apps/docs/public/openapi.json',
   'apps/docs/src/generated/',
   'artifacts/api/',
+  'artifacts/api-integration-skills/',
+  'distribution/public-distribution.json',
   'graphify-out/',
 ] as const;
 

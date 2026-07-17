@@ -5,6 +5,7 @@ import { RUM_MAXIMUM_VALUES, RUM_SCHEMA_VERSION, type RumWebVital } from '@tixki
 import { apiBaseUrl } from '@/lib/api';
 import { isSharedCheckoutHost } from '@/lib/hosts';
 import { useRuntimeConfig } from '@/context/runtime-config-provider';
+import { isLoopbackHostname } from '@/lib/runtime-config-contract';
 
 type WebVitalSample = {
   name: string;
@@ -26,6 +27,33 @@ const RESERVED_TOP_LEVEL_PATHS = new Set([
   'sitemap.xml',
   '_next',
 ]);
+
+export function issueBuyerRumUrl(platformApiBaseUrl: string): string {
+  if (
+    !platformApiBaseUrl ||
+    platformApiBaseUrl.length > 512 ||
+    platformApiBaseUrl !== platformApiBaseUrl.trim() ||
+    [...platformApiBaseUrl].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 32 || codePoint === 127 || character === '\\';
+    })
+  ) {
+    throw new Error('The checkout Platform API URL is invalid');
+  }
+  const parsed = new URL(platformApiBaseUrl);
+  if (
+    (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.pathname.replace(/\/+$/u, '') !== '/v1' ||
+    (parsed.protocol === 'http:' && !isLoopbackHostname(parsed.hostname))
+  ) {
+    throw new Error('The checkout Platform API URL is invalid');
+  }
+  return new URL('/v1/public/rum', parsed.origin).toString();
+}
 
 export function classifyBuyerSurface(
   pathname: string,
@@ -67,7 +95,7 @@ export function reportBuyerWebVital(sample: WebVitalSample, checkoutUrl?: string
     value,
   };
   try {
-    void fetch(`${apiBaseUrl()}/public/rum`, {
+    void fetch(issueBuyerRumUrl(apiBaseUrl()), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

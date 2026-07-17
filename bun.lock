@@ -333,6 +333,17 @@
         "vitest": "^4.1.0",
       },
     },
+    "packages/api-integration-skill": {
+      "name": "@tixkit/api-integration-skill",
+      "version": "0.1.0",
+      "bin": {
+        "tixkit-api-skill": "./dist/cli.js",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
+        "vitest": "^4.1.0",
+      },
+    },
     "packages/checkout-headless": {
       "name": "@tixkit/checkout-headless",
       "version": "0.1.0",
@@ -2447,6 +2458,8 @@
     "@tixkit/agent-protocol": ["@tixkit/agent-protocol@workspace:packages/agent-protocol"],
 
     "@tixkit/api": ["@tixkit/api@workspace:packages/api"],
+
+    "@tixkit/api-integration-skill": ["@tixkit/api-integration-skill@workspace:packages/api-integration-skill"],
 
     "@tixkit/astro": ["@tixkit/astro@workspace:packages/sdk-astro"],
 

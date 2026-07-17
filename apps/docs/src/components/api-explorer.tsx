@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { executeApiExplorerRequest, issueApiExplorerRequestUrl } from './api-explorer-target';
 
 type Operation = { operationId: string; method: string; path: string; summary: string };
 
@@ -30,7 +31,14 @@ export function ApiExplorer({
   const mutation = operation?.method !== 'GET';
   const unresolvedPath = /[{}]/u.test(requestPath);
   const sandboxCredential = /^tk_sandbox_[a-f0-9]{64}$/u.test(apiKey);
-  const url = operation ? `${baseUrl.replace(/\/$/u, '')}/v1${requestPath}` : '';
+  const url = useMemo(() => {
+    if (!operation) return '';
+    try {
+      return issueApiExplorerRequestUrl({ allowedOrigins, selectedOrigin: baseUrl, requestPath });
+    } catch {
+      return '';
+    }
+  }, [allowedOrigins, baseUrl, operation, requestPath]);
   const resetConsent = () => setMutationConfirmed(false);
 
   async function execute() {
@@ -40,16 +48,19 @@ export function ApiExplorer({
     setStatus('Sending sandbox request.');
     setFailure('');
     try {
-      const response = await fetch(url, {
-        method: operation.method,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'X-Tixkit-Version': version,
-          Accept: 'application/json',
-          ...(operation.method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
+      const response = await executeApiExplorerRequest(
+        { allowedOrigins, selectedOrigin: baseUrl, requestPath },
+        {
+          method: operation.method,
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'X-Tixkit-Version': version,
+            Accept: 'application/json',
+            ...(operation.method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
+          },
+          ...(operation.method === 'GET' ? {} : { body }),
         },
-        ...(operation.method === 'GET' ? {} : { body }),
-      });
+      );
       const text = await response.text();
       setResult(`${response.status} ${response.statusText}\n${text.slice(0, 20_000)}`);
       if (response.ok) setStatus(`Sandbox request completed with status ${response.status}.`);
@@ -177,6 +188,7 @@ export function ApiExplorer({
           !sandboxCredential ||
           running ||
           !operation ||
+          !url ||
           unresolvedPath ||
           (mutation && !mutationConfirmed)
         }

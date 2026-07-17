@@ -53,7 +53,7 @@ related:
   - /reference/migrations/2026-08-19-to-2026-08-20
 ---
 
-The current HTTP/OpenAPI/SDK contract release is `2026-08-20`. HTTP routes use the `/v1` URL prefix. Durable domain webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change their payload schema. The synthetic `test.ping` envelope and the `X-Tixkit-API-Version` delivery-attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train.
+The current HTTP/OpenAPI/SDK contract release is `2026-08-21`. HTTP routes use the `/v1` URL prefix. Durable domain webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change their payload schema. The synthetic `test.ping` envelope and the `X-Tixkit-API-Version` delivery-attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train.
 
 The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under `/contracts/<API version>/`. Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. No product-wide supported-version, end-of-life, or deprecation window is approved or published; retained immutable artifacts are verification records, not a promise that every historical server version remains available.
 

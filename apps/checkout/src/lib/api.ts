@@ -403,6 +403,99 @@ export function apiBaseUrl(): string {
   return getBrowserRuntimeConfig().platformApiBaseUrl;
 }
 
+function hasUnsafeUrlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 32 || codePoint === 127 || character === '\\';
+  });
+}
+
+export function issueCheckoutApiUrl(path: string): string {
+  const { platformApiBaseUrl } = getBrowserRuntimeConfig();
+  if (
+    !path ||
+    path.length > 4_096 ||
+    path !== path.trim() ||
+    !path.startsWith('/') ||
+    path.startsWith('//') ||
+    path.includes('@') ||
+    /%(?:2e|2f|5c)/iu.test(path) ||
+    hasUnsafeUrlCharacter(path)
+  ) {
+    throw new CheckoutApiError('INVALID_API_PATH', 'The checkout API path is invalid', 0);
+  }
+  const base = new URL(platformApiBaseUrl);
+  const resolved = new URL(`/v1${path}`, `${base.origin}/`);
+  if (
+    resolved.origin !== base.origin ||
+    resolved.username ||
+    resolved.password ||
+    !resolved.pathname.startsWith('/v1/')
+  ) {
+    throw new CheckoutApiError('INVALID_API_PATH', 'The checkout API path is invalid', 0);
+  }
+  return resolved.toString();
+}
+
+export function issueCheckoutUploadUrl(candidate: string): string {
+  const { mediaOrigin } = getBrowserRuntimeConfig();
+  if (
+    !candidate ||
+    candidate.length > 8_192 ||
+    candidate !== candidate.trim() ||
+    hasUnsafeUrlCharacter(candidate)
+  ) {
+    throw new CheckoutApiError('INVALID_UPLOAD_URL', 'The upload target is invalid', 0);
+  }
+  const allowed = new URL(mediaOrigin);
+  const resolved = new URL(candidate);
+  if (
+    resolved.origin !== allowed.origin ||
+    resolved.username ||
+    resolved.password ||
+    resolved.hash ||
+    (resolved.protocol !== 'https:' && resolved.protocol !== 'http:')
+  ) {
+    throw new CheckoutApiError('INVALID_UPLOAD_URL', 'The upload target is invalid', 0);
+  }
+  return resolved.toString();
+}
+
+export function issueCheckoutUploadCompletionUrl(candidate: string): string {
+  const { platformApiBaseUrl } = getBrowserRuntimeConfig();
+  if (
+    !candidate ||
+    candidate.length > 2_048 ||
+    candidate !== candidate.trim() ||
+    candidate.startsWith('//') ||
+    candidate.includes('@') ||
+    hasUnsafeUrlCharacter(candidate)
+  ) {
+    throw new CheckoutApiError(
+      'INVALID_UPLOAD_COMPLETION_URL',
+      'The upload completion target is invalid',
+      0,
+    );
+  }
+  const base = new URL(platformApiBaseUrl);
+  const resolved = new URL(candidate, `${base.origin}/`);
+  if (
+    resolved.origin !== base.origin ||
+    resolved.username ||
+    resolved.password ||
+    resolved.search ||
+    resolved.hash ||
+    !/^\/v1\/public\/upload-artifacts\/[A-Za-z0-9_-]+\/complete$/u.test(resolved.pathname)
+  ) {
+    throw new CheckoutApiError(
+      'INVALID_UPLOAD_COMPLETION_URL',
+      'The upload completion target is invalid',
+      0,
+    );
+  }
+  return resolved.toString();
+}
+
 function normalizePublicEvent(event: PublicEvent): PublicEvent {
   const origin = new URL(apiBaseUrl()).origin;
   return {
@@ -480,7 +573,7 @@ async function apiRequest<T>(
   let response: Response;
   try {
     const timeoutSignal = AbortSignal.timeout(15_000);
-    response = await fetch(`${apiBaseUrl()}${path}`, {
+    response = await fetch(issueCheckoutApiUrl(path), {
       ...init,
       headers,
       credentials: 'omit',
@@ -730,7 +823,8 @@ export const publicApi = {
         }),
       },
     );
-    const uploadResponse = await fetch(artifact.uploadUrl, {
+    const uploadUrl = issueCheckoutUploadUrl(artifact.uploadUrl);
+    const uploadResponse = await fetch(uploadUrl, {
       method: 'PUT',
       headers: artifact.uploadHeaders,
       body: file,
@@ -738,7 +832,8 @@ export const publicApi = {
     if (!uploadResponse.ok) {
       throw new CheckoutApiError('UPLOAD_FAILED', 'File upload failed', uploadResponse.status);
     }
-    await apiRequest(artifact.completeUrl.replace(/^\/v1/, ''), {
+    const completeUrl = new URL(issueCheckoutUploadCompletionUrl(artifact.completeUrl));
+    await apiRequest(completeUrl.pathname.replace(/^\/v1/u, ''), {
       method: 'POST',
       body: JSON.stringify({ token: artifact.completeToken }),
     });

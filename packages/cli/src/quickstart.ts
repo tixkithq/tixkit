@@ -25,14 +25,38 @@ const HEALTH_URLS = {
   docs: 'http://localhost:3002/health',
 };
 
-function waitForHealth(url: string, attempts = 30, delayMs = 1000): Promise<boolean> {
+export type QuickstartService = keyof typeof HEALTH_URLS;
+
+export function issueQuickstartHealthUrl(service: QuickstartService): string {
+  const value = HEALTH_URLS[service];
+  if (!value) throw new Error('Unknown quickstart service health target.');
+  const url = new URL(value);
+  if (
+    url.username ||
+    url.password ||
+    url.protocol !== 'http:' ||
+    !['127.0.0.1', '[::1]', '::1', 'localhost'].includes(url.hostname)
+  ) {
+    throw new Error('Quickstart health targets must use credential-free loopback HTTP URLs.');
+  }
+  return url.toString();
+}
+
+export function waitForHealth(
+  service: QuickstartService,
+  attempts = 30,
+  delayMs = 1000,
+  request: typeof fetch = globalThis.fetch,
+): Promise<boolean> {
   return new Promise((resolve) => {
     let attempt = 0;
 
     async function check() {
       attempt++;
       try {
-        const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+        const response = await request(issueQuickstartHealthUrl(service), {
+          signal: AbortSignal.timeout(2000),
+        });
         if (response.ok) {
           resolve(true);
           return;
@@ -172,10 +196,10 @@ export async function runQuickstart(options: QuickstartOptions): Promise<Quickst
 
   console.log('Waiting for services to become healthy...');
   const [apiHealthy, adminHealthy, checkoutHealthy, docsHealthy] = await Promise.all([
-    waitForHealth(HEALTH_URLS.api),
-    waitForHealth(HEALTH_URLS.admin),
-    waitForHealth(HEALTH_URLS.checkout),
-    waitForHealth(HEALTH_URLS.docs),
+    waitForHealth('api'),
+    waitForHealth('admin'),
+    waitForHealth('checkout'),
+    waitForHealth('docs'),
   ]);
 
   if (!apiHealthy || !adminHealthy || !checkoutHealthy || !docsHealthy) {

@@ -1,16 +1,22 @@
 export const WEBHOOK_TEST_EVENT_TYPE = 'test.ping' as const;
-export const WEBHOOK_TEST_API_VERSION = '2026-08-20' as const;
+export const WEBHOOK_TEST_API_VERSION = '2026-08-21' as const;
 const SUPPORTED_WEBHOOK_TEST_API_VERSIONS = new Set([
   '2026-07-17',
   '2026-07-26',
   '2026-08-12',
+  '2026-08-20',
   WEBHOOK_TEST_API_VERSION,
 ]);
 
 export type WebhookTestPayload = {
   type: typeof WEBHOOK_TEST_EVENT_TYPE;
   test: true;
-  apiVersion: '2026-07-17' | '2026-07-26' | '2026-08-12' | typeof WEBHOOK_TEST_API_VERSION;
+  apiVersion:
+    | '2026-07-17'
+    | '2026-07-26'
+    | '2026-08-12'
+    | '2026-08-20'
+    | typeof WEBHOOK_TEST_API_VERSION;
   createdAt: string;
   data: { endpointId: string };
 };

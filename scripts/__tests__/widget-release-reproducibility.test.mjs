@@ -184,6 +184,7 @@ test('widget release is checkout-independent and does not require embed-core dis
       'TIXKIT_WIDGET_VERSION',
       'TixkitButton',
       'TixkitWidget',
+      'issueWidgetRuntimeUrl',
     ]);
     assert.deepEqual(browserContract.definitions, ['tixkit-widget', 'tixkit-button']);
 

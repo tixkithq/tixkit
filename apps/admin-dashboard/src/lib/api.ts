@@ -12,6 +12,7 @@
  */
 
 import { getAdminApiBaseUrl, request, withFixture } from './api-http';
+import { getBrowserRuntimeConfig } from './runtime-config-browser';
 export { getAdminApiAuthHeaders, getAdminApiBaseUrl, resolveAdminApiUrl } from './api-http';
 export { hasClerkKey } from '@/lib/auth';
 import type { AdminTableQuery, AdminTablePage } from '@tixkit/admin-table-core';
@@ -72,15 +73,79 @@ function err<T>(error: AdminApiError): ApiResult<T> {
   return { ok: false, error };
 }
 
-async function putUploadBytes(
+function hasUnsafeUrlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 32 || codePoint === 127 || character === '\\';
+  });
+}
+
+export function issueAdminUploadUrl(candidate: string): string {
+  const { uploadOrigin } = getBrowserRuntimeConfig();
+  if (
+    !candidate ||
+    candidate.length > 8_192 ||
+    candidate !== candidate.trim() ||
+    hasUnsafeUrlCharacter(candidate)
+  ) {
+    throw new Error('The upload target is invalid');
+  }
+  const allowed = new URL(uploadOrigin);
+  const resolved = new URL(candidate);
+  if (
+    resolved.origin !== allowed.origin ||
+    resolved.username ||
+    resolved.password ||
+    resolved.hash ||
+    (resolved.protocol !== 'https:' && resolved.protocol !== 'http:')
+  ) {
+    throw new Error('The upload target is invalid');
+  }
+  return resolved.toString();
+}
+
+export function issueAdminUploadCompletionUrl(candidate: string): string {
+  const { platformApiBaseUrl } = getBrowserRuntimeConfig();
+  if (
+    !candidate ||
+    candidate.length > 2_048 ||
+    candidate !== candidate.trim() ||
+    candidate.startsWith('//') ||
+    candidate.includes('@') ||
+    hasUnsafeUrlCharacter(candidate)
+  ) {
+    throw new Error('The upload completion target is invalid');
+  }
+  const base = new URL(platformApiBaseUrl);
+  const resolved = new URL(candidate, `${base.origin}/`);
+  if (
+    resolved.origin !== base.origin ||
+    resolved.username ||
+    resolved.password ||
+    resolved.search ||
+    resolved.hash ||
+    !/^\/v1\/upload-artifacts\/[A-Za-z0-9_-]+\/complete$/u.test(resolved.pathname)
+  ) {
+    throw new Error('The upload completion target is invalid');
+  }
+  return resolved.toString();
+}
+
+export async function putAdminUploadBytes(
   ticket: UploadArtifactTicket,
   file: File,
   onProgress?: (percent: number) => void,
 ): Promise<ApiResult<void>> {
+  let uploadUrl: string;
+  try {
+    uploadUrl = issueAdminUploadUrl(ticket.uploadUrl);
+  } catch {
+    return err(apiError('invalid_upload_url', 'The upload target is invalid'));
+  }
   if (typeof XMLHttpRequest !== 'undefined' && onProgress) {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('PUT', ticket.uploadUrl);
+      xhr.open('PUT', uploadUrl);
       for (const [name, value] of Object.entries(ticket.uploadHeaders))
         xhr.setRequestHeader(name, value);
       xhr.upload.addEventListener('progress', (event) => {
@@ -101,7 +166,7 @@ async function putUploadBytes(
     });
   }
   try {
-    const response = await fetch(ticket.uploadUrl, {
+    const response = await fetch(uploadUrl, {
       method: 'PUT',
       headers: ticket.uploadHeaders,
       body: file,
@@ -5119,16 +5184,25 @@ export const adminApi: AdminApi = {
         });
         if (!createResult.ok) return createResult;
 
-        const uploadResult = await putUploadBytes(createResult.data, input.file, input.onProgress);
+        const uploadResult = await putAdminUploadBytes(
+          createResult.data,
+          input.file,
+          input.onProgress,
+        );
         if (!uploadResult.ok) return uploadResult;
 
-        const completeResult = await request<CompletedUploadArtifact>(
-          createResult.data.completeUrl,
-          {
-            method: 'POST',
-            body: JSON.stringify({}),
-          },
-        );
+        let completeUrl: string;
+        try {
+          completeUrl = issueAdminUploadCompletionUrl(createResult.data.completeUrl);
+        } catch {
+          return err(
+            apiError('invalid_upload_completion_url', 'The upload completion target is invalid'),
+          );
+        }
+        const completeResult = await request<CompletedUploadArtifact>(completeUrl, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        });
         if (!completeResult.ok) return completeResult;
 
         const downloadResult = await request<{ downloadUrl: string }>(

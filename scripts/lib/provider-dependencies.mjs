@@ -14,7 +14,7 @@ import {
 
 const sourceExtension = /\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx)$/u;
 const ignoredSegment =
-  /(?:^|\/)(?:\.dart_tool|\.expo|\.next|\.output|\.turbo|build|coverage|dist|generated|node_modules|out|test-results)(?:\/|$)/u;
+  /(?:^|\/)(?:\.astro|\.dart_tool|\.expo|\.next|\.nuxt|\.output|\.svelte-kit|\.turbo|build|coverage|dist|generated|node_modules|out|test-results)(?:\/|$)/u;
 const testPath = /(?:^|\/)(?:__tests__\/|[^/]+\.(?:integration\.)?(?:spec|test)\.)/u;
 
 export const PROVIDER_DEPENDENCY_INVENTORY_PATH = 'distribution/provider-dependency-inventory.json';
@@ -137,6 +137,58 @@ function packageRoot(packagePath) {
   return dirname(packagePath);
 }
 
+function maskJavaScriptComments(source) {
+  let output = '';
+  let quote;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (quote) {
+      output += character;
+      if (character === '\\') {
+        if (next !== undefined) {
+          output += next;
+          index += 1;
+        }
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      output += character;
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      output += '  ';
+      index += 2;
+      while (index < source.length && source[index] !== '\n') {
+        output += ' ';
+        index += 1;
+      }
+      if (index < source.length) output += '\n';
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      output += '  ';
+      index += 2;
+      while (index < source.length) {
+        if (source[index] === '*' && source[index + 1] === '/') {
+          output += '  ';
+          index += 1;
+          break;
+        }
+        output += source[index] === '\n' ? '\n' : ' ';
+        index += 1;
+      }
+      continue;
+    }
+    output += character;
+  }
+  return output;
+}
+
 function sourceMayContainClassifiedDependency(source, classifiedDependencies) {
   const decoded = source
     .replace(/\\x([0-9a-f]{2})/giu, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
@@ -148,6 +200,52 @@ function sourceMayContainClassifiedDependency(source, classifiedDependencies) {
   return [...classifiedDependencies].some((dependency) =>
     compact.includes(dependency.replace(/[^a-z0-9]/giu, '').toLowerCase()),
   );
+}
+
+function sourceMayContainDynamicModuleLoad(source) {
+  const withoutStaticLoads = source.replace(
+    /\b(?:import|require)\s*\(\s*(?:'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`$\\])*`)\s*\)/gu,
+    '',
+  );
+  const lexical = maskJavaScriptComments(withoutStaticLoads);
+  return (
+    /\bcreateRequire\b/u.test(lexical) ||
+    /\bmodule\s*\[/u.test(lexical) ||
+    /=\s*[^;]*\bmodule\b/u.test(lexical) ||
+    /\b(?:const|let|var)\s+(?:[A-Za-z_$][\w$]*\s*=\s*module\b|\{[^}]*\brequire\s*:)/u.test(
+      lexical,
+    ) ||
+    /\brequire\s*(?:[([.;,\]}]|$)/u.test(lexical) ||
+    /\bimport\s*\(/u.test(lexical)
+  );
+}
+
+function sourceMayContainClassifiedImport(source, classifiedDependencies) {
+  const decoded = source
+    .replace(/\\x([0-9a-f]{2})/giu, (_match, hex) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/\\u([0-9a-f]{4})/giu, (_match, hex) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/\\u\{([0-9a-f]{1,6})\}/giu, (_match, hex) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    );
+  const lexical = maskJavaScriptComments(decoded);
+  for (const dependency of classifiedDependencies) {
+    const escaped = dependency.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    const packageLiteral = `(?:'${escaped}(?:/[^'\\\\]*)?'|"${escaped}(?:/[^"\\\\]*)?"|\`${escaped}(?:/[^\`\\\\$]*)?\`)`;
+    const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*`;
+    const patterns = [
+      new RegExp(`\\bimport${gap}${packageLiteral}`, 'u'),
+      new RegExp(`\\bimport${gap}\\(${gap}${packageLiteral}`, 'u'),
+      new RegExp(`\\b(?:export|import)[^;]*?\\bfrom${gap}${packageLiteral}`, 'u'),
+      new RegExp(`\\bimport[^;]*?=\\s*require\\s*\\(\\s*${packageLiteral}`, 'u'),
+      new RegExp(`\\b(?:module|require)[^;]*?\\(\\s*${packageLiteral}`, 'u'),
+    ];
+    if (patterns.some((pattern) => pattern.test(lexical))) return true;
+  }
+  return false;
 }
 
 export function providerDependencyInventory(
@@ -184,7 +282,13 @@ export function providerDependencyInventory(
     for (const absolutePath of files) {
       const path = relative(repositoryRoot, absolutePath).replaceAll('\\', '/');
       const source = readFileSync(absolutePath, 'utf8');
-      const syntaxFindings = sourceMayContainClassifiedDependency(source, classifiedDependencies)
+      const mayContainClassifiedImport = sourceMayContainClassifiedImport(
+        source,
+        classifiedDependencies,
+      );
+      const mayContainDynamicModuleLoad = sourceMayContainDynamicModuleLoad(source);
+      if (!mayContainClassifiedImport && !mayContainDynamicModuleLoad) continue;
+      const syntaxFindings = mayContainDynamicModuleLoad
         ? providerSourceBoundaryFindings(
             path,
             source,
@@ -222,8 +326,8 @@ export function providerDependencyInventory(
 export function providerDependencyViolations(
   root,
   registry = loadProviderIntegrationRegistry(root),
+  inventory = providerDependencyInventory(root, registry),
 ) {
-  const inventory = providerDependencyInventory(root, registry);
   const violations = [];
   const nonProviderDependencies = new Set(registry.nonProviderDependencies);
   const classifiedDependencies = new Set(inventory.importPolicies.keys());
@@ -299,8 +403,11 @@ export function providerDependencyViolations(
   return [...new Set(violations)].sort();
 }
 
-export function renderProviderDependencyInventory(root, registry) {
-  const inventory = providerDependencyInventory(root, registry);
+export function renderProviderDependencyInventory(
+  root,
+  registry,
+  inventory = providerDependencyInventory(root, registry),
+) {
   return inventory.imports.map(({ dependency, manifestPath, path, testOnly }) => {
     const integrations = registry.integrations.filter(({ allowedImports }) =>
       allowedImports.some(
@@ -331,7 +438,11 @@ export function renderProviderDependencyInventory(root, registry) {
   });
 }
 
-export function buildProviderDependencyInventoryArtifact(root, registry) {
+export function buildProviderDependencyInventoryArtifact(
+  root,
+  registry,
+  inventory = providerDependencyInventory(root, registry),
+) {
   const repositoryRoot = resolve(root);
   return {
     $schema: './provider-dependency-inventory.schema.json',
@@ -342,11 +453,11 @@ export function buildProviderDependencyInventoryArtifact(root, registry) {
         readFileSync(resolve(repositoryRoot, 'distribution/provider-integration-registry.json')),
       ),
     },
-    imports: renderProviderDependencyInventory(repositoryRoot, registry),
+    imports: renderProviderDependencyInventory(repositoryRoot, registry, inventory),
   };
 }
 
-export function validateProviderDependencyInventoryArtifact(root, artifact, registry) {
+export function validateProviderDependencyInventoryArtifact(root, artifact, registry, inventory) {
   const repositoryRoot = resolve(root);
   const schema = JSON.parse(
     readFileSync(resolve(repositoryRoot, PROVIDER_DEPENDENCY_INVENTORY_SCHEMA_PATH), 'utf8'),
@@ -357,7 +468,7 @@ export function validateProviderDependencyInventoryArtifact(root, artifact, regi
       `Provider dependency inventory schema violations:\n${JSON.stringify(validate.errors, null, 2)}`,
     );
   }
-  const expected = buildProviderDependencyInventoryArtifact(repositoryRoot, registry);
+  const expected = buildProviderDependencyInventoryArtifact(repositoryRoot, registry, inventory);
   if (canonicalJson(artifact) !== canonicalJson(expected)) {
     throw new Error(
       'Provider dependency inventory is stale or tampered; regenerate it with validate-provider-dependencies.mjs --write.',
@@ -370,13 +481,14 @@ export function loadProviderDependencyInventoryArtifact(
   root,
   registry,
   artifactPath = PROVIDER_DEPENDENCY_INVENTORY_PATH,
+  inventory,
 ) {
   const artifact = JSON.parse(readFileSync(resolve(root, artifactPath), 'utf8'));
-  return validateProviderDependencyInventoryArtifact(root, artifact, registry);
+  return validateProviderDependencyInventoryArtifact(root, artifact, registry, inventory);
 }
 
-export function writeProviderDependencyInventoryArtifact(root, outputPath, registry) {
-  const artifact = buildProviderDependencyInventoryArtifact(root, registry);
+export function writeProviderDependencyInventoryArtifact(root, outputPath, registry, inventory) {
+  const artifact = buildProviderDependencyInventoryArtifact(root, registry, inventory);
   const absoluteOutputPath = resolve(root, outputPath);
   mkdirSync(dirname(absoluteOutputPath), { recursive: true });
   writeFileSync(absoluteOutputPath, canonicalJson(artifact), { mode: 0o644 });
