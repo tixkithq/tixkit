@@ -2,7 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
+  "anyOf": [
+    { "required": ["files"], "properties": { "files": true } },
+    { "required": ["nextRoutes"], "properties": { "nextRoutes": true } },
+    { "required": ["metrics"], "properties": { "metrics": true } },
+    { "required": ["lighthouseReports"], "properties": { "lighthouseReports": true } }
+  ],
   "properties": {
+    "$schema": { "type": "string" },
     "files": {
       "type": "array",
       "items": {
@@ -36,7 +43,10 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["label", "path", "metric"],
-        "oneOf": [{ "required": ["max"] }, { "required": ["min"] }],
+        "oneOf": [
+          { "required": ["max"], "properties": { "max": true } },
+          { "required": ["min"], "properties": { "min": true } }
+        ],
         "properties": {
           "label": { "type": "string" },
           "path": { "type": "string" },
@@ -52,18 +62,37 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["label", "path"],
+        "required": ["label", "path", "expectedUrlPattern", "lighthouseVersion"],
+        "anyOf": [
+          {
+            "required": ["minPerformanceScore"],
+            "properties": { "minPerformanceScore": true }
+          },
+          { "required": ["audits"], "properties": { "audits": true } }
+        ],
         "properties": {
           "label": { "type": "string" },
           "path": { "type": "string" },
+          "expectedUrlPattern": { "type": "string", "minLength": 1 },
+          "lighthouseVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
           "minPerformanceScore": { "type": "number", "minimum": 0, "maximum": 1 },
           "audits": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "object",
               "additionalProperties": false,
               "required": ["id"],
-              "oneOf": [{ "required": ["maxNumericValue"] }, { "required": ["minNumericValue"] }],
+              "oneOf": [
+                {
+                  "required": ["maxNumericValue"],
+                  "properties": { "maxNumericValue": true }
+                },
+                {
+                  "required": ["minNumericValue"],
+                  "properties": { "minNumericValue": true }
+                }
+              ],
               "properties": {
                 "label": { "type": "string" },
                 "id": { "type": "string" },

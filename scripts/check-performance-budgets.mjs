@@ -2,12 +2,37 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
+import performanceBudgetSchema from './performance-budgets.schema.json' with { type: 'json' };
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const defaultConfigPath = path.join(repoRoot, 'performance-budgets.json');
+const validatePerformanceBudgetSchema = new Ajv2020({ allErrors: true, strict: true }).compile(
+  performanceBudgetSchema,
+);
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
+}
+
+export function assertValidPerformanceBudgetConfig(config) {
+  if (!validatePerformanceBudgetSchema(config)) {
+    const details = validatePerformanceBudgetSchema.errors
+      ?.map((error) => `${error.instancePath || '/'} ${error.message}`)
+      .join('; ');
+    throw new Error(`Invalid performance budget config: ${details ?? 'unknown schema error'}`);
+  }
+  for (const report of config.lighthouseReports ?? []) {
+    try {
+      RegExp(report.expectedUrlPattern, 'u');
+    } catch (error) {
+      throw new Error(
+        `Invalid performance budget config: ${report.label} expectedUrlPattern is not a valid regular expression: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+  return config;
 }
 
 function bytesLabel(bytes) {
@@ -185,7 +210,59 @@ function readLighthouseAuditNumericValue(report, auditId) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function checkLighthouseIdentity(report, budget) {
+  const results = [];
+  const requestedUrl = report?.requestedUrl;
+  const finalDisplayedUrl = report?.finalDisplayedUrl;
+  if (typeof budget.expectedUrlPattern !== 'string' || budget.expectedUrlPattern.length === 0) {
+    return [{ ok: false, line: `FAIL ${budget.label}: missing expectedUrlPattern` }];
+  }
+  if (
+    typeof budget.lighthouseVersion !== 'string' ||
+    !/^\d+\.\d+\.\d+$/u.test(budget.lighthouseVersion)
+  ) {
+    return [{ ok: false, line: `FAIL ${budget.label}: invalid lighthouseVersion` }];
+  }
+  let expectedUrl;
+  try {
+    expectedUrl = new RegExp(budget.expectedUrlPattern, 'u');
+  } catch (error) {
+    return [
+      {
+        ok: false,
+        line: `FAIL ${budget.label}: invalid expectedUrlPattern: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    ];
+  }
+  for (const [field, value] of [
+    ['requestedUrl', requestedUrl],
+    ['finalDisplayedUrl', finalDisplayedUrl],
+  ]) {
+    if (typeof value !== 'string' || !expectedUrl.test(value)) {
+      results.push({
+        ok: false,
+        line: `FAIL ${budget.label} identity: ${field} does not match ${budget.expectedUrlPattern}`,
+      });
+    }
+    expectedUrl.lastIndex = 0;
+  }
+  if (report?.lighthouseVersion !== budget.lighthouseVersion) {
+    results.push({
+      ok: false,
+      line: `FAIL ${budget.label} identity: Lighthouse version ${String(report?.lighthouseVersion)} does not equal ${budget.lighthouseVersion}`,
+    });
+  }
+  if (results.length === 0) {
+    results.push({
+      ok: true,
+      line: `PASS ${budget.label} identity: ${requestedUrl} (Lighthouse ${budget.lighthouseVersion})`,
+    });
+  }
+  return results;
+}
+
 export function evaluateBudgets(config, { root = repoRoot } = {}) {
+  assertValidPerformanceBudgetConfig(config);
   const results = [];
   const nextRouteIdentities = new Set();
   for (const budget of config.files ?? []) {
@@ -260,6 +337,7 @@ export function evaluateBudgets(config, { root = repoRoot } = {}) {
 
     try {
       const report = readJson(reportPath);
+      results.push(...checkLighthouseIdentity(report, budget));
       if (typeof budget.minPerformanceScore === 'number') {
         const score = readLighthousePerformanceScore(report);
         if (score === undefined) {

@@ -4,6 +4,8 @@
     {
       "label": "checkout flow Lighthouse",
       "path": "artifacts/performance/lighthouse/checkout-flow.json",
+      "expectedUrlPattern": "^http://localhost:3201/checkout\\?eventId=[A-Za-z0-9_-]+$",
+      "lighthouseVersion": "12.8.2",
       "minPerformanceScore": 0.8,
       "audits": [
         {
@@ -29,6 +31,8 @@
     {
       "label": "hosted event page Lighthouse",
       "path": "artifacts/performance/lighthouse/hosted-event-page.json",
+      "expectedUrlPattern": "^http://localhost:3201/e/[A-Za-z0-9_-]+$",
+      "lighthouseVersion": "12.8.2",
       "minPerformanceScore": 0.8,
       "audits": [
         {
@@ -54,6 +58,8 @@
     {
       "label": "admin shell Lighthouse",
       "path": "artifacts/performance/lighthouse/admin-shell.json",
+      "expectedUrlPattern": "^http://localhost:3202/dashboard$",
+      "lighthouseVersion": "12.8.2",
       "minPerformanceScore": 0.75,
       "audits": [
         {
