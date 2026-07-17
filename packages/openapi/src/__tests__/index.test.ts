@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-18');
+    expect(openApiSpec.info.version).toBe('2026-08-19');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1222,6 +1222,34 @@ describe('openApiSpec', () => {
     ]);
   });
 
+  it('documents the breaking message campaign idempotency-key grammar', () => {
+    expect(openApiSpec.info.version).toBe('2026-08-19');
+    expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
+      name: 'Idempotency-Key',
+      in: 'header',
+      required: true,
+      schema: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 255,
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+      },
+      description:
+        'Required for message campaigns. Use 1-255 safe token characters with no whitespace, and reuse the same key only for an identical event and request body.',
+    });
+    const operation = openApiSpec.paths['/events/{eventId}/messages'].post;
+    expect(operation.parameters).toContainEqual({
+      $ref: '#/components/parameters/MessageCampaignIdempotencyKey',
+    });
+    expect(operation.parameters).not.toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(operation['x-compatibility-breaking-change']).toContain(
+      'API 2026-08-19 restricts message-campaign Idempotency-Key',
+    );
+    expect(operation.responses['400'].description).toContain('Idempotency-Key');
+  });
+
   it('documents brand payment account binding on response schemas', () => {
     expect(openApiSpec.components.schemas.Brand.properties).toHaveProperty('paymentAccountId');
     expect(
@@ -1857,7 +1885,7 @@ describe('openApiSpec', () => {
     const messagePost = openApiSpec.paths['/events/{eventId}/messages'].post;
     const requestSchema = messagePost.requestBody.content['application/json'].schema;
     expect(messagePost.parameters).toContainEqual({
-      $ref: '#/components/parameters/RequiredIdempotencyKey',
+      $ref: '#/components/parameters/MessageCampaignIdempotencyKey',
     });
     expect(requestSchema.oneOf).toHaveLength(3);
     expect(requestSchema.oneOf.map((schema) => [...schema.required])).toEqual([

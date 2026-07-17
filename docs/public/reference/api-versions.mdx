@@ -49,9 +49,10 @@ related:
   - /reference/migrations/2026-08-15-to-2026-08-16
   - /reference/migrations/2026-08-16-to-2026-08-17
   - /reference/migrations/2026-08-17-to-2026-08-18
+  - /reference/migrations/2026-08-18-to-2026-08-19
 ---
 
-The current HTTP/OpenAPI/SDK contract release is `2026-08-18`. HTTP routes use the `/v1` URL prefix. Durable domain webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change their payload schema. The synthetic `test.ping` envelope and the `X-Tixkit-API-Version` delivery-attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train.
+The current HTTP/OpenAPI/SDK contract release is `2026-08-19`. HTTP routes use the `/v1` URL prefix. Durable domain webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change their payload schema. The synthetic `test.ping` envelope and the `X-Tixkit-API-Version` delivery-attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train.
 
 The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under `/contracts/<API version>/`. Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. No product-wide supported-version, end-of-life, or deprecation window is approved or published; retained immutable artifacts are verification records, not a promise that every historical server version remains available.
 
@@ -74,3 +75,5 @@ Human-only authorization for `user_avatar` create, complete and download operati
 Explicit `billing.write` metadata for Stripe Connect payment-account onboarding is documented in [2026-08-16 to 2026-08-17](/reference/migrations/2026-08-16-to-2026-08-17).
 
 Durable, idempotent and audit-bound webhook replay dispatch is documented in [2026-08-17 to 2026-08-18](/reference/migrations/2026-08-17-to-2026-08-18).
+
+Message-campaign idempotency-key token validation is documented in [2026-08-18 to 2026-08-19](/reference/migrations/2026-08-18-to-2026-08-19).

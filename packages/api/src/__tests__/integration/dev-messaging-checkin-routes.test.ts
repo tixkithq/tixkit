@@ -1,7 +1,12 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it, vi } from 'vitest';
-import type { Principal } from '@tixkit/domain';
+import {
+  RESALE_REFUND_MODEL,
+  RESALE_SETTLEMENT_MODEL,
+  RESALE_TERMS_VERSION,
+  type Principal,
+} from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import { ProviderOperationError, type StripeGateway } from '@tixkit/provider-clients';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
@@ -6326,6 +6331,109 @@ describe('messaging endpoint', () => {
     await app.close();
   });
 
+  it('POST /events/:eventId/messages rejects unsafe or oversized Idempotency-Key values', async () => {
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      idempotency_records: [] as Record<string, unknown>[],
+      email_jobs: [] as Record<string, unknown>[],
+      sms_jobs: [] as Record<string, unknown>[],
+      audit_logs: [] as Record<string, unknown>[],
+    };
+    const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const sendEmail = app.context.emailTransport.send as ReturnType<typeof vi.fn>;
+    const startNotificationDelivery = app.context.temporalClient
+      .startNotificationDelivery as ReturnType<typeof vi.fn>;
+    const startSmsDelivery = app.context.temporalClient.startSmsDelivery as ReturnType<
+      typeof vi.fn
+    >;
+
+    for (const idempotencyKey of [
+      undefined,
+      '',
+      ' ',
+      ' unsafe',
+      'unsafe ',
+      'unsafe key',
+      'unsafe/key',
+      'unsafe\u0001key',
+      'a'.repeat(256),
+      ['duplicate-one', 'duplicate-two'],
+    ] satisfies Array<string | string[] | undefined>) {
+      const before = structuredClone(tables);
+      sendEmail.mockClear();
+      startNotificationDelivery.mockClear();
+      startSmsDelivery.mockClear();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/events/evt_1/messages',
+        ...(idempotencyKey === undefined ? {} : { headers: { 'Idempotency-Key': idempotencyKey } }),
+        payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().message).toContain('1-255 safe token characters');
+      expect(tables).toEqual(before);
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(startNotificationDelivery).not.toHaveBeenCalled();
+      expect(startSmsDelivery).not.toHaveBeenCalled();
+    }
+
+    await app.close();
+  });
+
+  it.each([
+    [1, 'a'],
+    [255, 'a'.repeat(255)],
+  ])(
+    'POST /events/:eventId/messages accepts Idempotency-Key boundary length %i',
+    async (_length, idempotencyKey) => {
+      const tables = {
+        events: [
+          {
+            id: 'evt_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'brd_1',
+            status: 'published',
+            slug: 'evt',
+            title: 'Event',
+            timezone: 'UTC',
+            starts_at: new Date(),
+            visibility: 'public',
+            seo: '{}',
+          },
+        ],
+        attendees: [],
+        idempotency_records: [] as Record<string, unknown>[],
+      };
+      const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/events/evt_1/messages',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().message).toContain('No matching recipients');
+      expect(res.json().message).not.toContain('Idempotency-Key');
+      await app.close();
+    },
+  );
+
   it('POST /events/:eventId/messages rejects no-recipient campaigns without fake success', async () => {
     const tables = {
       events: [
@@ -6817,6 +6925,7 @@ describe('ticket transfer and attendee update', () => {
     const oldScan = await app.inject({
       method: 'POST',
       url: '/check-ins/scan',
+      headers: { 'idempotency-key': 'transfer-old-credential-scan' },
       payload: {
         checkInListId: 'cil_1',
         qrPayload: 'payload:tkt_1',
@@ -6830,6 +6939,7 @@ describe('ticket transfer and attendee update', () => {
     const newScan = await app.inject({
       method: 'POST',
       url: '/check-ins/scan',
+      headers: { 'idempotency-key': 'transfer-new-credential-scan' },
       payload: {
         checkInListId: 'cil_1',
         qrPayload: transferredBody.qrPayload,
@@ -7240,12 +7350,18 @@ describe('resale listing routes', () => {
       ticket_listings: [] as Record<string, unknown>[],
     };
     const app = await setupApp(ticketingRoutes, principal(), tables);
+    const termsAcceptance = {
+      accepted: true,
+      termsVersion: RESALE_TERMS_VERSION,
+      settlementModel: RESALE_SETTLEMENT_MODEL,
+      refundModel: RESALE_REFUND_MODEL,
+    } as const;
 
     const first = await app.inject({
       method: 'POST',
       url: '/tickets/tkt_1/resale-listings',
       headers: { 'Idempotency-Key': 'resale_idem_1' },
-      payload: { priceCents: 5500 },
+      payload: { priceCents: 5500, termsAcceptance },
     });
     expect(first.statusCode).toBe(201);
     const firstBody = first.json();
@@ -7262,7 +7378,7 @@ describe('resale listing routes', () => {
       method: 'POST',
       url: '/tickets/tkt_1/resale-listings',
       headers: { 'Idempotency-Key': 'resale_idem_1' },
-      payload: { priceCents: 5500 },
+      payload: { priceCents: 5500, termsAcceptance },
     });
     expect(replay.statusCode).toBe(201);
     expect(replay.json().id).toBe(firstBody.id);

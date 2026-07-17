@@ -44,6 +44,22 @@ type QueuedEmailJob = {
   variables: Record<string, unknown>;
 };
 
+function requireMessageIdempotencyKey(headers: Record<string, unknown>): string {
+  const value = headers['idempotency-key'];
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 255 ||
+    value.trim() !== value ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)
+  ) {
+    throw new ValidationError(
+      'Idempotency-Key must contain 1-255 safe token characters with no surrounding whitespace',
+    );
+  }
+  return value;
+}
+
 export const messagingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
@@ -354,10 +370,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'messages.write');
     const { eventId } = request.params as { eventId: string };
-    const idempotencyKey = request.headers['idempotency-key'];
-    if (typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
-      throw new ValidationError('Idempotency-Key header is required for message campaigns');
-    }
+    const idempotencyKey = requireMessageIdempotencyKey(request.headers);
 
     const parsed = sendMessageSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -379,7 +392,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     }
     const templateKeys = resolveCampaignTemplateKeys(body);
 
-    const campaignId = idempotencyKey.trim();
+    const campaignId = idempotencyKey;
     await loadAuthorizedEvent(eventId, principal, db);
     const result = await withIdempotency(
       db,

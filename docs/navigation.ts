@@ -242,6 +242,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-18 replay-safe webhook dispatch',
         routeId: 'apiMigration20260817To20260818',
       },
+      {
+        label: 'Adopt 2026-08-19 message idempotency keys',
+        routeId: 'apiMigration20260818To20260819',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },
