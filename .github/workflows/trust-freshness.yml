@@ -1,0 +1,26 @@
+name: Trust Freshness
+
+on:
+  schedule:
+    - cron: '11 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trust-freshness
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate public trust claims
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - run: bun run validate:trust-program
+      - run: bun run validate:trust-evidence
+      - run: bun run validate:public-distribution
