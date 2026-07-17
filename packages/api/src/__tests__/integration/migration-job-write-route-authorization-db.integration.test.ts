@@ -11,7 +11,10 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
-import { MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+import {
+  MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  PORTABLE_MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+} from './route-authorization-contracts.js';
 
 describeWithIntegrationDatabase('migration job write authorization matrix', () => {
   let app: FastifyInstance;
@@ -75,6 +78,20 @@ describeWithIntegrationDatabase('migration job write authorization matrix', () =
         sourceMode: 'official-export',
         sourceSystem: 'generic-csv',
         artifactIds: [`upl_mjwrite_${suffix}`],
+      },
+    };
+  }
+
+  function portableRequestBody(organizationId: string, artifact = `upl_pmjwrite_${suffix}`) {
+    return {
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v1',
+      mode: 'dry-run',
+      configuration: {
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: [artifact],
       },
     };
   }
@@ -366,6 +383,178 @@ describeWithIntegrationDatabase('migration job write authorization matrix', () =
       expect(response.json()).toMatchObject({ error: { code: denial.code } });
       expect(response.body).not.toContain(tenantA);
       expect(response.body).not.toContain(tenantB);
+      expect(await snapshot()).toEqual(before);
+    }
+  });
+
+  it('creates and replays the exact portable job and audit atomically', async () => {
+    const contract = PORTABLE_MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const before = await snapshot();
+    const request = {
+      method: contract.method,
+      url: contract.path,
+      headers: { 'idempotency-key': `portable-authorized-${suffix}` },
+      payload: portableRequestBody(organizationA),
+    } as const;
+
+    const response = await app.inject(request);
+
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json()).toMatchObject({
+      tenant_id: tenantA,
+      organization_id: organizationA,
+      source_system: 'tixkit-portable',
+      adapter_version: 'tixkit-portable-bundle-v1',
+      mode: 'dry-run',
+      requested_by: actorId,
+      configurationHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(response.json()).not.toHaveProperty('configuration');
+    const after = await snapshot();
+    expect(after.jobs).toHaveLength(before.jobs.length + 1);
+    expect(after.audits).toHaveLength(before.audits.length + 1);
+
+    const replay = await app.inject(request);
+    expect(replay.statusCode, replay.body).toBe(201);
+    expect(replay.json()).toEqual(response.json());
+    expect(await snapshot()).toEqual(after);
+
+    const conflict = await app.inject({
+      ...request,
+      payload: portableRequestBody(organizationA, `upl_pmjwrite_conflict_${suffix}`),
+    });
+    expect(conflict.statusCode, conflict.body).toBe(409);
+    expect(conflict.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+    expect(await snapshot()).toEqual(after);
+  });
+
+  it('rejects portable jobs with missing or oversized idempotency keys without effects', async () => {
+    for (const headers of [{}, { 'idempotency-key': 'x'.repeat(256) }]) {
+      const before = await snapshot();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/portable-migration-jobs',
+        headers,
+        payload: portableRequestBody(organizationA),
+      });
+      expect(response.statusCode, response.body).toBe(400);
+      expect(await snapshot()).toEqual(before);
+    }
+  });
+
+  it('forces portable identical and conflicting key races to one winner', async () => {
+    const identicalBefore = await snapshot();
+    forceConcurrentMissingPrechecks();
+    const identical = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        app.inject({
+          method: 'POST',
+          url: '/portable-migration-jobs',
+          headers: { 'idempotency-key': `portable-concurrent-identical-${suffix}` },
+          payload: portableRequestBody(organizationA),
+        }),
+      ),
+    );
+    expect(identical.map(({ statusCode }) => statusCode)).toEqual([201, 201]);
+    expect(identical[0]!.json()).toEqual(identical[1]!.json());
+    const identicalAfter = await snapshot();
+    expect(identicalAfter.jobs).toHaveLength(identicalBefore.jobs.length + 1);
+    expect(identicalAfter.audits).toHaveLength(identicalBefore.audits.length + 1);
+
+    vi.restoreAllMocks();
+    const conflictingBefore = identicalAfter;
+    forceConcurrentMissingPrechecks();
+    const conflicting = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/portable-migration-jobs',
+        headers: { 'idempotency-key': `portable-concurrent-conflict-${suffix}` },
+        payload: portableRequestBody(organizationA),
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/portable-migration-jobs',
+        headers: { 'idempotency-key': `portable-concurrent-conflict-${suffix}` },
+        payload: portableRequestBody(organizationA, `upl_pmjwrite_race_${suffix}`),
+      }),
+    ]);
+    expect(conflicting.map(({ statusCode }) => statusCode).sort()).toEqual([201, 409]);
+    const conflictingAfter = await snapshot();
+    expect(conflictingAfter.jobs).toHaveLength(conflictingBefore.jobs.length + 1);
+    expect(conflictingAfter.audits).toHaveLength(conflictingBefore.audits.length + 1);
+    const winningResponse = conflicting.find(({ statusCode }) => statusCode === 201)!;
+    const winningJob = conflictingAfter.jobs.at(-1)!;
+    expect(conflictingAfter.audits.at(-1)?.resource_id).toBe(
+      winningResponse.json<{ id: string }>().id,
+    );
+    expect(winningJob.id).toBe(winningResponse.json<{ id: string }>().id);
+  });
+
+  it('rolls portable job persistence back when its required audit fails', async () => {
+    const before = await snapshot();
+    vi.spyOn(AuditLogRepository.prototype, 'create').mockRejectedValueOnce(
+      new Error('injected portable audit failure'),
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/portable-migration-jobs',
+      headers: { 'idempotency-key': `portable-audit-failure-${suffix}` },
+      payload: portableRequestBody(organizationA),
+    });
+    expect(response.statusCode, response.body).toBe(500);
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('denies every portable job boundary without persistence or audit effects', async () => {
+    const contract = PORTABLE_MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const cases: Array<{
+      principal: Principal;
+      organizationId: string;
+      status: 403 | 404;
+      code: 'FORBIDDEN' | 'NOT_FOUND';
+    }> = [
+      {
+        principal: { ...basePrincipal, scopes: ['migrations.read'] },
+        organizationId: organizationA,
+        status: 403,
+        code: 'FORBIDDEN',
+      },
+      {
+        principal: { ...basePrincipal, brandIds: [`brd_pmjwrite_${suffix}`] },
+        organizationId: organizationA,
+        status: 403,
+        code: 'FORBIDDEN',
+      },
+      {
+        principal: { ...basePrincipal, eventIds: [`evt_pmjwrite_${suffix}`] },
+        organizationId: organizationA,
+        status: 403,
+        code: 'FORBIDDEN',
+      },
+      {
+        principal: basePrincipal,
+        organizationId: organizationAScoped,
+        status: 404,
+        code: 'NOT_FOUND',
+      },
+      {
+        principal: basePrincipal,
+        organizationId: organizationB,
+        status: 404,
+        code: 'NOT_FOUND',
+      },
+    ];
+    for (const [index, denial] of cases.entries()) {
+      principal = denial.principal;
+      const before = await snapshot();
+      const response = await app.inject({
+        method: contract.method,
+        url: contract.path,
+        headers: { 'idempotency-key': `portable-denied-${index}-${suffix}` },
+        payload: portableRequestBody(denial.organizationId),
+      });
+      expect(response.statusCode, response.body).toBe(denial.status);
+      expect(response.json()).toMatchObject({ error: { code: denial.code } });
       expect(await snapshot()).toEqual(before);
     }
   });

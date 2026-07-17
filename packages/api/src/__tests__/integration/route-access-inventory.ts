@@ -232,7 +232,7 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'migration-mapping-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-mapping-route-authorization-db.integration.test.ts',
   }),
-  ...evidenceBindings(['createMigrationJob'], {
+  ...evidenceBindings(['createMigrationJob', 'createPortableMigrationJob'], {
     source: 'migration-job-write-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-job-write-route-authorization-db.integration.test.ts',
   }),

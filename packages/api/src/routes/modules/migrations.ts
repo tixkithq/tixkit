@@ -707,59 +707,83 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         `Unsupported tixkit-portable adapter version: ${body.adapterVersion}`,
       );
     }
+    const organization = await new OrganizationRepository(app.context.db).findById(
+      body.organizationId,
+    );
+    if (!organization) throw new NotFoundError('Organization', body.organizationId);
+    ClerkAuthService.requireResourceTenant(
+      principal,
+      organization,
+      'Organization',
+      body.organizationId,
+    );
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
     const key = String(request.headers['idempotency-key'] ?? '').trim();
     if (!key || key.length > 255) {
       throw new ValidationError('A valid Idempotency-Key header is required');
     }
-    const repository = repo();
     const operationKey = `portable:${createHash('sha256').update(key).digest('hex')}`;
-    const expectedFingerprint = portableMigrationRequestFingerprint({
+    const expectedFingerprint = migrationJobRequestFingerprint({
       sourceSystem: 'tixkit-portable',
       adapterVersion: body.adapterVersion,
       mode: 'dry-run',
       configuration,
+      requestedBy: principal.id,
     });
-    const existing = await repository.findJobByIdempotencyKey(
-      principal.tenantId,
-      body.organizationId,
-      operationKey,
-    );
-    if (existing) {
-      assertPortableMigrationIdempotency(
+    const assertReplayIdentity = (candidate: Awaited<ReturnType<ImportRepository['findJob']>>) => {
+      if (!candidate) throw new Error('Portable migration replay candidate is missing');
+      assertMigrationJobIdempotency(
         {
-          sourceSystem: existing.source_system,
-          adapterVersion: existing.adapter_version,
-          mode: existing.mode,
-          configuration: existing.configuration ? JSON.parse(existing.configuration) : null,
+          sourceSystem: candidate.source_system,
+          adapterVersion: candidate.adapter_version,
+          mode: candidate.mode,
+          configuration: candidate.configuration ? JSON.parse(candidate.configuration) : null,
+          requestedBy: candidate.requested_by,
         },
         expectedFingerprint,
       );
-      return reply.status(201).send(serializeJob(existing as unknown as Record<string, unknown>));
+      return candidate;
+    };
+    let job;
+    try {
+      job = await app.context.db.transaction().execute(async (transaction) => {
+        const repository = new ImportRepository(transaction as typeof app.context.db);
+        const result = await repository.createJobWithDisposition({
+          tenantId: principal.tenantId,
+          organizationId: body.organizationId,
+          sourceSystem: 'tixkit-portable',
+          adapterVersion: body.adapterVersion,
+          mode: 'dry-run',
+          idempotencyKey: operationKey,
+          requestedBy: principal.id,
+          configuration,
+        });
+        const created = assertReplayIdentity(result.job);
+        if (!result.created) return created;
+        await writeAuditLog(
+          new AuditLogRepository(transaction as typeof app.context.db),
+          request,
+          principal,
+          {
+            action: 'migration_job.created',
+            organizationId: body.organizationId,
+            resourceType: 'MigrationJob',
+            resourceId: created.id,
+            diffSummary: { sourceSystem: 'tixkit-portable', mode: 'dry-run' },
+          },
+          { failClosed: true },
+        );
+        return created;
+      });
+    } catch (error) {
+      const raced = await repo().findJobByIdempotencyKey(
+        principal.tenantId,
+        body.organizationId,
+        operationKey,
+      );
+      if (!raced) throw error;
+      job = assertReplayIdentity(raced);
     }
-    const job = await repository.createJob({
-      tenantId: principal.tenantId,
-      organizationId: body.organizationId,
-      sourceSystem: 'tixkit-portable',
-      adapterVersion: body.adapterVersion,
-      mode: 'dry-run',
-      idempotencyKey: operationKey,
-      requestedBy: principal.id,
-      configuration,
-    });
-    assertPortableMigrationIdempotency(
-      {
-        sourceSystem: job.source_system,
-        adapterVersion: job.adapter_version,
-        mode: job.mode,
-        configuration: job.configuration ? JSON.parse(job.configuration) : null,
-      },
-      expectedFingerprint,
-    );
-    await auditMutation(app, request, body.organizationId, job.id, 'migration_job.created', {
-      sourceSystem: 'tixkit-portable',
-      mode: 'dry-run',
-    });
     return reply.status(201).send(serializeJob(job as unknown as Record<string, unknown>));
   });
 
