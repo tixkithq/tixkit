@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-12',
+    version: '2026-08-13',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -3046,6 +3046,17 @@ const rawOpenApiSpec = {
         },
         required: ['enabled', 'maxMultiplier'],
       },
+      ResaleTermsAcceptance: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          accepted: { type: 'boolean', const: true },
+          termsVersion: { type: 'string', const: '2026-07-16' },
+          settlementModel: { type: 'string', const: 'organizer_managed' },
+          refundModel: { type: 'string', const: 'manual_coordinated_resolution' },
+        },
+        required: ['accepted', 'termsVersion', 'settlementModel', 'refundModel'],
+      },
       FeeRule: {
         type: 'object',
         properties: {
@@ -4860,15 +4871,95 @@ const rawOpenApiSpec = {
         },
         required: ['items', 'nextCursor', 'hasMore'],
       },
-      TicketResaleCompletion: {
+      ResaleSettlementEntry: {
         type: 'object',
         properties: {
-          listing: { $ref: '#/components/schemas/TicketListing' },
-          sellerTicket: { $ref: '#/components/schemas/Ticket' },
-          buyerTicket: { $ref: '#/components/schemas/Ticket' },
-          buyerAttendee: { $ref: '#/components/schemas/Attendee' },
+          id: { type: 'string' },
+          kind: {
+            type: 'string',
+            enum: ['payable_accrued', 'payout_recorded', 'payable_reversed', 'recovery_required'],
+          },
+          amountCents: { type: 'integer', exclusiveMinimum: 0 },
+          currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          actorId: { type: 'string' },
+          method: { type: 'string' },
+          externalReferenceSha256: {
+            type: ['string', 'null'],
+            pattern: '^[a-f0-9]{64}$',
+          },
+          reason: { type: ['string', 'null'] },
+          createdAt: { type: 'string', format: 'date-time' },
         },
-        required: ['listing', 'sellerTicket', 'buyerTicket', 'buyerAttendee'],
+        required: [
+          'id',
+          'kind',
+          'amountCents',
+          'currency',
+          'actorId',
+          'method',
+          'externalReferenceSha256',
+          'reason',
+          'createdAt',
+        ],
+      },
+      ResaleSettlement: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          listingId: { type: 'string' },
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
+          eventId: { type: 'string' },
+          sellerOrderId: { type: ['string', 'null'] },
+          buyerOrderId: { type: ['string', 'null'] },
+          sellerTicketId: { type: ['string', 'null'] },
+          buyerTicketId: { type: ['string', 'null'] },
+          currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          grossCents: { type: ['integer', 'null'], minimum: 0 },
+          feeCents: { type: ['integer', 'null'], minimum: 0 },
+          payableCents: { type: ['integer', 'null'], minimum: 0 },
+          paidCents: { type: ['integer', 'null'], minimum: 0 },
+          reversedCents: { type: ['integer', 'null'], minimum: 0 },
+          recoveryCents: { type: ['integer', 'null'], minimum: 0 },
+          state: {
+            type: 'string',
+            enum: ['pending', 'paid', 'reversed', 'recovery_required', 'review_required'],
+          },
+          termsVersion: { type: ['string', 'null'] },
+          version: { type: 'integer', minimum: 1 },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          entries: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ResaleSettlementEntry' },
+          },
+        },
+        required: [
+          'id',
+          'listingId',
+          'tenantId',
+          'organizationId',
+          'brandId',
+          'eventId',
+          'sellerOrderId',
+          'buyerOrderId',
+          'sellerTicketId',
+          'buyerTicketId',
+          'currency',
+          'grossCents',
+          'feeCents',
+          'payableCents',
+          'paidCents',
+          'reversedCents',
+          'recoveryCents',
+          'state',
+          'termsVersion',
+          'version',
+          'createdAt',
+          'updatedAt',
+          'entries',
+        ],
       },
       CheckInList: {
         type: 'object',
@@ -5721,7 +5812,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-12, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-13, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5768,7 +5859,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-12, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-13, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5875,7 +5966,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-12 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-13 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5912,7 +6003,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-12 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-13 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8198,7 +8289,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-12 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-13 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8255,7 +8346,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-12 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-13 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -11728,10 +11819,43 @@ const rawOpenApiSpec = {
                     type: 'object',
                     additionalProperties: true,
                   },
+                  resaleTermsAcceptance: {
+                    $ref: '#/components/schemas/ResaleTermsAcceptance',
+                  },
                   successUrl: { type: 'string', format: 'uri' },
                   cancelUrl: { type: 'string', format: 'uri' },
                 },
                 required: ['eventId', 'items', 'buyer'],
+                // oxlint-disable unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
+                allOf: [
+                  {
+                    if: {
+                      properties: {
+                        items: {
+                          contains: {
+                            type: 'object',
+                            required: ['resaleListingId'],
+                          },
+                        },
+                      },
+                    },
+                    then: { required: ['resaleTermsAcceptance'] },
+                  },
+                  {
+                    if: { required: ['resaleTermsAcceptance'] },
+                    then: {
+                      properties: {
+                        items: {
+                          contains: {
+                            type: 'object',
+                            required: ['resaleListingId'],
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+                // oxlint-enable unicorn/no-thenable
               },
             },
           },
@@ -12095,10 +12219,13 @@ const rawOpenApiSpec = {
               schema: {
                 type: 'object',
                 properties: {
-                  priceCents: { type: 'integer', minimum: 0 },
+                  priceCents: { type: 'integer', exclusiveMinimum: 0 },
                   expiresAt: { type: 'string', format: 'date-time' },
+                  termsAcceptance: {
+                    $ref: '#/components/schemas/ResaleTermsAcceptance',
+                  },
                 },
-                required: ['priceCents'],
+                required: ['priceCents', 'termsAcceptance'],
               },
             },
           },
@@ -12767,10 +12894,13 @@ const rawOpenApiSpec = {
               schema: {
                 type: 'object',
                 properties: {
-                  priceCents: { type: 'integer', minimum: 0 },
+                  priceCents: { type: 'integer', exclusiveMinimum: 0 },
                   expiresAt: { type: 'string', format: 'date-time' },
+                  termsAcceptance: {
+                    $ref: '#/components/schemas/ResaleTermsAcceptance',
+                  },
                 },
-                required: ['priceCents'],
+                required: ['priceCents', 'termsAcceptance'],
               },
             },
           },
@@ -12806,44 +12936,244 @@ const rawOpenApiSpec = {
     },
     '/ticket-listings/{listingId}/complete': {
       post: {
-        summary: 'Complete a provider-delegated resale listing and reissue the ticket',
+        summary: 'Retired provider-delegated resale completion tombstone',
+        description:
+          'Authenticated compatibility tombstone. This operation never mutates a listing, ticket, attendee, order, wallet credential, settlement, audit log, or idempotency record. Use checkout session creation and confirmation for resale payment and transfer.',
         security: [{ BearerAuth: [] }],
-        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
+        'x-required-permissions': ['tickets.write'],
+        parameters: [
+          {
+            name: 'listingId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
+        responses: {
+          '410': {
+            description: 'Provider-delegated resale completion is permanently retired',
+            headers: {
+              Deprecation: {
+                schema: { type: 'string', const: '@1784160000' },
+                description: 'RFC 9745 deprecation date for the retired operation.',
+              },
+              Link: {
+                schema: {
+                  type: 'string',
+                  const: '</v1/checkout/sessions>; rel="successor-version"',
+                },
+                description: 'Successor checkout-session operation.',
+              },
+            },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/ticket-listings/{listingId}/settlement': {
+      get: {
+        summary: 'Get the organizer-managed settlement ledger for a resale listing',
+        description:
+          'Requires orders.read and exact tenant, organization, brand, and event scope. External payout references are returned only as SHA-256 digests.',
+        security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['orders.read'],
+        parameters: [
+          {
+            name: 'listingId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Scoped resale settlement and append-only evidence entries',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResaleSettlement' },
+              },
+            },
+          },
+          '404': {
+            description: 'Listing or settlement not found in the authorized scope',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
+    '/ticket-listings/{listingId}/settlement/payouts': {
+      post: {
+        summary: 'Record an externally executed resale seller payout',
+        description:
+          'Requires billing.write. Tixkit records organizer-supplied evidence but does not move seller funds. The external reference is accepted only for one-way SHA-256 hashing and is never returned in plaintext.',
+        security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['billing.write'],
+        parameters: [
+          {
+            name: 'listingId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              pattern: '^[\\s\\S]*\\S[\\s\\S]*$',
+            },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
-                  buyerId: { type: 'string', minLength: 1 },
-                  buyerEmail: { type: 'string', format: 'email' },
-                  buyerFirstName: { type: ['string', 'null'], minLength: 1 },
-                  buyerLastName: { type: ['string', 'null'], minLength: 1 },
-                  buyerPhone: { type: ['string', 'null'], minLength: 1 },
-                  buyerDateOfBirth: {
+                  amountCents: { type: 'integer', exclusiveMinimum: 0 },
+                  currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+                  expectedVersion: { type: 'integer', minimum: 1 },
+                  method: {
                     type: 'string',
-                    pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-                    description: 'Required only when the event has a positive minimum age.',
+                    enum: ['bank_transfer', 'payment_provider', 'accounting_adjustment'],
                   },
-                  externalPaymentReference: {
-                    type: ['string', 'null'],
+                  externalReference: {
+                    type: 'string',
                     minLength: 1,
                     maxLength: 256,
+                    pattern: '^[\\s\\S]*\\S[\\s\\S]*$',
                   },
                 },
-                required: ['buyerId', 'buyerEmail'],
+                required: [
+                  'amountCents',
+                  'currency',
+                  'expectedVersion',
+                  'method',
+                  'externalReference',
+                ],
               },
             },
           },
         },
         responses: {
           '200': {
-            description: 'Resale listing completed and buyer ticket issued',
+            description: 'Payout evidence recorded or exact idempotent replay returned',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/TicketResaleCompletion' },
+                schema: { $ref: '#/components/schemas/ResaleSettlement' },
               },
+            },
+          },
+          '400': {
+            description: 'Invalid payout evidence or missing idempotency key',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Listing or settlement not found in the authorized scope',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Settlement state, amount, version, or idempotency evidence conflicts',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
+    '/ticket-listings/{listingId}/settlement/reversals': {
+      post: {
+        summary: 'Record a coordinated resale payable reversal or recovery requirement',
+        description:
+          'Requires billing.write. This append-only accounting operation records a manual coordinated resolution; it does not refund a provider charge or mutate ticket ownership.',
+        security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['billing.write'],
+        parameters: [
+          {
+            name: 'listingId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              pattern: '^[\\s\\S]*\\S[\\s\\S]*$',
+            },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  amountCents: { type: 'integer', exclusiveMinimum: 0 },
+                  currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+                  expectedVersion: { type: 'integer', minimum: 1 },
+                  method: {
+                    type: 'string',
+                    enum: ['bank_transfer', 'payment_provider', 'accounting_adjustment'],
+                  },
+                  reason: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 512,
+                    pattern: '^[\\s\\S]*\\S[\\s\\S]*$',
+                  },
+                },
+                required: ['amountCents', 'currency', 'expectedVersion', 'method', 'reason'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Reversal evidence recorded or exact idempotent replay returned',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResaleSettlement' },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid reversal evidence or missing idempotency key',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Listing or settlement not found in the authorized scope',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Settlement state, amount, version, or idempotency evidence conflicts',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
             },
           },
         },

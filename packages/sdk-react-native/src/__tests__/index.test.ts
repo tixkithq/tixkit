@@ -691,7 +691,7 @@ describe('TixkitScannerClient', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       const headers = init?.headers as Record<string, string>;
-      expect(headers['X-Tixkit-Version']).toBe('2026-08-12');
+      expect(headers['X-Tixkit-Version']).toBe('2026-08-13');
 
       if (url.includes('/events/evt_1/resale-listings')) {
         expect(init?.method).toBe('GET');
@@ -719,18 +719,15 @@ describe('TixkitScannerClient', () => {
         expect(headers['Idempotency-Key']).toBe('idem_delist');
         return new Response(JSON.stringify({ id: 'lst_2', status: 'delisted' }), { status: 200 });
       }
-      if (url.includes('/ticket-listings/lst_2/complete')) {
-        expect(init?.method).toBe('POST');
-        expect(headers['Idempotency-Key']).toBe('idem_complete');
-        expect(JSON.parse(String(init?.body))).toEqual({
-          buyerId: 'usr_1',
-          buyerEmail: 'buyer@example.test',
-          externalPaymentReference: 'pi_1',
-        });
+      if (url.includes('/ticket-listings/lst_2/settlement')) {
+        expect(init?.method).toBe('GET');
         return new Response(
           JSON.stringify({
-            listing: { id: 'lst_2', status: 'sold' },
-            buyerTicket: { id: 'tkt_2' },
+            id: 'rst_1',
+            listingId: 'lst_2',
+            state: 'pending',
+            version: 1,
+            entries: [],
           }),
           { status: 200 },
         );
@@ -750,24 +747,32 @@ describe('TixkitScannerClient', () => {
     ).resolves.toMatchObject({ items: [{ id: 'lst_1' }] });
     await client.createTicketResaleListing('tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'idem_create',
     });
     await client.createCheckoutTicketResaleListing('cs_1', 'tkt_1', {
       priceCents: 5500,
       clientToken: 'client_token',
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'idem_checkout',
     });
     await client.delistResaleListing('lst_2', {
       idempotencyKey: 'idem_delist',
     });
-    await expect(
-      client.completeResaleListing('lst_2', {
-        buyerId: 'usr_1',
-        buyerEmail: 'buyer@example.test',
-        externalPaymentReference: 'pi_1',
-        idempotencyKey: 'idem_complete',
-      }),
-    ).resolves.toMatchObject({ listing: { status: 'sold' } });
+    await expect(client.getResaleSettlement('lst_2')).resolves.toMatchObject({
+      id: 'rst_1',
+      state: 'pending',
+    });
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       'https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25',

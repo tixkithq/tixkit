@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { validateSdkParity } from './lib/sdk-parity.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
-const apiVersion = '2026-08-12';
+const apiVersion = '2026-08-13';
 const distribution = JSON.parse(
   readFileSync(new URL('../distribution/public-distribution.json', import.meta.url), 'utf8'),
 );
@@ -27,9 +27,11 @@ const checks = [
       'listResaleListings',
       'createResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
       'TicketListing',
-      'TicketResaleCompletion',
+      'ResaleSettlement',
       'RefundQueued',
       'CreateRefundInput',
       'voidTickets',
@@ -63,7 +65,11 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
     ],
   },
   {
@@ -81,7 +87,9 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
     ],
   },
   {
@@ -99,7 +107,9 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
     ],
   },
   {
@@ -117,7 +127,9 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
     ],
   },
   {
@@ -135,7 +147,7 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
     ],
   },
   {
@@ -158,9 +170,12 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
+      'ResaleTermsAcceptance',
       'TicketListing',
-      'TicketResaleCompletion',
+      'ResaleSettlement',
     ],
   },
   {
@@ -182,9 +197,12 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
+      'TixkitResaleTermsAcceptance',
       'TixkitTicketListing',
-      'TixkitResaleCompletion',
+      'TixkitResaleSettlement',
     ],
   },
   {
@@ -206,9 +224,12 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
+      'TixkitResaleTermsAcceptance',
       'TixkitTicketListing',
-      'TixkitResaleCompletion',
+      'TixkitResaleSettlement',
     ],
   },
   {
@@ -230,9 +251,12 @@ const checks = [
       'createTicketResaleListing',
       'createCheckoutTicketResaleListing',
       'delistResaleListing',
-      'completeResaleListing',
+      'getResaleSettlement',
+      'recordResaleSettlementPayout',
+      'recordResaleSettlementReversal',
+      'resaleTermsAcceptance',
       'TixkitTicketListing',
-      'TixkitResaleCompletion',
+      'TixkitResaleSettlement',
     ],
   },
   {
@@ -254,9 +278,12 @@ const checks = [
       'create_ticket_resale_listing',
       'create_resale_listing',
       'delist_resale_listing',
-      'complete_resale_listing',
+      'get_resale_settlement',
+      'record_resale_settlement_payout',
+      'record_resale_settlement_reversal',
+      'ResaleTermsAcceptance',
       'TicketListing',
-      'TicketResaleCompletion',
+      'ResaleSettlement',
       'RefundQueued',
       'CreateRefund',
       'pub async fn refund',
@@ -281,7 +308,9 @@ const checks = [
       'CreateTicketResaleListing',
       'CreateResaleListing',
       'DelistResaleListing',
-      'CompleteResaleListing',
+      'GetResaleSettlement',
+      'RecordResaleSettlementPayout',
+      'RecordResaleSettlementReversal',
       'X-Checkout-Session-Token',
       'withIdempotencyKey',
       'func (s *OrdersService) Refund',
@@ -305,7 +334,8 @@ const checks = [
     file: 'packages/sdk-go/types.go',
     patterns: [
       'TicketListing',
-      'TicketResaleCompletion',
+      'ResaleSettlement',
+      'ResaleTermsAcceptance',
       'CreateCheckoutTicketResaleListingRequest',
       'RefundQueued',
       'RestoreInventory',
@@ -356,6 +386,18 @@ for (const check of checks) {
     const source = read(check.file);
     for (const pattern of check.patterns) {
       assert(source.includes(pattern), `${check.platform} is missing ${pattern} in ${check.file}`);
+    }
+    for (const forbidden of [
+      'completeResaleListing',
+      'complete_resale_listing',
+      'CompleteResaleListing',
+      'TicketResaleCompletion',
+      'TixkitResaleCompletion',
+    ]) {
+      assert(
+        !source.includes(forbidden),
+        `${check.platform} retains unsafe resale completion symbol ${forbidden} in ${check.file}`,
+      );
     }
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error));

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TixkitClient } from '@tixkit/js';
 import {
-  completeResaleListing,
+  getResaleSettlement,
   createCheckoutFormAction,
   createCheckoutTicketResaleListing,
   createTicketResaleListing,
@@ -11,6 +11,8 @@ import {
   loadPublicEventDiscoveryCard,
   loadPublicEventPage,
   loadPublicEventPageBySlug,
+  recordResaleSettlementPayout,
+  recordResaleSettlementReversal,
   verifyTixkitWebhook,
 } from '../server.js';
 
@@ -83,8 +85,13 @@ describe('Remix server helpers', () => {
       tickets: {
         createResaleListing: vi.fn(async () => ({ id: 'lst_2', status: 'listed' })),
         delistResaleListing: vi.fn(async () => ({ id: 'lst_2', status: 'delisted' })),
-        completeResaleListing: vi.fn(async () => ({
+        getResaleSettlement: vi.fn(async () => ({
           listing: { id: 'lst_2', status: 'sold' },
+        })),
+        recordResaleSettlementPayout: vi.fn(async () => ({ id: 'rst_1', state: 'paid' })),
+        recordResaleSettlementReversal: vi.fn(async () => ({
+          id: 'rst_1',
+          state: 'recovery_required',
         })),
       },
       checkout: {
@@ -95,18 +102,40 @@ describe('Remix server helpers', () => {
     await listResaleListings(client, 'evt_1', { cursor: 'lst_0', limit: 25 });
     await createTicketResaleListing(client, 'tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'idem_create',
     });
     await delistResaleListing(client, 'lst_2', { idempotencyKey: 'idem_delist' });
-    await completeResaleListing(client, 'lst_2', {
-      buyerId: 'usr_1',
-      buyerEmail: 'buyer@example.test',
-      buyerDateOfBirth: '1990-01-01',
-      externalPaymentReference: 'pi_1',
-      idempotencyKey: 'idem_complete',
+    await getResaleSettlement(client, 'lst_2');
+    await recordResaleSettlementPayout(client, 'lst_2', {
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 1,
+      method: 'bank_transfer',
+      externalReference: 'bank-transfer-1',
+      idempotencyKey: 'idem_payout',
+    });
+    await recordResaleSettlementReversal(client, 'lst_2', {
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 2,
+      method: 'accounting_adjustment',
+      reason: 'Buyer refund coordinated with seller.',
+      idempotencyKey: 'idem_reversal',
     });
     await createCheckoutTicketResaleListing(client, 'cs_1', 'tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       clientToken: 'client_token',
       idempotencyKey: 'idem_checkout',
     });
@@ -117,20 +146,42 @@ describe('Remix server helpers', () => {
     });
     expect(client.tickets.createResaleListing).toHaveBeenCalledWith('tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'idem_create',
     });
     expect(client.tickets.delistResaleListing).toHaveBeenCalledWith('lst_2', {
       idempotencyKey: 'idem_delist',
     });
-    expect(client.tickets.completeResaleListing).toHaveBeenCalledWith('lst_2', {
-      buyerId: 'usr_1',
-      buyerEmail: 'buyer@example.test',
-      buyerDateOfBirth: '1990-01-01',
-      externalPaymentReference: 'pi_1',
-      idempotencyKey: 'idem_complete',
+    expect(client.tickets.getResaleSettlement).toHaveBeenCalledWith('lst_2');
+    expect(client.tickets.recordResaleSettlementPayout).toHaveBeenCalledWith('lst_2', {
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 1,
+      method: 'bank_transfer',
+      externalReference: 'bank-transfer-1',
+      idempotencyKey: 'idem_payout',
+    });
+    expect(client.tickets.recordResaleSettlementReversal).toHaveBeenCalledWith('lst_2', {
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 2,
+      method: 'accounting_adjustment',
+      reason: 'Buyer refund coordinated with seller.',
+      idempotencyKey: 'idem_reversal',
     });
     expect(client.checkout.createTicketResaleListing).toHaveBeenCalledWith('cs_1', 'tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       clientToken: 'client_token',
       idempotencyKey: 'idem_checkout',
     });

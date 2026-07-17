@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  completeResaleListing,
+  getResaleSettlement,
   createCheckoutFormAction,
   createCheckoutTicketResaleListing,
   createTicketResaleListing,
@@ -90,7 +90,7 @@ describe('Vue server helpers', () => {
       tickets: {
         createResaleListing: vi.fn(async () => ({ id: 'lst_2', status: 'listed' })),
         delistResaleListing: vi.fn(async () => ({ id: 'lst_2', status: 'delisted' })),
-        completeResaleListing: vi.fn(async () => ({
+        getResaleSettlement: vi.fn(async () => ({
           listing: { id: 'lst_2', status: 'sold' },
         })),
       },
@@ -102,18 +102,24 @@ describe('Vue server helpers', () => {
     await listResaleListings(client, 'evt_1', { cursor: 'lst_0', limit: 25 });
     await createTicketResaleListing(client, 'tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'idem_create',
     });
     await delistResaleListing(client, 'lst_2', { idempotencyKey: 'idem_delist' });
-    await completeResaleListing(client, 'lst_2', {
-      buyerId: 'usr_1',
-      buyerEmail: 'buyer@example.test',
-      buyerDateOfBirth: '1990-01-01',
-      externalPaymentReference: 'pi_1',
-      idempotencyKey: 'idem_complete',
-    });
+    await getResaleSettlement(client, 'lst_2');
     await createCheckoutTicketResaleListing(client, 'cs_1', 'tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       clientToken: 'client_token',
       idempotencyKey: 'idem_checkout',
     });
@@ -124,20 +130,26 @@ describe('Vue server helpers', () => {
     });
     expect(client.tickets.createResaleListing).toHaveBeenCalledWith('tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'idem_create',
     });
     expect(client.tickets.delistResaleListing).toHaveBeenCalledWith('lst_2', {
       idempotencyKey: 'idem_delist',
     });
-    expect(client.tickets.completeResaleListing).toHaveBeenCalledWith('lst_2', {
-      buyerId: 'usr_1',
-      buyerEmail: 'buyer@example.test',
-      buyerDateOfBirth: '1990-01-01',
-      externalPaymentReference: 'pi_1',
-      idempotencyKey: 'idem_complete',
-    });
+    expect(client.tickets.getResaleSettlement).toHaveBeenCalledWith('lst_2');
     expect(client.checkout.createTicketResaleListing).toHaveBeenCalledWith('cs_1', 'tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       clientToken: 'client_token',
       idempotencyKey: 'idem_checkout',
     });

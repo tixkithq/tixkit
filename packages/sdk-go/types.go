@@ -335,18 +335,19 @@ type CheckoutItem struct {
 }
 
 type CreateCheckoutSessionRequest struct {
-	EventID            string         `json:"eventId"`
-	Items              []CheckoutItem `json:"items"`
-	DiscountCode       string         `json:"discountCode,omitempty"`
-	AffiliateCode      string         `json:"affiliateCode,omitempty"`
-	TrackingID         string         `json:"trackingId,omitempty"`
-	BuyerFields        FlexibleObject `json:"buyerFields,omitempty"`
-	Buyer              *Buyer         `json:"buyer,omitempty"`
-	SuccessURL         string         `json:"successUrl,omitempty"`
-	CancelURL          string         `json:"cancelUrl,omitempty"`
-	AccessCode         string         `json:"accessCode,omitempty"`
-	WaitlistClaimToken string         `json:"waitlistClaimToken,omitempty"`
-	IdempotencyKey     string         `json:"-"`
+	EventID               string                 `json:"eventId"`
+	Items                 []CheckoutItem         `json:"items"`
+	DiscountCode          string                 `json:"discountCode,omitempty"`
+	AffiliateCode         string                 `json:"affiliateCode,omitempty"`
+	TrackingID            string                 `json:"trackingId,omitempty"`
+	BuyerFields           FlexibleObject         `json:"buyerFields,omitempty"`
+	Buyer                 *Buyer                 `json:"buyer,omitempty"`
+	SuccessURL            string                 `json:"successUrl,omitempty"`
+	CancelURL             string                 `json:"cancelUrl,omitempty"`
+	AccessCode            string                 `json:"accessCode,omitempty"`
+	WaitlistClaimToken    string                 `json:"waitlistClaimToken,omitempty"`
+	ResaleTermsAcceptance *ResaleTermsAcceptance `json:"resaleTermsAcceptance,omitempty"`
+	IdempotencyKey        string                 `json:"-"`
 }
 
 type CheckoutSessionGetOptions struct {
@@ -414,10 +415,11 @@ type CheckoutWalletPassTicket struct {
 }
 
 type CreateCheckoutTicketResaleListingRequest struct {
-	ClientToken    string `json:"-"`
-	PriceCents     int    `json:"priceCents"`
-	ExpiresAt      string `json:"expiresAt,omitempty"`
-	IdempotencyKey string `json:"-"`
+	ClientToken     string                `json:"-"`
+	PriceCents      int                   `json:"priceCents"`
+	ExpiresAt       string                `json:"expiresAt,omitempty"`
+	TermsAcceptance ResaleTermsAcceptance `json:"termsAcceptance"`
+	IdempotencyKey  string                `json:"-"`
 }
 
 type BoxOfficeBuyer struct {
@@ -677,26 +679,73 @@ type TicketListing struct {
 }
 
 type CreateResaleListingRequest struct {
-	PriceCents     int    `json:"priceCents"`
-	ExpiresAt      string `json:"expiresAt,omitempty"`
-	IdempotencyKey string `json:"-"`
+	PriceCents      int                   `json:"priceCents"`
+	ExpiresAt       string                `json:"expiresAt,omitempty"`
+	TermsAcceptance ResaleTermsAcceptance `json:"termsAcceptance"`
+	IdempotencyKey  string                `json:"-"`
 }
 
-type CompleteResaleListingRequest struct {
-	BuyerID                  string `json:"buyerId"`
-	BuyerEmail               string `json:"buyerEmail"`
-	BuyerFirstName           string `json:"buyerFirstName,omitempty"`
-	BuyerLastName            string `json:"buyerLastName,omitempty"`
-	BuyerPhone               string `json:"buyerPhone,omitempty"`
-	ExternalPaymentReference string `json:"externalPaymentReference,omitempty"`
-	IdempotencyKey           string `json:"-"`
+type ResaleTermsAcceptance struct {
+	Accepted        bool   `json:"accepted"`
+	TermsVersion    string `json:"termsVersion"`
+	SettlementModel string `json:"settlementModel"`
+	RefundModel     string `json:"refundModel"`
 }
 
-type TicketResaleCompletion struct {
-	Listing       TicketListing `json:"listing"`
-	SellerTicket  Ticket        `json:"sellerTicket"`
-	BuyerTicket   Ticket        `json:"buyerTicket"`
-	BuyerAttendee Attendee      `json:"buyerAttendee"`
+type ResaleSettlementEntry struct {
+	ID                      string  `json:"id"`
+	Kind                    string  `json:"kind"`
+	AmountCents             int     `json:"amountCents"`
+	Currency                string  `json:"currency"`
+	ActorID                 string  `json:"actorId"`
+	Method                  string  `json:"method"`
+	ExternalReferenceSHA256 *string `json:"externalReferenceSha256"`
+	Reason                  *string `json:"reason"`
+	CreatedAt               string  `json:"createdAt"`
+}
+
+type ResaleSettlement struct {
+	ID             string                  `json:"id"`
+	ListingID      string                  `json:"listingId"`
+	TenantID       string                  `json:"tenantId"`
+	OrganizationID string                  `json:"organizationId"`
+	BrandID        string                  `json:"brandId"`
+	EventID        string                  `json:"eventId"`
+	SellerOrderID  *string                 `json:"sellerOrderId"`
+	BuyerOrderID   *string                 `json:"buyerOrderId"`
+	SellerTicketID *string                 `json:"sellerTicketId"`
+	BuyerTicketID  *string                 `json:"buyerTicketId"`
+	Currency       string                  `json:"currency"`
+	GrossCents     *int                    `json:"grossCents"`
+	FeeCents       *int                    `json:"feeCents"`
+	PayableCents   *int                    `json:"payableCents"`
+	PaidCents      *int                    `json:"paidCents"`
+	ReversedCents  *int                    `json:"reversedCents"`
+	RecoveryCents  *int                    `json:"recoveryCents"`
+	State          string                  `json:"state"`
+	TermsVersion   *string                 `json:"termsVersion"`
+	Version        int                     `json:"version"`
+	CreatedAt      string                  `json:"createdAt"`
+	UpdatedAt      string                  `json:"updatedAt"`
+	Entries        []ResaleSettlementEntry `json:"entries"`
+}
+
+type RecordResaleSettlementPayoutRequest struct {
+	AmountCents       int    `json:"amountCents"`
+	Currency          string `json:"currency"`
+	ExpectedVersion   int    `json:"expectedVersion"`
+	Method            string `json:"method"`
+	ExternalReference string `json:"externalReference"`
+	IdempotencyKey    string `json:"-"`
+}
+
+type RecordResaleSettlementReversalRequest struct {
+	AmountCents     int    `json:"amountCents"`
+	Currency        string `json:"currency"`
+	ExpectedVersion int    `json:"expectedVersion"`
+	Method          string `json:"method"`
+	Reason          string `json:"reason"`
+	IdempotencyKey  string `json:"-"`
 }
 
 type CheckInList struct {

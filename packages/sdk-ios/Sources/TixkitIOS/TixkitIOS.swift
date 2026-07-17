@@ -3,10 +3,10 @@ import Foundation
 import SwiftUI
 
 #if canImport(Security)
-import Security
+  import Security
 #endif
 
-public let TixkitAPIVersion = "2026-08-12"
+public let TixkitAPIVersion = "2026-08-13"
 
 public enum TixkitScanOutcome: String, Codable, Equatable, Sendable {
   case accepted
@@ -182,55 +182,61 @@ public final class TixkitKeychainStorage: TixkitSecureStoring, @unchecked Sendab
 
   public func getItem(_ key: String) throws -> String? {
     #if canImport(Security)
-    var query = baseQuery(key)
-    query[kSecReturnData as String] = true
-    query[kSecMatchLimit as String] = kSecMatchLimitOne
-    var result: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecItemNotFound { return nil }
-    guard status == errSecSuccess else { throw TixkitKeychainStorageError.unhandledStatus(status) }
-    guard let data = result as? Data else { return nil }
-    return String(data: data, encoding: .utf8)
+      var query = baseQuery(key)
+      query[kSecReturnData as String] = true
+      query[kSecMatchLimit as String] = kSecMatchLimitOne
+      var result: CFTypeRef?
+      let status = SecItemCopyMatching(query as CFDictionary, &result)
+      if status == errSecItemNotFound { return nil }
+      guard status == errSecSuccess else {
+        throw TixkitKeychainStorageError.unhandledStatus(status)
+      }
+      guard let data = result as? Data else { return nil }
+      return String(data: data, encoding: .utf8)
     #else
-    throw TixkitKeychainStorageError.unavailable
+      throw TixkitKeychainStorageError.unavailable
     #endif
   }
 
   public func setItem(_ key: String, value: String) throws {
     #if canImport(Security)
-    let data = Data(value.utf8)
-    var query = baseQuery(key)
-    let update = [kSecValueData as String: data]
-    let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-    if updateStatus == errSecSuccess { return }
-    guard updateStatus == errSecItemNotFound else { throw TixkitKeychainStorageError.unhandledStatus(updateStatus) }
-    query[kSecValueData as String] = data
-    let addStatus = SecItemAdd(query as CFDictionary, nil)
-    guard addStatus == errSecSuccess else { throw TixkitKeychainStorageError.unhandledStatus(addStatus) }
+      let data = Data(value.utf8)
+      var query = baseQuery(key)
+      let update = [kSecValueData as String: data]
+      let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+      if updateStatus == errSecSuccess { return }
+      guard updateStatus == errSecItemNotFound else {
+        throw TixkitKeychainStorageError.unhandledStatus(updateStatus)
+      }
+      query[kSecValueData as String] = data
+      let addStatus = SecItemAdd(query as CFDictionary, nil)
+      guard addStatus == errSecSuccess else {
+        throw TixkitKeychainStorageError.unhandledStatus(addStatus)
+      }
     #else
-    throw TixkitKeychainStorageError.unavailable
+      throw TixkitKeychainStorageError.unavailable
     #endif
   }
 
   public func removeItem(_ key: String) throws {
     #if canImport(Security)
-    let status = SecItemDelete(baseQuery(key) as CFDictionary)
-    guard status == errSecSuccess || status == errSecItemNotFound else {
-      throw TixkitKeychainStorageError.unhandledStatus(status)
-    }
+      let status = SecItemDelete(baseQuery(key) as CFDictionary)
+      guard status == errSecSuccess || status == errSecItemNotFound else {
+        throw TixkitKeychainStorageError.unhandledStatus(status)
+      }
     #else
-    throw TixkitKeychainStorageError.unavailable
+      throw TixkitKeychainStorageError.unavailable
     #endif
   }
 
   #if canImport(Security)
-  private func baseQuery(_ key: String) -> [String: Any] {
-    [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: service,
-      kSecAttrAccount as String: key,
-    ]
-  }
+    private func baseQuery(_ key: String) -> [String: Any] {
+      [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: key,
+      ]
+    }
   #endif
 }
 
@@ -247,24 +253,34 @@ public struct TixkitScannerCredentials: Codable, Equatable, Sendable {
 }
 
 public enum TixkitScannerCredentialStore {
-  public static func save(_ credentials: TixkitScannerCredentials, in storage: TixkitSecureStoring, key: String = "tixkit:scanner:credentials") throws {
+  public static func save(
+    _ credentials: TixkitScannerCredentials, in storage: TixkitSecureStoring,
+    key: String = "tixkit:scanner:credentials"
+  ) throws {
     let data = try JSONEncoder().encode(credentials)
     guard let encoded = String(data: data, encoding: .utf8) else { return }
     try storage.setItem(key, value: encoded)
   }
 
-  public static func load(from storage: TixkitSecureStoring, key: String = "tixkit:scanner:credentials") throws -> TixkitScannerCredentials? {
+  public static func load(
+    from storage: TixkitSecureStoring, key: String = "tixkit:scanner:credentials"
+  ) throws -> TixkitScannerCredentials? {
     guard let raw = try storage.getItem(key), let data = raw.data(using: .utf8) else { return nil }
     return try JSONDecoder().decode(TixkitScannerCredentials.self, from: data)
   }
 
-  public static func clear(from storage: TixkitSecureStoring, key: String = "tixkit:scanner:credentials") throws {
+  public static func clear(
+    from storage: TixkitSecureStoring, key: String = "tixkit:scanner:credentials"
+  ) throws {
     try storage.removeItem(key)
   }
 }
 
 public struct TixkitCheckoutHandoffItem: Equatable, Sendable {
-  public init(ticketTypeId: String? = nil, productId: String? = nil, resaleListingId: String? = nil, quantity: Int) {
+  public init(
+    ticketTypeId: String? = nil, productId: String? = nil, resaleListingId: String? = nil,
+    quantity: Int
+  ) {
     self.ticketTypeId = ticketTypeId
     self.productId = productId
     self.resaleListingId = resaleListingId
@@ -330,8 +346,12 @@ public func tixkitCheckoutHandoffURL(_ options: TixkitCheckoutHandoffOptions) ->
   var components = URLComponents(url: options.checkoutBaseURL, resolvingAgainstBaseURL: false)!
   components.path = "/checkout"
   var queryItems = [URLQueryItem(name: "eventId", value: options.eventId)]
-  if let brandId = options.brandId { queryItems.append(URLQueryItem(name: "brand", value: brandId)) }
-  if let resaleListingId = options.items.first(where: { !($0.resaleListingId ?? "").isEmpty })?.resaleListingId {
+  if let brandId = options.brandId {
+    queryItems.append(URLQueryItem(name: "brand", value: brandId))
+  }
+  if let resaleListingId = options.items.first(where: { !($0.resaleListingId ?? "").isEmpty })?
+    .resaleListingId
+  {
     queryItems.append(URLQueryItem(name: "resaleListing", value: resaleListingId))
   }
   let encodedItems = options.items.compactMap { item -> String? in
@@ -340,16 +360,31 @@ public func tixkitCheckoutHandoffURL(_ options: TixkitCheckoutHandoffOptions) ->
     return "\(id)=\(item.quantity)"
   }.joined(separator: ",")
   if !encodedItems.isEmpty { queryItems.append(URLQueryItem(name: "items", value: encodedItems)) }
-  if !options.products.isEmpty { queryItems.append(URLQueryItem(name: "products", value: options.products.joined(separator: ","))) }
-  if let discountCode = options.discountCode { queryItems.append(URLQueryItem(name: "discount", value: discountCode)) }
-  if let accessCode = options.accessCode { queryItems.append(URLQueryItem(name: "accessCode", value: accessCode)) }
-  if let trackingId = options.trackingId { queryItems.append(URLQueryItem(name: "tracking", value: trackingId)) }
-  if let affiliateCode = options.affiliateCode { queryItems.append(URLQueryItem(name: "affiliate", value: affiliateCode)) }
+  if !options.products.isEmpty {
+    queryItems.append(
+      URLQueryItem(name: "products", value: options.products.joined(separator: ",")))
+  }
+  if let discountCode = options.discountCode {
+    queryItems.append(URLQueryItem(name: "discount", value: discountCode))
+  }
+  if let accessCode = options.accessCode {
+    queryItems.append(URLQueryItem(name: "accessCode", value: accessCode))
+  }
+  if let trackingId = options.trackingId {
+    queryItems.append(URLQueryItem(name: "tracking", value: trackingId))
+  }
+  if let affiliateCode = options.affiliateCode {
+    queryItems.append(URLQueryItem(name: "affiliate", value: affiliateCode))
+  }
   if let locale = options.locale { queryItems.append(URLQueryItem(name: "locale", value: locale)) }
   if let theme = options.theme { queryItems.append(URLQueryItem(name: "theme", value: theme)) }
   if let mode = options.mode { queryItems.append(URLQueryItem(name: "mode", value: mode)) }
-  if let successURL = options.successURL { queryItems.append(URLQueryItem(name: "successUrl", value: successURL)) }
-  if let cancelURL = options.cancelURL { queryItems.append(URLQueryItem(name: "cancelUrl", value: cancelURL)) }
+  if let successURL = options.successURL {
+    queryItems.append(URLQueryItem(name: "successUrl", value: successURL))
+  }
+  if let cancelURL = options.cancelURL {
+    queryItems.append(URLQueryItem(name: "cancelUrl", value: cancelURL))
+  }
   components.queryItems = queryItems
   return components.url!
 }
@@ -500,11 +535,15 @@ public final class TixkitPublicEventPageClient: Sendable {
   public let apiBaseURL: URL
   public let urlSession: URLSession
 
-  public func getEventPage(eventId: String, locale: String? = nil) async throws -> TixkitPublicContentPage {
+  public func getEventPage(eventId: String, locale: String? = nil) async throws
+    -> TixkitPublicContentPage
+  {
     try await getPage(path: "/public/events/\(eventId)/page", locale: locale)
   }
 
-  public func getContentPage(eventId: String, locale: String? = nil) async throws -> TixkitPublicContentPage {
+  public func getContentPage(eventId: String, locale: String? = nil) async throws
+    -> TixkitPublicContentPage
+  {
     try await getPage(path: "/public/events/\(eventId)/content-page", locale: locale)
   }
 
@@ -516,25 +555,40 @@ public final class TixkitPublicEventPageClient: Sendable {
     try await getPage(path: "/public/events/by-slug/\(slug)/page", host: host, locale: locale)
   }
 
-  public func getEventDiscoveryCard(eventId: String, locale: String? = nil) async throws -> TixkitPublicEventDiscoveryCard {
-    let (data, response) = try await urlSession.data(for: URLRequest(url: apiURL(path: "/public/events/\(eventId)/discovery-card", locale: locale)))
+  public func getEventDiscoveryCard(eventId: String, locale: String? = nil) async throws
+    -> TixkitPublicEventDiscoveryCard
+  {
+    let (data, response) = try await urlSession.data(
+      for: URLRequest(url: apiURL(path: "/public/events/\(eventId)/discovery-card", locale: locale))
+    )
     try assertSuccess(response)
     return try JSONDecoder().decode(TixkitPublicEventDiscoveryCard.self, from: data)
   }
 
-  public func listResaleListings(eventId: String, cursor: String? = nil, limit: Int? = nil) async throws -> TixkitPublicTicketListingPage {
-    let (data, response) = try await urlSession.data(for: URLRequest(url: apiURL(path: "/public/events/\(eventId)/resale-listings", cursor: cursor, limit: limit)))
+  public func listResaleListings(eventId: String, cursor: String? = nil, limit: Int? = nil)
+    async throws -> TixkitPublicTicketListingPage
+  {
+    let (data, response) = try await urlSession.data(
+      for: URLRequest(
+        url: apiURL(path: "/public/events/\(eventId)/resale-listings", cursor: cursor, limit: limit)
+      ))
     try assertSuccess(response)
     return try JSONDecoder().decode(TixkitPublicTicketListingPage.self, from: data)
   }
 
-  private func getPage(path: String, host: String? = nil, locale: String? = nil) async throws -> TixkitPublicContentPage {
-    let (data, response) = try await urlSession.data(for: URLRequest(url: apiURL(path: path, host: host, locale: locale)))
+  private func getPage(path: String, host: String? = nil, locale: String? = nil) async throws
+    -> TixkitPublicContentPage
+  {
+    let (data, response) = try await urlSession.data(
+      for: URLRequest(url: apiURL(path: path, host: host, locale: locale)))
     try assertSuccess(response)
     return try JSONDecoder().decode(TixkitPublicContentPage.self, from: data)
   }
 
-  private func apiURL(path: String, host: String? = nil, locale: String? = nil, cursor: String? = nil, limit: Int? = nil) -> URL {
+  private func apiURL(
+    path: String, host: String? = nil, locale: String? = nil, cursor: String? = nil,
+    limit: Int? = nil
+  ) -> URL {
     var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false)!
     components.path = "/v1\(path)"
     var queryItems: [URLQueryItem] = []
@@ -571,11 +625,56 @@ public struct TixkitTicketListing: Codable, Equatable, Sendable {
   public let soldToId: String?
 }
 
-public struct TixkitResaleCompletion: Codable, Equatable, Sendable {
-  public let listing: TixkitTicketListing
-  public let buyerTicket: TixkitJSONValue?
-  public let sellerTicket: TixkitJSONValue?
-  public let buyerAttendee: TixkitJSONValue?
+public struct TixkitResaleTermsAcceptance: Encodable, Equatable, Sendable {
+  public init(accepted: Bool, termsVersion: String, settlementModel: String, refundModel: String) {
+    self.accepted = accepted
+    self.termsVersion = termsVersion
+    self.settlementModel = settlementModel
+    self.refundModel = refundModel
+  }
+
+  public let accepted: Bool
+  public let termsVersion: String
+  public let settlementModel: String
+  public let refundModel: String
+}
+
+public struct TixkitResaleSettlementEntry: Codable, Equatable, Sendable {
+  public let id: String
+  public let kind: String
+  public let amountCents: Int
+  public let currency: String
+  public let actorId: String
+  public let method: String
+  public let externalReferenceSha256: String?
+  public let reason: String?
+  public let createdAt: String
+}
+
+public struct TixkitResaleSettlement: Codable, Equatable, Sendable {
+  public let id: String
+  public let listingId: String
+  public let tenantId: String
+  public let organizationId: String
+  public let brandId: String
+  public let eventId: String
+  public let sellerOrderId: String?
+  public let buyerOrderId: String?
+  public let sellerTicketId: String?
+  public let buyerTicketId: String?
+  public let currency: String
+  public let grossCents: Int?
+  public let feeCents: Int?
+  public let payableCents: Int?
+  public let paidCents: Int?
+  public let reversedCents: Int?
+  public let recoveryCents: Int?
+  public let state: String
+  public let termsVersion: String?
+  public let version: Int
+  public let createdAt: String
+  public let updatedAt: String
+  public let entries: [TixkitResaleSettlementEntry]
 }
 
 public final class TixkitResaleClient: Sendable {
@@ -598,7 +697,8 @@ public final class TixkitResaleClient: Sendable {
     cursor: String? = nil,
     limit: Int? = nil
   ) async throws -> TixkitTicketListingPage {
-    let request = apiRequest(path: "/events/\(eventId)/resale-listings", cursor: cursor, limit: limit)
+    let request = apiRequest(
+      path: "/events/\(eventId)/resale-listings", cursor: cursor, limit: limit)
     let (data, response) = try await urlSession.data(for: request)
     try assertSuccess(response)
     return try JSONDecoder().decode(TixkitTicketListingPage.self, from: data)
@@ -608,13 +708,19 @@ public final class TixkitResaleClient: Sendable {
     ticketId: String,
     priceCents: Int,
     idempotencyKey: String,
-    expiresAt: String? = nil
+    expiresAt: String? = nil,
+    termsAcceptance: TixkitResaleTermsAcceptance
   ) async throws -> TixkitTicketListing {
     try await postListing(
       path: "/tickets/\(ticketId)/resale-listings",
       body: [
         "priceCents": priceCents,
         "expiresAt": expiresAt as Any,
+        "termsAcceptance": [
+          "accepted": termsAcceptance.accepted, "termsVersion": termsAcceptance.termsVersion,
+          "settlementModel": termsAcceptance.settlementModel,
+          "refundModel": termsAcceptance.refundModel,
+        ],
       ],
       idempotencyKey: idempotencyKey
     )
@@ -626,13 +732,19 @@ public final class TixkitResaleClient: Sendable {
     priceCents: Int,
     sessionToken: String,
     idempotencyKey: String,
-    expiresAt: String? = nil
+    expiresAt: String? = nil,
+    termsAcceptance: TixkitResaleTermsAcceptance
   ) async throws -> TixkitTicketListing {
     try await postListing(
       path: "/checkout/sessions/\(sessionId)/tickets/\(ticketId)/resale-listing",
       body: [
         "priceCents": priceCents,
         "expiresAt": expiresAt as Any,
+        "termsAcceptance": [
+          "accepted": termsAcceptance.accepted, "termsVersion": termsAcceptance.termsVersion,
+          "settlementModel": termsAcceptance.settlementModel,
+          "refundModel": termsAcceptance.refundModel,
+        ],
       ],
       idempotencyKey: idempotencyKey,
       sessionToken: sessionToken
@@ -650,28 +762,47 @@ public final class TixkitResaleClient: Sendable {
     )
   }
 
-  public func completeResaleListing(
-    listingId: String,
-    buyerId: String,
-    buyerEmail: String,
-    idempotencyKey: String,
-    buyerFirstName: String? = nil,
-    buyerLastName: String? = nil,
-    externalPaymentReference: String? = nil
-  ) async throws -> TixkitResaleCompletion {
-    var request = apiRequest(path: "/ticket-listings/\(listingId)/complete")
-    request.httpMethod = "POST"
-    applyWriteHeaders(&request, idempotencyKey: idempotencyKey)
-    request.httpBody = try jsonData([
-      "buyerId": buyerId,
-      "buyerEmail": buyerEmail,
-      "buyerFirstName": buyerFirstName as Any,
-      "buyerLastName": buyerLastName as Any,
-      "externalPaymentReference": externalPaymentReference as Any,
-    ])
+  public func getResaleSettlement(listingId: String) async throws -> TixkitResaleSettlement {
+    let request = apiRequest(path: "/ticket-listings/\(listingId)/settlement")
     let (data, response) = try await urlSession.data(for: request)
     try assertSuccess(response)
-    return try JSONDecoder().decode(TixkitResaleCompletion.self, from: data)
+    return try JSONDecoder().decode(TixkitResaleSettlement.self, from: data)
+  }
+
+  public func recordResaleSettlementPayout(
+    listingId: String, amountCents: Int, currency: String, expectedVersion: Int, method: String,
+    externalReference: String, idempotencyKey: String
+  ) async throws -> TixkitResaleSettlement {
+    try await postSettlement(
+      path: "/ticket-listings/\(listingId)/settlement/payouts",
+      body: [
+        "amountCents": amountCents, "currency": currency, "expectedVersion": expectedVersion,
+        "method": method, "externalReference": externalReference,
+      ], idempotencyKey: idempotencyKey)
+  }
+
+  public func recordResaleSettlementReversal(
+    listingId: String, amountCents: Int, currency: String, expectedVersion: Int, method: String,
+    reason: String, idempotencyKey: String
+  ) async throws -> TixkitResaleSettlement {
+    try await postSettlement(
+      path: "/ticket-listings/\(listingId)/settlement/reversals",
+      body: [
+        "amountCents": amountCents, "currency": currency, "expectedVersion": expectedVersion,
+        "method": method, "reason": reason,
+      ], idempotencyKey: idempotencyKey)
+  }
+
+  private func postSettlement(path: String, body: [String: Any], idempotencyKey: String)
+    async throws -> TixkitResaleSettlement
+  {
+    var request = apiRequest(path: path)
+    request.httpMethod = "POST"
+    applyWriteHeaders(&request, idempotencyKey: idempotencyKey)
+    request.httpBody = try jsonData(body)
+    let (data, response) = try await urlSession.data(for: request)
+    try assertSuccess(response)
+    return try JSONDecoder().decode(TixkitResaleSettlement.self, from: data)
   }
 
   private func postListing(
@@ -782,22 +913,31 @@ public final class TixkitScannerClient: @unchecked Sendable {
 
   public func verifyManifestSignature(_ manifest: TixkitOfflineManifest) -> Bool {
     let key = SymmetricKey(data: Data(manifestSigningKey.utf8))
-    let signature = HMAC<SHA256>.authenticationCode(for: manifest.unsignedCanonicalJSONData, using: key).hexString
+    let signature = HMAC<SHA256>.authenticationCode(
+      for: manifest.unsignedCanonicalJSONData, using: key
+    ).hexString
     return signature == manifest.signature
   }
 
-  public func downloadManifest(eventId: String, checkInListId: String) async throws -> TixkitOfflineManifest {
-    var request = URLRequest(url: apiURL(path: "/events/\(eventId)/check-in-lists/\(checkInListId)/manifest"))
+  public func downloadManifest(eventId: String, checkInListId: String) async throws
+    -> TixkitOfflineManifest
+  {
+    var request = URLRequest(
+      url: apiURL(path: "/events/\(eventId)/check-in-lists/\(checkInListId)/manifest"))
     applyAuthHeaders(to: &request)
     let (data, response) = try await urlSession.data(for: request)
     try assertSuccess(response)
     let manifest = try JSONDecoder().decode(TixkitOfflineManifest.self, from: data)
-    guard verifyManifestSignature(manifest) else { throw TixkitScannerError.invalidManifestSignature }
+    guard verifyManifestSignature(manifest) else {
+      throw TixkitScannerError.invalidManifestSignature
+    }
     setManifest(manifest)
     return manifest
   }
 
-  public func scanOnline(checkInListId: String, qrPayload: String, scannedAt: Date = Date()) async throws -> TixkitScanResult {
+  public func scanOnline(checkInListId: String, qrPayload: String, scannedAt: Date = Date())
+    async throws -> TixkitScanResult
+  {
     var request = URLRequest(url: apiURL(path: "/check-ins/scan"))
     request.httpMethod = "POST"
     applyAuthHeaders(to: &request)
@@ -812,7 +952,9 @@ public final class TixkitScannerClient: @unchecked Sendable {
     return try JSONDecoder().decode(TixkitScanResult.self, from: data)
   }
 
-  public func scanOffline(_ qrPayload: String, hashed: Bool = false, now: Date = Date()) -> TixkitScanResult {
+  public func scanOffline(_ qrPayload: String, hashed: Bool = false, now: Date = Date())
+    -> TixkitScanResult
+  {
     lock.withLock {
       guard let manifest else {
         return TixkitScanResult(outcome: .invalid, message: "No manifest downloaded")
@@ -825,13 +967,16 @@ public final class TixkitScannerClient: @unchecked Sendable {
         return TixkitScanResult(outcome: .notFound, message: "Ticket not in manifest")
       }
       if ["void", "refunded", "transferred"].contains(ticket.status) {
-        return TixkitScanResult(outcome: .revoked, message: "Ticket is voided, refunded, or transferred")
+        return TixkitScanResult(
+          outcome: .revoked, message: "Ticket is voided, refunded, or transferred")
       }
       if offlineScans[qrHash] != nil {
-        return TixkitScanResult(outcome: .duplicate, message: "Ticket already checked in", ticketId: ticket.ticketId)
+        return TixkitScanResult(
+          outcome: .duplicate, message: "Ticket already checked in", ticketId: ticket.ticketId)
       }
       offlineScans[qrHash] = now
-      return TixkitScanResult(outcome: .accepted, message: "Check-in successful (offline)", ticketId: ticket.ticketId)
+      return TixkitScanResult(
+        outcome: .accepted, message: "Check-in successful (offline)", ticketId: ticket.ticketId)
     }.also {
       try? persistOfflineScans()
     }
@@ -848,7 +993,9 @@ public final class TixkitScannerClient: @unchecked Sendable {
     var request = URLRequest(url: apiURL(path: "/check-ins/sync"))
     request.httpMethod = "POST"
     applyAuthHeaders(to: &request)
-    request.addValue(syncIdempotencyKey(checkInListId: listId, scans: snapshot.1), forHTTPHeaderField: "Idempotency-Key")
+    request.addValue(
+      syncIdempotencyKey(checkInListId: listId, scans: snapshot.1),
+      forHTTPHeaderField: "Idempotency-Key")
     request.httpBody = try JSONSerialization.data(withJSONObject: [
       "checkInListId": listId,
       "scans": snapshot.1.map { key, value in
@@ -872,7 +1019,8 @@ public final class TixkitScannerClient: @unchecked Sendable {
   }
 
   public func restoreOfflineScans() throws {
-    guard let raw = try storage?.getItem(resolvedStorageKey), let data = raw.data(using: .utf8) else { return }
+    guard let raw = try storage?.getItem(resolvedStorageKey), let data = raw.data(using: .utf8)
+    else { return }
     let decoded = try JSONDecoder.tixkit.decode([PersistedOfflineScan].self, from: data)
     lock.withLock {
       offlineScans = Dictionary(uniqueKeysWithValues: decoded.map { ($0.qrHash, $0.scannedAt) })
@@ -901,7 +1049,8 @@ public final class TixkitScannerClient: @unchecked Sendable {
       try storage.removeItem(resolvedStorageKey)
       return
     }
-    let payload = snapshot
+    let payload =
+      snapshot
       .map { PersistedOfflineScan(qrHash: $0.key, scannedAt: $0.value) }
       .sorted { $0.qrHash < $1.qrHash }
     let data = try JSONEncoder.tixkit.encode(payload)
@@ -934,7 +1083,9 @@ public final class TixkitScannerClient: @unchecked Sendable {
   }
 
   private func assertSuccess(_ response: URLResponse) throws {
-    guard let httpResponse = response as? HTTPURLResponse else { throw TixkitScannerError.invalidResponse }
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw TixkitScannerError.invalidResponse
+    }
     guard (200..<300).contains(httpResponse.statusCode) else {
       throw TixkitScannerError.httpStatus(httpResponse.statusCode)
     }
@@ -980,9 +1131,13 @@ public final class TixkitScannerController: ObservableObject {
 
   @MainActor
   public func handlePayload(_ payload: String) async {
-    guard !payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isScanning else { return }
+    guard !payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isScanning else {
+      return
+    }
     let now = Date()
-    if lastPayload == payload, let lastScanAt, now.timeIntervalSince(lastScanAt) < throttle { return }
+    if lastPayload == payload, let lastScanAt, now.timeIntervalSince(lastScanAt) < throttle {
+      return
+    }
     lastPayload = payload
     lastScanAt = now
     isScanning = true
@@ -1013,7 +1168,9 @@ public final class TixkitScannerController: ObservableObject {
 }
 
 public struct TixkitTicketCard: View {
-  public init(ticketId: String, status: String, ticketTypeId: String? = nil, attendeeName: String? = nil) {
+  public init(
+    ticketId: String, status: String, ticketTypeId: String? = nil, attendeeName: String? = nil
+  ) {
     self.ticketId = ticketId
     self.status = status
     self.ticketTypeId = ticketTypeId
@@ -1038,7 +1195,10 @@ public struct TixkitTicketCard: View {
 }
 
 public struct TixkitScannerStatusView: View {
-  public init(result: TixkitScanResult? = nil, manifest: TixkitOfflineManifest? = nil, offlineScanCount: Int? = nil, onSync: (() -> Void)? = nil) {
+  public init(
+    result: TixkitScanResult? = nil, manifest: TixkitOfflineManifest? = nil,
+    offlineScanCount: Int? = nil, onSync: (() -> Void)? = nil
+  ) {
     self.result = result
     self.manifest = manifest
     self.offlineScanCount = offlineScanCount
@@ -1076,7 +1236,8 @@ private enum TixkitISO8601 {
     if let date = fractionalFormatter.date(from: value) ?? wholeSecondFormatter.date(from: value) {
       return date
     }
-    throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Invalid ISO8601 date: \(value)"))
+    throw DecodingError.dataCorrupted(
+      .init(codingPath: [], debugDescription: "Invalid ISO8601 date: \(value)"))
   }
 
   static func format(_ date: Date) -> String {
@@ -1098,8 +1259,8 @@ private enum TixkitISO8601 {
   }()
 }
 
-private extension TixkitOfflineManifest {
-  var unsignedCanonicalJSONData: Data {
+extension TixkitOfflineManifest {
+  fileprivate var unsignedCanonicalJSONData: Data {
     let ticketsJSON = tickets.map { ticket in
       var fields = [
         #""ticketId":"\#(ticket.ticketId.jsonEscaped)""#,
@@ -1121,34 +1282,34 @@ private extension TixkitOfflineManifest {
       return "{\(fields.joined(separator: ","))}"
     }.joined(separator: ",")
     let json = """
-    {"eventId":"\(eventId.jsonEscaped)","checkInListId":"\(checkInListId.jsonEscaped)","generatedAt":"\(TixkitISO8601.format(generatedAt))","expiresAt":"\(TixkitISO8601.format(expiresAt))","keyId":"\(keyId.jsonEscaped)","tickets":[\(ticketsJSON)]}
-    """
+      {"eventId":"\(eventId.jsonEscaped)","checkInListId":"\(checkInListId.jsonEscaped)","generatedAt":"\(TixkitISO8601.format(generatedAt))","expiresAt":"\(TixkitISO8601.format(expiresAt))","keyId":"\(keyId.jsonEscaped)","tickets":[\(ticketsJSON)]}
+      """
     return Data(json.utf8)
   }
 }
 
-private extension String {
-  var jsonEscaped: String {
+extension String {
+  fileprivate var jsonEscaped: String {
     let data = try? JSONEncoder().encode(self)
     let encoded = data.flatMap { String(data: $0, encoding: .utf8) } ?? #""""#
     return String(encoded.dropFirst().dropLast())
   }
 }
 
-private extension Digest {
-  var hexString: String {
+extension Digest {
+  fileprivate var hexString: String {
     map { String(format: "%02x", $0) }.joined()
   }
 }
 
-private extension HMAC<SHA256>.MAC {
-  var hexString: String {
+extension HMAC<SHA256>.MAC {
+  fileprivate var hexString: String {
     map { String(format: "%02x", $0) }.joined()
   }
 }
 
-private extension JSONEncoder {
-  static let tixkit: JSONEncoder = {
+extension JSONEncoder {
+  fileprivate static let tixkit: JSONEncoder = {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .custom { date, encoder in
       var container = encoder.singleValueContainer()
@@ -1158,8 +1319,8 @@ private extension JSONEncoder {
   }()
 }
 
-private extension JSONDecoder {
-  static let tixkit: JSONDecoder = {
+extension JSONDecoder {
+  fileprivate static let tixkit: JSONDecoder = {
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .custom { decoder in
       let container = try decoder.singleValueContainer()
@@ -1169,16 +1330,16 @@ private extension JSONDecoder {
   }()
 }
 
-private extension NSLock {
-  func withLock<T>(_ body: () throws -> T) rethrows -> T {
+extension NSLock {
+  fileprivate func withLock<T>(_ body: () throws -> T) rethrows -> T {
     lock()
     defer { unlock() }
     return try body()
   }
 }
 
-private extension TixkitScanResult {
-  func also(_ body: () -> Void) -> TixkitScanResult {
+extension TixkitScanResult {
+  fileprivate func also(_ body: () -> Void) -> TixkitScanResult {
     body()
     return self
   }

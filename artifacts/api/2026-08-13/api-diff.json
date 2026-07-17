@@ -1,0 +1,126 @@
+{
+  "from": "2026-08-12",
+  "to": "2026-08-13",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 10,
+    "compatible": 9
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "schema-allOf-changed",
+      "path": "POST /checkout/sessions.requestBody.content.application/json.schema",
+      "message": "allOf changed."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "POST /checkout/sessions.requestBody.content.application/json.schema.properties.resaleTermsAcceptance",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-added",
+      "path": "POST /checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing.requestBody.content.application/json.schema.required.termsAcceptance",
+      "message": "A required property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-exclusiveMinimum",
+      "path": "POST /checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing.requestBody.content.application/json.schema.properties.priceCents",
+      "message": "exclusiveMinimum became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "POST /checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing.requestBody.content.application/json.schema.properties.termsAcceptance",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-added",
+      "path": "POST /tickets/{ticketId}/resale-listings.requestBody.content.application/json.schema.required.termsAcceptance",
+      "message": "A required property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-exclusiveMinimum",
+      "path": "POST /tickets/{ticketId}/resale-listings.requestBody.content.application/json.schema.properties.priceCents",
+      "message": "exclusiveMinimum became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "POST /tickets/{ticketId}/resale-listings.requestBody.content.application/json.schema.properties.termsAcceptance",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "POST /ticket-listings/{listingId}/complete.parameters.path:listingId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "parameter-removed",
+      "path": "POST /ticket-listings/{listingId}/complete.parameters.undefined:undefined",
+      "message": "A parameter was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "response-removed",
+      "path": "POST /ticket-listings/{listingId}/complete.responses.200",
+      "message": "A response status was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "media-type-removed",
+      "path": "POST /ticket-listings/{listingId}/complete.requestBody.content.application/json",
+      "message": "A media type was removed."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /ticket-listings/{listingId}/settlement",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /ticket-listings/{listingId}/settlement/payouts",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /ticket-listings/{listingId}/settlement/reversals",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-removed",
+      "path": "components.schemas.TicketResaleCompletion",
+      "message": "Named schema was removed."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.ResaleTermsAcceptance",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.ResaleSettlementEntry",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.ResaleSettlement",
+      "message": "A named schema was added."
+    }
+  ]
+}

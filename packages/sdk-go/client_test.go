@@ -447,7 +447,7 @@ func TestOrderRefundSendsLifecycleFlagsAndDecodesQueuedResponse(t *testing.T) {
 func TestResaleRoutesSendExpectedHeadersAndBodies(t *testing.T) {
 	t.Parallel()
 
-	paths := make(chan string, 5)
+	paths := make(chan string, 7)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths <- r.URL.RequestURI()
 		switch r.URL.Path {
@@ -505,23 +505,26 @@ func TestResaleRoutesSendExpectedHeadersAndBodies(t *testing.T) {
 				t.Fatalf("delist body = %#v", body)
 			}
 			_ = json.NewEncoder(w).Encode(TicketListing{ID: "lst_1", Status: "delisted"})
-		case "/v1/ticket-listings/lst_1/complete":
-			if got := r.Header.Get("Idempotency-Key"); got != "idem_complete_1" {
-				t.Fatalf("complete idempotency key = %s", got)
-			}
-			var body CompleteResaleListingRequest
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatal(err)
-			}
-			if body.IdempotencyKey != "" || body.BuyerID != "usr_1" || body.ExternalPaymentReference != "stripe_pi_1" {
-				t.Fatalf("complete body = %#v", body)
-			}
-			_ = json.NewEncoder(w).Encode(TicketResaleCompletion{
-				Listing:       TicketListing{ID: "lst_1", Status: "sold"},
-				SellerTicket:  Ticket{ID: "tkt_1", Status: "transferred"},
-				BuyerTicket:   Ticket{ID: "tkt_2", Status: "valid"},
-				BuyerAttendee: Attendee{ID: "att_2", Email: "buyer@example.com"},
+		case "/v1/ticket-listings/lst_1/settlement":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "rst_1", "listingId": "lst_1", "tenantId": "ten_1", "organizationId": "org_1",
+				"brandId": "br_1", "eventId": "evt_1", "sellerOrderId": "ord_seller_1",
+				"buyerOrderId": "ord_buyer_1", "sellerTicketId": "tkt_seller_1", "buyerTicketId": "tkt_buyer_1",
+				"currency": "USD", "grossCents": 5600, "feeCents": 600, "payableCents": 5000,
+				"paidCents": 0, "reversedCents": 0, "recoveryCents": 0, "state": "pending",
+				"termsVersion": "2026-07-16", "version": 1, "createdAt": "2026-07-16T00:00:00Z",
+				"updatedAt": "2026-07-16T00:00:00Z", "entries": []any{},
 			})
+		case "/v1/ticket-listings/lst_1/settlement/payouts":
+			if got := r.Header.Get("Idempotency-Key"); got != "idem_payout_1" {
+				t.Fatalf("payout idempotency key = %s", got)
+			}
+			_ = json.NewEncoder(w).Encode(ResaleSettlement{ID: "rst_1", ListingID: "lst_1", State: "paid", Version: 2})
+		case "/v1/ticket-listings/lst_1/settlement/reversals":
+			if got := r.Header.Get("Idempotency-Key"); got != "idem_reversal_1" {
+				t.Fatalf("reversal idempotency key = %s", got)
+			}
+			_ = json.NewEncoder(w).Encode(ResaleSettlement{ID: "rst_1", ListingID: "lst_1", State: "reversed", Version: 3})
 		default:
 			t.Fatalf("unexpected path = %s", r.URL.Path)
 		}
@@ -553,17 +556,21 @@ func TestResaleRoutesSendExpectedHeadersAndBodies(t *testing.T) {
 	if _, err := client.Tickets.DelistResaleListing(context.Background(), "lst_1", "idem_delist_1"); err != nil {
 		t.Fatal(err)
 	}
-	completion, err := client.Tickets.CompleteResaleListing(context.Background(), "lst_1", CompleteResaleListingRequest{
-		BuyerID:                  "usr_1",
-		BuyerEmail:               "buyer@example.com",
-		ExternalPaymentReference: "stripe_pi_1",
-		IdempotencyKey:           "idem_complete_1",
-	})
+	settlement, err := client.Tickets.GetResaleSettlement(context.Background(), "lst_1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completion.Listing.Status != "sold" || completion.BuyerTicket.ID != "tkt_2" {
-		t.Fatalf("completion = %#v", completion)
+	if settlement.SellerOrderID == nil || *settlement.SellerOrderID != "ord_seller_1" ||
+		settlement.BuyerOrderID == nil || *settlement.BuyerOrderID != "ord_buyer_1" ||
+		settlement.SellerTicketID == nil || *settlement.SellerTicketID != "tkt_seller_1" ||
+		settlement.BuyerTicketID == nil || *settlement.BuyerTicketID != "tkt_buyer_1" {
+		t.Fatalf("settlement identifiers = %#v", settlement)
+	}
+	if _, err := client.Tickets.RecordResaleSettlementPayout(context.Background(), "lst_1", RecordResaleSettlementPayoutRequest{AmountCents: 5000, Currency: "USD", ExpectedVersion: 1, Method: "bank_transfer", ExternalReference: "wire_1", IdempotencyKey: "idem_payout_1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Tickets.RecordResaleSettlementReversal(context.Background(), "lst_1", RecordResaleSettlementReversalRequest{AmountCents: 5000, Currency: "USD", ExpectedVersion: 2, Method: "accounting_adjustment", Reason: "refund", IdempotencyKey: "idem_reversal_1"}); err != nil {
+		t.Fatal(err)
 	}
 
 	want := []string{
@@ -571,7 +578,9 @@ func TestResaleRoutesSendExpectedHeadersAndBodies(t *testing.T) {
 		"/v1/tickets/tkt_1/resale-listings",
 		"/v1/checkout/sessions/cs_1/tickets/tkt_1/resale-listing",
 		"/v1/ticket-listings/lst_1/delist",
-		"/v1/ticket-listings/lst_1/complete",
+		"/v1/ticket-listings/lst_1/settlement",
+		"/v1/ticket-listings/lst_1/settlement/payouts",
+		"/v1/ticket-listings/lst_1/settlement/reversals",
 	}
 	for index, expected := range want {
 		if got := <-paths; got != expected {

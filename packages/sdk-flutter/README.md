@@ -10,7 +10,9 @@ Flutter 3.22+ mobile applications.
 
 ## Status
 
-Supported package version 0.1.0, pinned to API version `2026-08-12`.
+Supported package version 0.1.0, pinned to API version `2026-08-13`.
+
+Resale writes include the exact `2026-07-16` terms acceptance. Settlement helpers replace provider-delegated listing completion.
 
 ## Installation
 
@@ -42,7 +44,7 @@ Use platform secure storage for scanner secrets; verify offline manifests and ex
 
 ## Compatibility
 
-Flutter/Dart constraints in `pubspec.yaml` and API version `2026-08-12` define compatibility.
+Flutter/Dart constraints in `pubspec.yaml` and API version `2026-08-13` define compatibility.
 
 ## Related guides
 

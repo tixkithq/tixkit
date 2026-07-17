@@ -1,0 +1,47 @@
+---
+title: API migration from 2026-08-12 to 2026-08-13
+description: Adopt payment-backed resale checkout terms and organizer-managed settlement evidence.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-12
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+---
+
+API version `2026-08-13` makes resale transfers payment-backed and records organizer-managed seller settlement evidence. It also permanently retires the provider-delegated resale completion mutation.
+
+## Accept the exact resale terms
+
+Both seller listing operations now require `termsAcceptance`. A checkout session containing a resale item requires `resaleTermsAcceptance`. Send the exact current object:
+
+```json
+{
+  "accepted": true,
+  "termsVersion": "2026-07-16",
+  "settlementModel": "organizer_managed",
+  "refundModel": "manual_coordinated_resolution"
+}
+```
+
+The server rejects missing, stale, or altered terms. Non-resale checkout sessions must omit `resaleTermsAcceptance`.
+
+## Replace delegated completion
+
+`POST /v1/ticket-listings/{listingId}/complete` is an authenticated `410 Gone` tombstone and performs no mutation. Remove calls to this operation. Buyers must purchase resale tickets through checkout session creation and the normal payment-confirmation workflow.
+
+## Record organizer settlement evidence
+
+Use these scoped operations after payment-backed fulfillment:
+
+- `GET /v1/ticket-listings/{listingId}/settlement` with `orders.read` retrieves the append-only ledger.
+- `POST /v1/ticket-listings/{listingId}/settlement/payouts` with `billing.write` records an externally executed seller payout.
+- `POST /v1/ticket-listings/{listingId}/settlement/reversals` with `billing.write` records a coordinated payable reversal or recovery requirement.
+
+Both mutations require an idempotency key and the current settlement `expectedVersion`. A payout accepts an exact external reference only to compute a SHA-256 digest; plaintext references are never returned. Tixkit records evidence but does not move seller funds or promise an automatic resale refund.

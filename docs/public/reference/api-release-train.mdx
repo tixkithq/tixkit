@@ -23,8 +23,8 @@ Before release, run:
 
 ```bash
 bun scripts/build-api-release.ts
-(cd artifacts/api/2026-08-12 && sha256sum --check CHECKSUMS.sha256)
-bunx tsc --noEmit --skipLibCheck artifacts/api/2026-08-12/openapi.d.ts
+(cd artifacts/api/2026-08-13 && sha256sum --check CHECKSUMS.sha256)
+bunx tsc --noEmit --skipLibCheck artifacts/api/2026-08-13/openapi.d.ts
 node scripts/sdk-parity-matrix.mjs
 node scripts/test-contract-test-consumers.mjs
 ```

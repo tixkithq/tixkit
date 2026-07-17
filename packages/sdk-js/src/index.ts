@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-12';
+export const TIXKIT_API_VERSION = '2026-08-13';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -2758,11 +2758,51 @@ export type PublicTicketListing = {
   updatedAt: string;
 };
 
-export type TicketResaleCompletion = {
-  listing: TicketListing;
-  sellerTicket: Ticket;
-  buyerTicket: Ticket;
-  buyerAttendee: Attendee;
+export type ResaleTermsAcceptance = {
+  accepted: true;
+  termsVersion: '2026-07-16';
+  settlementModel: 'organizer_managed';
+  refundModel: 'manual_coordinated_resolution';
+};
+
+export type ResaleSettlementMethod = 'bank_transfer' | 'payment_provider' | 'accounting_adjustment';
+
+export type ResaleSettlementEntry = {
+  id: string;
+  kind: 'payable_accrued' | 'payout_recorded' | 'payable_reversed' | 'recovery_required';
+  amountCents: number;
+  currency: string;
+  actorId: string;
+  method: string;
+  externalReferenceSha256: string | null;
+  reason: string | null;
+  createdAt: string;
+};
+
+export type ResaleSettlement = {
+  id: string;
+  listingId: string;
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId: string;
+  sellerOrderId: string | null;
+  buyerOrderId: string | null;
+  sellerTicketId: string | null;
+  buyerTicketId: string | null;
+  currency: string;
+  grossCents: number | null;
+  feeCents: number | null;
+  payableCents: number | null;
+  paidCents: number | null;
+  reversedCents: number | null;
+  recoveryCents: number | null;
+  state: 'pending' | 'paid' | 'reversed' | 'recovery_required' | 'review_required' | string;
+  termsVersion: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  entries: ResaleSettlementEntry[];
 };
 
 export type RefundQueued = {
@@ -3526,8 +3566,8 @@ export class TixkitClient {
     this.authorizationCredential = authorizationCredential;
     this.apiBaseUrl = normalizeApiBaseUrl(config.apiBaseUrl ?? 'https://api.tixkit.com');
     this.apiVersion = config.apiVersion ?? TIXKIT_API_VERSION;
-    this.timeout = config.timeout ?? 30000;
-    this.maxRetries = config.maxRetries ?? 3;
+    this.timeout = validateTimeout(config.timeout ?? 30000);
+    this.maxRetries = validateMaxRetries(config.maxRetries ?? 3);
 
     this.checkout = new CheckoutResource(this);
     this.events = new EventResource(this);
@@ -3574,6 +3614,7 @@ export class TixkitClient {
       headers?: Record<string, string>;
     },
   ): Promise<T> {
+    const normalizedMethod = normalizeHttpMethod(method);
     const url = new URL(`${this.apiBaseUrl}/v1${path}`);
 
     if (options?.params) {
@@ -3583,6 +3624,7 @@ export class TixkitClient {
     }
 
     const hasBody = options?.body !== undefined;
+    const requestBody = hasBody ? JSON.stringify(options.body) : undefined;
     const headers: Record<string, string> = {
       'X-Tixkit-Version': this.apiVersion,
     };
@@ -3602,7 +3644,7 @@ export class TixkitClient {
 
     let lastError: Error | null = null;
     const attempts = this.maxRetries + 1;
-    const retryableRequest = isSafeMethod(method) || Boolean(options?.idempotencyKey);
+    const retryableRequest = isSafeMethod(normalizedMethod) || Boolean(options?.idempotencyKey);
 
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
@@ -3614,9 +3656,9 @@ export class TixkitClient {
         try {
           // eslint-disable-next-line no-await-in-loop -- retries must run sequentially so backoff and previous response state are respected.
           response = await fetch(url.toString(), {
-            method,
+            method: normalizedMethod,
             headers,
-            body: hasBody ? JSON.stringify(options.body) : undefined,
+            body: requestBody,
             signal: controller.signal,
           });
 
@@ -3635,7 +3677,7 @@ export class TixkitClient {
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
 
-        if (!retryableRequest) {
+        if (!retryableRequest || err instanceof SyntaxError) {
           throw err;
         }
 
@@ -3669,6 +3711,7 @@ export class TixkitClient {
       successStatuses?: number[];
     },
   ): Promise<Response> {
+    const normalizedMethod = normalizeHttpMethod(method);
     const url = new URL(`${this.apiBaseUrl}/v1${path}`);
 
     if (options?.params) {
@@ -3678,6 +3721,7 @@ export class TixkitClient {
     }
 
     const hasBody = options?.body !== undefined;
+    const requestBody = hasBody ? JSON.stringify(options.body) : undefined;
     const headers: Record<string, string> = {
       'X-Tixkit-Version': this.apiVersion,
     };
@@ -3697,7 +3741,7 @@ export class TixkitClient {
 
     let lastError: Error | null = null;
     const attempts = this.maxRetries + 1;
-    const retryableRequest = isSafeMethod(method) || Boolean(options?.idempotencyKey);
+    const retryableRequest = isSafeMethod(normalizedMethod) || Boolean(options?.idempotencyKey);
     const successStatuses = new Set(options?.successStatuses ?? []);
 
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -3705,26 +3749,27 @@ export class TixkitClient {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-        let response: Response;
         try {
           // eslint-disable-next-line no-await-in-loop -- retries must run sequentially so backoff and previous response state are respected.
-          response = await fetch(url.toString(), {
-            method,
+          const response = await fetch(url.toString(), {
+            method: normalizedMethod,
             headers,
-            body: hasBody ? JSON.stringify(options.body) : undefined,
+            body: requestBody,
             signal: controller.signal,
           });
+
+          if (!response.ok && !successStatuses.has(response.status)) {
+            // Keep the attempt timeout active while consuming an error body. A peer can send
+            // headers immediately and otherwise keep this request pending indefinitely.
+            // eslint-disable-next-line no-await-in-loop -- each retry attempt must consume its own error response before deciding whether to retry.
+            const responseText = await response.text();
+            throw createApiErrorFromResponse(response.status, parseErrorResponse(responseText));
+          }
+
+          return response;
         } finally {
           clearTimeout(timeoutId);
         }
-
-        if (!response.ok && !successStatuses.has(response.status)) {
-          // eslint-disable-next-line no-await-in-loop -- each retry attempt must consume its own error response before deciding whether to retry.
-          const responseText = await response.text();
-          throw createApiErrorFromResponse(response.status, parseErrorResponse(responseText));
-        }
-
-        return response;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
 
@@ -3760,6 +3805,26 @@ function isBrowserRuntime(): boolean {
 
 function normalizeApiBaseUrl(value: string): string {
   return value.replace(/\/+$/, '');
+}
+
+function validateTimeout(value: number): number {
+  if (!Number.isFinite(value) || value <= 0 || value > 2_147_483_647) {
+    throw new RangeError('timeout must be a finite positive number within the timer range');
+  }
+  return value;
+}
+
+function validateMaxRetries(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 10) {
+    throw new RangeError('maxRetries must be an integer between 0 and 10');
+  }
+  return value;
+}
+
+function normalizeHttpMethod(method: string): string {
+  const normalized = method.trim().toUpperCase();
+  if (!normalized) throw new TypeError('HTTP method must not be empty');
+  return normalized;
 }
 
 function looksLikeSecretApiKey(value: string): boolean {
@@ -3853,6 +3918,7 @@ class CheckoutResource {
       cancelUrl?: string;
       accessCode?: string;
       waitlistClaimToken?: string;
+      resaleTermsAcceptance?: ResaleTermsAcceptance;
       testOrder?: boolean;
     } & IdempotencyOptions,
   ): Promise<CheckoutSession> {
@@ -3892,6 +3958,7 @@ class CheckoutResource {
       clientToken: string;
       priceCents: number;
       expiresAt?: string;
+      termsAcceptance: ResaleTermsAcceptance;
     } & IdempotencyOptions,
   ): Promise<TicketListing> {
     const { idempotencyKey, clientToken, ...body } = input;
@@ -4291,7 +4358,11 @@ class TicketResource {
 
   async createResaleListing(
     ticketId: string,
-    input: { priceCents: number; expiresAt?: string } & IdempotencyOptions,
+    input: {
+      priceCents: number;
+      expiresAt?: string;
+      termsAcceptance: ResaleTermsAcceptance;
+    } & IdempotencyOptions,
   ): Promise<TicketListing> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', `/tickets/${ticketId}/resale-listings`, {
@@ -4307,20 +4378,39 @@ class TicketResource {
     });
   }
 
-  async completeResaleListing(
+  async getResaleSettlement(listingId: string): Promise<ResaleSettlement> {
+    return this.client.request('GET', `/ticket-listings/${listingId}/settlement`);
+  }
+
+  async recordResaleSettlementPayout(
     listingId: string,
     input: {
-      buyerId: string;
-      buyerEmail: string;
-      buyerDateOfBirth?: string;
-      buyerFirstName?: string | null;
-      buyerLastName?: string | null;
-      buyerPhone?: string | null;
-      externalPaymentReference?: string | null;
+      amountCents: number;
+      currency: string;
+      expectedVersion: number;
+      method: ResaleSettlementMethod;
+      externalReference: string;
     } & IdempotencyOptions,
-  ): Promise<TicketResaleCompletion> {
+  ): Promise<ResaleSettlement> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', `/ticket-listings/${listingId}/complete`, {
+    return this.client.request('POST', `/ticket-listings/${listingId}/settlement/payouts`, {
+      body,
+      idempotencyKey,
+    });
+  }
+
+  async recordResaleSettlementReversal(
+    listingId: string,
+    input: {
+      amountCents: number;
+      currency: string;
+      expectedVersion: number;
+      method: ResaleSettlementMethod;
+      reason: string;
+    } & IdempotencyOptions,
+  ): Promise<ResaleSettlement> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/ticket-listings/${listingId}/settlement/reversals`, {
       body,
       idempotencyKey,
     });

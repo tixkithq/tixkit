@@ -8,11 +8,13 @@ import {
   type PublicEventDiscoveryCard,
   type PublicTicketListing,
   type PageResult,
+  type ResaleSettlement,
+  type ResaleSettlementMethod,
+  type ResaleTermsAcceptance,
   type TicketListing,
-  type TicketResaleCompletion,
 } from '@tixkit/js';
 
-export const TIXKIT_API_VERSION = '2026-08-12';
+export const TIXKIT_API_VERSION = '2026-08-13';
 
 // NOTE: React Native does not provide Node.js `crypto` APIs by default.
 // The following is a pure-JS HMAC-SHA256 implementation so the SDK works
@@ -297,7 +299,7 @@ export type {
 };
 export type { PublicTicketListing };
 
-export type { TicketListing, TicketResaleCompletion };
+export type { ResaleSettlement, ResaleSettlementMethod, ResaleTermsAcceptance, TicketListing };
 
 export type TixkitResaleListParams = {
   cursor?: string;
@@ -307,6 +309,7 @@ export type TixkitResaleListParams = {
 export type TixkitCreateResaleListingInput = {
   priceCents: number;
   expiresAt?: string;
+  termsAcceptance: ResaleTermsAcceptance;
   idempotencyKey: string;
 };
 
@@ -314,13 +317,21 @@ export type TixkitCreateCheckoutResaleListingInput = TixkitCreateResaleListingIn
   clientToken: string;
 };
 
-export type TixkitCompleteResaleListingInput = {
-  buyerId: string;
-  buyerEmail: string;
-  buyerDateOfBirth?: string;
-  buyerFirstName?: string;
-  buyerLastName?: string;
-  externalPaymentReference?: string;
+export type TixkitRecordResaleSettlementPayoutInput = {
+  amountCents: number;
+  currency: string;
+  expectedVersion: number;
+  method: ResaleSettlementMethod;
+  externalReference: string;
+  idempotencyKey: string;
+};
+
+export type TixkitRecordResaleSettlementReversalInput = {
+  amountCents: number;
+  currency: string;
+  expectedVersion: number;
+  method: ResaleSettlementMethod;
+  reason: string;
   idempotencyKey: string;
 };
 
@@ -827,11 +838,22 @@ export class TixkitResaleClient {
     return this.client.tickets.delistResaleListing(listingId, input);
   }
 
-  async completeResaleListing(
+  async getResaleSettlement(listingId: string): Promise<ResaleSettlement> {
+    return this.client.tickets.getResaleSettlement(listingId);
+  }
+
+  async recordResaleSettlementPayout(
     listingId: string,
-    input: TixkitCompleteResaleListingInput,
-  ): Promise<TicketResaleCompletion> {
-    return this.client.tickets.completeResaleListing(listingId, input);
+    input: TixkitRecordResaleSettlementPayoutInput,
+  ): Promise<ResaleSettlement> {
+    return this.client.tickets.recordResaleSettlementPayout(listingId, input);
+  }
+
+  async recordResaleSettlementReversal(
+    listingId: string,
+    input: TixkitRecordResaleSettlementReversalInput,
+  ): Promise<ResaleSettlement> {
+    return this.client.tickets.recordResaleSettlementReversal(listingId, input);
   }
 }
 

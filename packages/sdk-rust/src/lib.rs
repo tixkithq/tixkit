@@ -1,6 +1,6 @@
 //! Async Rust SDK for Tixkit.
 //!
-//! The client is pinned to API version `2026-08-12` by default and sends the
+//! The client is pinned to API version `2026-08-13` by default and sends the
 //! `X-Tixkit-Version` header on every request.
 
 use futures_util::{Stream, stream};
@@ -15,7 +15,7 @@ use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
-pub const TIXKIT_API_VERSION: &str = "2026-08-12";
+pub const TIXKIT_API_VERSION: &str = "2026-08-13";
 
 type HmacSha256 = Hmac<Sha256>;
 type BoxStreamResult<T> = Pin<Box<dyn Stream<Item = Result<T, TixkitError>> + Send>>;
@@ -640,6 +640,8 @@ pub struct CreateCheckoutSession {
     pub access_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waitlist_claim_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resale_terms_acceptance: Option<ResaleTermsAcceptance>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
@@ -710,21 +712,78 @@ pub struct CreateResaleListing {
     pub price_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<String>,
+    pub terms_acceptance: ResaleTermsAcceptance,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResaleTermsAcceptance {
+    pub accepted: bool,
+    pub terms_version: String,
+    pub settlement_model: String,
+    pub refund_model: String,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResaleSettlementEntry {
+    pub id: String,
+    pub kind: String,
+    pub amount_cents: i64,
+    pub currency: String,
+    pub actor_id: String,
+    pub method: String,
+    pub external_reference_sha256: Option<String>,
+    pub reason: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResaleSettlement {
+    pub id: String,
+    pub listing_id: String,
+    pub tenant_id: String,
+    pub organization_id: String,
+    pub brand_id: String,
+    pub event_id: String,
+    pub seller_order_id: Option<String>,
+    pub buyer_order_id: Option<String>,
+    pub seller_ticket_id: Option<String>,
+    pub buyer_ticket_id: Option<String>,
+    pub currency: String,
+    pub gross_cents: Option<i64>,
+    pub fee_cents: Option<i64>,
+    pub payable_cents: Option<i64>,
+    pub paid_cents: Option<i64>,
+    pub reversed_cents: Option<i64>,
+    pub recovery_cents: Option<i64>,
+    pub state: String,
+    pub terms_version: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub entries: Vec<ResaleSettlementEntry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CompleteResaleListing {
-    pub buyer_id: String,
-    pub buyer_email: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub buyer_first_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub buyer_last_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub buyer_phone: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_payment_reference: Option<String>,
+pub struct RecordResaleSettlementPayout {
+    pub amount_cents: i64,
+    pub currency: String,
+    pub expected_version: i64,
+    pub method: String,
+    pub external_reference: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordResaleSettlementReversal {
+    pub amount_cents: i64,
+    pub currency: String,
+    pub expected_version: i64,
+    pub method: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
@@ -862,15 +921,6 @@ pub struct PublicTicketListing {
     pub updated_at: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct TicketResaleCompletion {
-    pub listing: TicketListing,
-    pub seller_ticket: Ticket,
-    pub buyer_ticket: Ticket,
-    pub buyer_attendee: Attendee,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1219,16 +1269,44 @@ impl TicketResource<'_> {
             .await
     }
 
-    pub async fn complete_resale_listing(
+    pub async fn get_resale_settlement(
         &self,
         listing_id: &str,
-        input: CompleteResaleListing,
+    ) -> Result<ResaleSettlement, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/ticket-listings/{listing_id}/settlement"),
+                RequestOptions::<()>::default(),
+            )
+            .await
+    }
+
+    pub async fn record_resale_settlement_payout(
+        &self,
+        listing_id: &str,
+        input: RecordResaleSettlementPayout,
         idempotency_key: impl Into<String>,
-    ) -> Result<TicketResaleCompletion, TixkitError> {
+    ) -> Result<ResaleSettlement, TixkitError> {
         self.client
             .request(
                 reqwest::Method::POST,
-                &format!("/ticket-listings/{listing_id}/complete"),
+                &format!("/ticket-listings/{listing_id}/settlement/payouts"),
+                RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
+            )
+            .await
+    }
+
+    pub async fn record_resale_settlement_reversal(
+        &self,
+        listing_id: &str,
+        input: RecordResaleSettlementReversal,
+        idempotency_key: impl Into<String>,
+    ) -> Result<ResaleSettlement, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::POST,
+                &format!("/ticket-listings/{listing_id}/settlement/reversals"),
                 RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
             )
             .await
@@ -1573,6 +1651,7 @@ mod tests {
                     cancel_url: None,
                     access_code: None,
                     waitlist_claim_token: None,
+                    resale_terms_acceptance: None,
                 },
                 "idem_checkout_1",
             )
@@ -1627,6 +1706,7 @@ mod tests {
                     cancel_url: None,
                     access_code: None,
                     waitlist_claim_token: None,
+                    resale_terms_acceptance: Some(resale_terms()),
                 },
                 "idem_resale_1",
             )
@@ -1843,7 +1923,8 @@ mod tests {
             .and(header("idempotency-key", "idem_create_1"))
             .and(body_json(json!({
                 "priceCents": 5500,
-                "expiresAt": "2026-07-01T00:00:00.000Z"
+                "expiresAt": "2026-07-01T00:00:00.000Z",
+                "termsAcceptance": {"accepted": true, "termsVersion": "2026-07-16", "settlementModel": "organizer_managed", "refundModel": "manual_coordinated_resolution"}
             })))
             .respond_with(ResponseTemplate::new(201).set_body_json(json!({
                 "id": "lst_2",
@@ -1857,7 +1938,7 @@ mod tests {
             ))
             .and(header("x-checkout-session-token", "client_1"))
             .and(header("idempotency-key", "idem_checkout_resale_1"))
-            .and(body_json(json!({"priceCents": 5600})))
+            .and(body_json(json!({"priceCents": 5600, "termsAcceptance": {"accepted": true, "termsVersion": "2026-07-16", "settlementModel": "organizer_managed", "refundModel": "manual_coordinated_resolution"}})))
             .respond_with(ResponseTemplate::new(201).set_body_json(json!({
                 "id": "lst_3",
                 "status": "listed"
@@ -1874,19 +1955,14 @@ mod tests {
             })))
             .mount(&server)
             .await;
-        Mock::given(method("POST"))
-            .and(path("/v1/ticket-listings/lst_1/complete"))
-            .and(header("idempotency-key", "idem_complete_1"))
-            .and(body_json(json!({
-                "buyerId": "usr_1",
-                "buyerEmail": "buyer@example.com",
-                "externalPaymentReference": "stripe_pi_1"
-            })))
+        Mock::given(method("GET"))
+            .and(path("/v1/ticket-listings/lst_1/settlement"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "listing": {"id": "lst_1", "status": "sold"},
-                "sellerTicket": {"id": "tkt_1", "status": "transferred"},
-                "buyerTicket": {"id": "tkt_2", "status": "valid"},
-                "buyerAttendee": {"id": "att_2", "email": "buyer@example.com"}
+                "id": "rst_1", "listingId": "lst_1", "tenantId": "ten_1", "organizationId": "org_1", "brandId": "br_1", "eventId": "evt_1",
+                "sellerOrderId": "ord_seller_1", "buyerOrderId": "ord_buyer_1", "sellerTicketId": "tkt_seller_1", "buyerTicketId": "tkt_buyer_1",
+                "currency": "USD", "grossCents": 5600, "feeCents": 600, "payableCents": 5000, "paidCents": 0, "reversedCents": 0,
+                "recoveryCents": 0, "state": "pending", "termsVersion": "2026-07-16", "version": 1,
+                "createdAt": "2026-07-16T00:00:00Z", "updatedAt": "2026-07-16T00:00:00Z", "entries": []
             })))
             .mount(&server)
             .await;
@@ -1912,6 +1988,7 @@ mod tests {
                 CreateResaleListing {
                     price_cents: 5500,
                     expires_at: Some("2026-07-01T00:00:00.000Z".to_string()),
+                    terms_acceptance: resale_terms(),
                 },
                 "idem_create_1",
             )
@@ -1927,6 +2004,7 @@ mod tests {
                 CreateResaleListing {
                     price_cents: 5600,
                     expires_at: None,
+                    terms_acceptance: resale_terms(),
                 },
                 "client_1",
                 "idem_checkout_resale_1",
@@ -1942,24 +2020,16 @@ mod tests {
             .expect("delist resale listing");
         assert_eq!(delisted.status.as_deref(), Some("delisted"));
 
-        let completed = tixkit
+        let settlement = tixkit
             .tickets()
-            .complete_resale_listing(
-                "lst_1",
-                CompleteResaleListing {
-                    buyer_id: "usr_1".to_string(),
-                    buyer_email: "buyer@example.com".to_string(),
-                    buyer_first_name: None,
-                    buyer_last_name: None,
-                    buyer_phone: None,
-                    external_payment_reference: Some("stripe_pi_1".to_string()),
-                },
-                "idem_complete_1",
-            )
+            .get_resale_settlement("lst_1")
             .await
-            .expect("complete resale listing");
-        assert_eq!(completed.listing.status.as_deref(), Some("sold"));
-        assert_eq!(completed.buyer_ticket.id, "tkt_2");
+            .expect("get resale settlement");
+        assert_eq!(settlement.id, "rst_1");
+        assert_eq!(settlement.seller_order_id.as_deref(), Some("ord_seller_1"));
+        assert_eq!(settlement.buyer_order_id.as_deref(), Some("ord_buyer_1"));
+        assert_eq!(settlement.seller_ticket_id.as_deref(), Some("tkt_seller_1"));
+        assert_eq!(settlement.buyer_ticket_id.as_deref(), Some("tkt_buyer_1"));
     }
 
     #[tokio::test]
@@ -2446,6 +2516,16 @@ mod tests {
             cancel_url: None,
             access_code: None,
             waitlist_claim_token: None,
+            resale_terms_acceptance: None,
+        }
+    }
+
+    fn resale_terms() -> ResaleTermsAcceptance {
+        ResaleTermsAcceptance {
+            accepted: true,
+            terms_version: "2026-07-16".to_string(),
+            settlement_model: "organizer_managed".to_string(),
+            refund_model: "manual_coordinated_resolution".to_string(),
         }
     }
 }

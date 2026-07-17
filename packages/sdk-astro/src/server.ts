@@ -157,12 +157,24 @@ export async function delistResaleListing(
   return client.tickets.delistResaleListing(listingId, input);
 }
 
-export async function completeResaleListing(
+export async function getResaleSettlement(client: TixkitClient, listingId: string) {
+  return client.tickets.getResaleSettlement(listingId);
+}
+
+export async function recordResaleSettlementPayout(
   client: TixkitClient,
   listingId: string,
-  input: Parameters<TixkitClient['tickets']['completeResaleListing']>[1],
+  input: Parameters<TixkitClient['tickets']['recordResaleSettlementPayout']>[1],
 ) {
-  return client.tickets.completeResaleListing(listingId, input);
+  return client.tickets.recordResaleSettlementPayout(listingId, input);
+}
+
+export async function recordResaleSettlementReversal(
+  client: TixkitClient,
+  listingId: string,
+  input: Parameters<TixkitClient['tickets']['recordResaleSettlementReversal']>[1],
+) {
+  return client.tickets.recordResaleSettlementReversal(listingId, input);
 }
 
 export async function createCheckoutTicketResaleListing(

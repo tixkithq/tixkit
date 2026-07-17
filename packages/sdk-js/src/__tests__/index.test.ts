@@ -585,6 +585,84 @@ describe('TixkitClient', () => {
     expect(client).toBeDefined();
   });
 
+  it('rejects timeout and retry settings that could skip or unbound requests', () => {
+    for (const timeout of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648]) {
+      expect(() => new TixkitClient({ timeout }), String(timeout)).toThrow(/timeout/);
+    }
+    for (const maxRetries of [-1, 1.5, 11, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => new TixkitClient({ maxRetries }), String(maxRetries)).toThrow(/maxRetries/);
+    }
+  });
+
+  it('normalizes lowercase safe methods before applying retry policy', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 1 });
+
+    await expect(client.request<{ ok: boolean }>('get', '/health')).resolves.toEqual({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('GET');
+  });
+
+  it('does not retry successful responses with malformed JSON', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{', { status: 200 }));
+    const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 2 });
+
+    await expect(client.request('GET', '/malformed')).rejects.toBeInstanceOf(SyntaxError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a request body that cannot be serialized', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const body: { self?: unknown } = {};
+    body.self = body;
+    const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 2 });
+
+    await expect(
+      client.request('POST', '/cyclic', { body, idempotencyKey: 'idem_cyclic' }),
+    ).rejects.toBeInstanceOf(TypeError);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the timeout active while consuming raw error responses', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+        const signal = init?.signal;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal?.addEventListener(
+              'abort',
+              () => controller.error(new DOMException('The operation was aborted', 'AbortError')),
+              { once: true },
+            );
+          },
+        });
+        return new Response(body, { status: 503 });
+      });
+      const client = new TixkitClient({
+        apiBaseUrl: 'https://api.test',
+        maxRetries: 0,
+        timeout: 25,
+      });
+
+      const request = client.requestRaw('GET', '/slow-error');
+      const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+      await vi.advanceTimersByTimeAsync(25);
+
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('normalizes trailing slashes from custom API base URLs', async () => {
     const fetchMock = mockFetch(200, { data: [], nextCursor: null });
     const client = new TixkitClient({
@@ -898,12 +976,24 @@ describe('TixkitClient', () => {
       eventId: 'evt_1',
       items: [{ resaleListingId: 'lst_1', quantity: 1 }],
       buyer: { email: 'buyer@example.com', dateOfBirth: '1990-01-01' },
+      resaleTermsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
     });
 
     const [, init] = fetchMock.mock.calls[0]!;
     const body = JSON.parse(init?.body as string) as Record<string, unknown>;
 
     expect(body.items).toEqual([{ resaleListingId: 'lst_1', quantity: 1 }]);
+    expect(body.resaleTermsAcceptance).toEqual({
+      accepted: true,
+      termsVersion: '2026-07-16',
+      settlementModel: 'organizer_managed',
+      refundModel: 'manual_coordinated_resolution',
+    });
   });
 
   it('passes waitlist claim tokens through checkout create', async () => {
@@ -1643,7 +1733,7 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
-  it('tickets creates, delists, and completes resale listings with idempotency keys', async () => {
+  it('tickets creates, delists, reads, pays, and reverses resale settlements', async () => {
     const fm = mockFetch(201, { id: 'lst_1', status: 'listed' });
     const c = new TixkitClient({
       apiKey: '***********',
@@ -1652,12 +1742,26 @@ describe('TixkitClient new resource methods', () => {
     });
     await c.tickets.createResaleListing('tkt_1', {
       priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'resale_1',
     });
     expect(getCall(fm).url).toBe('https://api.test/v1/tickets/tkt_1/resale-listings');
     expect(getCall(fm).method).toBe('POST');
     expect(getCall(fm).headers['Idempotency-Key']).toBe('resale_1');
-    expect(JSON.parse(getCall(fm).body)).toEqual({ priceCents: 5500 });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      priceCents: 5500,
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
+    });
 
     fm.mockClear();
     await c.tickets.delistResaleListing('lst_1', {
@@ -1668,21 +1772,47 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm).headers['Idempotency-Key']).toBe('delist_1');
 
     fm.mockClear();
-    await c.tickets.completeResaleListing('lst_1', {
-      buyerId: 'usr_buyer',
-      buyerEmail: 'buyer@example.com',
-      buyerDateOfBirth: '1990-01-01',
-      externalPaymentReference: 'stripe_pi_1',
-      idempotencyKey: 'complete_1',
+    await c.tickets.getResaleSettlement('lst_1');
+    expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/settlement');
+    expect(getCall(fm).method).toBe('GET');
+
+    fm.mockClear();
+    await c.tickets.recordResaleSettlementPayout('lst_1', {
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 1,
+      method: 'bank_transfer',
+      externalReference: 'bank-transfer-1',
+      idempotencyKey: 'payout_1',
     });
-    expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/complete');
+    expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/settlement/payouts');
     expect(getCall(fm).method).toBe('POST');
-    expect(getCall(fm).headers['Idempotency-Key']).toBe('complete_1');
+    expect(getCall(fm).headers['Idempotency-Key']).toBe('payout_1');
     expect(JSON.parse(getCall(fm).body)).toEqual({
-      buyerId: 'usr_buyer',
-      buyerEmail: 'buyer@example.com',
-      buyerDateOfBirth: '1990-01-01',
-      externalPaymentReference: 'stripe_pi_1',
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 1,
+      method: 'bank_transfer',
+      externalReference: 'bank-transfer-1',
+    });
+
+    fm.mockClear();
+    await c.tickets.recordResaleSettlementReversal('lst_1', {
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 2,
+      method: 'accounting_adjustment',
+      reason: 'Buyer refund approved',
+      idempotencyKey: 'reversal_1',
+    });
+    expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/settlement/reversals');
+    expect(getCall(fm).headers['Idempotency-Key']).toBe('reversal_1');
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      amountCents: 5000,
+      currency: 'USD',
+      expectedVersion: 2,
+      method: 'accounting_adjustment',
+      reason: 'Buyer refund approved',
     });
   });
 
@@ -1719,6 +1849,12 @@ describe('TixkitClient new resource methods', () => {
       clientToken: 'client_1',
       priceCents: 5500,
       expiresAt: '2026-06-30T00:00:00.000Z',
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
       idempotencyKey: 'buyer_resale_1',
     });
     expect(getCall(fm).url).toBe(
@@ -1730,6 +1866,12 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(getCall(fm).body)).toEqual({
       priceCents: 5500,
       expiresAt: '2026-06-30T00:00:00.000Z',
+      termsAcceptance: {
+        accepted: true,
+        termsVersion: '2026-07-16',
+        settlementModel: 'organizer_managed',
+        refundModel: 'manual_coordinated_resolution',
+      },
     });
   });
 
@@ -3716,7 +3858,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-12',
+        'X-Tixkit-Version': '2026-08-13',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

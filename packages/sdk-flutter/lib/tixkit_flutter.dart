@@ -7,7 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
-const String tixkitApiVersion = '2026-08-12';
+const String tixkitApiVersion = '2026-08-13';
 
 enum TixkitScanOutcome {
   accepted,
@@ -689,28 +689,55 @@ class TixkitTicketListing {
   final String? soldToId;
 }
 
-class TixkitResaleCompletion {
-  const TixkitResaleCompletion({
-    required this.listing,
-    this.buyerTicketId,
-    this.buyerAttendeeId,
-  });
+class TixkitResaleTermsAcceptance {
+  const TixkitResaleTermsAcceptance({required this.accepted, required this.termsVersion, required this.settlementModel, required this.refundModel});
+  final bool accepted;
+  final String termsVersion;
+  final String settlementModel;
+  final String refundModel;
+  Map<String, Object?> toJson() => {'accepted': accepted, 'termsVersion': termsVersion, 'settlementModel': settlementModel, 'refundModel': refundModel};
+}
 
-  factory TixkitResaleCompletion.fromJson(Map<String, Object?> json) {
-    final rawBuyerTicket = json['buyerTicket'];
-    final rawBuyerAttendee = json['buyerAttendee'];
-    return TixkitResaleCompletion(
-      listing: TixkitTicketListing.fromJson(json['listing'] as Map<String, Object?>? ?? const {}),
-      buyerTicketId:
-          rawBuyerTicket is Map<String, Object?> ? rawBuyerTicket['id'] as String? : null,
-      buyerAttendeeId:
-          rawBuyerAttendee is Map<String, Object?> ? rawBuyerAttendee['id'] as String? : null,
-    );
-  }
+class TixkitResaleSettlementEntry {
+  const TixkitResaleSettlementEntry({required this.id, required this.kind, required this.amountCents, required this.currency, required this.actorId, required this.method, required this.externalReferenceSha256, required this.reason, required this.createdAt});
+  factory TixkitResaleSettlementEntry.fromJson(Map<String, Object?> json) => TixkitResaleSettlementEntry(id: json['id'] as String, kind: json['kind'] as String, amountCents: json['amountCents'] as int, currency: json['currency'] as String, actorId: json['actorId'] as String, method: json['method'] as String, externalReferenceSha256: json['externalReferenceSha256'] as String?, reason: json['reason'] as String?, createdAt: json['createdAt'] as String);
+  final String id;
+  final String kind;
+  final int amountCents;
+  final String currency;
+  final String actorId;
+  final String method;
+  final String? externalReferenceSha256;
+  final String? reason;
+  final String createdAt;
+}
 
-  final TixkitTicketListing listing;
+class TixkitResaleSettlement {
+  const TixkitResaleSettlement({required this.id, required this.listingId, required this.tenantId, required this.organizationId, required this.brandId, required this.eventId, required this.sellerOrderId, required this.buyerOrderId, required this.sellerTicketId, required this.buyerTicketId, required this.currency, required this.grossCents, required this.feeCents, required this.payableCents, required this.paidCents, required this.reversedCents, required this.recoveryCents, required this.state, required this.termsVersion, required this.version, required this.createdAt, required this.updatedAt, required this.entries});
+  factory TixkitResaleSettlement.fromJson(Map<String, Object?> json) => TixkitResaleSettlement(id: json['id'] as String, listingId: json['listingId'] as String, tenantId: json['tenantId'] as String, organizationId: json['organizationId'] as String, brandId: json['brandId'] as String, eventId: json['eventId'] as String, sellerOrderId: json['sellerOrderId'] as String?, buyerOrderId: json['buyerOrderId'] as String?, sellerTicketId: json['sellerTicketId'] as String?, buyerTicketId: json['buyerTicketId'] as String?, currency: json['currency'] as String, grossCents: json['grossCents'] as int?, feeCents: json['feeCents'] as int?, payableCents: json['payableCents'] as int?, paidCents: json['paidCents'] as int?, reversedCents: json['reversedCents'] as int?, recoveryCents: json['recoveryCents'] as int?, state: json['state'] as String, termsVersion: json['termsVersion'] as String?, version: json['version'] as int, createdAt: json['createdAt'] as String, updatedAt: json['updatedAt'] as String, entries: (json['entries'] as List<Object?>? ?? const []).map((entry) => TixkitResaleSettlementEntry.fromJson(entry as Map<String, Object?>)).toList(growable: false));
+  final String id;
+  final String listingId;
+  final String tenantId;
+  final String organizationId;
+  final String brandId;
+  final String eventId;
+  final String? sellerOrderId;
+  final String? buyerOrderId;
+  final String? sellerTicketId;
   final String? buyerTicketId;
-  final String? buyerAttendeeId;
+  final String currency;
+  final int? grossCents;
+  final int? feeCents;
+  final int? payableCents;
+  final int? paidCents;
+  final int? reversedCents;
+  final int? recoveryCents;
+  final String state;
+  final String? termsVersion;
+  final int version;
+  final String createdAt;
+  final String updatedAt;
+  final List<TixkitResaleSettlementEntry> entries;
 }
 
 class TixkitPublicEventPageClient {
@@ -807,6 +834,7 @@ class TixkitResaleClient {
     required int priceCents,
     required String idempotencyKey,
     String? expiresAt,
+    required TixkitResaleTermsAcceptance termsAcceptance,
   }) async {
     return _postListing(
       '/tickets/$ticketId/resale-listings',
@@ -814,6 +842,7 @@ class TixkitResaleClient {
       body: {
         'priceCents': priceCents,
         if (expiresAt != null) 'expiresAt': expiresAt,
+        'termsAcceptance': termsAcceptance.toJson(),
       },
     );
   }
@@ -825,6 +854,7 @@ class TixkitResaleClient {
     required String sessionToken,
     required String idempotencyKey,
     String? expiresAt,
+    required TixkitResaleTermsAcceptance termsAcceptance,
   }) async {
     return _postListing(
       '/checkout/sessions/$sessionId/tickets/$ticketId/resale-listing',
@@ -833,6 +863,7 @@ class TixkitResaleClient {
       body: {
         'priceCents': priceCents,
         if (expiresAt != null) 'expiresAt': expiresAt,
+        'termsAcceptance': termsAcceptance.toJson(),
       },
     );
   }
@@ -848,29 +879,20 @@ class TixkitResaleClient {
     );
   }
 
-  Future<TixkitResaleCompletion> completeResaleListing(
-    String listingId, {
-    required String buyerId,
-    required String buyerEmail,
-    required String idempotencyKey,
-    String? buyerFirstName,
-    String? buyerLastName,
-    String? externalPaymentReference,
-  }) async {
-    final response = await httpClient.post(
-      _apiUri('/ticket-listings/$listingId/complete'),
-      headers: _headers(idempotencyKey: idempotencyKey),
-      body: jsonEncode({
-        'buyerId': buyerId,
-        'buyerEmail': buyerEmail,
-        if (buyerFirstName != null) 'buyerFirstName': buyerFirstName,
-        if (buyerLastName != null) 'buyerLastName': buyerLastName,
-        if (externalPaymentReference != null)
-          'externalPaymentReference': externalPaymentReference,
-      }),
-    );
+  Future<TixkitResaleSettlement> getResaleSettlement(String listingId) async {
+    final response = await httpClient.get(_apiUri('/ticket-listings/$listingId/settlement'), headers: _headers());
     _assertSuccess(response);
-    return TixkitResaleCompletion.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+    return TixkitResaleSettlement.fromJson(jsonDecode(response.body) as Map<String, Object?>);
+  }
+
+  Future<TixkitResaleSettlement> recordResaleSettlementPayout(String listingId, {required int amountCents, required String currency, required int expectedVersion, required String method, required String externalReference, required String idempotencyKey}) => _postSettlement('/ticket-listings/$listingId/settlement/payouts', {'amountCents': amountCents, 'currency': currency, 'expectedVersion': expectedVersion, 'method': method, 'externalReference': externalReference}, idempotencyKey);
+
+  Future<TixkitResaleSettlement> recordResaleSettlementReversal(String listingId, {required int amountCents, required String currency, required int expectedVersion, required String method, required String reason, required String idempotencyKey}) => _postSettlement('/ticket-listings/$listingId/settlement/reversals', {'amountCents': amountCents, 'currency': currency, 'expectedVersion': expectedVersion, 'method': method, 'reason': reason}, idempotencyKey);
+
+  Future<TixkitResaleSettlement> _postSettlement(String path, Map<String, Object?> body, String idempotencyKey) async {
+    final response = await httpClient.post(_apiUri(path), headers: _headers(idempotencyKey: idempotencyKey), body: jsonEncode(body));
+    _assertSuccess(response);
+    return TixkitResaleSettlement.fromJson(jsonDecode(response.body) as Map<String, Object?>);
   }
 
   Future<TixkitTicketListing> _postListing(

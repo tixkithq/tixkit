@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cancel_url: None,
                 access_code: None,
                 waitlist_claim_token: None,
+                resale_terms_acceptance: None,
             },
             format!("checkout-{}", std::process::id()),
         )

@@ -101,6 +101,9 @@ describe('Generated client compile validation (T33)', () => {
       '/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing',
       '/ticket-listings/{listingId}/delist',
       '/ticket-listings/{listingId}/complete',
+      '/ticket-listings/{listingId}/settlement',
+      '/ticket-listings/{listingId}/settlement/payouts',
+      '/ticket-listings/{listingId}/settlement/reversals',
     ]) {
       expect(output).toContain(path);
     }
@@ -121,13 +124,26 @@ describe('Generated client compile validation (T33)', () => {
       'PublicTicketListingPage',
       'TicketListing',
       'TicketListingPage',
-      'TicketResaleCompletion',
+      'ResaleTermsAcceptance',
+      'ResaleSettlementEntry',
+      'ResaleSettlement',
     ]) {
       expect(output).toContain(schema);
     }
 
     expect(output).toContain('"X-Checkout-Session-Token"');
     expect(output).toContain('"Idempotency-Key"');
+    expect(output).not.toContain('TicketResaleCompletion');
+    for (const path of [
+      '"/ticket-listings/{listingId}/complete"',
+      '"/ticket-listings/{listingId}/settlement"',
+      '"/ticket-listings/{listingId}/settlement/payouts"',
+      '"/ticket-listings/{listingId}/settlement/reversals"',
+    ]) {
+      const pathStart = output.indexOf(path);
+      expect(pathStart).toBeGreaterThanOrEqual(0);
+      expect(output.slice(pathStart, pathStart + 500)).toContain('listingId: string');
+    }
     expect(output).toContain('DraftPreviewPage');
     expect(output).toContain('data: components["schemas"]["PuckData"]');
     expect(output).toContain('puckData: components["schemas"]["PuckData"]');

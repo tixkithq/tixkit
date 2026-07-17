@@ -151,7 +151,7 @@ class TixkitAndroidTest {
       urls,
     )
     headersSeen.forEach { headers ->
-      assertEquals("2026-08-12", headers["X-Tixkit-Version"])
+      assertEquals("2026-08-13", headers["X-Tixkit-Version"])
       assertFalse(headers.containsKey("Authorization"))
       assertFalse(headers.containsKey("X-Device-Id"))
       assertFalse(headers.containsKey("X-Device-Secret"))
@@ -171,7 +171,7 @@ class TixkitAndroidTest {
       idempotencyKeys.add(headers["Idempotency-Key"])
       sessionTokens.add(headers["X-Checkout-Session-Token"])
       bodies.add(body)
-      assertEquals("2026-08-12", headers["X-Tixkit-Version"])
+      assertEquals("2026-08-13", headers["X-Tixkit-Version"])
       assertEquals("Bearer tk_test_123", headers["Authorization"])
 
       when {
@@ -189,19 +189,18 @@ class TixkitAndroidTest {
             "hasMore": false
           }
           """.trimIndent()
-        url.endsWith("/complete") ->
+        url.endsWith("/settlement") ->
           """
           {
-            "listing": {
-              "id": "lst_2",
-              "eventId": "evt_1",
-              "ticketId": "tkt_1",
-              "status": "sold",
-              "priceCents": 5500,
-              "currency": "USD"
-            },
-            "buyerTicket": {"id": "tkt_2"},
-            "buyerAttendee": {"id": "att_2"}
+            "id": "rst_1", "listingId": "lst_2", "tenantId": "ten_1", "organizationId": "org_1",
+            "brandId": "brd_1", "eventId": "evt_1", "sellerOrderId": "ord_seller",
+            "buyerOrderId": "ord_buyer", "sellerTicketId": "tkt_seller", "buyerTicketId": "tkt_buyer",
+            "currency": "USD", "grossCents": 5500, "feeCents": 500, "payableCents": 5000,
+            "paidCents": 0, "reversedCents": 0, "recoveryCents": 0, "state": "pending",
+            "termsVersion": "2026-07-16", "version": 1, "createdAt": "2026-07-16T00:00:00Z",
+            "updatedAt": "2026-07-16T00:00:00Z", "entries": [{"id": "entry_1", "kind": "payable_accrued",
+            "amountCents": 5000, "currency": "USD", "actorId": "system", "method": "checkout",
+            "externalReferenceSha256": null, "reason": null, "createdAt": "2026-07-16T00:00:00Z"}]
           }
           """.trimIndent()
         else ->
@@ -225,25 +224,28 @@ class TixkitAndroidTest {
 
     val page = client.listResaleListings("evt_1", cursor = "lst_0", limit = 25)
     assertEquals("lst_1", page.items.single().id)
-    client.createTicketResaleListing("tkt_1", priceCents = 5500, idempotencyKey = "idem_create")
+    val terms = TixkitResaleTermsAcceptance(true, "2026-07-16", "organizer_managed", "manual_coordinated_resolution")
+    client.createTicketResaleListing("tkt_1", priceCents = 5500, resaleTermsAcceptance = terms, idempotencyKey = "idem_create")
     client.createCheckoutTicketResaleListing(
       "cs_1",
       "tkt_1",
       priceCents = 5500,
       sessionToken = "client_token",
+      resaleTermsAcceptance = terms,
       idempotencyKey = "idem_checkout",
     )
     client.delistResaleListing("lst_2", idempotencyKey = "idem_delist")
-    val completed = client.completeResaleListing(
-      "lst_2",
-      buyerId = "usr_1",
-      buyerEmail = "buyer@example.test",
-      idempotencyKey = "idem_complete",
-      externalPaymentReference = "pi_1",
-    )
-
-    assertEquals("sold", completed.listing.status)
-    assertEquals("tkt_2", completed.buyerTicketId)
+    val settlement = client.getResaleSettlement("lst_2")
+    assertEquals("rst_1", settlement.id)
+    assertEquals("ten_1", settlement.tenantId)
+    assertEquals("payable_accrued", settlement.entries.single().kind)
+    listOf(bodies[1], bodies[2]).forEach { rawBody ->
+      val acceptance = JSONObject(requireNotNull(rawBody)).getJSONObject("termsAcceptance")
+      assertEquals(true, acceptance.getBoolean("accepted"))
+      assertEquals("2026-07-16", acceptance.getString("termsVersion"))
+      assertEquals("organizer_managed", acceptance.getString("settlementModel"))
+      assertEquals("manual_coordinated_resolution", acceptance.getString("refundModel"))
+    }
     assertEquals(listOf("GET", "POST", "POST", "POST", "POST"), methods)
     assertEquals(
       "https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25",

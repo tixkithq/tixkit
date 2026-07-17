@@ -223,11 +223,57 @@ data class TixkitTicketListing(
   val soldToId: String? = null,
 )
 
-data class TixkitResaleCompletion(
-  val listing: TixkitTicketListing,
-  val buyerTicketId: String? = null,
-  val buyerAttendeeId: String? = null,
+data class TixkitResaleTermsAcceptance(
+  val accepted: Boolean,
+  val termsVersion: String,
+  val settlementModel: String,
+  val refundModel: String,
 )
+
+data class TixkitResaleSettlementEntry(
+  val id: String,
+  val kind: String,
+  val amountCents: Int,
+  val currency: String,
+  val actorId: String,
+  val method: String,
+  val externalReferenceSha256: String?,
+  val reason: String?,
+  val createdAt: String,
+)
+
+data class TixkitResaleSettlement(
+  val id: String,
+  val listingId: String,
+  val tenantId: String,
+  val organizationId: String,
+  val brandId: String,
+  val eventId: String,
+  val sellerOrderId: String?,
+  val buyerOrderId: String?,
+  val sellerTicketId: String?,
+  val buyerTicketId: String?,
+  val currency: String,
+  val grossCents: Int?,
+  val feeCents: Int?,
+  val payableCents: Int?,
+  val paidCents: Int?,
+  val reversedCents: Int?,
+  val recoveryCents: Int?,
+  val state: String,
+  val termsVersion: String?,
+  val version: Int,
+  val createdAt: String,
+  val updatedAt: String,
+  val entries: List<TixkitResaleSettlementEntry>,
+)
+
+private fun TixkitResaleTermsAcceptance.toJson() =
+  JSONObject()
+    .put("accepted", accepted)
+    .put("termsVersion", termsVersion)
+    .put("settlementModel", settlementModel)
+    .put("refundModel", refundModel)
 
 fun interface TixkitPublicEventPageTransport {
   fun get(url: String, headers: Map<String, String>): String
@@ -312,11 +358,11 @@ class TixkitResaleClient(
   fun listResaleListings(eventId: String, cursor: String? = null, limit: Int? = null): TixkitTicketListingPage =
     parseListingPage(JSONObject(transport.request("GET", apiUrl("/events/$eventId/resale-listings", cursor = cursor, limit = limit), headers(), null)))
 
-  fun createTicketResaleListing(ticketId: String, priceCents: Int, idempotencyKey: String, expiresAt: String? = null): TixkitTicketListing =
+  fun createTicketResaleListing(ticketId: String, priceCents: Int, resaleTermsAcceptance: TixkitResaleTermsAcceptance, idempotencyKey: String, expiresAt: String? = null): TixkitTicketListing =
     postListing(
       path = "/tickets/$ticketId/resale-listings",
       idempotencyKey = idempotencyKey,
-      body = JSONObject().put("priceCents", priceCents).putOptional("expiresAt", expiresAt),
+      body = JSONObject().put("priceCents", priceCents).putOptional("expiresAt", expiresAt).put("termsAcceptance", resaleTermsAcceptance.toJson()),
     )
 
   fun createCheckoutTicketResaleListing(
@@ -324,6 +370,7 @@ class TixkitResaleClient(
     ticketId: String,
     priceCents: Int,
     sessionToken: String,
+    resaleTermsAcceptance: TixkitResaleTermsAcceptance,
     idempotencyKey: String,
     expiresAt: String? = null,
   ): TixkitTicketListing =
@@ -331,7 +378,7 @@ class TixkitResaleClient(
       path = "/checkout/sessions/$sessionId/tickets/$ticketId/resale-listing",
       idempotencyKey = idempotencyKey,
       sessionToken = sessionToken,
-      body = JSONObject().put("priceCents", priceCents).putOptional("expiresAt", expiresAt),
+      body = JSONObject().put("priceCents", priceCents).putOptional("expiresAt", expiresAt).put("termsAcceptance", resaleTermsAcceptance.toJson()),
     )
 
   fun delistResaleListing(listingId: String, idempotencyKey: String): TixkitTicketListing =
@@ -341,31 +388,13 @@ class TixkitResaleClient(
       body = JSONObject(),
     )
 
-  fun completeResaleListing(
-    listingId: String,
-    buyerId: String,
-    buyerEmail: String,
-    idempotencyKey: String,
-    buyerFirstName: String? = null,
-    buyerLastName: String? = null,
-    externalPaymentReference: String? = null,
-  ): TixkitResaleCompletion {
-    val body = JSONObject()
-      .put("buyerId", buyerId)
-      .put("buyerEmail", buyerEmail)
-      .putOptional("buyerFirstName", buyerFirstName)
-      .putOptional("buyerLastName", buyerLastName)
-      .putOptional("externalPaymentReference", externalPaymentReference)
-    val json = JSONObject(
-      transport.request(
-        "POST",
-        apiUrl("/ticket-listings/$listingId/complete"),
-        headers(idempotencyKey = idempotencyKey),
-        body.toString(),
-      ),
-    )
-    return parseResaleCompletion(json)
-  }
+  fun getResaleSettlement(listingId: String): TixkitResaleSettlement = parseResaleSettlement(JSONObject(transport.request("GET", apiUrl("/ticket-listings/$listingId/settlement"), headers(), null)))
+
+  fun recordResaleSettlementPayout(listingId: String, amountCents: Int, currency: String, expectedVersion: Int, method: String, externalReference: String, idempotencyKey: String): TixkitResaleSettlement = postSettlement("/ticket-listings/$listingId/settlement/payouts", JSONObject().put("amountCents", amountCents).put("currency", currency).put("expectedVersion", expectedVersion).put("method", method).put("externalReference", externalReference), idempotencyKey)
+
+  fun recordResaleSettlementReversal(listingId: String, amountCents: Int, currency: String, expectedVersion: Int, method: String, reason: String, idempotencyKey: String): TixkitResaleSettlement = postSettlement("/ticket-listings/$listingId/settlement/reversals", JSONObject().put("amountCents", amountCents).put("currency", currency).put("expectedVersion", expectedVersion).put("method", method).put("reason", reason), idempotencyKey)
+
+  private fun postSettlement(path: String, body: JSONObject, idempotencyKey: String): TixkitResaleSettlement = parseResaleSettlement(JSONObject(transport.request("POST", apiUrl(path), headers(idempotencyKey = idempotencyKey), body.toString())))
 
   private fun postListing(
     path: String,
@@ -672,7 +701,7 @@ class TixkitScannerStatusView @JvmOverloads constructor(
 }
 
 object TixkitAndroid {
-    const val API_VERSION = "2026-08-12"
+    const val API_VERSION = "2026-08-13"
 
   fun checkoutUrl(options: TixkitCheckoutOptions): String {
     val base = options.checkoutBaseUrl.trimEnd('/')
@@ -887,11 +916,44 @@ private fun parseListing(json: JSONObject): TixkitTicketListing =
     soldToId = json.optNullableString("soldToId"),
   )
 
-private fun parseResaleCompletion(json: JSONObject): TixkitResaleCompletion =
-  TixkitResaleCompletion(
-    listing = parseListing(json.getJSONObject("listing")),
-    buyerTicketId = json.optJSONObject("buyerTicket")?.optNullableString("id"),
-    buyerAttendeeId = json.optJSONObject("buyerAttendee")?.optNullableString("id"),
+private fun parseResaleSettlement(json: JSONObject): TixkitResaleSettlement =
+  TixkitResaleSettlement(
+    id = json.optString("id"),
+    listingId = json.optString("listingId"),
+    tenantId = json.optString("tenantId"),
+    organizationId = json.optString("organizationId"),
+    brandId = json.optString("brandId"),
+    eventId = json.optString("eventId"),
+    sellerOrderId = json.optNullableString("sellerOrderId"),
+    buyerOrderId = json.optNullableString("buyerOrderId"),
+    sellerTicketId = json.optNullableString("sellerTicketId"),
+    buyerTicketId = json.optNullableString("buyerTicketId"),
+    currency = json.optString("currency"),
+    grossCents = json.optNullableInt("grossCents"),
+    feeCents = json.optNullableInt("feeCents"),
+    payableCents = json.optNullableInt("payableCents"),
+    paidCents = json.optNullableInt("paidCents"),
+    reversedCents = json.optNullableInt("reversedCents"),
+    recoveryCents = json.optNullableInt("recoveryCents"),
+    state = json.optString("state"),
+    termsVersion = json.optNullableString("termsVersion"),
+    version = json.optInt("version"),
+    createdAt = json.optString("createdAt"),
+    updatedAt = json.optString("updatedAt"),
+    entries = json.optJSONArray("entries").toObjectList(::parseResaleSettlementEntry),
+  )
+
+private fun parseResaleSettlementEntry(json: JSONObject): TixkitResaleSettlementEntry =
+  TixkitResaleSettlementEntry(
+    id = json.optString("id"),
+    kind = json.optString("kind"),
+    amountCents = json.optInt("amountCents"),
+    currency = json.optString("currency"),
+    actorId = json.optString("actorId"),
+    method = json.optString("method"),
+    externalReferenceSha256 = json.optNullableString("externalReferenceSha256"),
+    reason = json.optNullableString("reason"),
+    createdAt = json.optString("createdAt"),
   )
 
 private fun JSONObject.putOptional(key: String, value: String?): JSONObject =

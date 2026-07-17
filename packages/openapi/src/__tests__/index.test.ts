@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-12');
+    expect(openApiSpec.info.version).toBe('2026-08-13');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1420,6 +1420,9 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/tickets/{ticketId}/resale-listings']).toBeDefined();
     expect(openApiSpec.paths['/ticket-listings/{listingId}/delist']).toBeDefined();
     expect(openApiSpec.paths['/ticket-listings/{listingId}/complete']).toBeDefined();
+    expect(openApiSpec.paths['/ticket-listings/{listingId}/settlement']).toBeDefined();
+    expect(openApiSpec.paths['/ticket-listings/{listingId}/settlement/payouts']).toBeDefined();
+    expect(openApiSpec.paths['/ticket-listings/{listingId}/settlement/reversals']).toBeDefined();
     expect(
       openApiSpec.paths['/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing'],
     ).toBeDefined();
@@ -1628,6 +1631,178 @@ describe('openApiSpec', () => {
         { required: ['attendeeFields'] },
       ]),
     );
+  });
+
+  it('binds resale listing and checkout requests to the exact current terms', () => {
+    const terms = openApiSpec.components.schemas.ResaleTermsAcceptance;
+    expect(terms).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        accepted: { type: 'boolean', const: true },
+        termsVersion: { type: 'string', const: '2026-07-16' },
+        settlementModel: { type: 'string', const: 'organizer_managed' },
+        refundModel: { type: 'string', const: 'manual_coordinated_resolution' },
+      },
+      required: ['accepted', 'termsVersion', 'settlementModel', 'refundModel'],
+    });
+
+    const staffListing =
+      openApiSpec.paths['/tickets/{ticketId}/resale-listings'].post.requestBody.content[
+        'application/json'
+      ].schema;
+    const buyerListing =
+      openApiSpec.paths['/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing'].post
+        .requestBody.content['application/json'].schema;
+    for (const schema of [staffListing, buyerListing]) {
+      expect(schema.required).toEqual(['priceCents', 'termsAcceptance']);
+      expect(schema.properties.priceCents).toEqual({ type: 'integer', exclusiveMinimum: 0 });
+      expect(schema.properties.termsAcceptance).toEqual({
+        $ref: '#/components/schemas/ResaleTermsAcceptance',
+      });
+    }
+
+    const checkout =
+      openApiSpec.paths['/checkout/sessions'].post.requestBody.content['application/json'].schema;
+    expect(checkout.properties.resaleTermsAcceptance).toEqual({
+      $ref: '#/components/schemas/ResaleTermsAcceptance',
+    });
+    expect(checkout.allOf).toEqual(
+      expect.arrayContaining([
+        // oxlint-disable-next-line unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
+        expect.objectContaining({ then: { required: ['resaleTermsAcceptance'] } }),
+        expect.objectContaining({ if: { required: ['resaleTermsAcceptance'] } }),
+      ]),
+    );
+  });
+
+  it('documents organizer-managed resale settlement evidence and retired completion', () => {
+    const settlement = openApiSpec.components.schemas.ResaleSettlement;
+    expect(settlement.properties.state.enum).toEqual([
+      'pending',
+      'paid',
+      'reversed',
+      'recovery_required',
+      'review_required',
+    ]);
+    expect(settlement.properties.entries.items).toEqual({
+      $ref: '#/components/schemas/ResaleSettlementEntry',
+    });
+    expect(
+      openApiSpec.components.schemas.ResaleSettlementEntry.properties.externalReferenceSha256,
+    ).toMatchObject({ type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' });
+
+    const read = openApiSpec.paths['/ticket-listings/{listingId}/settlement'].get;
+    expect(read['x-required-permissions']).toEqual(['orders.read']);
+    expect(read.responses['200'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/ResaleSettlement',
+    });
+
+    const payout = openApiSpec.paths['/ticket-listings/{listingId}/settlement/payouts'].post;
+    const reversal = openApiSpec.paths['/ticket-listings/{listingId}/settlement/reversals'].post;
+    const listingIdParameter = {
+      name: 'listingId',
+      in: 'path',
+      required: true,
+      schema: { type: 'string', minLength: 1 },
+    };
+    const settlementIdempotencyParameter = {
+      name: 'Idempotency-Key',
+      in: 'header',
+      required: true,
+      schema: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 128,
+        pattern: '^[\\s\\S]*\\S[\\s\\S]*$',
+      },
+    };
+    expect(read.parameters).toContainEqual(listingIdParameter);
+    for (const operation of [payout, reversal]) {
+      expect(operation['x-required-permissions']).toEqual(['billing.write']);
+      expect(operation.parameters).toContainEqual(listingIdParameter);
+      expect(operation.parameters).toContainEqual(settlementIdempotencyParameter);
+      expect(operation.responses['200'].content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/ResaleSettlement',
+      });
+      expect(operation.responses).toHaveProperty('400');
+      expect(operation.responses).toHaveProperty('404');
+    }
+    const payoutSchema = payout.requestBody.content['application/json'].schema;
+    const reversalSchema = reversal.requestBody.content['application/json'].schema;
+    expect(
+      exampleMatchesSchema(
+        {
+          amountCents: 5000,
+          currency: 'usd',
+          expectedVersion: 1,
+          method: 'bank_transfer',
+          externalReference: 'bank-1',
+        },
+        payoutSchema,
+      ),
+    ).toBe(false);
+    expect(
+      exampleMatchesSchema(
+        {
+          amountCents: 5000,
+          currency: 'USD',
+          expectedVersion: 1,
+          method: 'bank_transfer',
+          externalReference: '   ',
+        },
+        payoutSchema,
+      ),
+    ).toBe(false);
+    expect(
+      exampleMatchesSchema(
+        {
+          amountCents: 5000,
+          currency: 'USD',
+          expectedVersion: 1,
+          method: 'accounting_adjustment',
+          reason: 'Buyer refund approved',
+        },
+        reversalSchema,
+      ),
+    ).toBe(true);
+    expect(
+      exampleMatchesSchema(
+        {
+          amountCents: 5000,
+          currency: 'USD',
+          expectedVersion: 1,
+          method: 'accounting_adjustment',
+          reason: '\n\t',
+        },
+        reversalSchema,
+      ),
+    ).toBe(false);
+    expect(
+      payout.requestBody.content['application/json'].schema.properties.externalReference,
+    ).toBeDefined();
+    expect(reversal.requestBody.content['application/json'].schema.properties).not.toHaveProperty(
+      'externalReference',
+    );
+
+    const retired = openApiSpec.paths['/ticket-listings/{listingId}/complete'].post;
+    expect(retired['x-required-permissions']).toEqual(['tickets.write']);
+    expect(retired.parameters).toContainEqual(listingIdParameter);
+    expect(retired).not.toHaveProperty('requestBody');
+    expect(retired.responses).not.toHaveProperty('200');
+    expect(retired.responses['410'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/ApiError',
+    });
+    expect(retired.responses['410'].headers).toMatchObject({
+      Deprecation: { schema: { type: 'string', const: '@1784160000' } },
+      Link: {
+        schema: {
+          type: 'string',
+          const: '</v1/checkout/sessions>; rel="successor-version"',
+        },
+      },
+    });
+    expect(openApiSpec.components.schemas).not.toHaveProperty('TicketResaleCompletion');
   });
 
   it('documents split-key message campaign request and response contracts', () => {

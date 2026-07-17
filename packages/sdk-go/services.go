@@ -194,9 +194,21 @@ func (s *TicketsService) DelistResaleListing(ctx context.Context, listingID stri
 	return &out, err
 }
 
-func (s *TicketsService) CompleteResaleListing(ctx context.Context, listingID string, input CompleteResaleListingRequest) (*TicketResaleCompletion, error) {
-	var out TicketResaleCompletion
-	err := s.client.request(ctx, http.MethodPost, "/ticket-listings/"+escape(listingID)+"/complete", input, &out, withIdempotencyKey(input.IdempotencyKey))
+func (s *TicketsService) GetResaleSettlement(ctx context.Context, listingID string) (*ResaleSettlement, error) {
+	var out ResaleSettlement
+	err := s.client.request(ctx, http.MethodGet, "/ticket-listings/"+escape(listingID)+"/settlement", nil, &out)
+	return &out, err
+}
+
+func (s *TicketsService) RecordResaleSettlementPayout(ctx context.Context, listingID string, input RecordResaleSettlementPayoutRequest) (*ResaleSettlement, error) {
+	var out ResaleSettlement
+	err := s.client.request(ctx, http.MethodPost, "/ticket-listings/"+escape(listingID)+"/settlement/payouts", input, &out, withIdempotencyKey(input.IdempotencyKey))
+	return &out, err
+}
+
+func (s *TicketsService) RecordResaleSettlementReversal(ctx context.Context, listingID string, input RecordResaleSettlementReversalRequest) (*ResaleSettlement, error) {
+	var out ResaleSettlement
+	err := s.client.request(ctx, http.MethodPost, "/ticket-listings/"+escape(listingID)+"/settlement/reversals", input, &out, withIdempotencyKey(input.IdempotencyKey))
 	return &out, err
 }
 

@@ -143,6 +143,7 @@ void main() {
     final urls = <String>[];
     final methods = <String>[];
     final headers = <Map<String, String>>[];
+    const termsJson = <String, Object?>{'accepted': true, 'termsVersion': '2026-07-16', 'settlementModel': 'organizer_managed', 'refundModel': 'manual_coordinated_resolution'};
     final client = TixkitResaleClient(
       apiBaseUrl: 'https://api.test',
       apiKey: 'tk_test_123',
@@ -166,6 +167,7 @@ void main() {
         }
         if (request.url.path.endsWith('/resale-listings')) {
           expect(request.headers['Idempotency-Key'], 'idem_create');
+          expect((jsonDecode(request.body) as Map<String, Object?>)['termsAcceptance'], termsJson);
           return http.Response(
             jsonEncode({'id': 'lst_2', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'listed', 'priceCents': 5500, 'currency': 'USD'}),
             200,
@@ -174,6 +176,7 @@ void main() {
         if (request.url.path.endsWith('/resale-listing')) {
           expect(request.headers['X-Checkout-Session-Token'], 'client_token');
           expect(request.headers['Idempotency-Key'], 'idem_checkout');
+          expect((jsonDecode(request.body) as Map<String, Object?>)['termsAcceptance'], termsJson);
           return http.Response(
             jsonEncode({'id': 'lst_3', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'listed', 'priceCents': 5500, 'currency': 'USD'}),
             200,
@@ -186,13 +189,15 @@ void main() {
             200,
           );
         }
-        if (request.url.path.endsWith('/complete')) {
-          expect(request.headers['Idempotency-Key'], 'idem_complete');
+        if (request.url.path.endsWith('/settlement')) {
           return http.Response(
             jsonEncode({
-              'listing': {'id': 'lst_2', 'eventId': 'evt_1', 'ticketId': 'tkt_1', 'status': 'sold', 'priceCents': 5500, 'currency': 'USD'},
-              'buyerTicket': {'id': 'tkt_2'},
-              'buyerAttendee': {'id': 'att_2'},
+              'id': 'rst_1', 'listingId': 'lst_2', 'tenantId': 'ten_1', 'organizationId': 'org_1', 'brandId': 'brd_1', 'eventId': 'evt_1',
+              'sellerOrderId': 'ord_seller', 'buyerOrderId': 'ord_buyer', 'sellerTicketId': 'tkt_seller', 'buyerTicketId': 'tkt_buyer',
+              'currency': 'USD', 'grossCents': 5500, 'feeCents': 500, 'payableCents': 5000, 'paidCents': 0, 'reversedCents': 0,
+              'recoveryCents': 0, 'state': 'pending', 'termsVersion': '2026-07-16', 'version': 1,
+              'createdAt': '2026-07-16T00:00:00Z', 'updatedAt': '2026-07-16T00:00:00Z',
+              'entries': [{'id': 'entry_1', 'kind': 'payable_accrued', 'amountCents': 5000, 'currency': 'USD', 'actorId': 'system', 'method': 'checkout', 'externalReferenceSha256': null, 'reason': null, 'createdAt': '2026-07-16T00:00:00Z'}],
             }),
             200,
           );
@@ -203,24 +208,21 @@ void main() {
 
     final page = await client.listResaleListings('evt_1', cursor: 'lst_0', limit: 25);
     expect(page.items.single.id, 'lst_1');
-    await client.createTicketResaleListing('tkt_1', priceCents: 5500, idempotencyKey: 'idem_create');
+    const terms = TixkitResaleTermsAcceptance(accepted: true, termsVersion: '2026-07-16', settlementModel: 'organizer_managed', refundModel: 'manual_coordinated_resolution');
+    await client.createTicketResaleListing('tkt_1', priceCents: 5500, termsAcceptance: terms, idempotencyKey: 'idem_create');
     await client.createCheckoutTicketResaleListing(
       'cs_1',
       'tkt_1',
       priceCents: 5500,
       sessionToken: 'client_token',
+      termsAcceptance: terms,
       idempotencyKey: 'idem_checkout',
     );
     await client.delistResaleListing('lst_2', idempotencyKey: 'idem_delist');
-    final completed = await client.completeResaleListing(
-      'lst_2',
-      buyerId: 'usr_1',
-      buyerEmail: 'buyer@example.test',
-      externalPaymentReference: 'pi_1',
-      idempotencyKey: 'idem_complete',
-    );
-    expect(completed.listing.status, 'sold');
-    expect(completed.buyerTicketId, 'tkt_2');
+    final settlement = await client.getResaleSettlement('lst_2');
+    expect(settlement.id, 'rst_1');
+    expect(settlement.tenantId, 'ten_1');
+    expect(settlement.entries.single.kind, 'payable_accrued');
 
     expect(methods, ['GET', 'POST', 'POST', 'POST', 'POST']);
     expect(urls.first, 'https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25');
