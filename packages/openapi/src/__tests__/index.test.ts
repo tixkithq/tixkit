@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-19');
+    expect(openApiSpec.info.version).toBe('2026-08-20');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1223,7 +1223,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-19');
+    expect(openApiSpec.info.version).toBe('2026-08-20');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',
@@ -3068,6 +3068,31 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/migration-jobs/{jobId}/activate'].post).toMatchObject({
       operationId: 'activatePortableMigrationJob',
       'x-required-permissions': ['migrations.commit'],
+    });
+    expect(openApiSpec.components.parameters.MigrationLifecycleIdempotencyKey).toMatchObject({
+      required: true,
+      schema: {
+        minLength: 1,
+        maxLength: 255,
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+      },
+    });
+    for (const action of ['pause', 'resume', 'cancel', 'rollback'] as const) {
+      const operation = openApiSpec.paths[`/migration-jobs/{jobId}/${action}`].post;
+      expect(operation.parameters).toEqual(
+        expect.arrayContaining([
+          { $ref: '#/components/parameters/MigrationLifecycleIdempotencyKey' },
+        ]),
+      );
+      expect(operation['x-compatibility-breaking-change']).toContain('2026-08-20');
+    }
+    expect(openApiSpec.components.schemas.MigrationActionAccepted).toMatchObject({
+      additionalProperties: false,
+      required: expect.arrayContaining(['commandId', 'lifecycleSequence']),
+      properties: {
+        commandId: { type: 'string' },
+        lifecycleSequence: { type: 'integer', minimum: 1 },
+      },
     });
   });
 

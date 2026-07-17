@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-19',
+    version: '2026-08-20',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -709,6 +709,19 @@ const rawOpenApiSpec = {
         },
         description:
           'Required for message campaigns. Use 1-255 safe token characters with no whitespace, and reuse the same key only for an identical event and request body.',
+      },
+      MigrationLifecycleIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 255,
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+        },
+        description:
+          'Required for migration lifecycle commands. Reuse the same safe-token key only for the identical actor, job and action.',
       },
       AgentControlIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -1389,7 +1402,7 @@ const rawOpenApiSpec = {
       MigrationActionAccepted: {
         type: 'object',
         additionalProperties: false,
-        required: ['jobId', 'action', 'accepted'],
+        required: ['jobId', 'action', 'accepted', 'commandId', 'lifecycleSequence'],
         properties: {
           jobId: { type: 'string' },
           action: {
@@ -1397,6 +1410,8 @@ const rawOpenApiSpec = {
             enum: ['pause', 'resume', 'cancel', 'rollback'],
           },
           accepted: { const: true },
+          commandId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$' },
+          lifecycleSequence: { type: 'integer', minimum: 1 },
         },
       },
       MigrationDryRunResult: {
@@ -5854,7 +5869,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-19, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-20, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5901,7 +5916,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-19, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-20, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6008,7 +6023,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-19 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-20 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6045,7 +6060,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-19 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-20 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8331,7 +8346,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-19 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-20 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8388,7 +8403,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-19 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-20 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -21064,8 +21079,11 @@ const rawOpenApiSpec = {
       post: {
         operationId: 'pauseMigrationJob',
         summary: 'Pause migration commit',
+        'x-compatibility-breaking-change':
+          'API 2026-08-20 requires a safe-token Idempotency-Key and returns durable command identity.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
+        parameters: [{ $ref: '#/components/parameters/MigrationLifecycleIdempotencyKey' }],
         responses: {
           '202': {
             description: 'Pause accepted',
@@ -21092,8 +21110,11 @@ const rawOpenApiSpec = {
       post: {
         operationId: 'resumeMigrationJob',
         summary: 'Resume migration commit',
+        'x-compatibility-breaking-change':
+          'API 2026-08-20 requires a safe-token Idempotency-Key and returns durable command identity.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
+        parameters: [{ $ref: '#/components/parameters/MigrationLifecycleIdempotencyKey' }],
         responses: {
           '202': {
             description: 'Resume accepted',
@@ -21120,8 +21141,11 @@ const rawOpenApiSpec = {
       post: {
         operationId: 'cancelMigrationJob',
         summary: 'Cancel migration job',
+        'x-compatibility-breaking-change':
+          'API 2026-08-20 requires a safe-token Idempotency-Key and returns durable command identity.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
+        parameters: [{ $ref: '#/components/parameters/MigrationLifecycleIdempotencyKey' }],
         responses: {
           '202': {
             description: 'Cancellation accepted',
@@ -21176,9 +21200,12 @@ const rawOpenApiSpec = {
       post: {
         operationId: 'rollbackMigrationJob',
         summary: 'Request eligible migration rollback',
+        'x-compatibility-breaking-change':
+          'API 2026-08-20 requires a safe-token Idempotency-Key and returns durable command identity.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.rollback'],
         parameters: [
+          { $ref: '#/components/parameters/MigrationLifecycleIdempotencyKey' },
           {
             name: 'x-tixkit-confirmation',
             in: 'header',

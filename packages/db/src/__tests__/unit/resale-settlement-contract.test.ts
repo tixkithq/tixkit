@@ -121,7 +121,7 @@ describe('resale settlement persistence contract', () => {
 
   it('registers the settlement migration after the existing migration chain', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
-    expect(Object.keys(migrations).at(-1)).toBe('0090_webhook_replay_requests');
+    expect(Object.keys(migrations).at(-1)).toBe('0092_migration_lifecycle_command_outcomes');
     expect(migrations).toHaveProperty('0089_resale_settlements');
   });
 

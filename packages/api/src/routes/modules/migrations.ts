@@ -37,6 +37,7 @@ import {
   MIGRATION_IMPORT_RETENTION_MS,
   parseUploadArtifactMetadata,
 } from '../../services/uploads.js';
+import { reserveMigrationLifecycleAction } from '../../services/migration-lifecycle-control.js';
 
 class PortableDryRunAttestationUnavailableError extends Error {
   readonly code = 'SERVICE_UNAVAILABLE';
@@ -1987,69 +1988,85 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     return { approvalId, revoked: true, revokedAt: revocation.created_at };
   });
 
-  for (const action of ['pause', 'resume', 'cancel', 'rollback'] as const) {
+  const lifecycleActions = [
+    { action: 'pause', permission: 'migrations.commit' },
+    { action: 'resume', permission: 'migrations.commit' },
+    { action: 'cancel', permission: 'migrations.commit' },
+    { action: 'rollback', permission: 'migrations.rollback' },
+  ] as const;
+  for (const { action, permission } of lifecycleActions) {
     app.post(`/migration-jobs/:jobId/${action}`, async (request, reply) => {
       const principal = request.principal!;
-      requireMigrationPermission(
-        principal,
-        action === 'rollback' ? 'migrations.rollback' : 'migrations.commit',
-      );
+      requireMigrationPermission(principal, permission);
       const { jobId } = request.params as { jobId: string };
       const repository = repo();
-      const { job, organizationId } = await scopedJob(repository, request, jobId);
+      const { organizationId } = await scopedJob(repository, request, jobId);
       if (
         action === 'rollback' &&
         request.headers['x-tixkit-confirmation'] !== `rollback:${jobId}`
       ) {
         throw new ValidationError(`x-tixkit-confirmation must equal rollback:${jobId}`);
       }
-      const allowed: Record<typeof action, string[]> = {
-        pause: ['preparing', 'committing'],
-        resume: ['paused'],
-        cancel: ['pending', 'prepared', 'ready', 'preparing', 'committing', 'paused'],
-        rollback: ['committed', 'failed'],
-      };
-      if (!allowed[action].includes(job.status))
-        throw new ConflictError(`Migration cannot ${action} in its current status`);
-      const preparation = await repository.preparationProgress(
-        principal.tenantId,
-        organizationId,
-        jobId,
-      );
-      const preparationAction =
-        job.status === 'preparing' || (job.status === 'paused' && !preparation.completed);
-      if (action === 'cancel' && ['pending', 'prepared', 'ready'].includes(job.status)) {
-        const changed = await repository.transitionJob({
+      let reservation;
+      try {
+        reservation = await reserveMigrationLifecycleAction({
+          db: app.context.db,
           tenantId: principal.tenantId,
           organizationId,
           jobId,
-          from: [job.status as never],
-          to: 'cancelled',
-        });
-        if (!changed) throw new ConflictError('Migration status changed concurrently');
-      } else if (action === 'rollback') {
-        await app.context.temporalClient.startMigrationRollback({
-          tenantId: principal.tenantId,
-          organizationId,
-          jobId,
-        });
-      } else if (preparationAction) {
-        await app.context.temporalClient.signalMigrationPreparation(
-          principal.tenantId,
-          organizationId,
-          jobId,
           action,
-        );
-      } else {
-        await app.context.temporalClient.signalMigration(
-          principal.tenantId,
-          organizationId,
-          jobId,
-          action,
-        );
+          idempotencyKey: request.headers['idempotency-key'] as unknown as string,
+          actorId: principal.id,
+          auditCorrelationId: request.id,
+          onReserved: async ({ db, command }) => {
+            await writeAuditLog(
+              new AuditLogRepository(db),
+              request,
+              principal,
+              {
+                action: `migration_job.${action}_requested`,
+                organizationId,
+                resourceType: 'MigrationJob',
+                resourceId: jobId,
+                diffSummary: {
+                  commandId: command.id,
+                  lifecycleSequence: command.lifecycle_sequence,
+                  dispatchKind: command.dispatch_kind,
+                },
+              },
+              { failClosed: true },
+            );
+          },
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === 'MIGRATION_LIFECYCLE_IDEMPOTENCY_KEY_INVALID'
+        ) {
+          throw new ValidationError('A valid Idempotency-Key header is required');
+        }
+        if (error instanceof Error && error.message === 'MIGRATION_JOB_NOT_FOUND') {
+          throw new NotFoundError('MigrationJob', jobId);
+        }
+        if (
+          error instanceof Error &&
+          (error.message === 'MIGRATION_LIFECYCLE_STATUS_CONFLICT' ||
+            error.message === 'MIGRATION_LIFECYCLE_IDEMPOTENCY_CONFLICT' ||
+            error.message === 'MIGRATION_LIFECYCLE_VERSION_CONFLICT' ||
+            error.message === 'MIGRATION_LIFECYCLE_PREDECESSOR_INCOMPLETE' ||
+            error.message === 'MIGRATION_LIFECYCLE_PAUSED_PHASE_UNKNOWN')
+        ) {
+          throw new ConflictError(`Migration cannot ${action} in its current status`);
+        }
+        throw error;
       }
-      await auditMutation(app, request, organizationId, jobId, `migration_job.${action}_requested`);
-      return reply.status(202).send({ jobId, action, accepted: true });
+      return reply.status(202).send({
+        jobId,
+        action,
+        accepted: true,
+        commandId: reservation.command.id,
+        lifecycleSequence: reservation.command.lifecycle_sequence,
+      });
     });
   }
 

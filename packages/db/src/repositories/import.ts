@@ -6,12 +6,89 @@ import type {
   ImportJobFileTable,
   ImportJobRowTable,
   ImportJobTable,
+  MigrationLifecycleAction,
+  MigrationLifecycleCommandTable,
+  MigrationLifecycleDispatchKind,
   MigrationCredentialTable,
   PortableDestinationResourceTable,
   UploadArtifactTable,
 } from '../types/db.js';
 import { BaseRepository } from './base.js';
-import type { Database } from '../client.js';
+import { getDriver, type Database } from '../client.js';
+
+const SHA256_HEX = /^[a-f0-9]{64}$/;
+const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
+const MIGRATION_JOB_STATUSES = new Set<ImportJobStatus>([
+  'pending',
+  'preparing',
+  'prepared',
+  'discovering',
+  'extracting',
+  'normalizing',
+  'validating',
+  'ready',
+  'committing',
+  'committed',
+  'activated',
+  'paused',
+  'cancelling',
+  'cancelled',
+  'failed',
+  'rolling-back',
+  'rolled-back',
+]);
+
+export type MigrationLifecycleOutcome =
+  | 'paused'
+  | 'resumed'
+  | 'cancelled'
+  | 'rollback_refused'
+  | 'rolled_back';
+
+function assertTransactionOwned(database: Database): void {
+  if ((database as Database & { isTransaction?: boolean }).isTransaction !== true) {
+    throw new Error('MIGRATION_LIFECYCLE_TRANSACTION_REQUIRED');
+  }
+}
+
+function assertLifecycleIdentity(value: string, code: string): void {
+  if (!value || value.length > 128) throw new Error(code);
+}
+
+function assertLifecycleCommandInput(input: {
+  action: MigrationLifecycleAction;
+  dispatchKind: MigrationLifecycleDispatchKind;
+  idempotencyKeySha256: string;
+  requestFingerprint: string;
+  expectedJobStatus: ImportJobStatus;
+  expectedLifecycleVersion: number;
+  actorId: string;
+  auditCorrelationId: string;
+}): void {
+  if (!SHA256_HEX.test(input.idempotencyKeySha256)) {
+    throw new Error('MIGRATION_LIFECYCLE_IDEMPOTENCY_DIGEST_INVALID');
+  }
+  if (!SHA256_HEX.test(input.requestFingerprint)) {
+    throw new Error('MIGRATION_LIFECYCLE_REQUEST_FINGERPRINT_INVALID');
+  }
+  if (!MIGRATION_JOB_STATUSES.has(input.expectedJobStatus)) {
+    throw new Error('MIGRATION_LIFECYCLE_EXPECTED_STATUS_INVALID');
+  }
+  if (!Number.isSafeInteger(input.expectedLifecycleVersion) || input.expectedLifecycleVersion < 0) {
+    throw new Error('MIGRATION_LIFECYCLE_VERSION_INVALID');
+  }
+  assertLifecycleIdentity(input.actorId, 'MIGRATION_LIFECYCLE_ACTOR_INVALID');
+  assertLifecycleIdentity(input.auditCorrelationId, 'MIGRATION_LIFECYCLE_CORRELATION_INVALID');
+  if (input.action === 'rollback' && input.dispatchKind !== 'rollback-start') {
+    throw new Error('MIGRATION_LIFECYCLE_DISPATCH_INVALID');
+  }
+  if (input.action !== 'rollback' && input.dispatchKind === 'rollback-start') {
+    throw new Error('MIGRATION_LIFECYCLE_DISPATCH_INVALID');
+  }
+  if (input.dispatchKind === 'none' && input.action !== 'cancel') {
+    throw new Error('MIGRATION_LIFECYCLE_DISPATCH_INVALID');
+  }
+}
 
 function isUniqueViolation(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -1491,6 +1568,578 @@ export class ImportRepository extends BaseRepository {
       if (!raced) throw error;
       return { created: false, job: raced };
     }
+  }
+
+  private findMigrationLifecycleCommandForUpdate(input: {
+    tenantId: string;
+    organizationId: string;
+    commandId: string;
+  }) {
+    if (getDriver() === 'mssql') {
+      return sql<Selectable<MigrationLifecycleCommandTable>>`
+        select * from migration_lifecycle_commands with (updlock, holdlock)
+        where tenant_id = ${input.tenantId}
+          and organization_id = ${input.organizationId}
+          and id = ${input.commandId}
+      `
+        .execute(this.db)
+        .then((result) => result.rows[0]);
+    }
+    return this.db
+      .selectFrom('migration_lifecycle_commands')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.commandId)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
+  private findMigrationLifecycleCommandByIdempotencyForUpdate(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    idempotencyKeySha256: string;
+  }) {
+    if (getDriver() === 'mssql') {
+      return sql<Selectable<MigrationLifecycleCommandTable>>`
+        select * from migration_lifecycle_commands with (updlock, holdlock)
+        where tenant_id = ${input.tenantId}
+          and organization_id = ${input.organizationId}
+          and import_job_id = ${input.jobId}
+          and idempotency_key_sha256 = ${input.idempotencyKeySha256}
+      `
+        .execute(this.db)
+        .then((result) => result.rows[0]);
+    }
+    return this.db
+      .selectFrom('migration_lifecycle_commands')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('idempotency_key_sha256', '=', input.idempotencyKeySha256)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
+  async reserveMigrationLifecycleCommand(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    action: MigrationLifecycleAction;
+    dispatchKind: MigrationLifecycleDispatchKind;
+    idempotencyKeySha256: string;
+    requestFingerprint: string;
+    expectedJobStatus: ImportJobStatus;
+    expectedLifecycleVersion: number;
+    actorId: string;
+    auditCorrelationId: string;
+    now?: Date;
+  }): Promise<{ created: boolean; command: Selectable<MigrationLifecycleCommandTable> }> {
+    assertTransactionOwned(this.db);
+    assertLifecycleCommandInput(input);
+    const now = input.now ?? new Date();
+    if (!Number.isFinite(now.getTime())) throw new Error('MIGRATION_LIFECYCLE_TIME_INVALID');
+
+    const job = await this.findJobForUpdate(input.tenantId, input.organizationId, input.jobId);
+    if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
+    const existing = await this.findMigrationLifecycleCommandByIdempotencyForUpdate({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      idempotencyKeySha256: input.idempotencyKeySha256,
+    });
+    if (existing) {
+      if (existing.request_fingerprint !== input.requestFingerprint) {
+        throw new Error('MIGRATION_LIFECYCLE_IDEMPOTENCY_CONFLICT');
+      }
+      return { created: false, command: existing };
+    }
+    if (
+      job.status !== input.expectedJobStatus ||
+      Number(job.lifecycle_version) !== input.expectedLifecycleVersion
+    ) {
+      throw new Error('MIGRATION_LIFECYCLE_VERSION_CONFLICT');
+    }
+    if (input.expectedLifecycleVersion > 0) {
+      const predecessor = await this.db
+        .selectFrom('migration_lifecycle_commands')
+        .select(['id', 'completed_at'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('import_job_id', '=', input.jobId)
+        .where('lifecycle_sequence', '=', input.expectedLifecycleVersion)
+        .executeTakeFirst();
+      if (!predecessor || predecessor.completed_at === null) {
+        throw new Error('MIGRATION_LIFECYCLE_PREDECESSOR_INCOMPLETE');
+      }
+    }
+    const lifecycleSequence = input.expectedLifecycleVersion + 1;
+    const advanced = await this.db
+      .updateTable('import_jobs')
+      .set({ lifecycle_version: lifecycleSequence, updated_at: now })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.jobId)
+      .where('status', '=', input.expectedJobStatus)
+      .where('lifecycle_version', '=', input.expectedLifecycleVersion)
+      .executeTakeFirst();
+    if (Number(advanced.numUpdatedRows) !== 1) {
+      throw new Error('MIGRATION_LIFECYCLE_VERSION_CONFLICT');
+    }
+    const id = this.generateId('mlc');
+    await this.db
+      .insertInto('migration_lifecycle_commands')
+      .values({
+        id,
+        tenant_id: input.tenantId,
+        organization_id: input.organizationId,
+        import_job_id: input.jobId,
+        action: input.action,
+        dispatch_kind: input.dispatchKind,
+        idempotency_key_sha256: input.idempotencyKeySha256,
+        request_fingerprint: input.requestFingerprint,
+        expected_job_status: input.expectedJobStatus,
+        lifecycle_sequence: lifecycleSequence,
+        status: 'pending',
+        attempts: 0,
+        next_attempt_at: now,
+        lease_owner: null,
+        lease_expires_at: null,
+        last_error_code: null,
+        actor_id: input.actorId,
+        audit_correlation_id: input.auditCorrelationId,
+        created_at: now,
+        updated_at: now,
+        dispatched_at: null,
+        completed_at: null,
+      })
+      .execute();
+    const command = await this.findMigrationLifecycleCommand({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      commandId: id,
+    });
+    if (!command) throw new Error('MIGRATION_LIFECYCLE_COMMAND_NOT_FOUND');
+    return { created: true, command };
+  }
+
+  findMigrationLifecycleCommand(input: {
+    tenantId: string;
+    organizationId: string;
+    commandId: string;
+  }): Promise<Selectable<MigrationLifecycleCommandTable> | undefined> {
+    return this.db
+      .selectFrom('migration_lifecycle_commands')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.commandId)
+      .executeTakeFirst();
+  }
+
+  findMigrationLifecycleCommandByIdempotency(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    idempotencyKeySha256: string;
+  }): Promise<Selectable<MigrationLifecycleCommandTable> | undefined> {
+    if (!SHA256_HEX.test(input.idempotencyKeySha256)) {
+      throw new Error('MIGRATION_LIFECYCLE_IDEMPOTENCY_DIGEST_INVALID');
+    }
+    return this.db
+      .selectFrom('migration_lifecycle_commands')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('idempotency_key_sha256', '=', input.idempotencyKeySha256)
+      .executeTakeFirst();
+  }
+
+  listMigrationLifecycleCommands(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    afterSequence?: number;
+    limit?: number;
+  }): Promise<Array<Selectable<MigrationLifecycleCommandTable>>> {
+    const afterSequence = input.afterSequence ?? 0;
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+      throw new Error('MIGRATION_LIFECYCLE_SEQUENCE_INVALID');
+    }
+    return this.db
+      .selectFrom('migration_lifecycle_commands')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('lifecycle_sequence', '>', afterSequence)
+      .orderBy('lifecycle_sequence', 'asc')
+      .limit(Math.min(Math.max(input.limit ?? 100, 1), 500))
+      .execute();
+  }
+
+  async claimDueMigrationLifecycleCommands(input: {
+    workerId: string;
+    limit?: number;
+    leaseMs: number;
+    now?: Date;
+  }): Promise<Array<Selectable<MigrationLifecycleCommandTable>>> {
+    assertLifecycleIdentity(input.workerId, 'MIGRATION_LIFECYCLE_WORKER_INVALID');
+    const limit = Math.min(Math.max(input.limit ?? 25, 1), 100);
+    if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs < 1 || input.leaseMs > 15 * 60_000) {
+      throw new Error('MIGRATION_LIFECYCLE_LEASE_INVALID');
+    }
+    const now = input.now ?? new Date();
+    if (!Number.isFinite(now.getTime())) throw new Error('MIGRATION_LIFECYCLE_TIME_INVALID');
+    const leaseExpiresAt = new Date(now.getTime() + input.leaseMs);
+    return this.db.transaction().execute(async (transaction) => {
+      const candidates =
+        getDriver() === 'mssql'
+          ? (
+              await sql<Selectable<MigrationLifecycleCommandTable>>`
+                select top (${limit}) command.*
+                from migration_lifecycle_commands command with (updlock, readpast, rowlock)
+                where (
+                  (command.status = 'pending' and command.next_attempt_at <= ${now})
+                  or (command.status = 'dispatching' and command.lease_expires_at <= ${now})
+                )
+                and not exists (
+                  select 1 from migration_lifecycle_commands earlier
+                  where earlier.tenant_id = command.tenant_id
+                    and earlier.organization_id = command.organization_id
+                    and earlier.import_job_id = command.import_job_id
+                    and earlier.lifecycle_sequence < command.lifecycle_sequence
+                    and earlier.completed_at is null
+                )
+                order by command.next_attempt_at, command.created_at, command.id
+              `.execute(transaction)
+            ).rows
+          : await transaction
+              .selectFrom('migration_lifecycle_commands as command')
+              .selectAll('command')
+              .where((eb) =>
+                eb.or([
+                  eb.and([
+                    eb('command.status', '=', 'pending'),
+                    eb('command.next_attempt_at', '<=', now),
+                  ]),
+                  eb.and([
+                    eb('command.status', '=', 'dispatching'),
+                    eb('command.lease_expires_at', '<=', now),
+                  ]),
+                ]),
+              )
+              .where(
+                sql<boolean>`not exists (
+                  select 1 from migration_lifecycle_commands earlier
+                  where earlier.tenant_id = command.tenant_id
+                    and earlier.organization_id = command.organization_id
+                    and earlier.import_job_id = command.import_job_id
+                    and earlier.lifecycle_sequence < command.lifecycle_sequence
+                    and earlier.completed_at is null
+                )`,
+              )
+              .orderBy('command.next_attempt_at', 'asc')
+              .orderBy('command.created_at', 'asc')
+              .orderBy('command.id', 'asc')
+              .limit(limit)
+              .forUpdate()
+              .skipLocked()
+              .execute();
+      const claimed: Array<Selectable<MigrationLifecycleCommandTable>> = [];
+      for (const candidate of candidates) {
+        const updated = await transaction
+          .updateTable('migration_lifecycle_commands')
+          .set((eb) => ({
+            status: 'dispatching',
+            attempts: eb('attempts', '+', 1),
+            lease_owner: input.workerId,
+            lease_expires_at: leaseExpiresAt,
+            last_error_code: null,
+            updated_at: now,
+          }))
+          .where('id', '=', candidate.id)
+          .where('tenant_id', '=', candidate.tenant_id)
+          .where('organization_id', '=', candidate.organization_id)
+          .where((eb) =>
+            eb.or([
+              eb.and([eb('status', '=', 'pending'), eb('next_attempt_at', '<=', now)]),
+              eb.and([eb('status', '=', 'dispatching'), eb('lease_expires_at', '<=', now)]),
+            ]),
+          )
+          .executeTakeFirst();
+        if (Number(updated.numUpdatedRows) !== 1) continue;
+        const row = await transaction
+          .selectFrom('migration_lifecycle_commands')
+          .selectAll()
+          .where('id', '=', candidate.id)
+          .executeTakeFirstOrThrow();
+        claimed.push(row);
+      }
+      return claimed;
+    });
+  }
+
+  async markMigrationLifecycleCommandDispatched(input: {
+    tenantId: string;
+    organizationId: string;
+    commandId: string;
+    workerId: string;
+    now?: Date;
+  }): Promise<boolean> {
+    assertLifecycleIdentity(input.workerId, 'MIGRATION_LIFECYCLE_WORKER_INVALID');
+    const now = input.now ?? new Date();
+    const result = await this.db
+      .updateTable('migration_lifecycle_commands')
+      .set({
+        status: 'dispatched',
+        lease_owner: null,
+        lease_expires_at: null,
+        last_error_code: null,
+        dispatched_at: now,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.commandId)
+      .where('status', '=', 'dispatching')
+      .where('lease_owner', '=', input.workerId)
+      .where('lease_expires_at', '>', now)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) === 1;
+  }
+
+  async rescheduleMigrationLifecycleCommand(input: {
+    tenantId: string;
+    organizationId: string;
+    commandId: string;
+    workerId: string;
+    errorCode: string;
+    nextAttemptAt: Date;
+    now?: Date;
+  }): Promise<boolean> {
+    return this.releaseMigrationLifecycleCommand({ ...input, status: 'pending' });
+  }
+
+  async markMigrationLifecycleCommandFailed(input: {
+    tenantId: string;
+    organizationId: string;
+    commandId: string;
+    workerId: string;
+    errorCode: string;
+    now?: Date;
+  }): Promise<boolean> {
+    const now = input.now ?? new Date();
+    return this.releaseMigrationLifecycleCommand({
+      ...input,
+      status: 'failed',
+      nextAttemptAt: now,
+    });
+  }
+
+  private async releaseMigrationLifecycleCommand(input: {
+    tenantId: string;
+    organizationId: string;
+    commandId: string;
+    workerId: string;
+    errorCode: string;
+    nextAttemptAt: Date;
+    status: 'pending' | 'failed';
+    now?: Date;
+  }): Promise<boolean> {
+    assertLifecycleIdentity(input.workerId, 'MIGRATION_LIFECYCLE_WORKER_INVALID');
+    if (!SAFE_ERROR_CODE.test(input.errorCode)) {
+      throw new Error('MIGRATION_LIFECYCLE_ERROR_CODE_INVALID');
+    }
+    const now = input.now ?? new Date();
+    if (
+      !Number.isFinite(now.getTime()) ||
+      !Number.isFinite(input.nextAttemptAt.getTime()) ||
+      input.nextAttemptAt < now
+    ) {
+      throw new Error('MIGRATION_LIFECYCLE_RETRY_TIME_INVALID');
+    }
+    const result = await this.db
+      .updateTable('migration_lifecycle_commands')
+      .set({
+        status: input.status,
+        next_attempt_at: input.nextAttemptAt,
+        lease_owner: null,
+        lease_expires_at: null,
+        last_error_code: input.errorCode,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.commandId)
+      .where('status', '=', 'dispatching')
+      .where('lease_owner', '=', input.workerId)
+      .where('lease_expires_at', '>', now)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) === 1;
+  }
+
+  async persistMigrationLifecycleCommandOutcome(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    commandId: string;
+    lifecycleSequence: number;
+    outcome: MigrationLifecycleOutcome;
+    now?: Date;
+  }): Promise<{
+    job: Selectable<ImportJobTable>;
+    command: Selectable<MigrationLifecycleCommandTable>;
+    event: Selectable<ImportJobEventTable>;
+  }> {
+    assertTransactionOwned(this.db);
+    if (!Number.isSafeInteger(input.lifecycleSequence) || input.lifecycleSequence < 1) {
+      throw new Error('MIGRATION_LIFECYCLE_SEQUENCE_INVALID');
+    }
+    const now = input.now ?? new Date();
+    if (!Number.isFinite(now.getTime())) throw new Error('MIGRATION_LIFECYCLE_TIME_INVALID');
+    const job = await this.findJobForUpdate(input.tenantId, input.organizationId, input.jobId);
+    if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
+    const command = await this.findMigrationLifecycleCommandForUpdate(input);
+    if (
+      !command ||
+      command.import_job_id !== input.jobId ||
+      command.lifecycle_sequence !== input.lifecycleSequence
+    ) {
+      throw new Error('MIGRATION_LIFECYCLE_COMMAND_NOT_FOUND');
+    }
+    const expectedAction: Record<MigrationLifecycleOutcome, MigrationLifecycleAction> = {
+      paused: 'pause',
+      resumed: 'resume',
+      cancelled: 'cancel',
+      rollback_refused: 'rollback',
+      rolled_back: 'rollback',
+    };
+    if (command.action !== expectedAction[input.outcome]) {
+      throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+    }
+    let targetStatus: ImportJobStatus;
+    let allowedStatuses: ImportJobStatus[];
+    switch (input.outcome) {
+      case 'paused':
+        targetStatus = 'paused';
+        allowedStatuses = [command.expected_job_status as ImportJobStatus, 'paused'];
+        break;
+      case 'resumed':
+        if (command.dispatch_kind === 'preparation-signal') targetStatus = 'preparing';
+        else if (command.dispatch_kind === 'commit-signal') targetStatus = 'committing';
+        else throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+        allowedStatuses = ['paused', targetStatus];
+        break;
+      case 'cancelled':
+        targetStatus = 'cancelled';
+        allowedStatuses = [
+          command.expected_job_status as ImportJobStatus,
+          'cancelling',
+          'cancelled',
+        ];
+        break;
+      case 'rollback_refused':
+        targetStatus = command.expected_job_status as ImportJobStatus;
+        allowedStatuses = ['rolling-back', targetStatus];
+        break;
+      case 'rolled_back':
+        targetStatus = 'rolled-back';
+        allowedStatuses = [
+          command.expected_job_status as ImportJobStatus,
+          'rolling-back',
+          'rolled-back',
+        ];
+        break;
+    }
+    if (!MIGRATION_JOB_STATUSES.has(targetStatus)) {
+      throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+    }
+    const eventInput = {
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      eventKey: `lifecycle:${command.id}:${command.lifecycle_sequence}:${input.outcome}`,
+      type: `migration.lifecycle.${input.outcome}`,
+      severity: (input.outcome === 'rollback_refused' ? 'warning' : 'info') as 'warning' | 'info',
+      message: `Migration lifecycle command outcome: ${input.outcome}.`,
+      data: {
+        commandId: command.id,
+        lifecycleSequence: command.lifecycle_sequence,
+        outcome: input.outcome,
+        actorId: command.actor_id,
+        auditCorrelationId: command.audit_correlation_id,
+      },
+    };
+    const outcomeEvents = await this.listEventsByKeyPrefix({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      eventKeyPrefix: `lifecycle:${command.id}:${command.lifecycle_sequence}:`,
+    });
+    const existingEvent = outcomeEvents.find(({ event_key }) => event_key === eventInput.eventKey);
+    if (outcomeEvents.length > 0 && !existingEvent) {
+      throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+    }
+    if (existingEvent) {
+      const event = await this.appendIdempotentEventInCurrentTransaction(eventInput);
+      const replayJob = await this.findJob(input.tenantId, input.organizationId, input.jobId);
+      if (!replayJob) throw new Error('MIGRATION_JOB_NOT_FOUND');
+      return { job: replayJob, command, event };
+    }
+    if (!allowedStatuses.includes(job.status as ImportJobStatus)) {
+      throw new Error('MIGRATION_LIFECYCLE_JOB_STATUS_CONFLICT');
+    }
+    if (command.dispatch_kind === 'none') {
+      if (command.status !== 'pending') throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+      const dispatched = await this.db
+        .updateTable('migration_lifecycle_commands')
+        .set({ status: 'dispatched', dispatched_at: now, completed_at: now, updated_at: now })
+        .where('id', '=', command.id)
+        .where('status', '=', 'pending')
+        .executeTakeFirst();
+      if (Number(dispatched.numUpdatedRows) !== 1) {
+        throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+      }
+    } else if (command.status !== 'dispatched') {
+      throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+    }
+    const transitioned = await this.db
+      .updateTable('import_jobs')
+      .set({
+        status: targetStatus,
+        completed_at: ['cancelled', 'rolled-back'].includes(targetStatus) ? now : undefined,
+        cancelled_at: targetStatus === 'cancelled' ? now : undefined,
+        updated_at: now,
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.jobId)
+      .where('status', 'in', allowedStatuses)
+      .executeTakeFirst();
+    if (Number(transitioned.numUpdatedRows) !== 1) {
+      throw new Error('MIGRATION_LIFECYCLE_JOB_STATUS_CONFLICT');
+    }
+    if (command.dispatch_kind !== 'none') {
+      const completed = await this.db
+        .updateTable('migration_lifecycle_commands')
+        .set({ completed_at: now, updated_at: now })
+        .where('id', '=', command.id)
+        .where('status', '=', 'dispatched')
+        .where('completed_at', 'is', null)
+        .executeTakeFirst();
+      if (Number(completed.numUpdatedRows) !== 1) {
+        throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+      }
+    }
+    const event = await this.appendIdempotentEventInCurrentTransaction(eventInput);
+    const updatedJob = await this.findJob(input.tenantId, input.organizationId, input.jobId);
+    const updatedCommand = await this.findMigrationLifecycleCommand(input);
+    if (!updatedJob || !updatedCommand) throw new Error('MIGRATION_LIFECYCLE_OUTCOME_CONFLICT');
+    return { job: updatedJob, command: updatedCommand, event };
   }
 
   findJob(

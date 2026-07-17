@@ -26,9 +26,9 @@ export const EXPORT_WORKFLOW_VERSION = 1;
 export const CLERK_IDENTITY_SYNC_WORKFLOW_VERSION = 1;
 export const PAYMENT_RECONCILIATION_WORKFLOW_VERSION = 2;
 export const PRIVACY_REQUEST_WORKFLOW_VERSION = 1;
-export const MIGRATION_COMMIT_WORKFLOW_VERSION = 1;
-export const MIGRATION_ROLLBACK_WORKFLOW_VERSION = 1;
-export const MIGRATION_PREPARATION_WORKFLOW_VERSION = 1;
+export const MIGRATION_COMMIT_WORKFLOW_VERSION = 2;
+export const MIGRATION_ROLLBACK_WORKFLOW_VERSION = 2;
+export const MIGRATION_PREPARATION_WORKFLOW_VERSION = 2;
 
 // Workflow ID conventions
 export function checkoutWorkflowId(sessionId: string): string {
@@ -117,6 +117,8 @@ export function migrationRollbackWorkflowId(
   tenantId: string,
   organizationId: string,
   jobId: string,
+  commandId?: string,
 ): string {
-  return `migration-rollback:${tenantId}:${organizationId}:${jobId}`;
+  const base = `migration-rollback:${tenantId}:${organizationId}:${jobId}`;
+  return commandId ? `${base}:${commandId}` : base;
 }

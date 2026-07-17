@@ -115,6 +115,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'migration-commit-route-authorization-db.integration.test.ts'),
   ],
   [
+    'migration-lifecycle-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'migration-lifecycle-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'migration-dry-run-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'migration-dry-run-route-authorization-db.integration.test.ts'),
   ],
@@ -270,6 +274,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'migration-commit-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-commit-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    ['pauseMigrationJob', 'resumeMigrationJob', 'cancelMigrationJob', 'rollbackMigrationJob'],
+    {
+      source: 'migration-lifecycle-route-authorization-db.integration.test.ts',
+      persistenceSource: 'migration-lifecycle-route-authorization-db.integration.test.ts',
+    },
+  ),
   ...evidenceBindings(['runMigrationDryRun'], {
     source: 'migration-dry-run-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-dry-run-route-authorization-db.integration.test.ts',
@@ -499,6 +510,17 @@ const delegatedPermissionContracts = new Map<
   ],
   ['getMigrationReport', { guard: 'report', permissions: ['migrations.read'] }],
   ['downloadMigrationReport', { guard: 'report', permissions: ['migrations.read'] }],
+  ...['pauseMigrationJob', 'resumeMigrationJob', 'cancelMigrationJob'].map(
+    (operationId) =>
+      [
+        operationId,
+        { guard: 'requireMigrationPermission', permissions: ['migrations.commit'] },
+      ] as const,
+  ),
+  [
+    'rollbackMigrationJob',
+    { guard: 'requireMigrationPermission', permissions: ['migrations.rollback'] },
+  ],
   [
     'grantPortableHistoricalExportAuthorization',
     { guard: 'requireHistoricalAuthorizationPrincipal', permissions: ['migrations.write'] },

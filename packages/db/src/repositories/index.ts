@@ -88,6 +88,7 @@ export {
   MIGRATION_IMPORT_MAX_RETENTION_MS,
   MIGRATION_IMPORT_PREPARATION_LEASE_MS,
   type ImportJobStatus,
+  type MigrationLifecycleOutcome,
   type RollbackEligibility,
 } from './import.js';
 export { AgentExecutionRepository } from './agent.js';

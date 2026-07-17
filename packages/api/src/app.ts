@@ -16,6 +16,7 @@ import { PricingEngine } from './services/pricing.js';
 import { InventoryService } from './services/inventory.js';
 import { QrService } from './services/qr.js';
 import { TemporalClient } from './services/temporal.js';
+import { startMigrationLifecycleDispatcher } from './services/migration-lifecycle-dispatcher.js';
 import type {
   PortableCutoverTrustConfiguration,
   PortableDryRunAttestationConfiguration,
@@ -479,6 +480,21 @@ export async function buildApp(): Promise<FastifyInstance> {
     dbProvider: () => db,
     observability,
     rateLimitRedis,
+  });
+
+  const stopMigrationLifecycleDispatcher = startMigrationLifecycleDispatcher({
+    db,
+    temporalClient,
+    workerId: `migration-lifecycle_${process.pid}_${ulid()}`,
+    onError: (error) => {
+      app.log.error(
+        { err: redactErrorFields(error) },
+        'Migration lifecycle command dispatcher failed',
+      );
+    },
+  });
+  app.addHook('onClose', async () => {
+    await stopMigrationLifecycleDispatcher();
   });
 
   return app;

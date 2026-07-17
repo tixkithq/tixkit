@@ -141,7 +141,7 @@ describe('API route access inventory (C-123)', () => {
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(74);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(78);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -157,8 +157,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(74);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(286);
+    expect(coveredRoutes).toHaveLength(78);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(306);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
@@ -169,7 +169,7 @@ describe('API route access inventory (C-123)', () => {
       .flatMap((route) => route.negativeAuthorizationEvidence)
       .filter((evidence) => evidence.denialKind === 'policy')
       .map((evidence) => JSON.stringify(evidence.condition));
-    expect(policyConditions).toHaveLength(56);
+    expect(policyConditions).toHaveLength(64);
     expect(
       policyConditions.filter(
         (condition) =>
@@ -182,7 +182,7 @@ describe('API route access inventory (C-123)', () => {
           condition ===
           JSON.stringify({ discriminator: 'principal-scope', value: 'organization-wide' }),
       ),
-    ).toHaveLength(52);
+    ).toHaveLength(60);
     expect(
       policyConditions.filter(
         (condition) =>
@@ -341,10 +341,10 @@ describe('API route access inventory (C-123)', () => {
         )
         .map((route) => [route.operationId, route.permissionDocumentationStatus]),
     ).toEqual([
-      ['cancelMigrationJob', 'conditional-unverified'],
-      ['pauseMigrationJob', 'conditional-unverified'],
-      ['resumeMigrationJob', 'conditional-unverified'],
-      ['rollbackMigrationJob', 'conditional-unverified'],
+      ['cancelMigrationJob', 'delegated-contract'],
+      ['pauseMigrationJob', 'delegated-contract'],
+      ['resumeMigrationJob', 'delegated-contract'],
+      ['rollbackMigrationJob', 'delegated-contract'],
     ]);
   });
 

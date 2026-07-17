@@ -88,3 +88,5 @@ export { DashboardActionRevisionsMigration } from './0087_dashboard_action_revis
 export { ProviderIncidentEvidenceMigration } from './0088_provider_incident_evidence.js';
 export { ResaleSettlementsMigration } from './0089_resale_settlements.js';
 export { WebhookReplayRequestsMigration } from './0090_webhook_replay_requests.js';
+export { MigrationLifecycleCommandsMigration } from './0091_migration_lifecycle_commands.js';
+export { MigrationLifecycleCommandOutcomesMigration } from './0092_migration_lifecycle_command_outcomes.js';

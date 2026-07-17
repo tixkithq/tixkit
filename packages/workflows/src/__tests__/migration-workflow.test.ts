@@ -87,7 +87,11 @@ describe('migration preparation workflow', () => {
       jobId: 'imp_1',
     });
     expect(calls).toBe(2);
-    expect(result).toEqual({ status: 'prepared', processed: 101 });
+    expect(result).toEqual({
+      status: 'prepared',
+      processed: 101,
+      lifecycle: { lastSequence: 0, invalidCommand: false },
+    });
   });
 
   it('cancels between chunks without acquiring another page', async () => {
@@ -289,5 +293,28 @@ describe('migration commit workflow', () => {
     });
     expect(result).toMatchObject({ status: 'rolled_back', deleted: 2 });
     expect(state.activities.executeMigrationRollbackActivity).toHaveBeenCalledOnce();
+  });
+
+  it('accepts a job-global rollback sequence in a fresh command-bound workflow', async () => {
+    state.activities.assessMigrationRollbackActivity = vi.fn(async () => ({
+      eligible: true,
+      mode: 'pre_activation',
+      entityCount: 2,
+    }));
+    state.activities.executeMigrationRollbackActivity = vi.fn(async () => ({ deleted: 2 }));
+    const result = await migrationRollbackWorkflow({
+      version: 2,
+      tenantId: 'tenant_1',
+      organizationId: 'org_1',
+      jobId: 'import_1',
+      commandId: 'mlc_rollback_03',
+      lifecycleSequence: 3,
+    });
+    expect(result).toMatchObject({ status: 'rolled_back', deleted: 2 });
+    expect(state.activities.assessMigrationRollbackActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lifecycleCommand: { commandId: 'mlc_rollback_03', lifecycleSequence: 3 },
+      }),
+    );
   });
 });

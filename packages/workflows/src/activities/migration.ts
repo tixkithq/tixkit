@@ -3,6 +3,8 @@
  * repositories. The API/bootstrap layer registers the concrete tenant-scoped
  * implementation, while workflow tests can install an in-memory implementation.
  */
+import type { MigrationLifecycleSignalCommand } from '../workflows/migration-lifecycle.js';
+
 export type MigrationCommitStage =
   | 'organizations_brands'
   | 'venues'
@@ -96,13 +98,21 @@ export interface MigrationActivityService {
     context: MigrationActivityContext,
     paused: boolean,
     lifecycleSequence: number,
+    lifecycleCommand?: MigrationLifecycleSignalCommand,
   ): Promise<void>;
-  cancelCommit(context: MigrationActivityContext): Promise<void>;
+  cancelCommit(
+    context: MigrationActivityContext,
+    lifecycleCommand?: MigrationLifecycleSignalCommand,
+  ): Promise<void>;
   reconcile(context: MigrationActivityContext): Promise<{ repaired: number; unresolved: number }>;
-  assessRollback(context: MigrationActivityContext): Promise<MigrationRollbackAssessment>;
+  assessRollback(
+    context: MigrationActivityContext,
+    lifecycleCommand?: MigrationLifecycleSignalCommand,
+  ): Promise<MigrationRollbackAssessment>;
   executeRollback(
     context: MigrationActivityContext,
     assessment: Extract<MigrationRollbackAssessment, { eligible: true }>,
+    lifecycleCommand?: MigrationLifecycleSignalCommand,
   ): Promise<{ deleted: number }>;
   completeCommit(context: MigrationActivityContext): Promise<void>;
   failCommit(context: MigrationActivityContext, failure: MigrationFailure): Promise<void>;
@@ -208,16 +218,23 @@ export async function setMigrationPausedActivity(input: {
   jobId: string;
   paused: boolean;
   lifecycleSequence: number;
+  lifecycleCommand?: MigrationLifecycleSignalCommand;
 }): Promise<void> {
-  await getMigrationService().markPaused(context(input), input.paused, input.lifecycleSequence);
+  await getMigrationService().markPaused(
+    context(input),
+    input.paused,
+    input.lifecycleSequence,
+    input.lifecycleCommand,
+  );
 }
 
 export async function cancelMigrationCommitActivity(input: {
   tenantId: string;
   organizationId: string;
   jobId: string;
+  lifecycleCommand?: MigrationLifecycleSignalCommand;
 }): Promise<void> {
-  await getMigrationService().cancelCommit(context(input));
+  await getMigrationService().cancelCommit(context(input), input.lifecycleCommand);
 }
 
 export async function reconcileMigrationActivity(input: {
@@ -232,8 +249,9 @@ export async function assessMigrationRollbackActivity(input: {
   tenantId: string;
   organizationId: string;
   jobId: string;
+  lifecycleCommand?: MigrationLifecycleSignalCommand;
 }): Promise<MigrationRollbackAssessment> {
-  return getMigrationService().assessRollback(context(input));
+  return getMigrationService().assessRollback(context(input), input.lifecycleCommand);
 }
 
 export async function executeMigrationRollbackActivity(input: {
@@ -241,8 +259,13 @@ export async function executeMigrationRollbackActivity(input: {
   organizationId: string;
   jobId: string;
   assessment: Extract<MigrationRollbackAssessment, { eligible: true }>;
+  lifecycleCommand?: MigrationLifecycleSignalCommand;
 }): Promise<{ deleted: number }> {
-  return getMigrationService().executeRollback(context(input), input.assessment);
+  return getMigrationService().executeRollback(
+    context(input),
+    input.assessment,
+    input.lifecycleCommand,
+  );
 }
 
 export async function completeMigrationCommitActivity(input: {

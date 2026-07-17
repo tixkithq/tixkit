@@ -27,6 +27,7 @@ import {
   type TixkitPortableImportTrust,
 } from '@tixkit/migration-core';
 import { canonicalPortableJson, portableManifestSha256 } from '@tixkit/portability';
+import type { MigrationLifecycleSignalCommand } from '../workflows/migration-lifecycle.js';
 
 export type MigrationPreparationInput = {
   tenantId: string;
@@ -236,8 +237,21 @@ export function assertPortableAdapterVersionMatchesManifest(
 
 export interface MigrationPreparationService {
   prepare(input: MigrationPreparationInput): Promise<MigrationPreparationChunk>;
-  pause(input: Omit<MigrationPreparationInput, 'chunkSize'>): Promise<void>;
-  cancel(input: Omit<MigrationPreparationInput, 'chunkSize'>): Promise<void>;
+  pause(
+    input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+      lifecycleCommand?: MigrationLifecycleSignalCommand;
+    },
+  ): Promise<void>;
+  resume(
+    input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+      lifecycleCommand: MigrationLifecycleSignalCommand;
+    },
+  ): Promise<void>;
+  cancel(
+    input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+      lifecycleCommand?: MigrationLifecycleSignalCommand;
+    },
+  ): Promise<void>;
   fail(input: Omit<MigrationPreparationInput, 'chunkSize'> & { message: string }): Promise<void>;
 }
 
@@ -264,13 +278,25 @@ export function prepareMigrationChunkActivity(
 }
 
 export function pauseMigrationPreparationActivity(
-  input: Omit<MigrationPreparationInput, 'chunkSize'>,
+  input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+    lifecycleCommand?: MigrationLifecycleSignalCommand;
+  },
 ): Promise<void> {
   return preparationService().pause(input);
 }
 
+export function resumeMigrationPreparationActivity(
+  input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+    lifecycleCommand: MigrationLifecycleSignalCommand;
+  },
+): Promise<void> {
+  return preparationService().resume(input);
+}
+
 export function cancelMigrationPreparationActivity(
-  input: Omit<MigrationPreparationInput, 'chunkSize'>,
+  input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+    lifecycleCommand?: MigrationLifecycleSignalCommand;
+  },
 ): Promise<void> {
   return preparationService().cancel(input);
 }
@@ -1100,6 +1126,17 @@ export function createMigrationPreparationService(
   } = {},
 ): MigrationPreparationService {
   const repository = new ImportRepository(db);
+  const persistLifecycleOutcome = (
+    input: Parameters<ImportRepository['persistMigrationLifecycleCommandOutcome']>[0],
+  ) =>
+    db
+      .transaction()
+      .setIsolationLevel('serializable')
+      .execute((transaction) =>
+        new ImportRepository(transaction as Database).persistMigrationLifecycleCommandOutcome(
+          input,
+        ),
+      );
   return {
     async prepare(input) {
       if (!Number.isSafeInteger(input.chunkSize) || input.chunkSize < 1 || input.chunkSize > 500)
@@ -1493,13 +1530,45 @@ export function createMigrationPreparationService(
       return { processed: prepared.length, completed: !next };
     },
     async pause(input) {
+      if (input.lifecycleCommand) {
+        await persistLifecycleOutcome({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          commandId: input.lifecycleCommand.commandId,
+          lifecycleSequence: input.lifecycleCommand.lifecycleSequence,
+          outcome: 'paused',
+        });
+        return;
+      }
       await repository.transitionJob({
         ...input,
         from: ['preparing' as never],
         to: 'paused',
       });
     },
+    async resume(input) {
+      await persistLifecycleOutcome({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        commandId: input.lifecycleCommand.commandId,
+        lifecycleSequence: input.lifecycleCommand.lifecycleSequence,
+        outcome: 'resumed',
+      });
+    },
     async cancel(input) {
+      if (input.lifecycleCommand) {
+        await persistLifecycleOutcome({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          commandId: input.lifecycleCommand.commandId,
+          lifecycleSequence: input.lifecycleCommand.lifecycleSequence,
+          outcome: 'cancelled',
+        });
+        return;
+      }
       await repository.transitionJob({
         ...input,
         from: ['preparing' as never, 'paused'],

@@ -365,6 +365,7 @@ export class TemporalClient {
     organizationId: string,
     jobId: string,
     action: 'pause' | 'resume' | 'cancel',
+    command: { commandId: string; lifecycleSequence: number },
   ): Promise<void> {
     const handle = this.client.workflow.getHandle(
       migrationPreparationWorkflowId(tenantId, organizationId, jobId),
@@ -375,14 +376,21 @@ export class TemporalClient {
         : action === 'resume'
           ? resumeMigrationPreparationSignal
           : cancelMigrationPreparationSignal,
+      command,
     );
   }
 
-  async startMigrationRollback(input: Omit<MigrationRollbackWorkflowInput, 'version'>) {
+  async startMigrationRollback(
+    input: Omit<MigrationRollbackWorkflowInput, 'version'> & {
+      commandId: string;
+      lifecycleSequence: number;
+    },
+  ) {
     const workflowId = migrationRollbackWorkflowId(
       input.tenantId,
       input.organizationId,
       input.jobId,
+      input.commandId,
     );
     try {
       return await this.client.workflow.start(migrationRollbackWorkflow, {
@@ -401,6 +409,7 @@ export class TemporalClient {
     organizationId: string,
     jobId: string,
     action: 'pause' | 'resume' | 'cancel' | 'rollback',
+    command: { commandId: string; lifecycleSequence: number },
   ): Promise<void> {
     const handle = this.client.workflow.getHandle(
       migrationCommitWorkflowId(tenantId, organizationId, jobId),
@@ -411,7 +420,7 @@ export class TemporalClient {
       cancel: cancelMigrationSignal,
       rollback: requestMigrationRollbackSignal,
     }[action];
-    await handle.signal(signal);
+    await handle.signal(signal, command);
   }
 
   getMigrationState(

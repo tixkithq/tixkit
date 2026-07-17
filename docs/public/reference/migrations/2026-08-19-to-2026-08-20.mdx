@@ -1,0 +1,25 @@
+---
+title: Migrate API 2026-08-19 to 2026-08-20
+description: Adopt durable, idempotent migration lifecycle commands.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-17
+prerequisites:
+  - An integration using API version 2026-08-19
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /operators/migrations/generic-csv
+---
+
+API `2026-08-20` requires an `Idempotency-Key` header for `POST /migration-jobs/{jobId}/pause`, `/resume`, `/cancel`, and `/rollback`. Use 1–255 characters matching `^[A-Za-z0-9][A-Za-z0-9._:-]*$`. Reuse the same key only for the same actor, tenant, organization, job, and action. Conflicting reuse returns `409` without creating another command.
+
+An accepted response now includes `commandId` and `lifecycleSequence` in addition to `jobId`, `action`, and `accepted`. Acceptance means Tixkit durably reserved and audited the exact command. Non-local work is dispatched asynchronously and may be retried with the same command identity; callers must not infer that the workflow outcome is already complete from HTTP `202`.
+
+Lifecycle commands execute strictly in sequence. A new command is rejected while its predecessor has no durable outcome, including when dispatch exhausted its retry policy. Pause and resume retain the preparation-versus-commit workflow lane recorded by the accepted command. Rollback continues to require `x-tixkit-confirmation: rollback:{jobId}` and each accepted rollback command owns a distinct deterministic workflow execution.
+
+Clients should persist the returned command identity with their operation record, retry an ambiguous request with the original idempotency key, and refresh the migration job and event stream to observe the durable outcome.

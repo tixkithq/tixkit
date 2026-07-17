@@ -5,7 +5,8 @@ import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MIGRATION_COMMIT_STAGES, type MigrationCommitStage } from '../activities/migration.js';
-import { migrationCommitWorkflow } from '../workflows/migration.js';
+import { migrationCommitWorkflow, migrationRollbackWorkflow } from '../workflows/migration.js';
+import { migrationRollbackWorkflowId } from '../shared/types.js';
 
 const temporalAddress = process.env.TEMPORAL_ADDRESS;
 const describeWithTemporal = temporalAddress ? describe : describe.skip;
@@ -147,6 +148,90 @@ describeWithTemporal('migration workflow on Temporal', () => {
     }
     if (cleanupError) throw cleanupError;
   }, 45_000);
+
+  it('runs job-global rollback commands as distinct command-bound replayable executions', async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const taskQueue = `migration-rollback-command-proof-${suffix}`;
+    const workflowsPath = fileURLToPath(new URL('../workflows/index.ts', import.meta.url));
+    const observedCommands: Array<{ commandId: string; lifecycleSequence: number }> = [];
+    const worker = await Worker.create({
+      connection: environment.nativeConnection,
+      namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+      taskQueue,
+      workflowsPath,
+      activities: {
+        async assessMigrationRollbackActivity(input: {
+          lifecycleCommand: { commandId: string; lifecycleSequence: number };
+        }) {
+          observedCommands.push(input.lifecycleCommand);
+          return {
+            eligible: false,
+            mode: 'corrective_plan',
+            reasons: ['injected refusal'],
+            correctivePlanId: `plan_${input.lifecycleCommand.commandId}`,
+          };
+        },
+        async executeMigrationRollbackActivity() {
+          throw new Error('rollback execution must not run after refusal');
+        },
+      },
+    });
+    const scope = {
+      tenantId: 'tenant_temporal_rollback',
+      organizationId: 'organization_temporal_rollback',
+      jobId: `job_temporal_rollback_${suffix}`,
+    };
+    const commands = [
+      { commandId: `mlc_rollback_${suffix.replaceAll('-', '_')}_03`, lifecycleSequence: 3 },
+      { commandId: `mlc_rollback_${suffix.replaceAll('-', '_')}_04`, lifecycleSequence: 4 },
+    ];
+    const handles: Array<WorkflowHandleWithStartDetails<typeof migrationRollbackWorkflow>> = [];
+    let workerRan = false;
+    try {
+      for (const command of commands) {
+        const workflowId = migrationRollbackWorkflowId(
+          scope.tenantId,
+          scope.organizationId,
+          scope.jobId,
+          command.commandId,
+        );
+        const handle = await environment.client.workflow.start(migrationRollbackWorkflow, {
+          taskQueue,
+          workflowId,
+          workflowExecutionTimeout: '30 seconds',
+          args: [{ version: 2, ...scope, ...command }],
+        });
+        handles.push(handle);
+      }
+      workerRan = true;
+      const results = await worker.runUntil(
+        () => Promise.all(handles.map((handle) => handle.result())),
+        { promiseCompletionTimeout: '30 seconds' },
+      );
+      for (const [index, result] of results.entries()) {
+        const command = commands[index]!;
+        expect(result).toMatchObject({
+          status: 'rollback_refused',
+          assessment: { correctivePlanId: `plan_${command.commandId}` },
+        });
+        const handle = handles[index]!;
+        const history = await handle.fetchHistory();
+        await expect(
+          Worker.runReplayHistory({ workflowsPath }, history, handle.workflowId),
+        ).resolves.toBeUndefined();
+      }
+      expect(new Set(handles.map(({ workflowId }) => workflowId)).size).toBe(2);
+      expect(observedCommands).toEqual(expect.arrayContaining(commands));
+    } finally {
+      for (const handle of handles) {
+        await environment.connection.workflowService.deleteWorkflowExecution({
+          namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+          workflowExecution: { workflowId: handle.workflowId, runId: handle.firstExecutionRunId },
+        });
+      }
+      if (!workerRan) await worker.runUntil(Promise.resolve());
+    }
+  }, 60_000);
 
   it('continues on a replacement worker after the first worker drains between activities', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

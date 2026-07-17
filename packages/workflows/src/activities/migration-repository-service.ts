@@ -644,6 +644,17 @@ export function createRepositoryMigrationActivityService(
   const claimLeaseMs = hooks.claimLeaseMs ?? 10 * 60 * 1000;
   if (!Number.isSafeInteger(claimLeaseMs) || claimLeaseMs < 10)
     throw new Error('MIGRATION_CLAIM_LEASE_INVALID');
+  const persistLifecycleOutcome = (
+    input: Parameters<ImportRepository['persistMigrationLifecycleCommandOutcome']>[0],
+  ) =>
+    db
+      .transaction()
+      .setIsolationLevel('serializable')
+      .execute((transaction) =>
+        new ImportRepository(transaction as Database).persistMigrationLifecycleCommandOutcome(
+          input,
+        ),
+      );
 
   return {
     async beginCommit(context) {
@@ -1243,7 +1254,18 @@ export function createRepositoryMigrationActivityService(
       });
     },
 
-    async markPaused(context, paused, lifecycleSequence) {
+    async markPaused(context, paused, lifecycleSequence, lifecycleCommand) {
+      if (lifecycleCommand) {
+        await persistLifecycleOutcome({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          commandId: lifecycleCommand.commandId,
+          lifecycleSequence: lifecycleCommand.lifecycleSequence,
+          outcome: paused ? 'paused' : 'resumed',
+        });
+        return;
+      }
       const changed = await repository.transitionJob({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
@@ -1263,7 +1285,7 @@ export function createRepositoryMigrationActivityService(
       });
     },
 
-    async cancelCommit(context) {
+    async cancelCommit(context, lifecycleCommand) {
       await repository.requestCancellation(context.tenantId, context.organizationId, context.jobId);
       await repository.releaseClaims({
         tenantId: context.tenantId,
@@ -1272,6 +1294,17 @@ export function createRepositoryMigrationActivityService(
         claimedStatus,
         returnToStatus: 'validated',
       });
+      if (lifecycleCommand) {
+        await persistLifecycleOutcome({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          commandId: lifecycleCommand.commandId,
+          lifecycleSequence: lifecycleCommand.lifecycleSequence,
+          outcome: 'cancelled',
+        });
+        return;
+      }
       const changed = await repository.transitionJob({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
@@ -1388,7 +1421,22 @@ export function createRepositoryMigrationActivityService(
       };
     },
 
-    async assessRollback(context): Promise<MigrationRollbackAssessment> {
+    async assessRollback(context, lifecycleCommand): Promise<MigrationRollbackAssessment> {
+      const persistRefusal = async (
+        assessment: Extract<MigrationRollbackAssessment, { eligible: false }>,
+      ): Promise<MigrationRollbackAssessment> => {
+        if (lifecycleCommand) {
+          await persistLifecycleOutcome({
+            tenantId: context.tenantId,
+            organizationId: context.organizationId,
+            jobId: context.jobId,
+            commandId: lifecycleCommand.commandId,
+            lifecycleSequence: lifecycleCommand.lifecycleSequence,
+            outcome: 'rollback_refused',
+          });
+        }
+        return assessment;
+      };
       const eligibility = await repository.getRollbackEligibility(
         context.tenantId,
         context.organizationId,
@@ -1419,12 +1467,12 @@ export function createRepositoryMigrationActivityService(
             );
         }
         if (reasons.length > 0)
-          return {
+          return persistRefusal({
             eligible: false,
             mode: 'corrective_plan',
             reasons,
             correctivePlanId: `corrective-plan:${context.jobId}`,
-          };
+          });
         return {
           eligible: true,
           mode: 'pre_activation',
@@ -1438,7 +1486,7 @@ export function createRepositoryMigrationActivityService(
         context.organizationId,
         job.source_system,
       );
-      return {
+      return persistRefusal({
         eligible: false,
         mode: 'corrective_plan',
         reasons: eligibility.blockers.map((blocker) => blocker.reason),
@@ -1473,10 +1521,10 @@ export function createRepositoryMigrationActivityService(
             },
           })
         ).id,
-      };
+      });
     },
 
-    async executeRollback(context, assessment) {
+    async executeRollback(context, assessment, lifecycleCommand) {
       const eligibility = await repository.getRollbackEligibility(
         context.tenantId,
         context.organizationId,
@@ -1515,6 +1563,17 @@ export function createRepositoryMigrationActivityService(
         context.organizationId,
         context.jobId,
       );
+      if (lifecycleCommand) {
+        await persistLifecycleOutcome({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          commandId: lifecycleCommand.commandId,
+          lifecycleSequence: lifecycleCommand.lifecycleSequence,
+          outcome: 'rolled_back',
+        });
+        return { deleted };
+      }
       await repository.transitionJob({
         tenantId: context.tenantId,
         organizationId: context.organizationId,

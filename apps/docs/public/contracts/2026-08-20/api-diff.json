@@ -1,0 +1,60 @@
+{
+  "from": "2026-08-19",
+  "to": "2026-08-20",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 6,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /migration-jobs/{jobId}/pause",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /migration-jobs/{jobId}/resume",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /migration-jobs/{jobId}/cancel",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /migration-jobs/{jobId}/rollback",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-added",
+      "path": "components.schemas.MigrationActionAccepted.required.commandId",
+      "message": "A required property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-added",
+      "path": "components.schemas.MigrationActionAccepted.required.lifecycleSequence",
+      "message": "A required property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.MigrationActionAccepted.properties.commandId",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.MigrationActionAccepted.properties.lifecycleSequence",
+      "message": "An optional property was added."
+    }
+  ]
+}

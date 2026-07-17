@@ -156,7 +156,7 @@ describe('TemporalClient migration rollback', () => {
       expect.any(Function),
       expect.objectContaining({
         workflowId: 'migration-prepare:tenant_1:org_1:imp_1',
-        args: [expect.objectContaining({ version: 1 })],
+        args: [expect.objectContaining({ version: 2 })],
       }),
     );
   });
@@ -174,20 +174,24 @@ describe('TemporalClient migration rollback', () => {
       tenantId: 'tenant_1',
       organizationId: 'org_1',
       jobId: 'imp_1',
+      commandId: 'mlc_1',
+      lifecycleSequence: 1,
     });
     expect(result).toMatchObject({
-      workflowId: 'migration-rollback:tenant_1:org_1:imp_1',
+      workflowId: 'migration-rollback:tenant_1:org_1:imp_1:mlc_1',
     });
     expect(client.workflow.start).toHaveBeenCalledWith(
       expect.any(Function),
       expect.objectContaining({
-        workflowId: 'migration-rollback:tenant_1:org_1:imp_1',
+        workflowId: 'migration-rollback:tenant_1:org_1:imp_1:mlc_1',
         args: [
           expect.objectContaining({
-            version: 1,
+            version: 2,
             tenantId: 'tenant_1',
             organizationId: 'org_1',
             jobId: 'imp_1',
+            commandId: 'mlc_1',
+            lifecycleSequence: 1,
           }),
         ],
       }),

@@ -1874,6 +1874,7 @@ export interface ImportJobTable {
   configuration: string | null;
   preparation_cursor: string | null;
   preparation_row_number: number;
+  lifecycle_version: Generated<number>;
   summary: string | null;
   error_code: string | null;
   error_message: string | null;
@@ -1883,6 +1884,39 @@ export interface ImportJobTable {
   cancelled_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export type MigrationLifecycleAction = 'pause' | 'resume' | 'cancel' | 'rollback';
+export type MigrationLifecycleDispatchKind =
+  | 'none'
+  | 'preparation-signal'
+  | 'commit-signal'
+  | 'rollback-start';
+export type MigrationLifecycleCommandStatus = 'pending' | 'dispatching' | 'dispatched' | 'failed';
+
+export interface MigrationLifecycleCommandTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  action: MigrationLifecycleAction;
+  dispatch_kind: MigrationLifecycleDispatchKind;
+  idempotency_key_sha256: string;
+  request_fingerprint: string;
+  expected_job_status: string;
+  lifecycle_sequence: number;
+  status: MigrationLifecycleCommandStatus;
+  attempts: Generated<number>;
+  next_attempt_at: Timestamp;
+  lease_owner: string | null;
+  lease_expires_at: Timestamp | null;
+  last_error_code: string | null;
+  actor_id: string;
+  audit_correlation_id: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  dispatched_at: Timestamp | null;
+  completed_at: Timestamp | null;
 }
 
 export interface ImportJobFileTable {
@@ -2393,6 +2427,7 @@ export interface DB {
   content_test_sends: ContentTestSendTable;
   sandbox_environments: SandboxEnvironmentTable;
   import_jobs: ImportJobTable;
+  migration_lifecycle_commands: MigrationLifecycleCommandTable;
   migration_credentials: MigrationCredentialTable;
   import_job_files: ImportJobFileTable;
   import_job_rows: ImportJobRowTable;

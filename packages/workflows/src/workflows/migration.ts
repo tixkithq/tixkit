@@ -13,6 +13,11 @@ import {
   type MigrationStageResult,
   type MigrationWorkflowProgress,
 } from '../activities/migration.js';
+import {
+  createMigrationLifecycleCommandGate,
+  type MigrationLifecycleAction,
+  type MigrationLifecycleSignalCommand,
+} from './migration-lifecycle.js';
 
 type MigrationActivities = {
   beginMigrationCommitActivity(input: ScopedInput): Promise<void>;
@@ -26,14 +31,23 @@ type MigrationActivities = {
   ): Promise<MigrationStageResult>;
   recordMigrationProgressActivity(input: ScopedInput & MigrationWorkflowProgress): Promise<void>;
   setMigrationPausedActivity(
-    input: ScopedInput & { paused: boolean; lifecycleSequence: number },
+    input: ScopedInput & {
+      paused: boolean;
+      lifecycleSequence: number;
+      lifecycleCommand?: MigrationLifecycleSignalCommand;
+    },
   ): Promise<void>;
-  cancelMigrationCommitActivity(input: ScopedInput): Promise<void>;
+  cancelMigrationCommitActivity(
+    input: ScopedInput & { lifecycleCommand?: MigrationLifecycleSignalCommand },
+  ): Promise<void>;
   reconcileMigrationActivity(input: ScopedInput): Promise<{ repaired: number; unresolved: number }>;
-  assessMigrationRollbackActivity(input: ScopedInput): Promise<MigrationRollbackAssessment>;
+  assessMigrationRollbackActivity(
+    input: ScopedInput & { lifecycleCommand?: MigrationLifecycleSignalCommand },
+  ): Promise<MigrationRollbackAssessment>;
   executeMigrationRollbackActivity(
     input: ScopedInput & {
       assessment: Extract<MigrationRollbackAssessment, { eligible: true }>;
+      lifecycleCommand?: MigrationLifecycleSignalCommand;
     },
   ): Promise<{ deleted: number }>;
   completeMigrationCommitActivity(input: ScopedInput): Promise<void>;
@@ -65,11 +79,16 @@ const stageActivities = proxyActivities<Pick<MigrationActivities, 'processMigrat
 
 type ScopedInput = { tenantId: string; organizationId: string; jobId: string };
 
-export const pauseMigrationSignal = defineSignal('pauseMigration');
-export const resumeMigrationSignal = defineSignal('resumeMigration');
-export const cancelMigrationSignal = defineSignal('cancelMigration');
+export const pauseMigrationSignal =
+  defineSignal<[MigrationLifecycleSignalCommand]>('pauseMigration');
+export const resumeMigrationSignal =
+  defineSignal<[MigrationLifecycleSignalCommand]>('resumeMigration');
+export const cancelMigrationSignal =
+  defineSignal<[MigrationLifecycleSignalCommand]>('cancelMigration');
 export const reconcileMigrationSignal = defineSignal('reconcileMigration');
-export const requestMigrationRollbackSignal = defineSignal('requestMigrationRollback');
+export const requestMigrationRollbackSignal = defineSignal<[MigrationLifecycleSignalCommand]>(
+  'requestMigrationRollback',
+);
 export const getMigrationStateQuery = defineQuery<MigrationWorkflowState>('getMigrationState');
 
 export type MigrationWorkflowInput = ScopedInput & {
@@ -96,6 +115,9 @@ export type MigrationWorkflowState = MigrationWorkflowProgress & {
   rollbackRequested: boolean;
   rollback?: MigrationRollbackAssessment;
   error?: MigrationFailure;
+  lifecycle: ReturnType<ReturnType<typeof createMigrationLifecycleCommandGate>['snapshot']> & {
+    invalidCommand: boolean;
+  };
 };
 
 export type MigrationWorkflowResult = {
@@ -105,14 +127,18 @@ export type MigrationWorkflowResult = {
   reconciliation?: { repaired: number; unresolved: number };
 };
 
-export type MigrationRollbackWorkflowInput = ScopedInput & { version: number };
+export type MigrationRollbackWorkflowInput = ScopedInput & {
+  version: number;
+  commandId?: string;
+  lifecycleSequence?: number;
+};
 
 export async function migrationRollbackWorkflow(input: MigrationRollbackWorkflowInput): Promise<{
   status: 'rollback_refused' | 'rolled_back';
   assessment: MigrationRollbackAssessment;
   deleted?: number;
 }> {
-  if (input.version !== 1)
+  if (![1, 2].includes(input.version))
     throw new Error(`Unsupported migration rollback workflow version ${input.version}`);
   if (!input.tenantId || !input.organizationId || !input.jobId)
     throw new Error('Migration tenantId, organizationId and jobId are required');
@@ -121,9 +147,30 @@ export async function migrationRollbackWorkflow(input: MigrationRollbackWorkflow
     organizationId: input.organizationId,
     jobId: input.jobId,
   };
-  const assessment = await activities.assessMigrationRollbackActivity(scope);
+  const lifecycleCommand =
+    input.commandId === undefined && input.lifecycleSequence === undefined
+      ? undefined
+      : ({
+          commandId: input.commandId,
+          lifecycleSequence: input.lifecycleSequence,
+        } as MigrationLifecycleSignalCommand);
+  if (input.version === 2) {
+    if (!lifecycleCommand) throw new Error('MIGRATION_LIFECYCLE_COMMAND_REQUIRED');
+    const gate = createMigrationLifecycleCommandGate(lifecycleCommand.lifecycleSequence - 1);
+    if (gate.accept('rollback', lifecycleCommand).status !== 'accepted') {
+      throw new Error('MIGRATION_LIFECYCLE_COMMAND_INVALID');
+    }
+  }
+  const assessment = await activities.assessMigrationRollbackActivity({
+    ...scope,
+    ...(lifecycleCommand ? { lifecycleCommand } : {}),
+  });
   if (!assessment.eligible) return { status: 'rollback_refused', assessment };
-  const result = await activities.executeMigrationRollbackActivity({ ...scope, assessment });
+  const result = await activities.executeMigrationRollbackActivity({
+    ...scope,
+    assessment,
+    ...(lifecycleCommand ? { lifecycleCommand } : {}),
+  });
   return { status: 'rolled_back', assessment, deleted: result.deleted };
 }
 
@@ -148,7 +195,7 @@ function failureFrom(error: unknown, stage?: MigrationCommitStage): MigrationFai
 export async function migrationCommitWorkflow(
   input: MigrationWorkflowInput,
 ): Promise<MigrationWorkflowResult> {
-  if (input.version !== 1)
+  if (![1, 2].includes(input.version))
     throw new Error(`Unsupported migration workflow version ${input.version}`);
   if (!input.tenantId || !input.organizationId || !input.jobId)
     throw new Error('Migration tenantId, organizationId and jobId are required');
@@ -164,7 +211,14 @@ export async function migrationCommitWorkflow(
   };
   let paused = false;
   let pausePersisted = false;
-  let lifecycleSequence = 0;
+  let legacyLifecycleSequence = 0;
+  let invalidCommand = false;
+  let pauseCommand: MigrationLifecycleSignalCommand | undefined;
+  let resumeCommand: MigrationLifecycleSignalCommand | undefined;
+  let cancelCommand: MigrationLifecycleSignalCommand | undefined;
+  let rollbackCommand: MigrationLifecycleSignalCommand | undefined;
+  const commandGate = createMigrationLifecycleCommandGate();
+  const lifecycle = () => ({ ...commandGate.snapshot(), invalidCommand });
   const state: MigrationWorkflowState = {
     status: 'committing',
     cancellationRequested: false,
@@ -178,26 +232,56 @@ export async function migrationCommitWorkflow(
     skipped: 0,
     conflicts: 0,
     failed: 0,
+    lifecycle: lifecycle(),
   };
 
-  setHandler(pauseMigrationSignal, () => {
-    lifecycleSequence += 1;
+  const accept = (
+    action: MigrationLifecycleAction,
+    raw: MigrationLifecycleSignalCommand | undefined,
+  ): MigrationLifecycleSignalCommand | undefined => {
+    if (input.version === 1 && raw === undefined) {
+      legacyLifecycleSequence += 1;
+      state.lifecycle = lifecycle();
+      return undefined;
+    }
+    try {
+      const decision = commandGate.accept(action, raw);
+      state.lifecycle = lifecycle();
+      return decision.status === 'accepted' ? decision.command : undefined;
+    } catch {
+      invalidCommand = true;
+      state.lifecycle = lifecycle();
+      return undefined;
+    }
+  };
+  setHandler(pauseMigrationSignal, (raw?: MigrationLifecycleSignalCommand) => {
+    const command = accept('pause', raw);
+    if (input.version === 2 && !command) return;
+    pauseCommand = command;
     paused = true;
     state.status = 'paused';
   });
-  setHandler(resumeMigrationSignal, () => {
-    lifecycleSequence += 1;
+  setHandler(resumeMigrationSignal, (raw?: MigrationLifecycleSignalCommand) => {
+    const command = accept('resume', raw);
+    if (input.version === 2 && !command) return;
+    resumeCommand = command;
     paused = false;
     state.status = 'committing';
   });
-  setHandler(cancelMigrationSignal, () => {
+  setHandler(cancelMigrationSignal, (raw?: MigrationLifecycleSignalCommand) => {
+    const command = accept('cancel', raw);
+    if (input.version === 2 && !command) return;
+    cancelCommand = command;
     state.cancellationRequested = true;
     state.status = 'cancelling';
   });
   setHandler(reconcileMigrationSignal, () => {
     state.reconciliationRequested = true;
   });
-  setHandler(requestMigrationRollbackSignal, () => {
+  setHandler(requestMigrationRollbackSignal, (raw?: MigrationLifecycleSignalCommand) => {
+    const command = accept('rollback', raw);
+    if (input.version === 2 && !command) return;
+    rollbackCommand = command;
     state.rollbackRequested = true;
   });
   setHandler(getMigrationStateQuery, () => state);
@@ -220,8 +304,11 @@ export async function migrationCommitWorkflow(
             await activities.setMigrationPausedActivity({
               ...scope,
               paused: true,
-              lifecycleSequence,
+              lifecycleSequence:
+                pauseCommand?.lifecycleSequence ?? Math.max(legacyLifecycleSequence, 1),
+              ...(pauseCommand ? { lifecycleCommand: pauseCommand } : {}),
             });
+            pauseCommand = undefined;
             pausePersisted = true;
           }
           await condition(() => !paused || state.cancellationRequested);
@@ -230,12 +317,18 @@ export async function migrationCommitWorkflow(
           await activities.setMigrationPausedActivity({
             ...scope,
             paused: false,
-            lifecycleSequence,
+            lifecycleSequence:
+              resumeCommand?.lifecycleSequence ?? Math.max(legacyLifecycleSequence, 1),
+            ...(resumeCommand ? { lifecycleCommand: resumeCommand } : {}),
           });
+          resumeCommand = undefined;
           pausePersisted = false;
         }
         if (state.cancellationRequested) {
-          await activities.cancelMigrationCommitActivity(scope);
+          await activities.cancelMigrationCommitActivity({
+            ...scope,
+            ...(cancelCommand ? { lifecycleCommand: cancelCommand } : {}),
+          });
           state.status = 'cancelled';
           return { status: state.status, progress: state };
         }
@@ -268,7 +361,10 @@ export async function migrationCommitWorkflow(
 
     if (state.rollbackRequested) {
       state.status = 'rolling_back';
-      const assessment = await activities.assessMigrationRollbackActivity(scope);
+      const assessment = await activities.assessMigrationRollbackActivity({
+        ...scope,
+        ...(rollbackCommand ? { lifecycleCommand: rollbackCommand } : {}),
+      });
       state.rollback = assessment;
       if (!assessment.eligible) {
         state.status = 'rollback_refused';
@@ -282,6 +378,7 @@ export async function migrationCommitWorkflow(
       await activities.executeMigrationRollbackActivity({
         ...scope,
         assessment,
+        ...(rollbackCommand ? { lifecycleCommand: rollbackCommand } : {}),
       });
       state.status = 'rolled_back';
       return {

@@ -1,6 +1,6 @@
 //! Async Rust SDK for Tixkit.
 //!
-//! The client is pinned to API version `2026-08-19` by default and sends the
+//! The client is pinned to API version `2026-08-20` by default and sends the
 //! `X-Tixkit-Version` header on every request.
 
 use futures_util::{Stream, stream};
@@ -15,7 +15,7 @@ use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
-pub const TIXKIT_API_VERSION: &str = "2026-08-19";
+pub const TIXKIT_API_VERSION: &str = "2026-08-20";
 
 type HmacSha256 = Hmac<Sha256>;
 type BoxStreamResult<T> = Pin<Box<dyn Stream<Item = Result<T, TixkitError>> + Send>>;

@@ -3,16 +3,29 @@ import type {
   MigrationPreparationChunk,
   MigrationPreparationInput,
 } from '../activities/migration-preparation.js';
+import {
+  createMigrationLifecycleCommandGate,
+  type MigrationLifecycleSignalCommand,
+} from './migration-lifecycle.js';
 
 const activities = proxyActivities<{
   prepareMigrationChunkActivity(
     input: MigrationPreparationInput,
   ): Promise<MigrationPreparationChunk>;
   pauseMigrationPreparationActivity(
-    input: Omit<MigrationPreparationInput, 'chunkSize'>,
+    input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+      lifecycleCommand?: MigrationLifecycleSignalCommand;
+    },
+  ): Promise<void>;
+  resumeMigrationPreparationActivity(
+    input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+      lifecycleCommand: MigrationLifecycleSignalCommand;
+    },
   ): Promise<void>;
   cancelMigrationPreparationActivity(
-    input: Omit<MigrationPreparationInput, 'chunkSize'>,
+    input: Omit<MigrationPreparationInput, 'chunkSize'> & {
+      lifecycleCommand?: MigrationLifecycleSignalCommand;
+    },
   ): Promise<void>;
   failMigrationPreparationActivity(
     input: Omit<MigrationPreparationInput, 'chunkSize'> & { message: string },
@@ -38,16 +51,25 @@ export type MigrationPreparationWorkflowInput = Scope & {
 export type MigrationPreparationWorkflowResult = {
   status: 'prepared' | 'cancelled' | 'failed';
   processed: number;
+  lifecycle: ReturnType<ReturnType<typeof createMigrationLifecycleCommandGate>['snapshot']> & {
+    invalidCommand: boolean;
+  };
 };
 
-export const pauseMigrationPreparationSignal = defineSignal('pauseMigrationPreparation');
-export const resumeMigrationPreparationSignal = defineSignal('resumeMigrationPreparation');
-export const cancelMigrationPreparationSignal = defineSignal('cancelMigrationPreparation');
+export const pauseMigrationPreparationSignal = defineSignal<[MigrationLifecycleSignalCommand]>(
+  'pauseMigrationPreparation',
+);
+export const resumeMigrationPreparationSignal = defineSignal<[MigrationLifecycleSignalCommand]>(
+  'resumeMigrationPreparation',
+);
+export const cancelMigrationPreparationSignal = defineSignal<[MigrationLifecycleSignalCommand]>(
+  'cancelMigrationPreparation',
+);
 
 export async function migrationPreparationWorkflow(
   input: MigrationPreparationWorkflowInput,
 ): Promise<MigrationPreparationWorkflowResult> {
-  if (input.version !== 1)
+  if (![1, 2].includes(input.version))
     throw new Error(`Unsupported migration preparation version ${input.version}`);
   const scope = {
     tenantId: input.tenantId,
@@ -58,36 +80,82 @@ export async function migrationPreparationWorkflow(
   let paused = false;
   let cancelled = false;
   let processed = 0;
-  setHandler(pauseMigrationPreparationSignal, () => {
+  let legacyLifecycleSequence = 0;
+  let invalidCommand = false;
+  let pauseCommand: MigrationLifecycleSignalCommand | undefined;
+  let resumeCommand: MigrationLifecycleSignalCommand | undefined;
+  let cancelCommand: MigrationLifecycleSignalCommand | undefined;
+  const commandGate = createMigrationLifecycleCommandGate();
+  const lifecycle = () => ({ ...commandGate.snapshot(), invalidCommand });
+  const accept = (
+    action: 'pause' | 'resume' | 'cancel',
+    raw: MigrationLifecycleSignalCommand | undefined,
+  ): MigrationLifecycleSignalCommand | undefined => {
+    if (input.version === 1 && raw === undefined) {
+      legacyLifecycleSequence += 1;
+      return undefined;
+    }
+    try {
+      const decision = commandGate.accept(action, raw);
+      return decision.status === 'accepted' ? decision.command : undefined;
+    } catch {
+      invalidCommand = true;
+      return undefined;
+    }
+  };
+  setHandler(pauseMigrationPreparationSignal, (raw?: MigrationLifecycleSignalCommand) => {
+    const command = accept('pause', raw);
+    if (input.version === 2 && !command) return;
+    pauseCommand = command;
     paused = true;
   });
-  setHandler(resumeMigrationPreparationSignal, () => {
+  setHandler(resumeMigrationPreparationSignal, (raw?: MigrationLifecycleSignalCommand) => {
+    const command = accept('resume', raw);
+    if (input.version === 2 && !command) return;
+    resumeCommand = command;
     paused = false;
   });
-  setHandler(cancelMigrationPreparationSignal, () => {
+  setHandler(cancelMigrationPreparationSignal, (raw?: MigrationLifecycleSignalCommand) => {
+    const command = accept('cancel', raw);
+    if (input.version === 2 && !command) return;
+    cancelCommand = command;
     cancelled = true;
   });
   try {
     for (;;) {
       if (cancelled) {
-        await activities.cancelMigrationPreparationActivity(scope);
-        return { status: 'cancelled', processed };
+        await activities.cancelMigrationPreparationActivity({
+          ...scope,
+          ...(cancelCommand ? { lifecycleCommand: cancelCommand } : {}),
+        });
+        return { status: 'cancelled', processed, lifecycle: lifecycle() };
       }
       if (paused) {
-        await activities.pauseMigrationPreparationActivity(scope);
+        await activities.pauseMigrationPreparationActivity({
+          ...scope,
+          ...(pauseCommand ? { lifecycleCommand: pauseCommand } : {}),
+        });
+        pauseCommand = undefined;
         await condition(() => !paused || cancelled);
         continue;
+      }
+      if (resumeCommand) {
+        await activities.resumeMigrationPreparationActivity({
+          ...scope,
+          lifecycleCommand: resumeCommand,
+        });
+        resumeCommand = undefined;
       }
       const result = await activities.prepareMigrationChunkActivity({
         ...scope,
         chunkSize,
       });
       processed += result.processed;
-      if (result.completed) return { status: 'prepared', processed };
+      if (result.completed) return { status: 'prepared', processed, lifecycle: lifecycle() };
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Migration preparation failed';
     await activities.failMigrationPreparationActivity({ ...scope, message });
-    return { status: 'failed', processed };
+    return { status: 'failed', processed, lifecycle: lifecycle() };
   }
 }
