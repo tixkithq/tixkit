@@ -308,9 +308,65 @@ test('does not treat provider integration tests as production execution', () => 
     'packages/email-transport/src/send.test.ts': "fetch('https://api.resend.com/emails');\n",
     'apps/admin-dashboard/.next/server/chunk.js':
       "fetch('https://api.stripe.com/v1/payment_intents');\n",
+    'apps/docs/.next/server/chunk.js': "fetch('https://api.stripe.com/v1/payment_intents');\n",
+    'apps/sdk-astro-demo/.astro/types.d.ts':
+      "fetch('https://api.stripe.com/v1/payment_intents');\n",
+    'apps/sdk-nuxt-demo/.nuxt/dist/server/chunk.mjs':
+      "fetch('https://api.stripe.com/v1/payment_intents');\n",
+    'apps/sdk-sveltekit-demo/.svelte-kit/output/client/chunk.js':
+      "fetch('https://api.stripe.com/v1/payment_intents');\n",
   });
   try {
     assert.deepEqual(providerClientBoundaryViolations(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ignores framework-generated roots without excluding adjacent authored sources', () => {
+  const root = fixture({
+    'apps/sdk-astro-demo/.astro/generated.js': "fetch('https://api.generated-astro.invalid/v1');\n",
+    'apps/sdk-astro-demo/src/pages/index.ts': "fetch('https://api.authored-astro.invalid/v1');\n",
+    'apps/sdk-astro-demo/src/pages/attack.astro':
+      "---\nfetch('https://api.authored-astro-frontmatter.invalid/v1');\n---\n<script>fetch('https://api.authored-astro-script.invalid/v1')</script>\n<button onclick=\"fetch('https://api.authored-astro-handler.invalid/v1')\">Run</button>\n<div>{/* } */ fetch('https://api.authored-astro-comment.invalid/v1')}</div>\n<div>{(() => { const send = fetch; return send('https://api.authored-astro-alias.invalid/v1'); })()}</div>\n",
+    'apps/sdk-nuxt-demo/.nuxt/generated.js': "fetch('https://api.generated-nuxt.invalid/v1');\n",
+    'apps/sdk-nuxt-demo/server/api/example.ts': "fetch('https://api.authored-nuxt.invalid/v1');\n",
+    'apps/sdk-nuxt-demo/pages/attack.vue':
+      '<script setup="setup" lang="ts">fetch(\'https://api.authored-vue.invalid/v1\')</script>\n<template><button @click.once="$fetch(\'https://api.authored-vue-handler.invalid/v1\')">Run</button><button v-on:[event]="$fetch(\'https://api.authored-vue-dynamic.invalid/v1\')">Dynamic</button><button @click="() => { const send = fetch; return send(\'https://api.authored-vue-alias.invalid/v1\'); }">Alias</button><div v-if="$fetch(\'https://api.authored-vue-directive.invalid/v1\')">Conditional</div></template>\n',
+    'apps/sdk-sveltekit-demo/.svelte-kit/generated.js':
+      "fetch('https://api.generated-svelte.invalid/v1');\n",
+    'apps/sdk-sveltekit-demo/src/routes/example.ts':
+      "fetch('https://api.authored-svelte.invalid/v1');\n",
+    'apps/sdk-sveltekit-demo/src/routes/attack.svelte':
+      "<script context=\"module\">fetch('https://api.authored-svelte.invalid/v1')</script>\n<p>Don't skip this text.</p><button onclick={() => fetch('https://api.authored-svelte-handler.invalid/v1')}>Run</button>\n<div>{/* } */ fetch('https://api.authored-svelte-comment.invalid/v1')}</div>\n<div>{(() => { const send = fetch; return send('https://api.authored-svelte-alias.invalid/v1'); })()}</div>\n<div>{globalThis['\\x66etch']('https\\x3a//api.stripe.com/v1/refunds')}</div>\n{#await fetch('https://api.authored-svelte-await.invalid/v1')}<p>Loading</p>{:then value}<p>{value}</p>{/await}\n{#await Promise.resolve([' then ', fetch('https://api.authored-svelte-await-delimiter.invalid/v1')]) then value}<p>{value}</p>{/await}\n{#each [fetch('https://api.authored-svelte-each.invalid/v1'), ' as '] as item}<p>{item}</p>{/each}\n{#if false}<p>No</p>{:else if fetch('https://api.authored-svelte-else-if.invalid/v1')}<p>Yes</p>{/if}\n<div {@attach () => { fetch('https://api.authored-svelte-attach.invalid/v1'); }}></div>\n{#snippet card(value = fetch('https://api.authored-svelte-snippet.invalid/v1'))}<p>{value}</p>{/snippet}{@render card()}\n",
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), [
+      'apps/sdk-astro-demo/src/pages/attack.astro: outbound host is not classified in the provider registry: api.authored-astro-alias.invalid',
+      'apps/sdk-astro-demo/src/pages/attack.astro: outbound host is not classified in the provider registry: api.authored-astro-comment.invalid',
+      'apps/sdk-astro-demo/src/pages/attack.astro: outbound host is not classified in the provider registry: api.authored-astro-frontmatter.invalid',
+      'apps/sdk-astro-demo/src/pages/attack.astro: outbound host is not classified in the provider registry: api.authored-astro-handler.invalid',
+      'apps/sdk-astro-demo/src/pages/attack.astro: outbound host is not classified in the provider registry: api.authored-astro-script.invalid',
+      'apps/sdk-astro-demo/src/pages/index.ts: outbound host is not classified in the provider registry: api.authored-astro.invalid',
+      'apps/sdk-nuxt-demo/pages/attack.vue: outbound host is not classified in the provider registry: api.authored-vue-alias.invalid',
+      'apps/sdk-nuxt-demo/pages/attack.vue: outbound host is not classified in the provider registry: api.authored-vue-directive.invalid',
+      'apps/sdk-nuxt-demo/pages/attack.vue: outbound host is not classified in the provider registry: api.authored-vue-dynamic.invalid',
+      'apps/sdk-nuxt-demo/pages/attack.vue: outbound host is not classified in the provider registry: api.authored-vue-handler.invalid',
+      'apps/sdk-nuxt-demo/pages/attack.vue: outbound host is not classified in the provider registry: api.authored-vue.invalid',
+      'apps/sdk-nuxt-demo/server/api/example.ts: outbound host is not classified in the provider registry: api.authored-nuxt.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-alias.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-attach.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-await-delimiter.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-await.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-comment.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-each.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-else-if.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-handler.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte-snippet.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: outbound host is not classified in the provider registry: api.authored-svelte.invalid',
+      'apps/sdk-sveltekit-demo/src/routes/attack.svelte: server-side Stripe REST execution must cross @tixkit/provider-clients',
+      'apps/sdk-sveltekit-demo/src/routes/example.ts: outbound host is not classified in the provider registry: api.authored-svelte.invalid',
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -9,21 +9,34 @@ import {
   registryNonProviderHostPolicies,
 } from './provider-integration-registry.mjs';
 
-const sourceExtension = /\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx)$/u;
+const sourceExtension = /\.(?:astro|cjs|cts|js|jsx|mjs|mts|svelte|ts|tsx|vue)$/u;
+const componentSourceExtension = /\.(?:astro|svelte|vue)$/u;
 const ignoredSegment =
-  /(?:^|\/)(?:\.dart_tool|\.expo|\.next|\.output|\.turbo|__tests__|build|coverage|dist|fixtures|generated|node_modules|out|test-results)(?:\/|$)/u;
+  /(?:^|\/)(?:\.astro|\.dart_tool|\.expo|\.next|\.nuxt|\.output|\.svelte-kit|\.turbo|__tests__|build|coverage|dist|fixtures|generated|node_modules|out|test-results)(?:\/|$)/u;
 const testFile = /(?:^|\/)[^/]+\.(?:integration\.)?(?:spec|test)\.[^.]+$/u;
-const networkMethodNames = new Set(['delete', 'fetch', 'get', 'patch', 'post', 'put', 'request']);
+const networkMethodNames = new Set([
+  '$fetch',
+  'delete',
+  'fetch',
+  'get',
+  'patch',
+  'post',
+  'put',
+  'request',
+]);
 
 function walk(directory) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (
       [
+        '.astro',
         '.dart_tool',
         '.expo',
         '.next',
+        '.nuxt',
         '.output',
+        '.svelte-kit',
         '.turbo',
         '__tests__',
         'build',
@@ -56,6 +69,148 @@ function isRuntimeSource(path) {
     !ignoredSegment.test(path) &&
     !testFile.test(path)
   );
+}
+
+function expressionBeforeBinding(source, prefix, separators) {
+  if (!source.startsWith(prefix)) return;
+  const value = source.slice(prefix.length);
+  const positions = [];
+  for (const separator of separators) {
+    for (
+      let position = value.indexOf(separator);
+      position >= 0;
+      position = value.indexOf(separator, position + 1)
+    ) {
+      positions.push(position);
+    }
+  }
+  positions.sort((left, right) => right - left);
+  for (const position of positions) {
+    const expression = value.slice(0, position).trim();
+    if (parseSync('component-binding.tsx', `void (${expression});`).errors.length === 0) {
+      return expression;
+    }
+  }
+}
+
+function componentExpressionSource(expression) {
+  const trimmed = expression.trim();
+  const awaitBinding = expressionBeforeBinding(trimmed, '#await ', [' catch ', ' then ']);
+  if (awaitBinding) return `void (${awaitBinding});`;
+  const snippet = /^#snippet\s+([A-Za-z_$][\w$]*\s*\([\s\S]*\))$/u.exec(trimmed);
+  if (snippet) return `function ${snippet[1]} {}`;
+  const directSpecial =
+    /^(?:#(?:await|if|key)|@(?:attach|debug|html|render)|:else\s+if)\s+([\s\S]+)$/u.exec(trimmed);
+  if (directSpecial) return `void (${directSpecial[1]});`;
+  const each = expressionBeforeBinding(trimmed, '#each ', [' as ']);
+  if (each) return `void (${each});`;
+  const declaration = /^@const\s+([\s\S]+)$/u.exec(trimmed);
+  if (declaration) return `function __tixkitComponentDeclaration() { const ${declaration[1]}; }`;
+  return `void (${trimmed});`;
+}
+
+function parserBoundBraceExpressions(source) {
+  const expressions = [];
+  for (let open = source.indexOf('{'); open >= 0; open = source.indexOf('{', open + 1)) {
+    for (
+      let close = source.indexOf('}', open + 1);
+      close >= 0;
+      close = source.indexOf('}', close + 1)
+    ) {
+      const expression = source.slice(open + 1, close).trim();
+      const normalizedSource = componentExpressionSource(expression);
+      const parsed = parseSync('component-expression.tsx', normalizedSource);
+      if (parsed.errors.length === 0) {
+        expressions.push(normalizedSource);
+        break;
+      }
+    }
+  }
+  return [...new Set(expressions)];
+}
+
+function componentHandlerExpressions(markup) {
+  const expressions = [];
+  const handler =
+    /(?:^|\s)(?:on[a-z][\w:.-]*|v-[\w-]+(?::(?:\[[^\]]+\]|[\w-]+))?(?:\.[\w-]+)*|[@:#](?:\[[^\]]+\]|[\w:-]+)(?:\.[\w-]+)*)\s*=/giu;
+  for (const match of markup.matchAll(handler)) {
+    let cursor = (match.index ?? 0) + match[0].length;
+    const delimiter = markup[cursor];
+    if (delimiter === '"' || delimiter === "'") {
+      cursor += 1;
+      const end = markup.indexOf(delimiter, cursor);
+      if (end >= 0) expressions.push(markup.slice(cursor, end).trim());
+      continue;
+    }
+    if (delimiter === '{') {
+      const [expression] = parserBoundBraceExpressions(markup.slice(cursor));
+      if (expression !== undefined) expressions.push(expression);
+      continue;
+    }
+    let end = cursor;
+    while (end < markup.length && !/[\s>]/u.test(markup[end])) end += 1;
+    expressions.push(markup.slice(cursor, end).trim());
+  }
+  return expressions;
+}
+
+function executableComponentSources(path, source) {
+  if (!componentSourceExtension.test(path)) return [{ path, source }];
+
+  const sources = [];
+  if (path.endsWith('.astro')) {
+    const frontmatter = /^(?:\uFEFF)?\s*---\s*\r?\n([\s\S]*?)\r?\n---(?:\s*\r?\n|$)/u.exec(source);
+    if (frontmatter) sources.push({ path: `${path}.frontmatter.ts`, source: frontmatter[1] });
+  }
+
+  const scriptBlock = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/giu;
+  let match;
+  let index = 0;
+  while ((match = scriptBlock.exec(source)) !== null) {
+    const attributes = match[1];
+    const type = /\btype\s*=\s*["']([^"']+)["']/iu.exec(attributes)?.[1]?.toLowerCase();
+    if (
+      type &&
+      ![
+        'application/ecmascript',
+        'application/javascript',
+        'module',
+        'text/ecmascript',
+        'text/javascript',
+      ].includes(type)
+    ) {
+      continue;
+    }
+    const language = /\blang\s*=\s*["']([^"']+)["']/iu.exec(attributes)?.[1]?.toLowerCase();
+    if (language && !['js', 'jsx', 'ts', 'tsx'].includes(language)) continue;
+    index += 1;
+    sources.push({
+      path: `${path}.script-${index}.${language ?? 'js'}`,
+      source: match[2],
+    });
+  }
+
+  let markup = source.replace(scriptBlock, '');
+  if (path.endsWith('.astro')) {
+    markup = markup.replace(/^(?:\uFEFF)?\s*---\s*\r?\n[\s\S]*?\r?\n---(?:\s*\r?\n|$)/u, '');
+  }
+
+  for (const expression of componentHandlerExpressions(markup)) {
+    index += 1;
+    sources.push({
+      path: `${path}.handler-${index}.ts`,
+      source: `function __tixkitComponentHandler() { ${expression} }`,
+    });
+  }
+
+  for (const expression of parserBoundBraceExpressions(markup)) {
+    index += 1;
+    sources.push({
+      path: `${path}.expression-${index}.tsx`,
+      source: expression,
+    });
+  }
+  return sources;
 }
 
 function staticStrings(node, bindings, seen = new Set()) {
@@ -721,13 +876,19 @@ export function providerClientBoundaryViolations(
       const path = normalizedRelative(repositoryRoot, absolutePath);
       if (!isRuntimeSource(path)) continue;
       const source = readFileSync(absolutePath, 'utf8');
-      const findings = providerSourceBoundaryFindings(
-        path,
-        source,
-        hostPolicies,
-        importPolicies,
-        nonProviderHostPolicies,
-      );
+      const findings = { hosts: [], sdkPackages: [], unknownHosts: [] };
+      for (const componentSource of executableComponentSources(path, source)) {
+        const unitFindings = providerSourceBoundaryFindings(
+          componentSource.path,
+          componentSource.source,
+          hostPolicies,
+          importPolicies,
+          nonProviderHostPolicies,
+        );
+        findings.hosts.push(...unitFindings.hosts);
+        findings.sdkPackages.push(...unitFindings.sdkPackages);
+        findings.unknownHosts.push(...unitFindings.unknownHosts);
+      }
       for (const packageName of findings.sdkPackages) {
         const policy = importPolicies.get(packageName);
         if (!policy?.paths.some((pattern) => pathMatchesPolicy(path, pattern))) {
@@ -758,5 +919,5 @@ export function providerClientBoundaryViolations(
       }
     }
   }
-  return violations.sort();
+  return [...new Set(violations)].sort();
 }
