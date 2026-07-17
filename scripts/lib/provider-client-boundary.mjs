@@ -332,7 +332,9 @@ function sourceMayContainProviderBoundary(source, hostPolicies, importPolicies) 
     [...importPolicies.keys()].some((packageName) =>
       compact.includes(packageName.replace(/[^a-z0-9]/giu, '').toLowerCase()),
     ) ||
-    /(?:\bfetch\b|\brequire\b|\bimport\s*\(|\.request\s*\()/u.test(decoded) ||
+    /(?:\bfetch\b|\brequire\b|\bimport\s*\(|\.(?:delete|fetch|get|patch|post|put|request)\s*\()/u.test(
+      decoded,
+    ) ||
     ((decoded.includes('fromCharCode') || decoded.includes('fromCodePoint')) &&
       /(?:fetch|import|require|request)/u.test(decoded))
   );

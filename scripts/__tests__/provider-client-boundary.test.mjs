@@ -49,6 +49,16 @@ test('rejects unclassified provider hosts and registry-owned hosts outside their
       "fetch(['https://api.', 'mystery-join.invalid/v1/messages'].join(''));\n",
     'packages/api/src/services/mystery-object.ts':
       "client.request({ url: 'https://api.mystery-object.invalid/v1/messages', method: 'POST' });\n",
+    'packages/api/src/services/mystery-delete.ts':
+      "client.delete('https://api.mystery-delete.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-get.ts':
+      "client.get('https://api.mystery-get.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-patch.ts':
+      "client.patch('https://api.mystery-patch.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-post.ts':
+      "client.post('https://api.mystery-post.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-put.ts':
+      "client.put('https://api.mystery-put.invalid/v1/messages');\n",
     'packages/api/src/services/mystery-string.ts':
       "fetch(String('https://api.mystery-string.invalid/v1/messages'));\n",
     'packages/api/src/services/mystery.ts':
@@ -75,11 +85,16 @@ test('rejects unclassified provider hosts and registry-owned hosts outside their
       'packages/api/src/services/mystery-alias-object.ts: outbound host is not classified in the provider registry: api.mystery-alias-object.invalid',
       'packages/api/src/services/mystery-bind.ts: outbound host is not classified in the provider registry: api.mystery-bind.invalid',
       'packages/api/src/services/mystery-call.ts: outbound host is not classified in the provider registry: api.mystery-call.invalid',
+      'packages/api/src/services/mystery-delete.ts: outbound host is not classified in the provider registry: api.mystery-delete.invalid',
       'packages/api/src/services/mystery-destructured-assignment.ts: outbound host is not classified in the provider registry: api.mystery-destructured-assignment.invalid',
       'packages/api/src/services/mystery-destructured.ts: outbound host is not classified in the provider registry: api.mystery-destructured.invalid',
+      'packages/api/src/services/mystery-get.ts: outbound host is not classified in the provider registry: api.mystery-get.invalid',
       'packages/api/src/services/mystery-join.ts: outbound host is not classified in the provider registry: api.mystery-join.invalid',
       'packages/api/src/services/mystery-object-alias.ts: outbound host is not classified in the provider registry: api.mystery-object-alias.invalid',
       'packages/api/src/services/mystery-object.ts: outbound host is not classified in the provider registry: api.mystery-object.invalid',
+      'packages/api/src/services/mystery-patch.ts: outbound host is not classified in the provider registry: api.mystery-patch.invalid',
+      'packages/api/src/services/mystery-post.ts: outbound host is not classified in the provider registry: api.mystery-post.invalid',
+      'packages/api/src/services/mystery-put.ts: outbound host is not classified in the provider registry: api.mystery-put.invalid',
       'packages/api/src/services/mystery-reflect.ts: outbound host is not classified in the provider registry: api.mystery-reflect.invalid',
       'packages/api/src/services/mystery-string.ts: outbound host is not classified in the provider registry: api.mystery-string.invalid',
       'packages/api/src/services/mystery-wrapper.ts: outbound host is not classified in the provider registry: api.mystery-wrapper.invalid',
