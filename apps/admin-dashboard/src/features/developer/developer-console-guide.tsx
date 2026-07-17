@@ -15,7 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { dashboardDocUrl } from '@/lib/docs';
 import { routes } from '@/lib/routes';
 import { useRuntimeConfig } from '@/context/runtime-config-provider';
-const apiVersion = '2026-01-01';
+
+const apiVersion = sdkSnippetRegistry[0].apiVersion;
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = React.useState(false);

@@ -8,6 +8,8 @@ describe('DeveloperConsoleGuide source', () => {
     expect(source).toContain('runtimeConfig.platformApiBaseUrl');
     expect(source).toContain('Check API health');
     expect(source).toContain('sdkSnippetRegistry');
+    expect(source).toContain('const apiVersion = sdkSnippetRegistry[0].apiVersion');
+    expect(source).not.toContain("const apiVersion = '2026-01-01'");
     expect(source).toContain('Authorization: Bearer $TIXKIT_API_KEY');
   });
 
