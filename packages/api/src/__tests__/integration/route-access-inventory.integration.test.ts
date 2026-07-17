@@ -20,6 +20,7 @@ import {
   ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   type RouteAuthorizationDenialContract,
 } from './route-authorization-contracts.js';
 
@@ -101,7 +102,8 @@ describe('API route access inventory (C-123)', () => {
     expect(PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(6);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(39);
+    expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(41);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -117,8 +119,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(39);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(128);
+    expect(coveredRoutes).toHaveLength(41);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(138);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
@@ -134,6 +136,10 @@ describe('API route access inventory (C-123)', () => {
       { discriminator: 'purpose', value: 'user_avatar' },
       { discriminator: 'purpose', value: 'user_avatar' },
       { discriminator: 'purpose', value: 'user_avatar' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
+      { discriminator: 'principal-scope', value: 'organization-wide' },
     ]);
     expect(
       inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,

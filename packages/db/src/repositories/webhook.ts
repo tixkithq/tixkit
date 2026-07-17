@@ -179,7 +179,11 @@ export class WebhookEndpointRepository extends BaseRepository {
   async findActiveByEvent(orgId: string, eventType: string) {
     const endpoints = await this.findByOrganization(orgId);
     return endpoints.filter((e) => {
-      const events = JSON.parse(e.events as string) as string[];
+      const parsed = typeof e.events === 'string' ? (JSON.parse(e.events) as unknown) : e.events;
+      if (!Array.isArray(parsed) || !parsed.every((event) => typeof event === 'string')) {
+        throw new Error(`Webhook endpoint ${e.id} has an invalid event subscription`);
+      }
+      const events = parsed;
       return e.status === 'active' && events.includes(eventType);
     });
   }

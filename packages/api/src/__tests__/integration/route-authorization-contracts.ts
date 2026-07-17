@@ -9,10 +9,9 @@ export type AuthorizationBoundary =
 
 export type AuthorizationSideEffectKind = 'persistence' | 'workflow';
 
-export type AuthorizationPolicyCondition = Readonly<{
-  discriminator: 'purpose';
-  value: 'user_avatar';
-}>;
+export type AuthorizationPolicyCondition =
+  | Readonly<{ discriminator: 'principal-scope'; value: 'organization-wide' }>
+  | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>;
 
 export type RouteAuthorizationDenialContract = Readonly<{
   authorizedControl: Readonly<{
@@ -36,7 +35,7 @@ export type RouteAuthorizationDenialContract = Readonly<{
     status: 403;
   }>;
   policyCondition?: AuthorizationPolicyCondition;
-  policyDeniedBoundaries?: readonly Extract<AuthorizationBoundary, 'principal-type'>[];
+  policyDeniedBoundaries?: readonly AuthorizationBoundary[];
   persistenceSource?: string;
   resourceParameters: readonly string[];
   sideEffectAssertions: readonly AuthorizationSideEffectKind[];
@@ -467,6 +466,36 @@ export const RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze(
+  (
+    [
+      [
+        '/webhook-endpoints/{endpointId}/events/{eventId}/replay',
+        'postWebhookEndpointsByEndpointIdEventsByEventIdReplay',
+        ['endpointId', 'eventId'],
+      ],
+      ['/webhook-events/{eventId}/replay', 'postWebhookEventsByEventIdReplay', ['eventId']],
+    ] as const
+  ).map(([path, operationId, resourceParameters]) =>
+    denialContract({
+      authorizedControl: { required: true, status: 202 },
+      denialResponse: { code: 'NOT_FOUND', status: 404 },
+      deniedBoundaries: ['tenant', 'organization'],
+      method: 'POST',
+      operationId,
+      path,
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyDeniedBoundaries: ['brand', 'event'],
+      persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
+      resourceParameters,
+      sideEffectAssertions: ['persistence', 'workflow'],
+      source: 'webhook-replay-route-authorization-db.integration.test.ts',
+    }),
+  ),
+);
+
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -480,4 +509,5 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

@@ -66,7 +66,10 @@ export type RouteAccessInventory = {
 export type NegativeAuthorizationEvidence = {
   authorizedControlStatus: 200 | 201 | 202 | 204;
   boundary: AuthorizationBoundary;
-  condition: Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }> | null;
+  condition:
+    | Readonly<{ discriminator: 'principal-scope'; value: 'organization-wide' }>
+    | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>
+    | null;
   denialKind: 'permission' | 'policy' | 'resource-boundary';
   deniedCode: 'FORBIDDEN' | 'NOT_FOUND';
   deniedStatus: 403 | 404;
@@ -147,6 +150,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
     'payment-account-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'payment-account-route-authorization-db.integration.test.ts'),
+  ],
+  [
+    'webhook-replay-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'webhook-replay-route-authorization-db.integration.test.ts'),
   ],
 ]);
 
@@ -263,6 +270,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'payment-account-route-authorization-db.integration.test.ts',
     persistenceSource: 'payment-account-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    ['postWebhookEndpointsByEndpointIdEventsByEventIdReplay', 'postWebhookEventsByEventIdReplay'],
+    {
+      source: 'webhook-replay-route-authorization-db.integration.test.ts',
+      persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
+    },
+  ),
 ]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
@@ -297,6 +311,7 @@ const delegatedAuthorizationGuards = new Set([
   'requireHistoricalAuthorizationPrincipal',
   'requireMigrationPermission',
   'requireOrganizationScopedPermission',
+  'requireOrganizationWideWebhookEndpointPrincipal',
   'requireReportEventAccess',
   'requireUploadArtifactAccess',
   'scopedEvent',
@@ -312,6 +327,7 @@ const eventScopeGuards = new Set([
   'loadAuthorizedEvent',
   'loadSettlementScope',
   'requireEventAccess',
+  'requireOrganizationWideWebhookEndpointPrincipal',
   'requireReportEventAccess',
   'scopedEvent',
 ]);
@@ -726,14 +742,10 @@ export function negativeAuthorizationEvidenceForRoutes(
     if (contract.policyCondition && policyDeniedBoundaries.length === 0) {
       throw contractError(contract, 'policy condition has no boundary');
     }
-    if (
-      contract.policyCondition &&
-      (contract.policyCondition.discriminator !== 'purpose' ||
-        contract.policyCondition.value !== 'user_avatar')
-    ) {
-      throw contractError(contract, 'unsupported policy condition');
-    }
-    if (contract.policyCondition) {
+    if (contract.policyCondition?.discriminator === 'purpose') {
+      if (contract.policyCondition.value !== 'user_avatar') {
+        throw contractError(contract, 'unsupported policy condition');
+      }
       const operation = (
         openApiSpec.paths as unknown as Record<string, Record<string, OpenApiOperation>>
       )[contract.path]?.[contract.method.toLowerCase()];
@@ -747,6 +759,16 @@ export function negativeAuthorizationEvidenceForRoutes(
           'policy condition drifts from OpenAPI principal restrictions',
         );
       }
+    } else if (contract.policyCondition?.discriminator === 'principal-scope') {
+      if (
+        contract.policyCondition.value !== 'organization-wide' ||
+        !route.boundaries.includes('brand') ||
+        !route.boundaries.includes('event')
+      ) {
+        throw contractError(contract, 'organization-wide scope policy is not enforced by runtime');
+      }
+    } else if (contract.policyCondition) {
+      throw contractError(contract, 'unsupported policy condition');
     }
     for (const boundary of policyDeniedBoundaries) {
       if (!route.boundaries.includes(boundary)) {
