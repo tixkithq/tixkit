@@ -795,7 +795,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Migration preparation request body must be empty');
     const repository = repo();
     const { job, organizationId } = await scopedJob(repository, request, jobId);
-    if (!['pending', 'failed', 'paused'].includes(job.status))
+    if (!['pending', 'failed'].includes(job.status))
       throw new ConflictError('Migration preparation cannot start in the current status');
     let preparationConfiguration;
     try {
@@ -827,12 +827,23 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         );
       }
     }
+    await writeAuditLog(
+      new AuditLogRepository(app.context.db),
+      request,
+      principal,
+      {
+        action: 'migration_job.prepare_requested',
+        organizationId,
+        resourceType: 'MigrationJob',
+        resourceId: jobId,
+      },
+      { failClosed: true },
+    );
     await app.context.temporalClient.startMigrationPreparation({
       tenantId: principal.tenantId,
       organizationId,
       jobId,
     });
-    await auditMutation(app, request, organizationId, jobId, 'migration_job.prepare_requested');
     return reply.status(202).send({ jobId, status: 'preparing' });
   });
 
