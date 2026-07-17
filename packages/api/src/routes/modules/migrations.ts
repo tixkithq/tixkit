@@ -1853,6 +1853,25 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         idempotencyKey,
         confirmation,
         attestation: portableAttestation(),
+        onCreated: async ({ db, approval: createdApproval }) => {
+          await writeAuditLog(
+            new AuditLogRepository(db),
+            request,
+            principal,
+            {
+              action: 'migration_job.portable_approved',
+              organizationId,
+              resourceType: 'MigrationJob',
+              resourceId: jobId,
+              diffSummary: {
+                approvalId: createdApproval.id,
+                approvalDigest: createdApproval.approval_digest,
+                expiresAt: createdApproval.expires_at,
+              },
+            },
+            { failClosed: true },
+          );
+        },
       });
     } catch (error) {
       if (
@@ -1873,11 +1892,6 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       request.log.error({ err: error, jobId }, 'Portable import approval failed');
       throw new PortableDryRunAttestationUnavailableError();
     }
-    await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_approved', {
-      approvalId: approval.id,
-      approvalDigest: approval.approval_digest,
-      expiresAt: approval.expires_at,
-    });
     return reply.status(201).send({
       approvalId: approval.id,
       approvalDigest: approval.approval_digest,

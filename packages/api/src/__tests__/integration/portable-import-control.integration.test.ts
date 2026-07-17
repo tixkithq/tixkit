@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { Connection, WorkflowClient } from '@temporalio/client';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import Fastify from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import {
   createDb,
+  AuditLogRepository,
   ImportRepository,
   OrganizationRepository,
   runMigrations,
@@ -561,6 +562,26 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       destinationReference: 'acct_revoked_before_approval',
       boundBy: 'user_approver',
     });
+    const foreignTenantId = (
+      await new TenantRepository(db).create({ name: `Portable foreign ${driver}` })
+    ).id;
+    const foreignOrganizationId = (
+      await new OrganizationRepository(db).create({
+        tenantId: foreignTenantId,
+        name: `Portable foreign ${driver}`,
+        slug: `portable-foreign-${driver}`,
+      })
+    ).id;
+    const foreignJob = await repository.createJob({
+      tenantId: foreignTenantId,
+      organizationId: foreignOrganizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v1',
+      mode: 'dry-run',
+      idempotencyKey: `portable-foreign-${driver}`,
+      requestedBy: 'user_foreign',
+      configuration: { sourceMode: 'official-export', artifactIds: ['upl_foreign_01'] },
+    });
     expect(
       await repository.revokePortableDestinationResource({
         tenantId,
@@ -962,47 +983,62 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       'idempotency-key': 'portable-approval-route-01',
       'x-tixkit-confirmation': `approve:${job.id}:${first.receiptSha256}`,
     };
+    const approvalEffects = async () => ({
+      approvals: await db
+        .selectFrom('portable_import_approvals')
+        .selectAll()
+        .where('import_job_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      audits: await db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('action', '=', 'migration_job.portable_approved')
+        .where('resource_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+    });
+    const expectApprovalDenial = async (
+      expectedStatus: 403 | 404,
+      expectedCode: 'FORBIDDEN' | 'NOT_FOUND',
+      deniedJobId = job.id,
+    ) => {
+      const before = await approvalEffects();
+      const response = await app.inject({
+        method: 'POST',
+        url: `/migration-jobs/${deniedJobId}/portable-approval`,
+        headers: routeHeaders,
+        payload: {},
+      });
+      expect(response.statusCode, response.body).toBe(expectedStatus);
+      expect(response.json()).toMatchObject({ error: { code: expectedCode } });
+      expect(await approvalEffects()).toEqual(before);
+    };
     activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
-    expect(
-      (
-        await app.inject({
-          method: 'POST',
-          url: `/migration-jobs/${job.id}/portable-approval`,
-          headers: routeHeaders,
-          payload: {},
-        })
-      ).statusCode,
-    ).toBe(403);
+    await expectApprovalDenial(403, 'FORBIDDEN');
     activePrincipal = {
       ...activePrincipal,
       scopes: ['migrations.commit'],
+      brandIds: ['brand_scoped_route_01'],
+    };
+    await expectApprovalDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      brandIds: undefined,
       eventIds: ['event_scoped_route_01'],
     };
-    expect(
-      (
-        await app.inject({
-          method: 'POST',
-          url: `/migration-jobs/${job.id}/portable-approval`,
-          headers: routeHeaders,
-          payload: {},
-        })
-      ).statusCode,
-    ).toBe(403);
+    await expectApprovalDenial(403, 'FORBIDDEN');
     activePrincipal = {
       ...activePrincipal,
       eventIds: undefined,
       organizationIds: ['organization_outside_scope'],
     };
-    expect(
-      (
-        await app.inject({
-          method: 'POST',
-          url: `/migration-jobs/${job.id}/portable-approval`,
-          headers: routeHeaders,
-          payload: {},
-        })
-      ).statusCode,
-    ).toBe(404);
+    await expectApprovalDenial(404, 'NOT_FOUND');
+    activePrincipal = {
+      ...activePrincipal,
+      organizationIds: [foreignOrganizationId],
+    };
+    await expectApprovalDenial(404, 'NOT_FOUND', foreignJob.id);
     activePrincipal = {
       ...activePrincipal,
       organizationIds: [organizationId],
@@ -1036,6 +1072,19 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         })
       ).statusCode,
     ).toBe(400);
+    const beforeAuditFailure = await approvalEffects();
+    vi.spyOn(AuditLogRepository.prototype, 'create').mockRejectedValueOnce(
+      new Error('injected portable approval audit failure'),
+    );
+    const auditFailure = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/portable-approval`,
+      headers: routeHeaders,
+      payload: {},
+    });
+    expect(auditFailure.statusCode, auditFailure.body).toBe(503);
+    expect(await approvalEffects()).toEqual(beforeAuditFailure);
+    vi.restoreAllMocks();
     const approvedResponse = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/portable-approval`,
@@ -1046,6 +1095,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     const approvedBody = approvedResponse.json<{
       approvalId: string;
       approvalDigest: string;
+      expiresAt: string;
       commitConfirmation: string;
     }>();
     const replayResponse = await app.inject({
@@ -1056,6 +1106,35 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     });
     expect(replayResponse.statusCode).toBe(201);
     expect(replayResponse.json()).toEqual(approvedResponse.json());
+    const approvalAudit = await db
+      .selectFrom('audit_logs')
+      .selectAll()
+      .where('action', '=', 'migration_job.portable_approved')
+      .where('resource_id', '=', job.id)
+      .execute();
+    expect(approvalAudit).toHaveLength(1);
+    expect(approvalAudit[0]).toMatchObject({
+      tenant_id: tenantId,
+      organization_id: organizationId,
+      actor_id: activePrincipal.id,
+      resource_type: 'MigrationJob',
+    });
+    const approvalDiff = approvalAudit[0]!.diff_summary as unknown;
+    const parsedApprovalDiff =
+      typeof approvalDiff === 'string' ? JSON.parse(approvalDiff) : approvalDiff;
+    expect(parsedApprovalDiff).toEqual({
+      approvalId: approvedBody.approvalId,
+      approvalDigest: approvedBody.approvalDigest,
+      expiresAt: approvedBody.expiresAt,
+    });
+    const serializedApprovalDiff = JSON.stringify(parsedApprovalDiff);
+    expect(serializedApprovalDiff).not.toMatch(
+      /receipt|confirmation|idempotency|requestFingerprint|commitConfirmation/iu,
+    );
+    expect(serializedApprovalDiff).not.toContain(first.receiptSha256);
+    expect(serializedApprovalDiff).not.toContain(routeHeaders['idempotency-key']);
+    expect(serializedApprovalDiff).not.toContain(routeHeaders['x-tixkit-confirmation']);
+    expect(serializedApprovalDiff).not.toContain(approvedBody.commitConfirmation);
     const persistedApproval = await repository.findPortableImportApproval({
       tenantId,
       organizationId,

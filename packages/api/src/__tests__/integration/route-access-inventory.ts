@@ -119,6 +119,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'migration-dry-run-route-authorization-db.integration.test.ts'),
   ],
   [
+    'portable-import-control.integration.test.ts',
+    resolve(import.meta.dirname, 'portable-import-control.integration.test.ts'),
+  ],
+  [
     'order-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'order-route-authorization-db.integration.test.ts'),
   ],
@@ -267,6 +271,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['runMigrationDryRun'], {
     source: 'migration-dry-run-route-authorization-db.integration.test.ts',
     persistenceSource: 'migration-dry-run-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['approvePortableMigrationJob'], {
+    source: 'portable-import-control.integration.test.ts',
+    persistenceSource: 'portable-import-control.integration.test.ts',
   }),
   ...evidenceBindings(
     [

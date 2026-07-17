@@ -590,6 +590,10 @@ export async function approvePortableImport(input: {
   idempotencyKey: string;
   confirmation: string;
   attestation: PortableDryRunAttestationConfiguration;
+  onCreated?: (input: {
+    db: Database;
+    approval: Awaited<ReturnType<ImportRepository['createPortableImportApproval']>>;
+  }) => Promise<void>;
   now?: Date;
 }) {
   if (
@@ -706,7 +710,7 @@ export async function approvePortableImport(input: {
             approvedAt: now.toISOString(),
             expiresAt: expiresAt.toISOString(),
           });
-          return repository.createPortableImportApproval({
+          const approval = await repository.createPortableImportApproval({
             tenantId: input.tenantId,
             organizationId: input.organizationId,
             jobId: input.jobId,
@@ -723,6 +727,8 @@ export async function approvePortableImport(input: {
             expiresAt,
             now,
           });
+          await input.onCreated?.({ db: transactionDatabase, approval });
+          return approval;
         });
     } catch (error) {
       const repository = new ImportRepository(input.db);
