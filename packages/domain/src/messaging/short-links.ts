@@ -82,29 +82,40 @@ export function sanitizeUtmParams(params: Record<string, unknown>): Record<strin
   return clean;
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::', '::1']);
-const PRIVATE_IP_PREFIXES = [
-  '10.',
-  '172.16.',
-  '172.17.',
-  '172.18.',
-  '172.19.',
-  '172.20.',
-  '172.21.',
-  '172.22.',
-  '172.23.',
-  '172.24.',
-  '172.25.',
-  '172.26.',
-  '172.27.',
-  '172.28.',
-  '172.29.',
-  '172.30.',
-  '172.31.',
-  '192.168.',
-  '169.254.',
-];
+const LOOPBACK_HOSTS = new Set(['localhost', '::', '::1']);
 
+function isNonPublicIpv4(host: string): boolean {
+  const octets = host.split('.').map(Number);
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) {
+    return false;
+  }
+
+  const [first, second, third] = octets as [number, number, number, number];
+  return (
+    first === 0 ||
+    first === 10 ||
+    first === 127 ||
+    (first === 100 && second >= 64 && second <= 127) ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 0 && third === 0) ||
+    (first === 192 && second === 0 && third === 2) ||
+    (first === 192 && second === 168) ||
+    (first === 198 && (second === 18 || second === 19)) ||
+    (first === 198 && second === 51 && third === 100) ||
+    (first === 203 && second === 0 && third === 113) ||
+    first >= 224
+  );
+}
+
+/**
+ * Validates URL syntax and literal host ranges for redirect-only destinations.
+ * DNS names are intentionally not resolved; callers must never use this result to authorize a
+ * server-side fetch or other network access.
+ */
 export function isAllowedDestination(url: string, allowPrivate = false): boolean {
   let parsed: URL;
   try {
@@ -120,9 +131,14 @@ export function isAllowedDestination(url: string, allowPrivate = false): boolean
     .replace(/\.$/, '');
   if (LOOPBACK_HOSTS.has(host)) return false;
   if (host.endsWith('.local') || host.endsWith('.internal')) return false;
-  if (PRIVATE_IP_PREFIXES.some((prefix) => host.startsWith(prefix))) return false;
+  if (isNonPublicIpv4(host)) return false;
   if (/^(?:fc|fd)[0-9a-f]{2}:/i.test(host)) return false;
   if (/^fe[89ab][0-9a-f]:/i.test(host)) return false;
+  if (/^ff[0-9a-f]{2}:/i.test(host)) return false;
+  if (host.startsWith('100:')) return false;
+  if (/^2001:(?:0*2|0*10|0*20|db8):/i.test(host)) return false;
+  if (/^3fff:/i.test(host)) return false;
+  if (/^5f[0-9a-f]{2}:/i.test(host)) return false;
   if (host.startsWith('::ffff:')) return false;
   return true;
 }

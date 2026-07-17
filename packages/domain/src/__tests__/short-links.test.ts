@@ -83,10 +83,25 @@ describe('isAllowedDestination', () => {
     expect(isAllowedDestination('http://169.254.169.254/latest/meta-data')).toBe(false);
     expect(isAllowedDestination('http://service.local')).toBe(false);
     expect(isAllowedDestination('http://localhost./admin')).toBe(false);
+    expect(isAllowedDestination('http://127.0.0.2/admin')).toBe(false);
+    expect(isAllowedDestination('http://0.0.0.1/admin')).toBe(false);
+    expect(isAllowedDestination('http://100.64.0.1/admin')).toBe(false);
+    expect(isAllowedDestination('http://198.18.0.1/admin')).toBe(false);
+    expect(isAllowedDestination('http://224.0.0.1/admin')).toBe(false);
+    expect(isAllowedDestination('http://2130706433/admin')).toBe(false);
+    expect(isAllowedDestination('http://0177.0.0.1/admin')).toBe(false);
+    expect(isAllowedDestination('http://0x7f000001/admin')).toBe(false);
     expect(isAllowedDestination('https://[fc00::1]/admin')).toBe(false);
     expect(isAllowedDestination('https://[fd12:3456::1]/')).toBe(false);
     expect(isAllowedDestination('https://[fe80::1]/')).toBe(false);
     expect(isAllowedDestination('https://[::ffff:127.0.0.1]/')).toBe(false);
+    expect(isAllowedDestination('https://[ff02::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[100::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[2001:2::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[2001:db8::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[3fff::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[5f00::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[2606:4700:4700::1111]/')).toBe(true);
   });
 
   it('allows private hosts when explicitly permitted (dev)', () => {
