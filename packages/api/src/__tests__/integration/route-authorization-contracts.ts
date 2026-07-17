@@ -16,7 +16,7 @@ export type AuthorizationPolicyCondition =
 export type RouteAuthorizationDenialContract = Readonly<{
   authorizedControl: Readonly<{
     required: true;
-    status: 200 | 201 | 202 | 204;
+    status: 200 | 201 | 202 | 204 | 410;
   }>;
   denialResponse: Readonly<{
     code: 'NOT_FOUND';
@@ -426,6 +426,19 @@ export const UPLOAD_ARTIFACT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freez
 ]);
 
 export const RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 410 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'POST',
+    operationId: 'postTicketListingsByListingIdComplete',
+    path: '/ticket-listings/{listingId}/complete',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'resale-routes-db.integration.test.ts',
+    resourceParameters: ['listingId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'resale-routes-db.integration.test.ts',
+  }),
   denialContract({
     authorizedControl: { required: true, status: 201 },
     denialResponse: { code: 'NOT_FOUND', status: 404 },

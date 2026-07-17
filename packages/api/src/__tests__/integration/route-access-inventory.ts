@@ -64,7 +64,7 @@ export type RouteAccessInventory = {
 };
 
 export type NegativeAuthorizationEvidence = {
-  authorizedControlStatus: 200 | 201 | 202 | 204;
+  authorizedControlStatus: 200 | 201 | 202 | 204 | 410;
   boundary: AuthorizationBoundary;
   condition:
     | Readonly<{ discriminator: 'principal-scope'; value: 'organization-wide' }>
@@ -228,6 +228,7 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(
     [
+      'postTicketListingsByListingIdComplete',
       'postTicketsByTicketIdResaleListings',
       'postTicketListingsByListingIdDelist',
       'postTicketsByTicketIdTransfer',
