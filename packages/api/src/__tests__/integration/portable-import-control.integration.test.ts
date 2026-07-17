@@ -1923,6 +1923,75 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
     });
     expect((await repository.findJob(tenantId, organizationId, job.id))?.status).toBe('committed');
+    const activationEffects = async () => ({
+      jobs: await db
+        .selectFrom('import_jobs')
+        .selectAll()
+        .where('id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      events: await db
+        .selectFrom('import_job_events')
+        .selectAll()
+        .where('import_job_id', 'in', [job.id, foreignJob.id])
+        .where('event_key', '=', 'commit:activated')
+        .orderBy('id')
+        .execute(),
+      lineage: await db
+        .selectFrom('portable_import_lineage_checkpoints')
+        .selectAll()
+        .where('last_import_job_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+      audits: await db
+        .selectFrom('audit_logs')
+        .selectAll()
+        .where('action', '=', 'migration_job.portable_activated')
+        .where('resource_id', 'in', [job.id, foreignJob.id])
+        .orderBy('id')
+        .execute(),
+    });
+    const invokeActivation = (activatedJobId = job.id) =>
+      app.inject({
+        method: 'POST',
+        url: `/migration-jobs/${activatedJobId}/activate`,
+        headers: { 'x-tixkit-confirmation': `activate:${activatedJobId}` },
+        payload: {},
+      });
+    const expectActivationDenial = async (
+      expectedStatus: 403 | 404,
+      expectedCode: 'FORBIDDEN' | 'NOT_FOUND',
+      activatedJobId = job.id,
+    ) => {
+      const before = await activationEffects();
+      const response = await invokeActivation(activatedJobId);
+      expect(response.statusCode, response.body).toBe(expectedStatus);
+      expect(response.json()).toMatchObject({ error: { code: expectedCode } });
+      expect(await activationEffects()).toEqual(before);
+    };
+    activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
+    await expectActivationDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      scopes: ['migrations.commit'],
+      brandIds: ['brand_scoped_activation_01'],
+    };
+    await expectActivationDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      brandIds: undefined,
+      eventIds: ['event_scoped_activation_01'],
+    };
+    await expectActivationDenial(403, 'FORBIDDEN');
+    activePrincipal = {
+      ...activePrincipal,
+      eventIds: undefined,
+      organizationIds: ['organization_outside_scope'],
+    };
+    await expectActivationDenial(404, 'NOT_FOUND');
+    activePrincipal = { ...activePrincipal, organizationIds: [foreignOrganizationId] };
+    await expectActivationDenial(404, 'NOT_FOUND', foreignJob.id);
+    activePrincipal = { ...activePrincipal, organizationIds: [organizationId] };
     expect(
       (
         await app.inject({
@@ -1952,21 +2021,57 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       .where('tenant_id', '=', tenantId)
       .where('id', '=', organizationId)
       .execute();
+    const beforeActivationAuditFailure = await activationEffects();
+    vi.spyOn(AuditLogRepository.prototype, 'create').mockRejectedValueOnce(
+      new Error('injected portable activation audit failure'),
+    );
+    const activationAuditFailure = await invokeActivation();
+    expect(activationAuditFailure.statusCode, activationAuditFailure.body).toBe(500);
+    expect(await activationEffects()).toEqual(beforeActivationAuditFailure);
+    vi.restoreAllMocks();
+    const beforeInitialActivation = await activationEffects();
+    expect(beforeInitialActivation.lineage).toEqual([]);
     const initialActivations = await Promise.all(
-      Array.from({ length: 4 }, () =>
-        app.inject({
-          method: 'POST',
-          url: `/migration-jobs/${job.id}/activate`,
-          headers: { 'x-tixkit-confirmation': `activate:${job.id}` },
-          payload: {},
-        }),
-      ),
+      Array.from({ length: 4 }, () => invokeActivation()),
     );
     const activation = initialActivations[0]!;
     for (const response of initialActivations) {
       expect(response.statusCode, response.body).toBe(200);
       expect(response.json()).toEqual({ jobId: job.id, status: 'activated' });
     }
+    const activatedEffects = await activationEffects();
+    const localJobBeforeActivation = beforeInitialActivation.jobs.find(({ id }) => id === job.id)!;
+    const localJobAfterActivation = activatedEffects.jobs.find(({ id }) => id === job.id)!;
+    expect(localJobBeforeActivation.status).toBe('committed');
+    expect(localJobAfterActivation).toEqual({
+      ...localJobBeforeActivation,
+      status: 'activated',
+      activated_at: localJobAfterActivation.activated_at,
+      updated_at: localJobAfterActivation.updated_at,
+    });
+    expect(localJobAfterActivation.activated_at).not.toBeNull();
+    expect(new Date(localJobAfterActivation.updated_at).getTime()).toBeGreaterThanOrEqual(
+      new Date(localJobBeforeActivation.updated_at).getTime(),
+    );
+    expect(activatedEffects.jobs.find(({ id }) => id === foreignJob.id)).toEqual(
+      beforeInitialActivation.jobs.find(({ id }) => id === foreignJob.id),
+    );
+    expect(activatedEffects.lineage).toHaveLength(1);
+    expect(activatedEffects.lineage[0]).toMatchObject({
+      tenant_id: tenantId,
+      organization_id: organizationId,
+      destination_id: destination.deploymentId,
+      source_deployment_id: built.envelope.manifest.source.deploymentId,
+      source_tenant_id: built.envelope.manifest.source.tenantId,
+      source_organization_id: built.envelope.manifest.source.organizationId,
+      last_bundle_id: built.envelope.manifest.bundleId,
+      last_manifest_sha256: portableManifestSha256(built.envelope.manifest),
+      last_change_cursor: built.envelope.manifest.lineage.toChangeCursor,
+      last_export_sequence: built.envelope.manifest.source.exportSequence,
+      last_import_job_id: job.id,
+      cutover_frozen_at: null,
+    });
+    expect(Number.isNaN(new Date(activatedEffects.lineage[0]!.activated_at).getTime())).toBe(false);
     const activationEventCount = await db
       .selectFrom('import_job_events')
       .select(({ fn }) => fn.countAll<number>().as('count'))
@@ -1976,6 +2081,16 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       .where('event_key', '=', 'commit:activated')
       .executeTakeFirstOrThrow();
     expect(Number(activationEventCount.count)).toBe(1);
+    const activationAuditRows = (await activationEffects()).audits;
+    expect(activationAuditRows).toHaveLength(1);
+    expect(activationAuditRows[0]).toMatchObject({
+      tenant_id: tenantId,
+      organization_id: organizationId,
+      actor_id: activePrincipal.id,
+      action: 'migration_job.portable_activated',
+      resource_type: 'MigrationJob',
+      resource_id: job.id,
+    });
     await db
       .updateTable('organizations')
       .set({ name: 'Legitimate post-activation edit' })
@@ -1990,6 +2105,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     });
     expect(activationRetry.statusCode, activationRetry.body).toBe(200);
     expect(activationRetry.json()).toEqual(activation.json());
+    expect((await activationEffects()).audits).toHaveLength(1);
     const concurrentActivationRetries = await Promise.all(
       Array.from({ length: 4 }, () =>
         app.inject({
@@ -2004,6 +2120,11 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       expect(retry.statusCode, retry.body).toBe(200);
       expect(retry.json()).toEqual(activation.json());
     }
+    const replayedActivationEffects = await activationEffects();
+    expect(replayedActivationEffects.jobs).toEqual(activatedEffects.jobs);
+    expect(replayedActivationEffects.lineage).toEqual(activatedEffects.lineage);
+    expect(replayedActivationEffects.events).toEqual(activatedEffects.events);
+    expect(replayedActivationEffects.audits).toEqual(activatedEffects.audits);
     await expect(
       db
         .updateTable('import_job_events')

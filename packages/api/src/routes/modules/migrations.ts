@@ -1741,8 +1741,21 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         organizationId,
         jobId,
         activatedBy: principal.id,
+        onActivated: async ({ db }) => {
+          await writeAuditLog(
+            new AuditLogRepository(db),
+            request,
+            principal,
+            {
+              action: 'migration_job.portable_activated',
+              organizationId,
+              resourceType: 'MigrationJob',
+              resourceId: jobId,
+            },
+            { failClosed: true },
+          );
+        },
       });
-      await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_activated');
       return reply.status(200).send(activated);
     } catch (error) {
       if (

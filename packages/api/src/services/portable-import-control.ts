@@ -1193,6 +1193,7 @@ export async function activatePortableImport(input: {
   organizationId: string;
   jobId: string;
   activatedBy: string;
+  onActivated?: (input: { db: Database }) => Promise<void>;
   now?: Date;
 }) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -1396,6 +1397,7 @@ export async function activatePortableImport(input: {
               reconciliationEventId: reconciliation!.id,
             },
           });
+          await input.onActivated?.({ db: transaction as Database });
           return { jobId: input.jobId, status: 'activated' as const };
         });
     } catch (error) {
