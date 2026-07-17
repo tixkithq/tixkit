@@ -341,6 +341,11 @@ function DynamicQuestionField({
     control.setCustomValidity(questionPatternValidationMessage(question, nextValue));
   };
   const requiredMarker = question.required ? <span className="text-destructive"> *</span> : null;
+  const validationFeedback = validationError ? (
+    <p id={errorId} className="text-sm text-destructive">
+      {validationError}
+    </p>
+  ) : null;
   const label = (
     <Label htmlFor={id}>
       {question.label}
@@ -375,6 +380,7 @@ function DynamicQuestionField({
             {question.description}
           </p>
         ) : null}
+        {validationFeedback}
       </div>
     );
   }
@@ -403,6 +409,7 @@ function DynamicQuestionField({
             {question.description}
           </p>
         ) : null}
+        {validationFeedback}
       </div>
     );
   }
@@ -434,6 +441,7 @@ function DynamicQuestionField({
             {question.description}
           </p>
         ) : null}
+        {validationFeedback}
       </div>
     );
   }
@@ -498,11 +506,7 @@ function DynamicQuestionField({
             {question.description}
           </p>
         ) : null}
-        {validationError ? (
-          <p id={errorId} className="text-sm text-destructive">
-            {validationError}
-          </p>
-        ) : null}
+        {validationFeedback}
       </fieldset>
     );
   }
@@ -512,6 +516,9 @@ function DynamicQuestionField({
       value && typeof value === 'object' && !Array.isArray(value) && 'artifactId' in value
         ? value
         : null;
+    const uploadErrorId = uploadError ? `${id}_upload_error` : undefined;
+    const fileDescribedBy =
+      [descriptionId, errorId, uploadErrorId].filter(Boolean).join(' ') || undefined;
     return (
       <div className="grid gap-2">
         {label}
@@ -520,8 +527,8 @@ function DynamicQuestionField({
           type="file"
           disabled={disabled || uploading || !eventId}
           required={question.required && !uploaded}
-          aria-invalid={validationError ? true : undefined}
-          aria-describedby={describedBy}
+          aria-invalid={validationError || uploadError ? true : undefined}
+          aria-describedby={fileDescribedBy}
           onChange={async (event) => {
             const file = event.target.files?.[0];
             if (!file || !eventId) return;
@@ -543,13 +550,16 @@ function DynamicQuestionField({
         ) : uploading ? (
           <p className="text-xs text-muted-foreground">Uploading file...</p>
         ) : uploadError ? (
-          <p className="text-xs text-destructive">{uploadError}</p>
+          <p id={uploadErrorId} role="alert" className="text-xs text-destructive">
+            {uploadError}
+          </p>
         ) : null}
         {question.description ? (
           <p id={descriptionId} className="text-xs text-muted-foreground">
             {question.description}
           </p>
         ) : null}
+        {validationFeedback}
       </div>
     );
   }
@@ -578,6 +588,7 @@ function DynamicQuestionField({
             {question.description}
           </p>
         ) : null}
+        {validationFeedback}
       </div>
     );
   }
@@ -609,11 +620,7 @@ function DynamicQuestionField({
         aria-invalid={validationError ? true : undefined}
         aria-describedby={describedBy}
       />
-      {validationError ? (
-        <p id={errorId} className="text-sm text-destructive">
-          {validationError}
-        </p>
-      ) : null}
+      {validationFeedback}
       {question.description ? (
         <p id={descriptionId} className="text-xs text-muted-foreground">
           {question.description}

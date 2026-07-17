@@ -335,7 +335,18 @@ describe('CheckoutFlow buyer validation', () => {
     fillRequiredDatesOfBirth(view);
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
-    expect(await view.findByText('Please check I agree to the photo policy.')).toBeInTheDocument();
+    const feedback = await view.findAllByText('Please check I agree to the photo policy.');
+    expect(feedback).toHaveLength(2);
+    expect(view.getByLabelText(/I agree to the photo policy/)).toHaveAccessibleDescription(
+      'Please check I agree to the photo policy.',
+    );
+    expect(
+      view
+        .getAllByRole('alert')
+        .filter((alert) =>
+          alert.textContent?.includes('Please check I agree to the photo policy.'),
+        ),
+    ).toHaveLength(1);
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 

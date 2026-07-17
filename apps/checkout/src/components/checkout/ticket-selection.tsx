@@ -81,6 +81,7 @@ export function TicketSelection({
             donationAmount < (ticket.minimumPriceCents ?? 0)
               ? `Minimum ${formatCurrency(ticket.minimumPriceCents ?? 0, ticket.currency)}`
               : undefined;
+          const donationErrorId = donationError ? `donation_${itemId}_error` : undefined;
 
           return (
             <li
@@ -140,10 +141,14 @@ export function TicketSelection({
                         disabled={loading}
                         className="w-28"
                         aria-label={`Donation amount for ${ticket.name}`}
+                        aria-invalid={Boolean(donationError)}
+                        aria-describedby={donationErrorId}
                       />
                     </div>
                     {donationError ? (
-                      <p className="text-xs text-destructive">{donationError}</p>
+                      <output id={donationErrorId} className="text-xs text-destructive">
+                        {donationError}
+                      </output>
                     ) : null}
                   </div>
                 ) : null}

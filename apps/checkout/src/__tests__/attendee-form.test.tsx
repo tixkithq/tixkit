@@ -19,6 +19,7 @@ const publicApiMock = publicApi as unknown as {
 
 afterEach(() => {
   cleanup();
+  publicApiMock.uploadCheckoutArtifact.mockReset();
 });
 
 const buyer: Buyer = { email: 'a@b.com', firstName: '', lastName: '', phone: '' };
@@ -126,6 +127,64 @@ describe('AttendeeForm dynamic question types', () => {
     expect(input).toHaveAccessibleDescription(
       /Used if your receipt bounces\.[\s\S]*Backup email must be a valid email\./,
     );
+  });
+
+  it.each([
+    ['checkbox', 'I accept the terms'],
+    ['textarea', 'Accessibility requests'],
+    ['select', 'Meal preference'],
+    ['waiver', 'I accept the waiver'],
+  ] as const)('renders and associates validation feedback for %s questions', (type, label) => {
+    const question: CheckoutQuestion = {
+      id: `q_${type}`,
+      label,
+      type,
+      required: true,
+      appliesTo: 'buyer',
+      ...(type === 'select' ? { options: ['Standard', 'Vegetarian'] } : {}),
+    };
+    const message = `${label} is required.`;
+
+    const view = render(
+      createAttendeeForm({
+        buyerQuestions: [question],
+        buyerAnswers: {},
+        buyerQuestionErrors: { [question.id]: message },
+        onBuyerAnswersChange: () => {},
+      }),
+    );
+
+    const control = view.getByLabelText(new RegExp(label));
+    expect(control).toHaveAttribute('aria-invalid', 'true');
+    expect(control).toHaveAccessibleDescription(message);
+    expect(view.getByText(message)).toBeInTheDocument();
+    expect(view.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('associates file upload failures with the file input', async () => {
+    publicApiMock.uploadCheckoutArtifact.mockRejectedValueOnce(new Error('Upload interrupted'));
+    const question: CheckoutQuestion = {
+      id: 'q_file',
+      label: 'Proof of eligibility',
+      type: 'file',
+      required: true,
+      appliesTo: 'buyer',
+    };
+    const view = render(
+      createAttendeeForm({
+        eventId: 'evt_1',
+        buyerQuestions: [question],
+        buyerAnswers: {},
+        onBuyerAnswersChange: () => {},
+      }),
+    );
+    const input = view.getByLabelText(/Proof of eligibility/) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [new File(['proof'], 'proof.txt')] } });
+
+    expect(await view.findByRole('alert')).toHaveTextContent('Upload interrupted');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription('Upload interrupted');
   });
 
   it('renders conditional questions only when their condition matches', () => {
