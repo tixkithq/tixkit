@@ -67,6 +67,7 @@ import { paymentReconciliationWorkflow } from '../workflows/payment-reconciliati
 import { clerkIdentitySyncWorkflow } from '../workflows/clerk-identity-sync.js';
 import { privacyRequestWorkflow } from '../workflows/privacy.js';
 import {
+  CHECKOUT_WORKFLOW_VERSION,
   PAYMENT_RECONCILIATION_WORKFLOW_VERSION,
   CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
   okResult,
@@ -98,7 +99,7 @@ function exhaustedActivityFailure(message: string): ActivityFailure {
 
 function makeCheckoutInput(overrides: Record<string, unknown> = {}) {
   return {
-    version: 1,
+    version: CHECKOUT_WORKFLOW_VERSION,
     checkoutSessionId: 'cs_test_1',
     tenantId: 'tnt_1',
     organizationId: 'org_1',
@@ -346,7 +347,7 @@ describe('checkoutSessionWorkflow', () => {
     expect(released).toBe(true);
   });
 
-  it('throws when free checkout finalization returns a retryable error', async () => {
+  it('preserves the v1 retryable free-finalization history', async () => {
     let released = false;
     setActivity('finalizeOrderActivity', async () =>
       errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true),
@@ -356,10 +357,92 @@ describe('checkoutSessionWorkflow', () => {
       return okResult({ released: true });
     });
 
-    await expect(checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }))).rejects.toThrow(
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ version: 1, isFreeOrder: true })),
+    ).rejects.toThrow(
       'Checkout finalization failed (ORDER_FINALIZE_FAILED): database lock timeout',
     );
     expect(released).toBe(false);
+  });
+
+  it('retries free checkout finalization with stable input and releases after exhaustion', async () => {
+    const finalizeInputs: unknown[] = [];
+    let released = false;
+    setActivity('finalizeOrderActivity', async (input) => {
+      finalizeInputs.push(input);
+      return errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true);
+    });
+    setActivity('releaseHoldActivity', async () => {
+      released = true;
+      return okResult({ released: true });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }));
+
+    expect(result).toEqual({ status: 'failed' });
+    expect(finalizeInputs).toHaveLength(5);
+    expect(finalizeInputs.every((input) => input === finalizeInputs[0])).toBe(true);
+    expect(mockState.sleeps).toEqual(['5 seconds', '5 seconds', '5 seconds', '5 seconds']);
+    expect(released).toBe(true);
+  });
+
+  it('releases free checkout after the activity retry policy is exhausted', async () => {
+    let released = false;
+    setActivity('finalizeOrderActivity', async () => {
+      throw exhaustedActivityFailure('database deadlock attempts exhausted');
+    });
+    setActivity('releaseHoldActivity', async () => {
+      released = true;
+      return okResult({ released: true });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }));
+
+    expect(result).toEqual({ status: 'failed' });
+    expect(released).toBe(true);
+  });
+
+  it('completes free checkout when a retryable finalization succeeds on retry', async () => {
+    const finalizeInputs: unknown[] = [];
+    setActivity('finalizeOrderActivity', async (input) => {
+      finalizeInputs.push(input);
+      return finalizeInputs.length === 1
+        ? errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true)
+        : okResult({ orderId: 'ord_retry_1' });
+    });
+
+    const result = await checkoutSessionWorkflow(
+      makeCheckoutInput({ isFreeOrder: true, isTest: true }),
+    );
+
+    expect(result).toEqual({ orderId: 'ord_retry_1', status: 'completed' });
+    expect(finalizeInputs).toHaveLength(2);
+    expect(finalizeInputs[1]).toBe(finalizeInputs[0]);
+    expect(mockState.sleeps).toEqual(['5 seconds']);
+  });
+
+  it('stops free finalization retries and releases when checkout is cancelled', async () => {
+    let finalizeCalls = 0;
+    let releaseInput: unknown;
+    setActivity('finalizeOrderActivity', async () => {
+      finalizeCalls += 1;
+      mockState.signals.cancelCheckout();
+      return errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true);
+    });
+    setActivity('releaseHoldActivity', async (input) => {
+      releaseInput = input;
+      return okResult({ released: true });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: true }));
+
+    expect(result).toEqual({ status: 'cancelled' });
+    expect(finalizeCalls).toBe(1);
+    expect(mockState.sleeps).toEqual([]);
+    expect(releaseInput).toEqual({
+      checkoutSessionId: 'cs_test_1',
+      checkoutSessionStatus: 'cancelled',
+    });
   });
 
   it('retries free checkout confirmation email before ticket issuance and webhook delivery', async () => {
@@ -720,7 +803,7 @@ describe('checkoutSessionWorkflow', () => {
     expect(webhookCalled).toBe(false);
   });
 
-  it('throws when paid checkout finalization returns a retryable error before compensation', async () => {
+  it('preserves the v1 retryable paid-finalization history before compensation', async () => {
     let releaseCalled = false;
     let compensationCalled = false;
     let emailCalled = false;
@@ -752,7 +835,7 @@ describe('checkoutSessionWorkflow', () => {
     });
 
     await expect(
-      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+      checkoutSessionWorkflow(makeCheckoutInput({ version: 1, isFreeOrder: false })),
     ).rejects.toThrow(
       'Checkout finalization failed (ORDER_FINALIZE_FAILED): database lock timeout',
     );
@@ -761,6 +844,193 @@ describe('checkoutSessionWorkflow', () => {
     expect(emailCalled).toBe(false);
     expect(issueTicketsCalled).toBe(false);
     expect(webhookCalled).toBe(false);
+  });
+
+  it('compensates once and releases after retryable paid finalization is exhausted', async () => {
+    const finalizeInputs: unknown[] = [];
+    const compensationInputs: unknown[] = [];
+    const operations: string[] = [];
+    let releaseCalled = false;
+    setActivity('finalizeOrderActivity', async (input) => {
+      finalizeInputs.push(input);
+      return errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true);
+    });
+    setActivity('compensateOrphanPaymentActivity', async (input) => {
+      operations.push('compensate');
+      compensationInputs.push(input);
+      return okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_retry_1' });
+    });
+    setActivity('releaseHoldActivity', async () => {
+      operations.push('release');
+      releaseCalled = true;
+      return okResult({ released: true });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+    expect(result).toEqual({ status: 'failed' });
+    expect(finalizeInputs).toHaveLength(5);
+    expect(finalizeInputs.every((input) => input === finalizeInputs[0])).toBe(true);
+    expect(compensationInputs).toHaveLength(1);
+    expect(compensationInputs[0]).toMatchObject({
+      checkoutSessionId: 'cs_test_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_test_1',
+      source: 'checkout_finalize_failed',
+      metadata: {
+        eventId: 'evt_1',
+        brandId: 'brd_1',
+        errorCode: 'ORDER_FINALIZE_FAILED',
+      },
+    });
+    expect(releaseCalled).toBe(true);
+    expect(operations).toEqual(['compensate', 'release']);
+  });
+
+  it('compensates before release when the paid finalize activity policy is exhausted', async () => {
+    const operations: string[] = [];
+    setActivity('finalizeOrderActivity', async () => {
+      throw exhaustedActivityFailure('database deadlock attempts exhausted');
+    });
+    setActivity('compensateOrphanPaymentActivity', async (input) => {
+      operations.push('compensate');
+      expect(input).toMatchObject({
+        providerIntentId: 'pi_test_1',
+        source: 'checkout_finalize_failed',
+        metadata: { errorCode: 'ORDER_FINALIZE_ACTIVITY_EXHAUSTED' },
+      });
+      return okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_throw_1' });
+    });
+    setActivity('releaseHoldActivity', async () => {
+      operations.push('release');
+      return okResult({ released: true });
+    });
+
+    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+    expect(result).toEqual({ status: 'failed' });
+    expect(operations).toEqual(['compensate', 'release']);
+  });
+
+  it('completes without release when compensation resolves ambiguous finalize as already ordered', async () => {
+    let releaseCalled = false;
+    setActivity('finalizeOrderActivity', async () => {
+      throw exhaustedActivityFailure('database connection lost after commit');
+    });
+    setActivity('compensateOrphanPaymentActivity', async () =>
+      okResult({
+        status: 'already_ordered',
+        action: 'local_noop',
+        orderId: 'ord_committed_1',
+      }),
+    );
+    setActivity('releaseHoldActivity', async () => {
+      releaseCalled = true;
+      return okResult({ released: true });
+    });
+
+    const result = await checkoutSessionWorkflow(
+      makeCheckoutInput({ isFreeOrder: false, isTest: true }),
+    );
+
+    expect(result).toEqual({ orderId: 'ord_committed_1', status: 'completed' });
+    expect(releaseCalled).toBe(false);
+  });
+
+  it.each([
+    ['cancelCheckout', []],
+    ['paymentFailed', ['provider failed during finalization']],
+  ] as const)(
+    'treats a committed order as authoritative when %s arrives with finalization success',
+    async (signalName, signalArgs) => {
+      let compensationCalled = false;
+      let releaseCalled = false;
+      setActivity('finalizeOrderActivity', async () => {
+        mockState.signals[signalName](...signalArgs);
+        return okResult({ orderId: 'ord_committed_1' });
+      });
+      setActivity('compensateOrphanPaymentActivity', async () => {
+        compensationCalled = true;
+        return okResult({ status: 'already_ordered', action: 'local_noop' });
+      });
+      setActivity('releaseHoldActivity', async () => {
+        releaseCalled = true;
+        return okResult({ released: true });
+      });
+
+      const result = await checkoutSessionWorkflow(
+        makeCheckoutInput({ isFreeOrder: false, isTest: true }),
+      );
+
+      expect(result).toEqual({ orderId: 'ord_committed_1', status: 'completed' });
+      expect(compensationCalled).toBe(false);
+      expect(releaseCalled).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      expectedStatus: 'cancelled',
+      releaseStatus: 'cancelled',
+      signalName: 'cancelCheckout',
+      signalArgs: [] as string[],
+      source: 'checkout_cancelled_during_finalize',
+    },
+    {
+      expectedStatus: 'failed',
+      releaseStatus: 'expired',
+      signalName: 'paymentFailed',
+      signalArgs: ['provider failed during finalization'],
+      source: 'checkout_payment_failed_during_finalize',
+    },
+  ])(
+    'compensates and stops paid retries when $signalName interrupts a failed attempt',
+    async ({ expectedStatus, releaseStatus, signalName, signalArgs, source }) => {
+      const operations: string[] = [];
+      let finalizeCalls = 0;
+      setActivity('finalizeOrderActivity', async () => {
+        finalizeCalls += 1;
+        mockState.signals[signalName](...signalArgs);
+        return errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true);
+      });
+      setActivity('compensateOrphanPaymentActivity', async (input) => {
+        operations.push('compensate');
+        expect(input).toMatchObject({ source });
+        return okResult({ status: 'succeeded', action: 'refund', compensationId: 'pcmp_signal_1' });
+      });
+      setActivity('releaseHoldActivity', async (input) => {
+        operations.push('release');
+        expect(input).toMatchObject({ checkoutSessionStatus: releaseStatus });
+        return okResult({ released: true });
+      });
+
+      const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+
+      expect(result).toEqual({ status: expectedStatus });
+      expect(finalizeCalls).toBe(1);
+      expect(mockState.sleeps).toEqual([]);
+      expect(operations).toEqual(['compensate', 'release']);
+    },
+  );
+
+  it('does not release after exhausted finalization when compensation is incomplete', async () => {
+    let releaseCalled = false;
+    setActivity('finalizeOrderActivity', async () =>
+      errResult('ORDER_FINALIZE_FAILED', 'database lock timeout', true),
+    );
+    setActivity('compensateOrphanPaymentActivity', async () =>
+      okResult({ status: 'manual_review', action: 'refund', compensationId: 'pcmp_retry_1' }),
+    );
+    setActivity('releaseHoldActivity', async () => {
+      releaseCalled = true;
+      return okResult({ released: true });
+    });
+
+    await expect(
+      checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false })),
+    ).rejects.toThrow('Orphan payment compensation blocked with status manual_review');
+    expect(releaseCalled).toBe(false);
   });
 
   it('does not silently close when finalize-failure compensation returns a retryable error', async () => {
@@ -850,7 +1120,9 @@ describe('checkoutSessionWorkflow', () => {
       return okResult({ released: true });
     });
 
-    const result = await checkoutSessionWorkflow(makeCheckoutInput({ isFreeOrder: false }));
+    const result = await checkoutSessionWorkflow(
+      makeCheckoutInput({ version: 1, isFreeOrder: false }),
+    );
 
     expect(result).toEqual({ status: 'failed' });
     expect(releaseCalled).toBe(true);

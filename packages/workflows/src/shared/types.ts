@@ -15,7 +15,7 @@ export function errResult(
 }
 
 // Workflow input versions - must be versioned because workflows persist across deploys
-export const CHECKOUT_WORKFLOW_VERSION = 1;
+export const CHECKOUT_WORKFLOW_VERSION = 2;
 export const REFUND_WORKFLOW_VERSION = 1;
 export const NOTIFICATION_WORKFLOW_VERSION = 1;
 export const SMS_DELIVERY_WORKFLOW_VERSION = 1;

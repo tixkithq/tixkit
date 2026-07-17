@@ -118,8 +118,18 @@ vi.mock('@tixkit/db', () => {
           return query;
         },
         async executeTakeFirst() {
-          if (table === 'orders') return mockState.order;
-          if (table === 'checkout_sessions') return mockState.checkoutSession;
+          if (table === 'orders') {
+            return mockState.order &&
+              filters.every(([column, value]) => mockState.order?.[column] === value)
+              ? mockState.order
+              : undefined;
+          }
+          if (table === 'checkout_sessions') {
+            return mockState.checkoutSession &&
+              filters.every(([column, value]) => mockState.checkoutSession?.[column] === value)
+              ? mockState.checkoutSession
+              : undefined;
+          }
           if (table === 'brands') {
             return mockState.brand &&
               filters.every(([column, value]) => mockState.brand?.[column] === value)
@@ -311,6 +321,67 @@ describe('compensateOrphanPaymentActivity', () => {
       provider_compensation_id: 'local:pi_capture_cs_1',
       attempts: 1,
     });
+    expect(mockState.stripeRefundCreate).not.toHaveBeenCalled();
+    expect(mockState.stripeCancel).not.toHaveBeenCalled();
+  });
+
+  it('returns the committed order identity instead of compensating an ambiguous finalize', async () => {
+    mockState.order = {
+      id: 'ord_committed_1',
+      checkout_session_id: 'cs_1',
+      tenant_id: 'tnt_1',
+    };
+
+    const result = await compensateOrphanPaymentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe_capture',
+      providerIntentId: 'pi_capture_cs_1',
+      amountCents: 2500,
+      currency: 'USD',
+      reason: 'ambiguous finalize outcome',
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: { status: 'already_ordered', action: 'local_noop', orderId: 'ord_committed_1' },
+    });
+    expect(mockState.createdCompensations).toHaveLength(0);
+    expect(mockState.stripeRefundCreate).not.toHaveBeenCalled();
+    expect(mockState.stripeCancel).not.toHaveBeenCalled();
+  });
+
+  it('does not disclose a committed order when the checkout session belongs to another tenant', async () => {
+    mockState.checkoutSession = { ...mockState.checkoutSession, tenant_id: 'tnt_victim' };
+    mockState.paymentIntent = {
+      ...mockState.paymentIntent,
+      tenant_id: 'tnt_victim',
+      order_id: 'ord_victim',
+    };
+    mockState.order = {
+      id: 'ord_victim',
+      checkout_session_id: 'cs_1',
+      tenant_id: 'tnt_victim',
+    };
+
+    const result = await compensateOrphanPaymentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_attacker',
+      provider: 'stripe_capture',
+      providerIntentId: 'pi_capture_cs_1',
+      amountCents: 2500,
+      currency: 'USD',
+      reason: 'cross-tenant ambiguous finalize probe',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'PAYMENT_COMPENSATION_TENANT_MISMATCH',
+      retryable: false,
+    });
+    expect(result).not.toHaveProperty('value.orderId');
+    expect(mockState.createdCompensations).toHaveLength(0);
+    expect(mockState.stripeRetrieve).not.toHaveBeenCalled();
     expect(mockState.stripeRefundCreate).not.toHaveBeenCalled();
     expect(mockState.stripeCancel).not.toHaveBeenCalled();
   });

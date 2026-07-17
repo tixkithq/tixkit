@@ -5,6 +5,11 @@ import { describe, it, expect } from 'vitest';
 // migration-temporal.integration.test.ts when TEMPORAL_ADDRESS is configured.
 
 describe('Temporal workflow baseline', () => {
+  it('starts new checkout histories with bounded finalization recovery v2', async () => {
+    const { CHECKOUT_WORKFLOW_VERSION } = await import('../shared/types.js');
+    expect(CHECKOUT_WORKFLOW_VERSION).toBe(2);
+  });
+
   it('refundWorkflow is exported and has the correct input type shape', async () => {
     const mod = await import('../workflows/refund.js');
     expect(typeof mod.refundWorkflow).toBe('function');

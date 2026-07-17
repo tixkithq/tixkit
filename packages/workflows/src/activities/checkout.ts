@@ -988,6 +988,7 @@ export async function compensateOrphanPaymentActivity(input: {
   WorkflowActivityResult<{
     status: OrphanPaymentCompensationStatus;
     action: OrphanPaymentCompensationAction;
+    orderId?: string;
     compensationId?: string;
     providerCompensationId?: string;
   }>
@@ -1001,30 +1002,6 @@ export async function compensateOrphanPaymentActivity(input: {
   try {
     const piRepo = new PaymentIntentRepository(db);
     compensationRepo = new PaymentCompensationRepository(db);
-    const paymentIntentLookup = await findCompensablePaymentIntent({
-      repo: piRepo,
-      checkoutSessionId: input.checkoutSessionId,
-      provider: input.provider,
-      providerIntentId: input.providerIntentId,
-    });
-    if (paymentIntentLookup.mismatchMessage) {
-      return errResult(
-        'PAYMENT_COMPENSATION_UNTRUSTED',
-        paymentIntentLookup.mismatchMessage,
-        false,
-      );
-    }
-    const paymentIntent = paymentIntentLookup.paymentIntent;
-
-    const existingOrder = await db
-      .selectFrom('orders')
-      .select(['id'])
-      .where('checkout_session_id', '=', input.checkoutSessionId)
-      .executeTakeFirst();
-    if (paymentIntent?.order_id || existingOrder) {
-      return okResult({ status: 'already_ordered', action: 'local_noop' });
-    }
-
     const session = await db
       .selectFrom('checkout_sessions')
       .select(['id', 'tenant_id', 'brand_id', 'currency'])
@@ -1045,12 +1022,41 @@ export async function compensateOrphanPaymentActivity(input: {
         false,
       );
     }
+
+    const paymentIntentLookup = await findCompensablePaymentIntent({
+      repo: piRepo,
+      checkoutSessionId: input.checkoutSessionId,
+      provider: input.provider,
+      providerIntentId: input.providerIntentId,
+    });
+    if (paymentIntentLookup.mismatchMessage) {
+      return errResult(
+        'PAYMENT_COMPENSATION_UNTRUSTED',
+        paymentIntentLookup.mismatchMessage,
+        false,
+      );
+    }
+    const paymentIntent = paymentIntentLookup.paymentIntent;
     if (paymentIntent && paymentIntent.tenant_id !== session.tenant_id) {
       return errResult(
         'PAYMENT_COMPENSATION_TENANT_MISMATCH',
         'Payment intent tenant does not match checkout session tenant',
         false,
       );
+    }
+
+    const existingOrder = await db
+      .selectFrom('orders')
+      .select(['id'])
+      .where('checkout_session_id', '=', input.checkoutSessionId)
+      .where('tenant_id', '=', session.tenant_id)
+      .executeTakeFirst();
+    if (existingOrder) {
+      return okResult({
+        status: 'already_ordered',
+        action: 'local_noop',
+        orderId: existingOrder.id,
+      });
     }
     const tenantId = session.tenant_id;
 

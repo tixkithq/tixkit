@@ -73,6 +73,41 @@ describe('TemporalClient connection', () => {
   });
 });
 
+describe('TemporalClient checkout', () => {
+  it('starts new checkout histories with finalization recovery version 2', async () => {
+    const client = {
+      workflow: {
+        start: vi.fn(async (_workflow: unknown, options: { workflowId: string }) => ({
+          workflowId: options.workflowId,
+        })),
+      },
+    };
+    const temporalClient = new TemporalClient(client as never);
+
+    await temporalClient.startCheckoutSession({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      eventId: 'evt_1',
+      brandId: 'brd_1',
+      holdId: 'hld_1',
+      currency: 'USD',
+      amountCents: 10_000,
+      feeCents: 500,
+      buyerEmail: 'buyer@example.test',
+      isFreeOrder: false,
+    });
+
+    expect(client.workflow.start).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        workflowId: 'checkout-session:cs_1',
+        args: [expect.objectContaining({ version: 2, checkoutSessionId: 'cs_1' })],
+      }),
+    );
+  });
+});
+
 describe('TemporalClient payment reconciliation', () => {
   it('returns the existing workflow handle when reconciliation was already started', async () => {
     const existingHandle = { workflowId: 'payment-reconciliation:evt_1' };
