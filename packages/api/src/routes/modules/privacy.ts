@@ -546,9 +546,10 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(result.status).send(result.body);
   }
 
-  app.post('/privacy/data-exports', async (request, reply) =>
-    createPrivacyRequest('export', request, reply),
-  );
+  app.post('/privacy/data-exports', async (request, reply) => {
+    ClerkAuthService.requireNoEventScope(request.principal!, 'privacy requests');
+    return createPrivacyRequest('export', request, reply);
+  });
 
   app.post('/privacy/erasures', async (request, reply) => {
     ClerkAuthService.requireNoEventScope(request.principal!, 'privacy requests');

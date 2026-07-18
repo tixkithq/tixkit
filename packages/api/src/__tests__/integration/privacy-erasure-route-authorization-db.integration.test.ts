@@ -145,6 +145,15 @@ async function invokeErasure(key: string, payload: Record<string, string> = eras
   });
 }
 
+async function invokeExport(key: string, payload: Record<string, string> = erasurePayload()) {
+  return app.inject({
+    method: 'POST',
+    url: '/privacy/data-exports',
+    headers: { 'idempotency-key': key },
+    payload,
+  });
+}
+
 function legacyPrivacyRequestId(key: string, payload: Record<string, string>): string {
   const requestHash = hashRequest({ requestType: 'erasure', ...payload });
   const digest = createHash('sha256')
@@ -196,11 +205,11 @@ async function privacyRows() {
     .execute();
 }
 
-async function auditRows() {
+async function auditRows(requestType: 'erasure' | 'export' = 'erasure') {
   return db
     .selectFrom('audit_logs')
     .selectAll()
-    .where('action', '=', 'privacy.erasure.requested')
+    .where('action', '=', `privacy.${requestType}.requested`)
     .where('actor_id', 'in', [actorId, alternateActorId])
     .orderBy('id', 'asc')
     .execute();
@@ -218,7 +227,8 @@ async function idempotencyRows() {
 
 async function expectNoEffects(): Promise<void> {
   expect(await privacyRows()).toEqual([]);
-  expect(await auditRows()).toEqual([]);
+  expect(await auditRows('erasure')).toEqual([]);
+  expect(await auditRows('export')).toEqual([]);
   expect(await idempotencyRows()).toEqual([]);
   expect(startPrivacyRequest).not.toHaveBeenCalled();
 }
@@ -230,7 +240,7 @@ function databaseJson(value: unknown): Record<string, unknown> {
 async function clearWrites(): Promise<void> {
   await db
     .deleteFrom('audit_logs')
-    .where('action', '=', 'privacy.erasure.requested')
+    .where('action', 'in', ['privacy.erasure.requested', 'privacy.export.requested'])
     .where('actor_id', 'in', [actorId, alternateActorId])
     .execute();
   await db
@@ -411,6 +421,100 @@ describeWithIntegrationDatabase(
       expect(rewrittenIdempotency[0]!.response_body).not.toContain(privateEmail);
       expect(rewrittenIdempotency[0]!.response_body).not.toContain(privateSubjectId);
     });
+
+    it('queues one scoped export with one hash-only audit and redacted replay state', async () => {
+      const key = `${keyPrefix}-export-authorized`;
+      const response = await invokeExport(key);
+
+      expect(response.statusCode).toBe(202);
+      const body = response.json<Record<string, unknown>>();
+      expect(body).toMatchObject({
+        tenantId: tenantA,
+        organizationId: organizationA,
+        brandId: brandA,
+        requestType: 'export',
+        subjectType: 'buyer',
+        subjectId: null,
+        subjectEmail: null,
+        status: 'pending',
+        requestedBy: actorId,
+      });
+      expect(await privacyRows()).toMatchObject([
+        {
+          id: body.id,
+          request_type: 'export',
+          subject_id: privateSubjectId,
+          subject_email: privateEmail,
+        },
+      ]);
+      const audits = await auditRows('export');
+      expect(audits).toHaveLength(1);
+      expect(databaseJson(audits[0]!.diff_summary)).toEqual({
+        requestType: 'export',
+        subjectType: 'buyer',
+        subjectSha256: hashRequest({
+          subjectType: 'buyer',
+          subjectId: privateSubjectId,
+          subjectEmail: privateEmail,
+        }),
+      });
+      expect(JSON.stringify(audits[0])).not.toContain(privateEmail);
+      expect(JSON.stringify(audits[0])).not.toContain(privateSubjectId);
+      const idempotency = await idempotencyRows();
+      expect(idempotency).toMatchObject([{ key, status: 'completed', response_status: 202 }]);
+      expect(idempotency[0]!.response_body).not.toContain(privateEmail);
+      expect(idempotency[0]!.response_body).not.toContain(privateSubjectId);
+      expect(startPrivacyRequest).toHaveBeenCalledOnce();
+      expect(startPrivacyRequest).toHaveBeenCalledWith({ requestId: body.id });
+    });
+
+    it.each([
+      ['permission', () => principal({ scopes: [] }), erasurePayload(), 403, 'FORBIDDEN'],
+      [
+        'tenant',
+        () => principal({ organizationIds: [organizationB], brandIds: undefined }),
+        erasurePayload({ organizationId: organizationB, brandId: undefined }),
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'organization',
+        () => principal({ organizationIds: [organizationA], brandIds: undefined }),
+        erasurePayload({ organizationId: organizationScoped, brandId: undefined }),
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => principal({ brandIds: [brandA] }),
+        erasurePayload({ brandId: brandScoped }),
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event policy',
+        () => principal({ eventIds: [`evt_privacy_${runId}`] }),
+        erasurePayload(),
+        403,
+        'FORBIDDEN',
+      ],
+      [
+        'brand scope requires brand',
+        () => principal({ brandIds: [brandA] }),
+        erasurePayload({ brandId: undefined }),
+        403,
+        'FORBIDDEN',
+      ],
+    ] as const)(
+      'rejects the export %s denial before every persistent or workflow effect',
+      async (_boundary, buildPrincipal, payload, status, code) => {
+        activePrincipal = buildPrincipal();
+        const response = await invokeExport(`${keyPrefix}-export-denial-${_boundary}`, payload);
+        expect(response.statusCode).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        await expectNoEffects();
+      },
+    );
 
     it('sanitizes and rewrites a completed pre-actor-hash idempotency replay', async () => {
       const key = `${keyPrefix}-legacy-completed`;

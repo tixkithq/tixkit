@@ -275,7 +275,7 @@ function evidenceBindings(
 }
 
 const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
-  ...evidenceBindings(['postPrivacyErasures'], {
+  ...evidenceBindings(['postPrivacyDataExports', 'postPrivacyErasures'], {
     source: 'privacy-erasure-route-authorization-db.integration.test.ts',
     persistenceSource: 'privacy-erasure-route-authorization-db.integration.test.ts',
   }),

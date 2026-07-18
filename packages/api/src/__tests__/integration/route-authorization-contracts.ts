@@ -1306,6 +1306,25 @@ export const PRIVACY_ERASURE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freez
   }),
 ]);
 
+export const PRIVACY_EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 202 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand'],
+    method: 'POST',
+    operationId: 'postPrivacyDataExports',
+    path: '/privacy/data-exports',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyDeniedBoundaries: ['event'],
+    persistenceSource: 'privacy-erasure-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'privacy-erasure-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -1342,4 +1361,5 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PRIVACY_ERASURE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...PRIVACY_EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);
