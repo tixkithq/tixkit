@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import test from 'node:test';
-import { providerClientBoundaryViolations as inspectProviderClientBoundary } from '../lib/provider-client-boundary.mjs';
+import {
+  providerClientBoundaryViolations as inspectProviderClientBoundary,
+  providerSourceBoundaryFindings,
+} from '../lib/provider-client-boundary.mjs';
 import {
   loadProviderIntegrationRegistry,
+  registryHostPolicies,
+  registryImportPolicies,
+  registryNonProviderHostPolicies,
+  registryTransportExecutorPolicies,
+  registryTransportExecutors,
   sourceSha256,
 } from '../lib/provider-integration-registry.mjs';
 
@@ -38,6 +47,40 @@ function registryWithFixtureDigests(files) {
   }
   return candidate;
 }
+
+test('bounds generic read-method analysis on a large Fastify route module', () => {
+  const path = 'packages/api/src/routes/modules/checkin.ts';
+  const source = readFileSync(resolve(repositoryRoot, path), 'utf8');
+  const startedAt = performance.now();
+  const findings = providerSourceBoundaryFindings(
+    path,
+    source,
+    registryHostPolicies(registry),
+    registryImportPolicies(registry),
+    registryNonProviderHostPolicies(registry),
+    registryTransportExecutors(registry),
+    registryTransportExecutorPolicies(registry),
+  );
+  const durationMs = performance.now() - startedAt;
+
+  assert.deepEqual(findings, {
+    hosts: [],
+    sdkPackages: [],
+    unknownHosts: [],
+    unresolvedDynamicLoads: false,
+    unapprovedDynamicNetwork: false,
+    unapprovedProviderNetwork: false,
+    dynamicNetworkEnvironmentVariables: [],
+    dynamicNetworkTargetKinds: [],
+    dynamicNetworkTargetSources: [],
+    dynamicNetworkTargets: [],
+    unapprovedTransportExecutorUse: false,
+  });
+  assert.ok(
+    durationMs < 5_000,
+    `provider boundary analysis exceeded 5 seconds (${durationMs.toFixed(1)} ms)`,
+  );
+});
 
 test('accepts provider-owned clients with webhook verification behind the boundary', () => {
   const root = fixture({

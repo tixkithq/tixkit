@@ -429,7 +429,7 @@
         "type": "workspace-export",
         "path": "packages/sdk-js/src/index.ts",
         "export": "issueTixkitApiRequestUrl",
-        "sha256": "7e99dbe2c9adee3cde22c10ef2105cb92b7b6839d2877e9fed5ad3f5e53e6d68"
+        "sha256": "c3bf446a1fb0717f10539656ec12323f7e1ab70f6e92f3d5e5ac7207c5568729"
       },
       "allowedSinks": [
         {
