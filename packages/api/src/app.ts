@@ -121,6 +121,10 @@ export type AppContext = {
     eventId: string;
     provider: 'ga4' | 'meta_pixel' | 'generic_tag';
   }) => void | Promise<void>;
+  questionReorderCheckpoint?: (input: {
+    stage: 'before_transaction';
+    eventId: string;
+  }) => void | Promise<void>;
   eventPagePublishCheckpoint?: (input: {
     stage: 'after_event_locked';
     eventId: string;

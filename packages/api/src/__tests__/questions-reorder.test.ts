@@ -60,6 +60,8 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
     tenant_id: 'tnt_1',
     organization_id: 'org_1',
     brand_id: 'brd_1',
+    version: 1,
+    public_revision: new Date('2026-01-01T00:00:00.000Z'),
   };
 
   const createQuery = (table: string) => {
@@ -70,6 +72,7 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
         whereCalls.push(args);
         return query;
       },
+      forUpdate: () => query,
       orderBy: () => query,
       async executeTakeFirst() {
         if (table !== 'events') return undefined;
@@ -117,6 +120,14 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
           }
           return [];
         },
+        returningAll: () => ({
+          executeTakeFirstOrThrow: async () => {
+            if (table !== 'events') throw new Error(`No mock returned row for ${table}`);
+            event.version += 1;
+            event.public_revision = new Date();
+            return { ...event };
+          },
+        }),
       };
       return update;
     },
@@ -125,6 +136,11 @@ function createQuestionReorderDb(rows: QuestionRow[], failOnQuestionId?: string)
   const mockDb = {
     selectFrom: createQuery,
     updateTable: createUpdate,
+    insertInto: () => ({
+      values: (value: Record<string, unknown>) => ({
+        returningAll: () => ({ executeTakeFirstOrThrow: async () => value }),
+      }),
+    }),
     transaction: () => ({
       execute: async (fn: (trx: typeof mockDb) => Promise<unknown>) => {
         const snapshot = rows.map((row) => ({ ...row }));
@@ -359,6 +375,26 @@ describe('question reorder route', () => {
       ['q_second', 1],
     ]);
 
+    await app.close();
+  });
+
+  it('rejects unknown nested reorder properties before updating any rows', async () => {
+    const rows = [question('q_first', 0), question('q_second', 1)];
+    const app = await buildQuestionApp(createQuestionReorderDb(rows) as unknown as Database);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/questions/reorder',
+      payload: {
+        questions: [{ id: 'q_first', sortOrder: 1, unexpected: true }],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(rows.map((row) => [row.id, row.sort_order])).toEqual([
+      ['q_first', 0],
+      ['q_second', 1],
+    ]);
     await app.close();
   });
 });

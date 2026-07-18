@@ -1098,10 +1098,12 @@ export const reorderQuestionsSchema = z
   .object({
     questions: z
       .array(
-        z.object({
-          id: ulidSchema,
-          sortOrder: z.number().int(),
-        }),
+        z
+          .object({
+            id: ulidSchema,
+            sortOrder: z.number().int(),
+          })
+          .strict(),
       )
       .min(1),
   })

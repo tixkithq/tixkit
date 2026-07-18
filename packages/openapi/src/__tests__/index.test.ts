@@ -2761,9 +2761,13 @@ describe('openApiSpec', () => {
       $ref: '#/components/schemas/QuestionPage',
     });
     expect(openApiSpec.components.schemas.ReorderQuestionsRequest).toMatchObject({
+      additionalProperties: false,
       required: ['questions'],
       properties: {
-        questions: expect.objectContaining({ minItems: 1 }),
+        questions: expect.objectContaining({
+          minItems: 1,
+          items: expect.objectContaining({ additionalProperties: false }),
+        }),
       },
     });
   });

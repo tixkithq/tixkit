@@ -83,6 +83,10 @@ export type NegativeAuthorizationEvidence = {
 
 const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
+    'question-reorder-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'question-reorder-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'marketing-integration-route-authorization-db.integration.test.ts',
     resolve(
       import.meta.dirname,
@@ -403,6 +407,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['putEventsByEventIdMarketingIntegrationsByProvider'], {
     source: 'marketing-integration-route-authorization-db.integration.test.ts',
     persistenceSource: 'marketing-integration-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postEventsByEventIdQuestionsReorder'], {
+    source: 'question-reorder-route-authorization-db.integration.test.ts',
+    persistenceSource: 'question-reorder-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(
     ['getOrdersByOrderId', 'getOrdersByOrderIdInvoice', 'getOrdersByOrderIdInvoiceDownload'],

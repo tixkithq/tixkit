@@ -5863,12 +5863,14 @@ const rawOpenApiSpec = {
       },
       ReorderQuestionsRequest: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           questions: {
             type: 'array',
             minItems: 1,
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
                 id: { type: 'string' },
                 sortOrder: { type: 'integer' },

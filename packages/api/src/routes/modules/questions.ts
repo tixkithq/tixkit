@@ -1,7 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { EventRepository, bumpEventPublicRevision, getDriver, type Database } from '@tixkit/db';
+import {
+  AuditLogRepository,
+  EventRepository,
+  bumpEventPublicRevision,
+  getDriver,
+  type Database,
+} from '@tixkit/db';
+import { writeAuditLog } from '../../auth/audit.js';
 import {
   ConflictError,
   NotFoundError,
@@ -209,20 +216,33 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Duplicate question IDs are not allowed in a reorder request');
     }
 
-    const existing = await db
-      .selectFrom('questions')
-      .selectAll()
-      .where('event_id', '=', eventId)
-      .where('id', 'in', questionIds)
-      .execute();
-    if (existing.length !== questionIds.length) {
-      throw new NotFoundError(
-        'Question',
-        questionIds.find((id) => !existing.some((question) => question.id === id)) ?? eventId,
-      );
-    }
+    await app.context.questionReorderCheckpoint?.({ stage: 'before_transaction', eventId });
 
-    await db.transaction().execute(async (trx) => {
+    const rows = await db.transaction().execute(async (trx) => {
+      const currentEvent = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentEvent) throw new NotFoundError('Event', eventId);
+      requireEventAccess(principal, currentEvent, eventId);
+      const existing = await trx
+        .selectFrom('questions')
+        .selectAll()
+        .where('event_id', '=', eventId)
+        .where('id', 'in', questionIds)
+        .forUpdate()
+        .execute();
+      if (existing.length !== questionIds.length) {
+        throw new NotFoundError(
+          'Question',
+          questionIds.find((id) => !existing.some((question) => question.id === id)) ?? eventId,
+        );
+      }
+      const before = existing
+        .map((question) => ({ id: question.id, sortOrder: Number(question.sort_order) }))
+        .sort((left, right) => left.id.localeCompare(right.id));
       const revision = new Date();
       for (const question of body.questions) {
         // eslint-disable-next-line no-await-in-loop -- reorder updates run sequentially on one transaction connection for deterministic rollback behavior.
@@ -233,17 +253,38 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
           .where('id', '=', question.id)
           .execute();
       }
-      await bumpEventPublicRevision(trx, eventId, revision);
+      const updatedEvent = await new EventRepository(trx).update(eventId, {});
+      const reordered = await trx
+        .selectFrom('questions')
+        .selectAll()
+        .where('event_id', '=', eventId)
+        .where('id', 'in', questionIds)
+        .orderBy('sort_order', 'asc')
+        .orderBy('id', 'asc')
+        .execute();
+      await writeAuditLog(
+        new AuditLogRepository(trx),
+        request,
+        principal,
+        {
+          action: 'event.questions.reordered',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'Event',
+          resourceId: eventId,
+          diffSummary: {
+            before,
+            after: reordered
+              .map((question) => ({ id: question.id, sortOrder: Number(question.sort_order) }))
+              .sort((left, right) => left.id.localeCompare(right.id)),
+            previousVersion: Number(currentEvent.version),
+            newVersion: Number(updatedEvent.version),
+          },
+        },
+        { failClosed: true },
+      );
+      return reordered;
     });
-
-    const rows = await db
-      .selectFrom('questions')
-      .selectAll()
-      .where('event_id', '=', eventId)
-      .where('id', 'in', questionIds)
-      .orderBy('sort_order', 'asc')
-      .orderBy('id', 'asc')
-      .execute();
 
     return pageEnvelope(
       rows.filter((row) => !isHiddenQuestion(row)).map((row) => serializeQuestion(row)),
