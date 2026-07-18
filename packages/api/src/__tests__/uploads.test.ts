@@ -4619,6 +4619,122 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
+  it('serves public event media renditions with immutable cache and resource-timing evidence', async () => {
+    const { Readable } = await import('node:stream');
+    const renditionQuery = {
+      innerJoin: vi.fn(function (this: typeof renditionQuery) {
+        return this;
+      }),
+      select: vi.fn(function (this: typeof renditionQuery) {
+        return this;
+      }),
+      where: vi.fn(function (
+        this: typeof renditionQuery,
+        _column: string,
+        _operator: string,
+        _value: unknown,
+      ) {
+        return this;
+      }),
+      async executeTakeFirst() {
+        return {
+          bucket: 'tixkit',
+          object_key: 'event-media/tnt_1/evt_1/ema_1/emr_public.webp',
+          content_type: 'image/webp',
+          variant: 'page',
+          checksum_sha256: 'a'.repeat(64),
+          event_id: 'evt_1',
+        };
+      },
+    };
+    const db = {
+      selectFrom: vi.fn(() => renditionQuery),
+    } as unknown as Database;
+    const app = await setupUploadApp(db, publicUploadRoutes);
+    const rendition = Buffer.from('optimized-event-media');
+    s3Send.mockResolvedValueOnce({
+      Body: Readable.from([rendition]),
+      ContentType: 'image/webp',
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/public/event-media/renditions/emr_public',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(rendition.toString());
+    expect(response.headers['content-type']).toBe('image/webp');
+    expect(response.headers['content-disposition']).toContain('inline');
+    expect(response.headers['content-disposition']).toContain('evt_1-page.webp');
+    expect(response.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect(response.headers.etag).toBe(`"${'a'.repeat(64)}"`);
+    expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    expect(response.headers['timing-allow-origin']).toBe('*');
+    expect(renditionQuery.where).toHaveBeenCalledWith('rendition.id', '=', 'emr_public');
+    expect(renditionQuery.where).toHaveBeenCalledWith('event.status', '=', 'published');
+    expect(renditionQuery.where).toHaveBeenCalledWith('event.visibility', '!=', 'private');
+    await app.close();
+  });
+
+  it.each([
+    ['unpublished rendition', 'emr_unpublished'],
+    ['private-event rendition', 'emr_private'],
+    ['original upload artifact id', 'upl_original'],
+  ])('never streams a %s through the public rendition route', async (_label, renditionId) => {
+    const unsafeRow = {
+      bucket: 'tixkit',
+      object_key: `event-media/tnt_1/evt_1/ema_1/${renditionId}.webp`,
+      content_type: 'image/webp',
+      variant: 'page',
+      checksum_sha256: 'b'.repeat(64),
+      event_id: 'evt_1',
+    };
+    const renditionQuery = {
+      innerJoin: vi.fn(function (this: typeof renditionQuery) {
+        return this;
+      }),
+      select: vi.fn(function (this: typeof renditionQuery) {
+        return this;
+      }),
+      where: vi.fn(function (
+        this: typeof renditionQuery,
+        _column: string,
+        _operator: string,
+        _value: unknown,
+      ) {
+        return this;
+      }),
+      executeTakeFirst: vi.fn(async () => {
+        if (renditionId === 'upl_original') return undefined;
+        const hasPublicationGuard = renditionQuery.where.mock.calls.some(
+          (call) => call[0] === 'event.status' && call[1] === '=' && call[2] === 'published',
+        );
+        const hasVisibilityGuard = renditionQuery.where.mock.calls.some(
+          (call) => call[0] === 'event.visibility' && call[1] === '!=' && call[2] === 'private',
+        );
+        if (renditionId === 'emr_unpublished') {
+          return hasPublicationGuard ? undefined : unsafeRow;
+        }
+        return hasVisibilityGuard ? undefined : unsafeRow;
+      }),
+    };
+    const db = {
+      selectFrom: vi.fn(() => renditionQuery),
+    } as unknown as Database;
+    const app = await setupUploadApp(db, publicUploadRoutes);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/public/event-media/renditions/${renditionId}`,
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    expect(s3Send).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('rejects non-content-email-image artifacts via the public content email image route', async () => {
     const { db } = createMockDb({
       upload_artifacts: [

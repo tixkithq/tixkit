@@ -317,6 +317,7 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
     reply.header('ETag', `"${checksumSha256}"`);
     reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+    reply.header('Timing-Allow-Origin', '*');
     return reply.send(stream);
   });
 };

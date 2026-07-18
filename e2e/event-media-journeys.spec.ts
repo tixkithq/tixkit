@@ -53,6 +53,30 @@ async function installLargestContentfulPaintObserver(page: Page) {
   });
 }
 
+async function readEventMediaResourceTiming(page: Page, renditionPath: string) {
+  return page.evaluate((expectedPath) => {
+    const entries = performance
+      .getEntriesByType('resource')
+      .filter((entry): entry is PerformanceResourceTiming => {
+        if (!(entry instanceof PerformanceResourceTiming)) return false;
+        try {
+          return new URL(entry.name).pathname === expectedPath;
+        } catch {
+          return false;
+        }
+      });
+    const entry = entries.at(-1);
+    return entry
+      ? {
+          encodedBodySize: entry.encodedBodySize,
+          decodedBodySize: entry.decodedBodySize,
+          transferSize: entry.transferSize,
+          origin: new URL(entry.name).origin,
+        }
+      : undefined;
+  }, renditionPath);
+}
+
 declare global {
   interface Window {
     __tixkitLargestContentfulPaint: number;
@@ -183,13 +207,32 @@ test.describe('role-based event media journeys', () => {
     const replacementResponse = await replaced;
     expect(replacementResponse.status()).toBe(200);
     const replacementMedia = (await replacementResponse.json()) as {
-      renditions: Array<{ variant: string; url: string }>;
+      renditions: Array<{
+        variant: string;
+        url: string;
+        sizeBytes: number;
+        checksumSha256: string;
+      }>;
     };
+    const replacementPage = replacementMedia.renditions.find(
+      (rendition) => rendition.variant === 'page',
+    );
     const replacementSocialUrl = replacementMedia.renditions.find(
       (rendition) => rendition.variant === 'social',
     )?.url;
+    expect(replacementPage).toBeTruthy();
+    expect(replacementPage!.sizeBytes).toBeLessThanOrEqual(600_000);
+    expect(replacementPage!.checksumSha256).toMatch(/^[a-f0-9]{64}$/u);
+    const replacementDelivery = await request.get(new URL(replacementPage!.url, apiBaseUrl).href);
+    expect(replacementDelivery.status()).toBe(200);
+    const replacementBytes = await replacementDelivery.body();
+    expect(replacementBytes.byteLength).toBe(replacementPage!.sizeBytes);
+    expect(createHash('sha256').update(replacementBytes).digest('hex')).toBe(
+      replacementPage!.checksumSha256,
+    );
     expect(replacementSocialUrl).toBeTruthy();
     const expectedSocialUrl = new URL(replacementSocialUrl!, apiBaseUrl).href;
+    const expectedPagePath = new URL(replacementPage!.url, apiBaseUrl).pathname;
     await expect
       .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-replaced'))
       .toHaveLength(8);
@@ -200,6 +243,16 @@ test.describe('role-based event media journeys', () => {
     );
 
     await installLargestContentfulPaintObserver(page);
+    const buyerMediaRequestPaths: string[] = [];
+    page.on('request', (request) => {
+      const path = new URL(request.url()).pathname;
+      if (
+        path.includes('/event-media/') ||
+        path.includes('/media/renditions/') ||
+        path.includes('/upload-artifacts/')
+      )
+        buyerMediaRequestPaths.push(path);
+    });
     const viewports = testInfo.project.name.startsWith('mobile-')
       ? [responsiveMediaViewports[0]]
       : responsiveMediaViewports;
@@ -210,7 +263,7 @@ test.describe('role-based event media journeys', () => {
       await expect(page.getByRole('heading', { name: seeded.event.title })).toBeVisible();
       const buyerPoster = page.getByAltText(altText);
       await expect(buyerPoster).toBeVisible();
-      await expect(buyerPoster).toHaveAttribute('src', /\/v1\/public\/event-media\/renditions\//u);
+      await expect(buyerPoster).toHaveAttribute('src', replacementPage!.url);
       await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
         'content',
         expectedSocialUrl,
@@ -220,6 +273,16 @@ test.describe('role-based event media journeys', () => {
         expectedSocialUrl,
       );
       await buyerPoster.evaluate((image: HTMLImageElement) => image.decode());
+      const initialTiming = await readEventMediaResourceTiming(page, expectedPagePath);
+      expect(
+        initialTiming,
+        `${viewport.name} page rendition timing should be visible`,
+      ).toBeDefined();
+      expect(initialTiming!.encodedBodySize).toBeGreaterThan(0);
+      expect(initialTiming!.encodedBodySize).toBeLessThanOrEqual(replacementPage!.sizeBytes);
+      expect(initialTiming!.decodedBodySize).toBeGreaterThan(0);
+      expect(initialTiming!.transferSize).toBeGreaterThanOrEqual(0);
+      expect(initialTiming!.origin).toBe(new URL(replacementPage!.url, page.url()).origin);
       const performance = await buyerPoster.evaluate((image: HTMLImageElement) => {
         return {
           naturalWidth: image.naturalWidth,
@@ -248,7 +311,23 @@ test.describe('role-based event media journeys', () => {
         expect(settledLargestContentfulPaint).toBeLessThanOrEqual(4_000);
       }
       await expectNoAxeViolations(page, testInfo, 'main');
+
+      await page.reload();
+      const cachedBuyerPoster = page.getByAltText(altText);
+      await expect(cachedBuyerPoster).toBeVisible();
+      await cachedBuyerPoster.evaluate((image: HTMLImageElement) => image.decode());
+      const cachedTiming = await readEventMediaResourceTiming(page, expectedPagePath);
+      expect(
+        cachedTiming,
+        `${viewport.name} cached rendition timing should be visible`,
+      ).toBeDefined();
+      expect(cachedTiming!.encodedBodySize).toBe(initialTiming!.encodedBodySize);
+      expect(cachedTiming!.decodedBodySize).toBe(initialTiming!.decodedBodySize);
+      expect(cachedTiming!.transferSize).toBeGreaterThanOrEqual(0);
+      expect(cachedTiming!.origin).toBe(initialTiming!.origin);
     }
+    expect(buyerMediaRequestPaths.length).toBeGreaterThan(0);
+    expect([...new Set(buyerMediaRequestPaths)]).toEqual([expectedPagePath]);
 
     await page.setViewportSize(
       testInfo.project.name.startsWith('mobile-')
