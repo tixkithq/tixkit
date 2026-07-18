@@ -341,15 +341,40 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(resalePolicySchema, request.body);
 
-    const eventRepo = new EventRepository(db);
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-    const updated = await eventRepo.update(eventId, {
-      resale_enabled: body.enabled,
-      resale_max_multiplier: body.maxMultiplier,
-      resale_max_absolute_cents: body.maxAbsoluteCents ?? null,
+    await app.context.resalePolicyCheckpoint?.({ stage: 'before_transaction', eventId });
+
+    return db.transaction().execute(async (transaction) => {
+      const currentEvent = await loadAuthorizedEventForUpdate(transaction, principal, eventId);
+      const before = serializeResalePolicy(currentEvent);
+      const updated = await new EventRepository(transaction).update(eventId, {
+        resale_enabled: body.enabled,
+        resale_max_multiplier: body.maxMultiplier,
+        resale_max_absolute_cents: body.maxAbsoluteCents ?? null,
+      });
+      const after = serializeResalePolicy(updated);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'event.resale_policy.updated',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'Event',
+          resourceId: eventId,
+          diffSummary: {
+            before,
+            after,
+            previousVersion: Number(currentEvent.version),
+            newVersion: Number(updated.version),
+          },
+        },
+        { failClosed: true },
+      );
+      return after;
     });
-    return serializeResalePolicy(updated);
   });
 
   app.get('/events/:eventId/resale-listings', async (request) => {

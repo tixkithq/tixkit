@@ -577,7 +577,7 @@ export type PublicEvent = {
 export type ResalePolicy = {
   enabled: boolean;
   maxMultiplier: number;
-  maxAbsoluteCents?: number;
+  maxAbsoluteCents?: number | null;
 };
 
 export type FeeRule = {

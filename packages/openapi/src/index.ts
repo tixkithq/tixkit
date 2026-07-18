@@ -3067,10 +3067,11 @@ const rawOpenApiSpec = {
       },
       ResalePolicy: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           enabled: { type: 'boolean' },
           maxMultiplier: { type: 'number', minimum: 0 },
-          maxAbsoluteCents: { type: 'integer', minimum: 0 },
+          maxAbsoluteCents: { type: ['integer', 'null'], minimum: 0 },
         },
         required: ['enabled', 'maxMultiplier'],
       },

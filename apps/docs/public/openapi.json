@@ -4776,6 +4776,7 @@
       },
       "ResalePolicy": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "enabled": {
             "type": "boolean"
@@ -4785,7 +4786,10 @@
             "minimum": 0
           },
           "maxAbsoluteCents": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0
           }
         },
