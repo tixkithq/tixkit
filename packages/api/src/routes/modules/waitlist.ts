@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { ulid } from 'ulid';
 import { AuditLogRepository, EventRepository, getDriver, type Database } from '@tixkit/db';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import { ConflictError, NotFoundError, ValidationError } from '@tixkit/domain';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
 import { parseBody } from '../../http/schemas.js';
@@ -19,25 +19,18 @@ const joinWaitlistSchema = z
   })
   .strict();
 
+const waitlistOfferTtlMinutesSchema = z.number().int().min(5).max(60 * 24 * 14);
+
 const offerWaitlistSchema = z
   .object({
-    expiresInMinutes: z
-      .number()
-      .int()
-      .min(5)
-      .max(60 * 24 * 14)
-      .default(60 * 24),
+    expiresInMinutes: waitlistOfferTtlMinutesSchema,
   })
   .strict();
 
 const waitlistSettingsSchema = z
   .object({
     autoOfferEnabled: z.boolean(),
-    offerTtlMinutes: z
-      .number()
-      .int()
-      .min(5)
-      .max(60 * 24 * 14),
+    offerTtlMinutes: waitlistOfferTtlMinutesSchema,
   })
   .strict();
 
@@ -282,17 +275,33 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { eventId, entryId } = request.params as { eventId: string; entryId: string };
-    const body = parseBody(offerWaitlistSchema.partial(), request.body);
+    const body = parseBody(offerWaitlistSchema.partial(), request.body ?? {});
     const event = await new EventRepository(db).findById(eventId);
     if (!event) throw new NotFoundError('Event', eventId);
     ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
+    await app.context.waitlistOfferCheckpoint?.({
+      stage: 'before_transaction',
+      eventId,
+      entryId,
+    });
 
     const token = randomBytes(24).toString('base64url');
     const updated = await db.transaction().execute(async (trx) => {
       const now = new Date();
+      const currentEvent = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentEvent) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, currentEvent, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, currentEvent.organization_id);
+      ClerkAuthService.requireBrandScope(principal, currentEvent.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
       const entry = await trx
         .selectFrom('waitlist_entries')
         .selectAll()
@@ -301,21 +310,32 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
         .forUpdate()
         .executeTakeFirst();
       if (!entry) throw new NotFoundError('WaitlistEntry', entryId);
+      if (
+        entry.tenant_id !== currentEvent.tenant_id ||
+        entry.organization_id !== currentEvent.organization_id ||
+        entry.brand_id !== currentEvent.brand_id
+      ) {
+        throw new NotFoundError('WaitlistEntry', entryId);
+      }
       if (entry.status !== 'joined') {
-        throw new ValidationError('Only joined waitlist entries can be offered');
+        throw new ConflictError('Only joined waitlist entries can be offered');
       }
 
       const ticketType = await trx
         .selectFrom('ticket_types')
         .selectAll()
         .where('id', '=', entry.ticket_type_id)
-        .executeTakeFirstOrThrow();
+        .where('event_id', '=', eventId)
+        .executeTakeFirst();
+      if (!ticketType) throw new NotFoundError('WaitlistEntry', entryId);
       const pool = await trx
         .selectFrom('inventory_pools')
         .select(['total_capacity', 'sold_count'])
         .where('id', '=', ticketType.inventory_pool_id)
+        .where('event_id', '=', eventId)
         .forUpdate()
-        .executeTakeFirstOrThrow();
+        .executeTakeFirst();
+      if (!pool) throw new NotFoundError('WaitlistEntry', entryId);
       const activeHolds = await trx
         .selectFrom('checkout_holds')
         .select(({ fn }) => fn.sum<number>('quantity').as('quantity'))
@@ -343,11 +363,15 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
         activeOffersQuantity: Number(activeOffers?.quantity ?? 0),
       });
       if (available < Number(entry.quantity)) {
-        throw new ValidationError('Not enough freed capacity to issue this waitlist offer');
+        throw new ConflictError('Not enough freed capacity to issue this waitlist offer');
       }
 
       const expiresInMinutes =
-        body.expiresInMinutes ?? Number(event.waitlist_offer_ttl_minutes ?? 60 * 24);
+        body.expiresInMinutes ??
+        parseBody(
+          waitlistOfferTtlMinutesSchema,
+          Number(currentEvent.waitlist_offer_ttl_minutes ?? 60 * 24),
+        );
       const offerExpiresAt = new Date(now.getTime() + expiresInMinutes * 60_000);
       const updateQuery = trx
         .updateTable('waitlist_entries')
@@ -360,19 +384,36 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
         })
         .where('id', '=', entryId)
         .where('status', '=', 'joined');
-      if (getDriver() === 'postgres') {
-        return updateQuery.returningAll().executeTakeFirstOrThrow();
-      }
-
-      const result = await updateQuery.executeTakeFirst();
-      if (Number(result.numUpdatedRows ?? 0) !== 1) {
-        throw new ValidationError('Only joined waitlist entries can be offered');
-      }
-      return trx
-        .selectFrom('waitlist_entries')
-        .selectAll()
-        .where('id', '=', entryId)
-        .executeTakeFirstOrThrow();
+      const persisted =
+        getDriver() === 'postgres'
+          ? await updateQuery.returningAll().executeTakeFirst()
+          : await updateQuery.executeTakeFirst().then(async (result) => {
+              if (Number(result.numUpdatedRows ?? 0) !== 1) return undefined;
+              return trx
+                .selectFrom('waitlist_entries')
+                .selectAll()
+                .where('id', '=', entryId)
+                .executeTakeFirst();
+            });
+      if (!persisted) throw new ConflictError('Only joined waitlist entries can be offered');
+      await writeAuditLog(
+        new AuditLogRepository(trx),
+        request,
+        principal,
+        {
+          action: 'event.waitlist.offer.created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'WaitlistEntry',
+          resourceId: entryId,
+          diffSummary: {
+            before: publicEntry(entry),
+            after: publicEntry(persisted),
+          },
+        },
+        { failClosed: true },
+      );
+      return persisted;
     });
 
     return { entry: publicEntry(updated), claimToken: token };

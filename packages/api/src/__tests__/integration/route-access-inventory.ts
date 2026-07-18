@@ -83,6 +83,10 @@ export type NegativeAuthorizationEvidence = {
 
 const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
+    'waitlist-offer-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'waitlist-offer-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'waitlist-settings-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'waitlist-settings-route-authorization-db.integration.test.ts'),
   ],
@@ -415,6 +419,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['postEventsByEventIdQuestionsReorder'], {
     source: 'question-reorder-route-authorization-db.integration.test.ts',
     persistenceSource: 'question-reorder-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postEventsByEventIdWaitlistByEntryIdOffer'], {
+    source: 'waitlist-offer-route-authorization-db.integration.test.ts',
+    persistenceSource: 'waitlist-offer-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['patchEventsByEventIdWaitlistSettings'], {
     source: 'waitlist-settings-route-authorization-db.integration.test.ts',

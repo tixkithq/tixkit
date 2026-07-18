@@ -10342,12 +10342,12 @@ const rawOpenApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
                   expiresInMinutes: {
                     type: 'integer',
                     minimum: 5,
-                    maximum: 10080,
-                    default: 1440,
+                    maximum: 20160,
                   },
                 },
               },

@@ -96,6 +96,24 @@ describe('openApiSpec', () => {
     ).toEqual({ $ref: '#/components/schemas/WaitlistSettings' });
   });
 
+  it('keeps manual waitlist offers strict and aligned with runtime conflicts', () => {
+    const operation = openApiSpec.paths['/events/{eventId}/waitlist/{entryId}/offer'].post;
+    const body = operation.requestBody.content['application/json'].schema;
+
+    expect(body).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        expiresInMinutes: {
+          type: 'integer',
+          minimum: 5,
+          maximum: 20160,
+        },
+      },
+    });
+    expect(operation.responses['409']).toBeDefined();
+  });
+
   it('documents event media purposes and safe test checkout tagging', () => {
     expect(openApiSpec.components.schemas.CreateUploadArtifact.properties.purpose.enum).toEqual(
       expect.arrayContaining(['event_poster', 'event_cover', 'event_social', 'event_seo_image']),

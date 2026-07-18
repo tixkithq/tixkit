@@ -129,6 +129,11 @@ export type AppContext = {
     stage: 'before_transaction';
     eventId: string;
   }) => void | Promise<void>;
+  waitlistOfferCheckpoint?: (input: {
+    stage: 'before_transaction';
+    eventId: string;
+    entryId: string;
+  }) => void | Promise<void>;
   eventPagePublishCheckpoint?: (input: {
     stage: 'after_event_locked';
     eventId: string;
