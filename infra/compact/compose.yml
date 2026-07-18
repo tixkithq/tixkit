@@ -184,6 +184,8 @@ services:
       context: ../..
       dockerfile: Dockerfile.api
     restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1g
     environment:
       <<: *app-environment
       PORT: 4000
@@ -234,6 +236,8 @@ services:
       context: ../..
       dockerfile: Dockerfile.worker
     restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1g
     environment:
       <<: *app-environment
       TIXKIT_PORTABILITY_IMPORT_TRUST: ${TIXKIT_PORTABILITY_IMPORT_TRUST:-}

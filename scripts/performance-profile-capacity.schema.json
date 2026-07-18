@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.tixkit.com/performance/supported-profile-capacity-v1.json",
+  "$id": "https://schemas.tixkit.com/performance/supported-profile-capacity-v2.json",
   "oneOf": [{ "$ref": "#/$defs/config" }, { "$ref": "#/$defs/evidence" }],
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
@@ -95,7 +95,7 @@
       "required": ["$schema", "schemaVersion", "claimScope", "denials", "profiles"],
       "properties": {
         "$schema": { "const": "./scripts/performance-profile-capacity.schema.json" },
-        "schemaVersion": { "const": "tixkit-supported-profile-capacity-config-v1" },
+        "schemaVersion": { "const": "tixkit-supported-profile-capacity-config-v2" },
         "claimScope": { "const": "supported-profile-capacity-eligibility" },
         "denials": {
           "const": [
@@ -119,17 +119,23 @@
       "additionalProperties": false,
       "required": [
         "attempts",
+        "rounds",
+        "reservationActiveLoadMs",
         "successes",
         "expectedInventoryDeclines",
         "platformFailures",
-        "successfulReservationP95Ms"
+        "successfulReservationP95Ms",
+        "finalHeld"
       ],
       "properties": {
         "attempts": { "type": "integer", "minimum": 1 },
+        "rounds": { "type": "integer", "minimum": 1 },
+        "reservationActiveLoadMs": { "type": "integer", "minimum": 0 },
         "successes": { "type": "integer", "minimum": 0 },
         "expectedInventoryDeclines": { "type": "integer", "minimum": 0 },
         "platformFailures": { "type": "integer", "minimum": 0 },
-        "successfulReservationP95Ms": { "type": "number", "minimum": 0 }
+        "successfulReservationP95Ms": { "type": "number", "minimum": 0 },
+        "finalHeld": { "type": "integer", "minimum": 0 }
       }
     },
     "sample": {
@@ -143,6 +149,7 @@
         "completedAt",
         "elapsedMs",
         "runtime",
+        "fixtureSha256",
         "rawSha256",
         "metrics"
       ],
@@ -154,6 +161,7 @@
         "completedAt": { "type": "string", "format": "date-time" },
         "elapsedMs": { "type": "integer", "minimum": 1 },
         "runtime": { "$ref": "#/$defs/runtime" },
+        "fixtureSha256": { "$ref": "#/$defs/sha256" },
         "rawSha256": { "$ref": "#/$defs/sha256" },
         "metrics": { "$ref": "#/$defs/sampleMetrics" }
       }
@@ -161,13 +169,57 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["profile", "deploymentManifestSha256", "database", "api", "worker"],
+      "required": [
+        "profile",
+        "deploymentManifestSha256",
+        "database",
+        "api",
+        "worker",
+        "topologyFingerprint",
+        "targetBinding"
+      ],
       "properties": {
         "profile": { "enum": ["compact", "production"] },
         "deploymentManifestSha256": { "$ref": "#/$defs/sha256" },
         "database": { "$ref": "#/$defs/database" },
         "api": { "$ref": "#/$defs/runtimeComponent" },
-        "worker": { "$ref": "#/$defs/runtimeComponent" }
+        "worker": { "$ref": "#/$defs/runtimeComponent" },
+        "topologyFingerprint": { "$ref": "#/$defs/topologyFingerprint" },
+        "targetBinding": { "$ref": "#/$defs/targetBinding" }
+      }
+    },
+    "topologyFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": { "const": "tixkit-supported-profile-topology-v1" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "targetBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transport",
+        "apiImageDigest",
+        "apiOriginSha256",
+        "fixtureDeploymentSha256",
+        "fixtureIdentityPublicKeySha256",
+        "fixtureOriginSha256",
+        "fixtureServiceArtifactSha256"
+      ],
+      "properties": {
+        "transport": { "enum": ["https", "compact-loopback-http"] },
+        "apiImageDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "apiOriginSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureDeploymentSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureIdentityPublicKeySha256": { "$ref": "#/$defs/sha256" },
+        "fixtureOriginSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureServiceArtifactSha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "runtimeComponent": {
@@ -197,20 +249,30 @@
         "profile",
         "deploymentManifestSha256",
         "database",
+        "topologyFingerprint",
+        "targetBinding",
         "resourcesSha256",
         "workloadSha256",
         "startedAt",
         "completedAt",
         "durationSeconds",
+        "activeLoadSeconds",
         "samples",
         "capacityClaim",
         "evidenceSha256"
       ],
       "properties": {
-        "schemaVersion": { "const": "tixkit-supported-profile-capacity-evidence-v1" },
+        "schemaVersion": { "const": "tixkit-supported-profile-capacity-evidence-v2" },
         "claimScope": { "const": "supported-profile-capacity-characterization" },
         "denials": {
-          "const": ["Cloud capacity", "SLA or SLO attainment", "soak stability", "fault tolerance"]
+          "const": [
+            "Cloud capacity",
+            "SLA or SLO attainment",
+            "soak stability",
+            "fault tolerance",
+            "worker, frontend, provider, Temporal, Redis, object-storage or host capacity",
+            "relational database and dependency capacity are not independently characterized"
+          ]
         },
         "integrityModel": { "const": "checksums-plus-hosted-Ed25519-receipt" },
         "sourceCommit": { "$ref": "#/$defs/gitSha" },
@@ -229,11 +291,14 @@
         "profile": { "enum": ["compact", "production"] },
         "deploymentManifestSha256": { "$ref": "#/$defs/sha256" },
         "database": { "$ref": "#/$defs/database" },
+        "topologyFingerprint": { "$ref": "#/$defs/topologyFingerprint" },
+        "targetBinding": { "$ref": "#/$defs/targetBinding" },
         "resourcesSha256": { "$ref": "#/$defs/sha256" },
         "workloadSha256": { "$ref": "#/$defs/sha256" },
         "startedAt": { "type": "string", "format": "date-time" },
         "completedAt": { "type": "string", "format": "date-time" },
         "durationSeconds": { "type": "integer", "minimum": 1, "maximum": 604800 },
+        "activeLoadSeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 604800 },
         "samples": {
           "type": "array",
           "minItems": 9,
@@ -243,8 +308,19 @@
         "capacityClaim": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["maxPublishableConcurrency", "saturationObservedAtConcurrency"],
+          "required": [
+            "surface",
+            "dependencyScope",
+            "hostCapacity",
+            "maxPublishableConcurrency",
+            "saturationObservedAtConcurrency"
+          ],
           "properties": {
+            "surface": { "const": "api-checkout-reservation" },
+            "dependencyScope": {
+              "const": "runtime-topology-bound-dependencies-not-independently-characterized"
+            },
+            "hostCapacity": { "const": "not-characterized" },
             "maxPublishableConcurrency": { "type": "integer", "minimum": 1 },
             "saturationObservedAtConcurrency": { "type": "integer", "minimum": 1 }
           }

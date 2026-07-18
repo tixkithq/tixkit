@@ -21,6 +21,8 @@ import {
 import { canonicalJson, sha256 } from '../performance-evidence.mjs';
 import {
   createSupportedProfileCapacityEvidence,
+  createTargetBinding,
+  createTopologyFingerprint,
   deploymentManifest,
   main,
   validateSupportedProfileCapacityConfig,
@@ -37,6 +39,26 @@ const sourceCommit = 'a'.repeat(40);
 const now = Date.UTC(2026, 6, 17, 12);
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const keyId = 'supported-profile-capacity-2026-07';
+const topologyFingerprint = createTopologyFingerprint({
+  profile: 'fixture',
+  runtime: 'reviewed-host',
+});
+const targetBinding = createTargetBinding({
+  profile: 'production',
+  apiOrigin: 'https://api.capacity.test',
+  fixtureOrigin: 'https://fixture.capacity.test',
+  apiImageDigest: `sha256:${'9'.repeat(64)}`,
+  fixtureServiceArtifactSha256: 'f'.repeat(64),
+  fixtureDeploymentSha256: 'd'.repeat(64),
+  fixtureIdentityPublicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+});
+const capacityClaim = (maxPublishableConcurrency = 64, saturationObservedAtConcurrency = 128) => ({
+  surface: 'api-checkout-reservation',
+  dependencyScope: 'runtime-topology-bound-dependencies-not-independently-characterized',
+  hostCapacity: 'not-characterized',
+  maxPublishableConcurrency,
+  saturationObservedAtConcurrency,
+});
 const keyring = {
   schemaVersion: 1,
   purpose: 'tixkit.hosted-trust-receipt',
@@ -115,13 +137,19 @@ function rawSamples(profile, releaseManifest = publicReleaseManifest()) {
               ...profile.resources.worker,
               imageDigest: releaseManifest.core.images.find(({ name }) => name === 'worker').digest,
             },
+            topologyFingerprint,
+            targetBinding,
           },
+          fixtureSha256: sha256(Buffer.from(`${profile.id}:${sequence}:fresh-fixture`)),
           metrics: {
             attempts: concurrency,
+            rounds: 1,
+            reservationActiveLoadMs: intervalMs,
             expectedInventoryDeclines,
             platformFailures,
             successes,
             successfulReservationP95Ms: saturation ? 2500 : 500,
+            finalHeld: successes,
           },
         })}\n`,
       );
@@ -192,10 +220,9 @@ function evidenceFixture(
     releaseManifest,
     releaseManifestBytes,
     rawSamples: samples,
-    capacityClaim: {
-      maxPublishableConcurrency: 64,
-      saturationObservedAtConcurrency: 128,
-    },
+    capacityClaim: capacityClaim(),
+    topologyFingerprint,
+    targetBinding,
   });
   const evidenceBytes = Buffer.from(`${canonicalJson(evidence)}\n`);
   return {
@@ -254,6 +281,8 @@ function creationInput(
     gitTree,
     releaseManifest,
     releaseManifestBytes: Buffer.from(`${canonicalJson(releaseManifest)}\n`),
+    topologyFingerprint,
+    targetBinding,
   };
 }
 
@@ -516,7 +545,7 @@ test('capacity claim requires adjacent saturation and complete fail-closed sampl
     () =>
       createSupportedProfileCapacityEvidence({
         ...base,
-        capacityClaim: { maxPublishableConcurrency: 32, saturationObservedAtConcurrency: 128 },
+        capacityClaim: capacityClaim(32, 128),
       }),
     /adjacent tested saturation/u,
   );
@@ -525,9 +554,23 @@ test('capacity claim requires adjacent saturation and complete fail-closed sampl
       createSupportedProfileCapacityEvidence({
         ...base,
         rawSamples: base.rawSamples.slice(1),
-        capacityClaim: { maxPublishableConcurrency: 64, saturationObservedAtConcurrency: 128 },
+        capacityClaim: capacityClaim(),
       }),
     /sample count/u,
+  );
+  const reusedFixture = [...base.rawSamples];
+  const firstFixture = JSON.parse(reusedFixture[0]).fixtureSha256;
+  reusedFixture[1] = mutateRawSample(reusedFixture[1], (sample) => {
+    sample.fixtureSha256 = firstFixture;
+  });
+  assert.throws(
+    () =>
+      createSupportedProfileCapacityEvidence({
+        ...base,
+        rawSamples: reusedFixture,
+        capacityClaim: capacityClaim(),
+      }),
+    /fresh unique fixture identity/u,
   );
   const noSaturation = base.rawSamples.map((sample) =>
     Buffer.from(
@@ -543,7 +586,7 @@ test('capacity claim requires adjacent saturation and complete fail-closed sampl
       createSupportedProfileCapacityEvidence({
         ...base,
         rawSamples: noSaturation,
-        capacityClaim: { maxPublishableConcurrency: 64, saturationObservedAtConcurrency: 128 },
+        capacityClaim: capacityClaim(),
       }),
     /did not exhibit/u,
   );
@@ -559,20 +602,20 @@ test('capacity claim requires adjacent saturation and complete fail-closed sampl
       createSupportedProfileCapacityEvidence({
         ...base,
         rawSamples: prematureDecline,
-        capacityClaim: { maxPublishableConcurrency: 64, saturationObservedAtConcurrency: 128 },
+        capacityClaim: capacityClaim(),
       }),
     /decline occurred before inventory exhaustion/u,
   );
 });
 
-test('derives duration only from canonical contiguous sample intervals', () => {
+test('derives duration only from canonical non-overlapping sample intervals', () => {
   const profile = committedConfig.profiles[0];
   const releaseManifest = publicReleaseManifest();
   const create = (samples) =>
     createSupportedProfileCapacityEvidence({
       ...creationInput(profile),
       rawSamples: samples,
-      capacityClaim: { maxPublishableConcurrency: 64, saturationObservedAtConcurrency: 128 },
+      capacityClaim: capacityClaim(),
     });
   const base = rawSamples(profile, releaseManifest);
 
@@ -588,14 +631,35 @@ test('derives duration only from canonical contiguous sample intervals', () => {
   });
   assert.throws(() => create(elapsedInflation), /elapsed time does not match/u);
 
-  for (const offset of [1000, -1000]) {
-    const discontinuous = [...base];
-    discontinuous[1] = mutateRawSample(discontinuous[1], (sample) => {
-      sample.startedAt = new Date(Date.parse(sample.startedAt) + offset).toISOString();
-      sample.completedAt = new Date(Date.parse(sample.completedAt) + offset).toISOString();
-    });
-    assert.throws(() => create(discontinuous), /contiguous without gaps or overlap/u);
-  }
+  const overlapping = [...base];
+  overlapping[1] = mutateRawSample(overlapping[1], (sample) => {
+    sample.startedAt = new Date(Date.parse(sample.startedAt) - 1000).toISOString();
+    sample.completedAt = new Date(Date.parse(sample.completedAt) - 1000).toISOString();
+  });
+  assert.throws(() => create(overlapping), /must not overlap/u);
+
+  const gapped = base.map((sample, index) =>
+    index === 0
+      ? sample
+      : mutateRawSample(sample, (value) => {
+          value.startedAt = new Date(Date.parse(value.startedAt) + 1000).toISOString();
+          value.completedAt = new Date(Date.parse(value.completedAt) + 1000).toISOString();
+        }),
+  );
+  assert.doesNotThrow(() => create(gapped));
+
+  const minimumMs = profile.workload.minimumDurationSeconds * 1000;
+  const idleInflated = base.map((sample, index) =>
+    mutateRawSample(sample, (value) => {
+      const started =
+        now - minimumMs - 60_000 + Math.floor((index * minimumMs) / (base.length - 1));
+      value.startedAt = new Date(started).toISOString();
+      value.completedAt = new Date(started + 1000).toISOString();
+      value.elapsedMs = 1000;
+      value.metrics.reservationActiveLoadMs = 1;
+    }),
+  );
+  assert.throws(() => create(idleInflated), /active load duration/u);
 
   const tooShort = base.map((sample, index) =>
     mutateRawSample(sample, (value) => {
@@ -632,7 +696,7 @@ test('derives duration only from canonical contiguous sample intervals', () => {
       shiftedFixture.gitTree,
     ),
     rawSamples: shifted,
-    capacityClaim: { maxPublishableConcurrency: 64, saturationObservedAtConcurrency: 128 },
+    capacityClaim: capacityClaim(),
   });
   const shiftedBytes = Buffer.from(`${canonicalJson(shiftedEvidence)}\n`);
   const shiftedReceipt = signedReceipt(shiftedBytes, (candidate) => {
@@ -664,7 +728,7 @@ test('binds every raw sample to exact stable observed runtime identity', () => {
     createSupportedProfileCapacityEvidence({
       ...creationInput(profile),
       rawSamples: samples,
-      capacityClaim: { maxPublishableConcurrency: 64, saturationObservedAtConcurrency: 128 },
+      capacityClaim: capacityClaim(),
     });
   const attacks = [
     (runtime) => (runtime.profile = 'production'),
@@ -679,6 +743,8 @@ test('binds every raw sample to exact stable observed runtime identity', () => {
     (runtime) => (runtime.worker.memoryLimitMiB += 1),
     (runtime) => (runtime.api.imageDigest = `sha256:${'3'.repeat(64)}`),
     (runtime) => (runtime.worker.imageDigest = `sha256:${'4'.repeat(64)}`),
+    (runtime) => (runtime.topologyFingerprint.sha256 = '5'.repeat(64)),
+    (runtime) => (runtime.targetBinding.apiOriginSha256 = '6'.repeat(64)),
   ];
   for (const attack of attacks) {
     const samples = rawSamples(profile, releaseManifest);

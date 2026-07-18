@@ -1,6 +1,6 @@
 {
   "$schema": "./scripts/performance-profile-capacity.schema.json",
-  "schemaVersion": "tixkit-supported-profile-capacity-config-v1",
+  "schemaVersion": "tixkit-supported-profile-capacity-config-v2",
   "claimScope": "supported-profile-capacity-eligibility",
   "denials": [
     "capacity proof without profile-scoped hosted evidence",
@@ -15,7 +15,7 @@
       "deployment": {
         "kind": "compact-compose",
         "files": ["infra/compact/.env.example", "infra/compact/compose.yml"],
-        "manifestSha256": "da5f0ea35631bccaec6e5388b95b0c8895030e636aa5f28429ea34956f1a4d2c"
+        "manifestSha256": "fd846ac49767b6bdb780c53c311c6312151bcc46e3f3b801a5ffab7346fd9018"
       },
       "database": { "engine": "postgresql", "topology": "bundled-single-instance" },
       "resources": {

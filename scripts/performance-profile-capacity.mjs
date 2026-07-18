@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { createPublicKey } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import schema from './performance-profile-capacity.schema.json' with { type: 'json' };
@@ -10,14 +12,17 @@ import { verifyHostedTrustReceipt } from './lib/hosted-trust-receipt.mjs';
 import { canonicalJson, sha256 } from './performance-evidence.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CONFIG_VERSION = 'tixkit-supported-profile-capacity-config-v1';
+const CONFIG_VERSION = 'tixkit-supported-profile-capacity-config-v2';
 const CONFIG_SCOPE = 'supported-profile-capacity-eligibility';
-const EVIDENCE_VERSION = 'tixkit-supported-profile-capacity-evidence-v1';
+const EVIDENCE_VERSION = 'tixkit-supported-profile-capacity-evidence-v2';
 const EVIDENCE_SCOPE = 'supported-profile-capacity-characterization';
+export const TOPOLOGY_FINGERPRINT_VERSION = 'tixkit-supported-profile-topology-v1';
 const MAX_DEPLOYMENT_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_SAMPLE_BYTES = 64 * 1024;
 const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
 const MAX_RELEASE_MANIFEST_BYTES = 1024 * 1024;
+const MAX_EXTERNAL_HA_OBSERVATION_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_EXTERNAL_HA_VALIDITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const CONFIG_DENIALS = Object.freeze([
   'capacity proof without profile-scoped hosted evidence',
   'Cloud capacity',
@@ -30,6 +35,8 @@ const EVIDENCE_DENIALS = Object.freeze([
   'SLA or SLO attainment',
   'soak stability',
   'fault tolerance',
+  'worker, frontend, provider, Temporal, Redis, object-storage or host capacity',
+  'relational database and dependency capacity are not independently characterized',
 ]);
 const ajv = new Ajv2020({ strict: true, formats: { 'date-time': true } });
 const validateSchema = ajv.compile(schema);
@@ -202,7 +209,319 @@ function canonicalTimestamp(value, label) {
   return timestamp;
 }
 
-function validateObservedRuntime(value, profile, releaseImages) {
+export function validateTopologyFingerprint(value) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    canonicalJson(Object.keys(value).sort()) !== canonicalJson(['sha256', 'version']) ||
+    value.version !== TOPOLOGY_FINGERPRINT_VERSION ||
+    !/^[a-f0-9]{64}$/u.test(value.sha256 ?? '')
+  ) {
+    throw new Error('supported-profile topology fingerprint is malformed');
+  }
+  return Object.freeze({ version: value.version, sha256: value.sha256 });
+}
+
+export function createTopologyFingerprint(descriptor) {
+  if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) {
+    throw new Error('supported-profile topology descriptor must be an object');
+  }
+  return Object.freeze({
+    version: TOPOLOGY_FINGERPRINT_VERSION,
+    sha256: sha256(canonicalJson(descriptor)),
+  });
+}
+
+export function createReviewedTopologyFingerprint(descriptor) {
+  if (
+    !descriptor ||
+    typeof descriptor !== 'object' ||
+    Array.isArray(descriptor) ||
+    descriptor.schemaVersion !== 'tixkit-supported-profile-runtime-descriptor-v1' ||
+    !['compact', 'production'].includes(descriptor.profile)
+  ) {
+    throw new Error('supported-profile reviewed topology descriptor is malformed');
+  }
+  const reviewed = structuredClone(descriptor);
+  if (reviewed.profile === 'production') {
+    const digest = /^[a-f0-9]{64}$/u;
+    const observations = [
+      reviewed.cluster?.profileProofSha256,
+      reviewed.api?.deploymentRevisionSha256,
+      reviewed.api?.templateHashSha256,
+      reviewed.api?.readyPodIdentitiesSha256,
+      reviewed.worker?.deploymentRevisionSha256,
+      reviewed.worker?.templateHashSha256,
+      reviewed.worker?.readyPodIdentitiesSha256,
+    ];
+    if (observations.some((value) => !digest.test(value ?? ''))) {
+      throw new Error('Production topology is missing exact runtime observations');
+    }
+    delete reviewed.cluster.profileProofSha256;
+    for (const component of [reviewed.api, reviewed.worker]) {
+      delete component.deploymentRevisionSha256;
+      delete component.templateHashSha256;
+      delete component.readyPodIdentitiesSha256;
+    }
+  }
+  return createTopologyFingerprint(reviewed);
+}
+
+export function validateTargetBinding(value) {
+  const digest = /^[a-f0-9]{64}$/u;
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    canonicalJson(Object.keys(value).sort()) !==
+      canonicalJson([
+        'apiImageDigest',
+        'apiOriginSha256',
+        'fixtureDeploymentSha256',
+        'fixtureIdentityPublicKeySha256',
+        'fixtureOriginSha256',
+        'fixtureServiceArtifactSha256',
+        'transport',
+      ]) ||
+    !['https', 'compact-loopback-http'].includes(value.transport) ||
+    !/^sha256:[a-f0-9]{64}$/u.test(value.apiImageDigest ?? '') ||
+    !digest.test(value.apiOriginSha256 ?? '') ||
+    !digest.test(value.fixtureDeploymentSha256 ?? '') ||
+    !digest.test(value.fixtureIdentityPublicKeySha256 ?? '') ||
+    !digest.test(value.fixtureOriginSha256 ?? '') ||
+    !digest.test(value.fixtureServiceArtifactSha256 ?? '')
+  ) {
+    throw new Error('supported-profile target binding is malformed');
+  }
+  return Object.freeze({ ...value });
+}
+
+function boundOrigin(value, profile, label) {
+  if (typeof value !== 'string' || value.length > 2048) {
+    throw new Error(`${label} must be a bounded absolute origin`);
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} must be an absolute origin`);
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  const allowedHttp = profile === 'compact' && url.protocol === 'http:' && loopback;
+  if (
+    (url.protocol !== 'https:' && !allowedHttp) ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(`${label} transport or origin is unsupported`);
+  }
+  return { origin: url.origin, transport: allowedHttp ? 'compact-loopback-http' : 'https' };
+}
+
+export function createTargetBinding({
+  profile,
+  apiOrigin,
+  fixtureOrigin,
+  apiImageDigest,
+  fixtureServiceArtifactSha256,
+  fixtureDeploymentSha256,
+  fixtureIdentityPublicKeyPem,
+}) {
+  if (
+    !/^sha256:[a-f0-9]{64}$/u.test(apiImageDigest ?? '') ||
+    !/^[a-f0-9]{64}$/u.test(fixtureServiceArtifactSha256 ?? '') ||
+    !/^[a-f0-9]{64}$/u.test(fixtureDeploymentSha256 ?? '') ||
+    typeof fixtureIdentityPublicKeyPem !== 'string' ||
+    fixtureIdentityPublicKeyPem.length > 8192
+  ) {
+    throw new Error('capacity target release or fixture identity is invalid');
+  }
+  let fixtureIdentityKey;
+  try {
+    fixtureIdentityKey = createPublicKey(fixtureIdentityPublicKeyPem);
+  } catch {
+    throw new Error('capacity fixture identity public key is invalid');
+  }
+  if (fixtureIdentityKey.asymmetricKeyType !== 'ed25519') {
+    throw new Error('capacity fixture identity public key must be Ed25519');
+  }
+  const api = boundOrigin(apiOrigin, profile, 'capacity API origin');
+  const fixture = boundOrigin(fixtureOrigin, profile, 'capacity fixture origin');
+  if (api.transport !== fixture.transport) {
+    throw new Error('capacity API and fixture transports must use the same trust mode');
+  }
+  return validateTargetBinding({
+    transport: api.transport,
+    apiImageDigest,
+    apiOriginSha256: sha256(api.origin),
+    fixtureDeploymentSha256,
+    fixtureIdentityPublicKeySha256: sha256(fixtureIdentityPublicKeyPem),
+    fixtureOriginSha256: sha256(fixture.origin),
+    fixtureServiceArtifactSha256,
+  });
+}
+
+function exactOwnKeys(value, keys, label) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    canonicalJson(Object.keys(value).sort()) !== canonicalJson([...keys].sort())
+  ) {
+    throw new Error(`${label} must use its closed public-safe schema`);
+  }
+}
+
+function proofTimestamp(value, label) {
+  const timestamp = Date.parse(value);
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u.test(value) ||
+    !Number.isFinite(timestamp) ||
+    value.length > 64
+  ) {
+    throw new Error(`${label} must be a bounded RFC 3339 timestamp`);
+  }
+  return timestamp;
+}
+
+export function createCapacityProofProjection(
+  kind,
+  value,
+  sourceSha256,
+  { now = () => new Date() } = {},
+) {
+  if (!/^[a-f0-9]{64}$/u.test(sourceSha256 ?? '')) {
+    throw new Error('capacity proof source digest is invalid');
+  }
+  if (kind === 'fixture-service-artifact') {
+    exactOwnKeys(
+      value,
+      ['schemaVersion', 'sourceCommit', 'deploymentSha256', 'identityPublicKeyPem'],
+      'fixture service artifact',
+    );
+    if (
+      value.schemaVersion !== 'tixkit-capacity-fixture-service-artifact-v1' ||
+      !/^[a-f0-9]{40}$/u.test(value.sourceCommit ?? '') ||
+      !/^[a-f0-9]{64}$/u.test(value.deploymentSha256 ?? '')
+    ) {
+      throw new Error('fixture service artifact identity is invalid');
+    }
+    let key;
+    try {
+      key = createPublicKey(value.identityPublicKeyPem);
+    } catch {
+      throw new Error('fixture service artifact public key is invalid');
+    }
+    if (key.asymmetricKeyType !== 'ed25519') {
+      throw new Error('fixture service artifact public key must be Ed25519');
+    }
+    return Object.freeze({
+      schemaVersion: value.schemaVersion,
+      sourceCommit: value.sourceCommit,
+      deploymentSha256: value.deploymentSha256,
+      identityPublicKeyPem: value.identityPublicKeyPem,
+      sourceSha256,
+    });
+  }
+  if (kind === 'external-ha-attestation') {
+    exactOwnKeys(
+      value,
+      ['schemaVersion', 'databaseEngine', 'topology', 'observedAt', 'expiresAt', 'evidenceSha256'],
+      'external HA attestation',
+    );
+    const observedAt = proofTimestamp(value.observedAt, 'external HA observedAt');
+    const expiresAt = proofTimestamp(value.expiresAt, 'external HA expiresAt');
+    const current = now();
+    if (!(current instanceof Date) || !Number.isFinite(current.getTime())) {
+      throw new Error('external HA proof clock must return a valid Date');
+    }
+    const currentTime = current.getTime();
+    if (
+      value.schemaVersion !== 'tixkit-external-ha-attestation-v1' ||
+      value.databaseEngine !== 'postgresql' ||
+      value.topology !== 'external-high-availability' ||
+      !/^[a-f0-9]{64}$/u.test(value.evidenceSha256 ?? '') ||
+      expiresAt <= observedAt ||
+      observedAt > currentTime ||
+      expiresAt <= currentTime ||
+      currentTime - observedAt > MAX_EXTERNAL_HA_OBSERVATION_AGE_MS ||
+      expiresAt - observedAt > MAX_EXTERNAL_HA_VALIDITY_WINDOW_MS
+    ) {
+      throw new Error('external HA attestation identity or validity window is invalid');
+    }
+    return Object.freeze({
+      schemaVersion: value.schemaVersion,
+      databaseEngine: value.databaseEngine,
+      topology: value.topology,
+      observedAt: new Date(observedAt).toISOString(),
+      expiresAt: new Date(expiresAt).toISOString(),
+      evidenceSha256: value.evidenceSha256,
+      sourceSha256,
+    });
+  }
+  if (kind === 'production-profile') {
+    exactOwnKeys(
+      value,
+      [
+        'schemaVersion',
+        'drillId',
+        'context',
+        'cluster',
+        'namespace',
+        'namespaceUid',
+        'release',
+        'helmRelease',
+        'startedAt',
+        'completedAt',
+        'disruptionPerformed',
+        'before',
+        'after',
+        'disruptions',
+      ],
+      'Production profile proof',
+    );
+    const startedAt = proofTimestamp(value.startedAt, 'Production proof startedAt');
+    const completedAt = proofTimestamp(value.completedAt, 'Production proof completedAt');
+    if (
+      value.schemaVersion !== 'tixkit-production-profile-proof-v1' ||
+      typeof value.disruptionPerformed !== 'boolean' ||
+      !Array.isArray(value.before) ||
+      !Array.isArray(value.after) ||
+      !Array.isArray(value.disruptions) ||
+      completedAt < startedAt
+    ) {
+      throw new Error('Production profile proof identity is invalid');
+    }
+    return Object.freeze({
+      schemaVersion: 'tixkit-production-profile-public-projection-v1',
+      sourceSha256,
+      startedAt: new Date(startedAt).toISOString(),
+      completedAt: new Date(completedAt).toISOString(),
+      disruptionPerformed: value.disruptionPerformed,
+      clusterIdentitySha256: sha256(canonicalJson(value.cluster)),
+      helmReleaseSha256: sha256(canonicalJson(value.helmRelease)),
+      componentStateSha256: sha256(canonicalJson({ before: value.before, after: value.after })),
+      disruptionsSha256: sha256(canonicalJson(value.disruptions)),
+    });
+  }
+  throw new Error('capacity proof projection kind is unsupported');
+}
+
+export function validateObservedRuntime(
+  value,
+  profile,
+  releaseImages,
+  topologyFingerprint,
+  targetBinding,
+) {
   const imagePattern = /^sha256:[a-f0-9]{64}$/u;
   const images = { api: value?.api?.imageDigest, worker: value?.worker?.imageDigest };
   if (!imagePattern.test(images.api ?? '') || !imagePattern.test(images.worker ?? '')) {
@@ -217,6 +536,8 @@ function validateObservedRuntime(value, profile, releaseImages) {
     database: profile.database,
     api: { ...profile.resources.api, imageDigest: images.api },
     worker: { ...profile.resources.worker, imageDigest: images.worker },
+    topologyFingerprint: validateTopologyFingerprint(topologyFingerprint),
+    targetBinding: validateTargetBinding(targetBinding),
   };
   if (canonicalJson(value) !== canonicalJson(expected)) {
     throw new Error(
@@ -233,6 +554,8 @@ function parseRawSample(
   expectedSequence,
   previousCompletedAt,
   releaseImages,
+  topologyFingerprint,
+  targetBinding,
 ) {
   const raw = Buffer.from(bytes);
   if (raw.length < 1 || raw.length > MAX_SAMPLE_BYTES) {
@@ -250,6 +573,7 @@ function parseRawSample(
   const expectedSampleFields = [
     'completedAt',
     'elapsedMs',
+    'fixtureSha256',
     'metrics',
     'runtime',
     'sequence',
@@ -275,17 +599,30 @@ function parseRawSample(
   ) {
     throw new Error('supported-profile raw sample elapsed time does not match its timestamps');
   }
-  if (previousCompletedAt !== undefined && value.startedAt !== previousCompletedAt) {
-    throw new Error(
-      'supported-profile raw sample intervals must be contiguous without gaps or overlap',
-    );
+  if (
+    previousCompletedAt !== undefined &&
+    Date.parse(value.startedAt) < Date.parse(previousCompletedAt)
+  ) {
+    throw new Error('supported-profile raw sample intervals must not overlap');
   }
-  validateObservedRuntime(value.runtime, profile, releaseImages);
+  validateObservedRuntime(
+    value.runtime,
+    profile,
+    releaseImages,
+    topologyFingerprint,
+    targetBinding,
+  );
+  if (!/^[a-f0-9]{64}$/u.test(value.fixtureSha256 ?? '')) {
+    throw new Error('supported-profile raw sample fixture identity is invalid');
+  }
   const metrics = value.metrics;
   const expectedFields = [
     'attempts',
     'expectedInventoryDeclines',
+    'finalHeld',
     'platformFailures',
+    'reservationActiveLoadMs',
+    'rounds',
     'successes',
     'successfulReservationP95Ms',
   ];
@@ -302,24 +639,39 @@ function parseRawSample(
       throw new Error(`supported-profile raw sample ${name} must be finite and non-negative`);
     }
   }
-  for (const name of ['attempts', 'successes', 'expectedInventoryDeclines', 'platformFailures']) {
+  for (const name of [
+    'attempts',
+    'rounds',
+    'successes',
+    'expectedInventoryDeclines',
+    'platformFailures',
+    'reservationActiveLoadMs',
+  ]) {
     if (!Number.isSafeInteger(metrics[name])) throw new Error(`${name} must be a safe integer`);
   }
   if (
-    metrics.attempts !== expectedConcurrency ||
+    metrics.attempts !== expectedConcurrency * metrics.rounds ||
     metrics.attempts !==
       metrics.successes + metrics.expectedInventoryDeclines + metrics.platformFailures
   ) {
     throw new Error('supported-profile raw sample accounting or duration is invalid');
   }
-  const maximumSuccesses = Math.min(profile.workload.inventory, expectedConcurrency);
+  const maximumSuccesses =
+    Math.min(profile.workload.inventory, expectedConcurrency) * metrics.rounds;
   if (metrics.successes > maximumSuccesses) throw new Error('supported-profile sample oversold');
-  const maximumExpectedDeclines = Math.max(0, expectedConcurrency - profile.workload.inventory);
+  const maximumExpectedDeclines =
+    Math.max(0, expectedConcurrency - profile.workload.inventory) * metrics.rounds;
   if (metrics.expectedInventoryDeclines > maximumExpectedDeclines) {
     throw new Error('supported-profile inventory decline occurred before inventory exhaustion');
   }
-  if (metrics.expectedInventoryDeclines > 0 && metrics.successes !== profile.workload.inventory) {
+  if (
+    metrics.expectedInventoryDeclines > 0 &&
+    metrics.successes !== profile.workload.inventory * metrics.rounds
+  ) {
     throw new Error('supported-profile inventory decline requires exact inventory exhaustion');
+  }
+  if (metrics.finalHeld !== metrics.successes || metrics.finalHeld > maximumSuccesses) {
+    throw new Error('supported-profile final inventory reconciliation is invalid');
   }
   return {
     raw,
@@ -328,6 +680,7 @@ function parseRawSample(
     completedAt: value.completedAt,
     elapsedMs: value.elapsedMs,
     runtime: value.runtime,
+    fixtureSha256: value.fixtureSha256,
     metrics,
   };
 }
@@ -341,6 +694,8 @@ function evidencePayload({
   releaseManifestBytes,
   rawSamples,
   capacityClaim,
+  topologyFingerprint,
+  targetBinding,
 }) {
   if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) {
     throw new Error('supported-profile evidence requires an exact 40-character Git SHA');
@@ -349,12 +704,15 @@ function evidencePayload({
     throw new Error('supported-profile evidence requires an exact Git tree ID');
   }
   const release = validateReleaseManifest(releaseManifest, releaseManifestBytes, sourceCommit);
+  const frozenTopologyFingerprint = validateTopologyFingerprint(topologyFingerprint);
+  const frozenTargetBinding = validateTargetBinding(targetBinding);
   const expectedCount =
     profile.workload.concurrencyPoints.length * profile.workload.samplesPerPoint;
   if (!Array.isArray(rawSamples) || rawSamples.length !== expectedCount) {
     throw new Error('supported-profile raw sample count does not match the workload');
   }
   const samples = [];
+  const fixtureIdentities = new Set();
   let rawIndex = 0;
   let previousCompletedAt;
   for (const concurrency of profile.workload.concurrencyPoints) {
@@ -366,7 +724,13 @@ function evidencePayload({
         rawIndex + 1,
         previousCompletedAt,
         release.images,
+        frozenTopologyFingerprint,
+        frozenTargetBinding,
       );
+      if (fixtureIdentities.has(parsed.fixtureSha256)) {
+        throw new Error('supported-profile samples require fresh unique fixture identity');
+      }
+      fixtureIdentities.add(parsed.fixtureSha256);
       samples.push({
         sequence: parsed.sequence,
         concurrency,
@@ -375,6 +739,7 @@ function evidencePayload({
         completedAt: parsed.completedAt,
         elapsedMs: parsed.elapsedMs,
         runtime: parsed.runtime,
+        fixtureSha256: parsed.fixtureSha256,
         rawSha256: sha256(parsed.raw),
         metrics: parsed.metrics,
       });
@@ -389,6 +754,14 @@ function evidencePayload({
     throw new Error('supported-profile derived execution duration is below the committed minimum');
   }
   const durationSeconds = durationMs / 1000;
+  const activeLoadMs = samples.reduce(
+    (total, sample) => total + sample.metrics.reservationActiveLoadMs,
+    0,
+  );
+  if (activeLoadMs < profile.workload.minimumDurationSeconds * 1000) {
+    throw new Error('supported-profile active load duration is below the committed minimum');
+  }
+  const activeLoadSeconds = activeLoadMs / 1000;
   const maxConcurrency = capacityClaim?.maxPublishableConcurrency;
   const saturationConcurrency = capacityClaim?.saturationObservedAtConcurrency;
   const points = profile.workload.concurrencyPoints;
@@ -397,7 +770,11 @@ function evidencePayload({
     !Number.isSafeInteger(saturationConcurrency) ||
     !points.includes(maxConcurrency) ||
     !points.includes(saturationConcurrency) ||
-    points.indexOf(saturationConcurrency) !== points.indexOf(maxConcurrency) + 1
+    points.indexOf(saturationConcurrency) !== points.indexOf(maxConcurrency) + 1 ||
+    capacityClaim?.surface !== 'api-checkout-reservation' ||
+    capacityClaim?.dependencyScope !==
+      'runtime-topology-bound-dependencies-not-independently-characterized' ||
+    capacityClaim?.hostCapacity !== 'not-characterized'
   ) {
     throw new Error('supported-profile capacity claim must bind adjacent tested saturation points');
   }
@@ -435,11 +812,14 @@ function evidencePayload({
     profile: profile.id,
     deploymentManifestSha256: profile.deployment.manifestSha256,
     database: profile.database,
+    topologyFingerprint: frozenTopologyFingerprint,
+    targetBinding: frozenTargetBinding,
     resourcesSha256: sha256(canonicalJson(profile.resources)),
     workloadSha256: sha256(canonicalJson(profile.workload)),
     startedAt,
     completedAt,
     durationSeconds,
+    activeLoadSeconds,
     samples,
     capacityClaim,
   };
@@ -453,6 +833,66 @@ export function createSupportedProfileCapacityEvidence(input) {
   const evidence = { ...payload, evidenceSha256: sha256(canonicalJson(payload)) };
   schemaViolation(evidence, 'supported-profile capacity evidence');
   return evidence;
+}
+
+function canonicalUtcTimestamp(date, label) {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) {
+    throw new Error(`${label} must return a valid Date`);
+  }
+  return date.toISOString();
+}
+
+export async function executeSupportedProfileCapacitySample({
+  profile,
+  releaseImages,
+  topologyFingerprint,
+  targetBinding,
+  sequence,
+  concurrency,
+  executeWorkload,
+  clock = { wallNow: () => new Date(), monotonicNow: () => performance.now() },
+}) {
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    throw new Error('supported-profile sample sequence must be a positive integer');
+  }
+  if (!profile.workload.concurrencyPoints.includes(concurrency)) {
+    throw new Error('supported-profile sample concurrency is not configured');
+  }
+  if (typeof executeWorkload !== 'function') {
+    throw new Error('supported-profile workload executor is required');
+  }
+  const fingerprint = validateTopologyFingerprint(topologyFingerprint);
+  const startedAt = canonicalUtcTimestamp(clock.wallNow(), 'sample wall clock');
+  const monotonicStart = clock.monotonicNow();
+  const result = await executeWorkload({ concurrency, inventory: profile.workload.inventory });
+  const monotonicEnd = clock.monotonicNow();
+  const elapsedMs = Math.max(1, Math.ceil(monotonicEnd - monotonicStart));
+  if (
+    !Number.isFinite(monotonicStart) ||
+    !Number.isFinite(monotonicEnd) ||
+    monotonicEnd < monotonicStart
+  ) {
+    throw new Error('supported-profile sample monotonic clock is invalid');
+  }
+  const completedAt = new Date(Date.parse(startedAt) + elapsedMs).toISOString();
+  const raw = {
+    sequence,
+    startedAt,
+    completedAt,
+    elapsedMs,
+    runtime: {
+      profile: profile.id,
+      deploymentManifestSha256: profile.deployment.manifestSha256,
+      database: profile.database,
+      api: { ...profile.resources.api, imageDigest: releaseImages.api },
+      worker: { ...profile.resources.worker, imageDigest: releaseImages.worker },
+      topologyFingerprint: fingerprint,
+      targetBinding: validateTargetBinding(targetBinding),
+    },
+    fixtureSha256: result?.fixtureSha256,
+    metrics: result?.metrics,
+  };
+  return Buffer.from(`${canonicalJson(raw)}\n`);
 }
 
 export function verifySupportedProfileCapacityEvidence(input) {
@@ -479,6 +919,8 @@ export function verifySupportedProfileCapacityEvidence(input) {
     releaseManifestBytes: input.releaseManifestBytes,
     rawSamples: input.rawSamples,
     capacityClaim: input.evidence.capacityClaim,
+    topologyFingerprint: input.evidence.topologyFingerprint,
+    targetBinding: input.evidence.targetBinding,
   });
   const expected = {
     ...expectedPayload,
