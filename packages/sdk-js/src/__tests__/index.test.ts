@@ -37,6 +37,10 @@ import {
   type CreateMigrationJobInput,
   type AgentPlanDefinition,
   type AgentEventPrepareResolvedChanges,
+  type MarketingIntegrationConfigByProvider,
+  type MarketingIntegrationProvider,
+  type MarketingIntegration,
+  type PublicMarketingIntegration,
 } from '../index.js';
 
 const validResolvedEventMedia: AgentEventPrepareResolvedChanges = {
@@ -49,6 +53,36 @@ const invalidResolvedEventMedia: AgentEventPrepareResolvedChanges = {
   coverImageUrl: 'https://unowned.example/cover.jpg',
 };
 void invalidResolvedEventMedia;
+
+function acceptMarketingIntegrationConfig<Provider extends MarketingIntegrationProvider>(
+  _provider: Provider,
+  _config: MarketingIntegrationConfigByProvider[Provider],
+): void {}
+
+acceptMarketingIntegrationConfig('ga4', { measurementId: 'G-TEST123' });
+acceptMarketingIntegrationConfig('meta_pixel', { pixelId: '123456789' });
+acceptMarketingIntegrationConfig('generic_tag', { pixelUrl: 'https://pixel.example.test/collect' });
+// @ts-expect-error GA4 configuration must not accept Meta Pixel fields.
+acceptMarketingIntegrationConfig('ga4', { pixelId: '123456789' });
+// @ts-expect-error Generic tags require the typed pixel URL field.
+acceptMarketingIntegrationConfig('generic_tag', { measurementId: 'G-TEST123' });
+
+function assertMarketingIntegrationNarrowing(
+  integration: MarketingIntegration,
+  publicIntegration: PublicMarketingIntegration,
+): void {
+  if (integration.provider === 'ga4') {
+    expectTypeOf(integration.config).toEqualTypeOf<{ measurementId: string }>();
+  } else if (integration.provider === 'meta_pixel') {
+    expectTypeOf(integration.config).toEqualTypeOf<{ pixelId: string }>();
+  } else {
+    expectTypeOf(integration.config).toEqualTypeOf<{ pixelUrl: string }>();
+  }
+  if (publicIntegration.provider === 'generic_tag') {
+    expectTypeOf(publicIntegration.config).toEqualTypeOf<{ pixelUrl: string }>();
+  }
+}
+void assertMarketingIntegrationNarrowing;
 
 function mockFetch(status: number, body: unknown) {
   const init: ResponseInit = {

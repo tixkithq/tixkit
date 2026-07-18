@@ -2584,7 +2584,60 @@ describe('openApiSpec', () => {
     ]);
     const upsertBody = upsertOperation.requestBody.content['application/json'].schema;
     expect(upsertBody.required).toEqual(['config']);
+    expect(upsertBody.additionalProperties).toBe(false);
     expect(Object.hasOwn(upsertBody.properties, 'provider')).toBe(false);
+    expect(upsertBody.properties.config.oneOf).toEqual([
+      { $ref: '#/components/schemas/Ga4MarketingIntegrationConfig' },
+      { $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig' },
+      { $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig' },
+    ]);
+    expect(upsertOperation['x-tixkit-provider-config-correlation']).toEqual({
+      pathParameter: 'provider',
+      requestProperty: 'config',
+      mappings: {
+        ga4: '#/components/schemas/Ga4MarketingIntegrationConfig',
+        meta_pixel: '#/components/schemas/MetaPixelMarketingIntegrationConfig',
+        generic_tag: '#/components/schemas/GenericTagMarketingIntegrationConfig',
+      },
+    });
+    expect(openApiSpec.components.schemas.GenericTagMarketingIntegrationConfig).toMatchObject({
+      additionalProperties: false,
+      required: ['pixelUrl'],
+      properties: {
+        pixelUrl: {
+          pattern: '^[Hh][Tt][Tt][Pp][Ss]://(?![^/?#]*@)[^?#]+$',
+          description: expect.stringContaining('without credentials'),
+        },
+      },
+    });
+    const genericConfig = openApiSpec.components.schemas.GenericTagMarketingIntegrationConfig;
+    expect(
+      exampleMatchesSchema({ pixelUrl: 'https://metrics.example.test/pixel.gif' }, genericConfig),
+    ).toBe(true);
+    for (const pixelUrl of [
+      'https://user:password@metrics.example.test/pixel.gif',
+      'https://metrics.example.test/pixel.gif?token=secret',
+      'https://metrics.example.test/pixel.gif#secret',
+    ]) {
+      expect(exampleMatchesSchema({ pixelUrl }, genericConfig)).toBe(false);
+    }
+    for (const schema of [
+      openApiSpec.components.schemas.MarketingIntegration,
+      openApiSpec.components.schemas.PublicMarketingIntegration,
+    ]) {
+      expect(schema.additionalProperties).toBe(false);
+      expect(schema.oneOf).toEqual([
+        expect.objectContaining({
+          properties: expect.objectContaining({ provider: { const: 'ga4' } }),
+        }),
+        expect.objectContaining({
+          properties: expect.objectContaining({ provider: { const: 'meta_pixel' } }),
+        }),
+        expect.objectContaining({
+          properties: expect.objectContaining({ provider: { const: 'generic_tag' } }),
+        }),
+      ]);
+    }
     expect(
       openApiSpec.paths['/public/events/{eventId}/marketing-integrations'].get.responses['200']
         .content['application/json'].schema,

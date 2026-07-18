@@ -30,6 +30,21 @@ type PublicMarketingIntegrationConfig =
   | { pixelId: string }
   | { pixelUrl: string }
   | Record<string, never>;
+
+export function isPublicMarketingPixelUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.username === '' &&
+      url.password === '' &&
+      url.search === '' &&
+      url.hash === ''
+    );
+  } catch {
+    return false;
+  }
+}
 const defaultBoxOfficeSettings: BoxOfficeSettings = {
   enabled: true,
   allowedTenderTypes: [...boxOfficeTenderTypes],
@@ -108,16 +123,32 @@ function publicMarketingIntegrationConfig(
   const config = parseJsonValue<unknown>(value, {});
   if (config == null || typeof config !== 'object' || Array.isArray(config)) return {};
   const record = config as Record<string, unknown>;
-  if (provider === 'ga4' && typeof record.measurementId === 'string') {
+  if (
+    provider === 'ga4' &&
+    typeof record.measurementId === 'string' &&
+    record.measurementId.length > 0
+  ) {
     return { measurementId: record.measurementId };
   }
-  if (provider === 'meta_pixel' && typeof record.pixelId === 'string') {
+  if (
+    provider === 'meta_pixel' &&
+    typeof record.pixelId === 'string' &&
+    record.pixelId.length > 0
+  ) {
     return { pixelId: record.pixelId };
   }
-  if (provider === 'generic_tag' && typeof record.pixelUrl === 'string') {
+  if (
+    provider === 'generic_tag' &&
+    typeof record.pixelUrl === 'string' &&
+    isPublicMarketingPixelUrl(record.pixelUrl)
+  ) {
     return { pixelUrl: record.pixelUrl };
   }
   return {};
+}
+
+export function hasSafeMarketingIntegrationConfig(provider: unknown, value: unknown): boolean {
+  return Object.keys(publicMarketingIntegrationConfig(provider, value)).length === 1;
 }
 
 export function parsePagination(query: unknown): PaginationInput {
@@ -269,9 +300,7 @@ export function serializeMarketingIntegration(
   row: Record<string, unknown>,
   options: { public?: boolean } = {},
 ) {
-  const config = options.public
-    ? publicMarketingIntegrationConfig(row.provider, row.config)
-    : parseJsonValue(row.config, {});
+  const config = publicMarketingIntegrationConfig(row.provider, row.config);
   const base = {
     provider: row.provider,
     config,

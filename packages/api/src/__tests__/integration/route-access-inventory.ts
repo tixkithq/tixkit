@@ -83,6 +83,13 @@ export type NegativeAuthorizationEvidence = {
 
 const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
+    'marketing-integration-route-authorization-db.integration.test.ts',
+    resolve(
+      import.meta.dirname,
+      'marketing-integration-route-authorization-db.integration.test.ts',
+    ),
+  ],
+  [
     'resale-policy-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'resale-policy-route-authorization-db.integration.test.ts'),
   ],
@@ -392,6 +399,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['putEventsByEventIdResalePolicy'], {
     source: 'resale-policy-route-authorization-db.integration.test.ts',
     persistenceSource: 'resale-policy-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['putEventsByEventIdMarketingIntegrationsByProvider'], {
+    source: 'marketing-integration-route-authorization-db.integration.test.ts',
+    persistenceSource: 'marketing-integration-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(
     ['getOrdersByOrderId', 'getOrdersByOrderIdInvoice', 'getOrdersByOrderIdInvoiceDownload'],

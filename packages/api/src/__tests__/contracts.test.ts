@@ -9,6 +9,7 @@ import {
   registerJsonBodyParser,
 } from '../app.js';
 import {
+  hasSafeMarketingIntegrationConfig,
   pageEnvelope,
   parsePagination,
   serializeBrandTheme,
@@ -69,26 +70,26 @@ describe('API contract helpers', () => {
     });
   });
 
-  it('redacts non-public marketing integration config fields for anonymous contracts', () => {
-    expect(
-      serializeMarketingIntegration(
-        {
-          provider: 'ga4',
-          config: JSON.stringify({
-            measurementId: 'G-PUBLIC',
-            apiKey: 'secret-key',
-            accessToken: 'secret-token',
-          }),
-          consent_required: true,
-          status: 'active',
-        },
-        { public: true },
-      ),
-    ).toEqual({
+  it('redacts non-public marketing integration config fields from all response contracts', () => {
+    const ga4WithSecrets = {
+      provider: 'ga4',
+      config: JSON.stringify({
+        measurementId: 'G-PUBLIC',
+        apiKey: 'secret-key',
+        accessToken: 'secret-token',
+      }),
+      consent_required: true,
+      status: 'active',
+    };
+    expect(serializeMarketingIntegration(ga4WithSecrets, { public: true })).toEqual({
       provider: 'ga4',
       config: { measurementId: 'G-PUBLIC' },
       consentRequired: true,
       status: 'active',
+    });
+    expect(serializeMarketingIntegration({ id: 'mkt_1', ...ga4WithSecrets })).toMatchObject({
+      id: 'mkt_1',
+      config: { measurementId: 'G-PUBLIC' },
     });
 
     expect(
@@ -105,6 +106,29 @@ describe('API contract helpers', () => {
       provider: 'meta_pixel',
       config: { pixelId: '123456' },
     });
+
+    for (const pixelUrl of [
+      'https://user:password@metrics.example.test/pixel.gif',
+      'https://metrics.example.test/pixel.gif?token=secret',
+      'https://metrics.example.test/pixel.gif#secret',
+    ]) {
+      expect(
+        serializeMarketingIntegration(
+          {
+            provider: 'generic_tag',
+            config: JSON.stringify({ pixelUrl }),
+            consent_required: true,
+            status: 'active',
+          },
+          { public: true },
+        ),
+      ).toMatchObject({ provider: 'generic_tag', config: {} });
+      expect(hasSafeMarketingIntegrationConfig('generic_tag', JSON.stringify({ pixelUrl }))).toBe(
+        false,
+      );
+    }
+    expect(hasSafeMarketingIntegrationConfig('ga4', { measurementId: '' })).toBe(false);
+    expect(hasSafeMarketingIntegrationConfig('meta_pixel', { pixelId: '' })).toBe(false);
   });
 
   it('serializes order sales attribution with online defaults for legacy rows', () => {

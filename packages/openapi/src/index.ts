@@ -2028,23 +2028,67 @@ const rawOpenApiSpec = {
         },
         required: ['event', 'contentPage', 'availability', 'resaleListings'],
       },
+      Ga4MarketingIntegrationConfig: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { measurementId: { type: 'string', minLength: 1 } },
+        required: ['measurementId'],
+      },
+      MetaPixelMarketingIntegrationConfig: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { pixelId: { type: 'string', minLength: 1 } },
+        required: ['pixelId'],
+      },
+      GenericTagMarketingIntegrationConfig: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          pixelUrl: {
+            type: 'string',
+            format: 'uri',
+            pattern: '^[Hh][Tt][Tt][Pp][Ss]://(?![^/?#]*@)[^?#]+$',
+            description: 'Public HTTPS URL without credentials, query parameters, or fragments.',
+          },
+        },
+        required: ['pixelUrl'],
+      },
       PublicMarketingIntegration: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           provider: {
             type: 'string',
             enum: ['ga4', 'meta_pixel', 'generic_tag'],
           },
-          config: {
-            type: 'object',
-            additionalProperties: true,
-            description:
-              'Buyer-safe public config. GA4 exposes measurementId, Meta Pixel exposes pixelId, and generic tags expose an HTTPS pixelUrl.',
-          },
+          config: true,
           consentRequired: { type: 'boolean' },
           status: { type: 'string', enum: ['active', 'disabled'] },
         },
         required: ['provider', 'config', 'consentRequired', 'status'],
+        oneOf: [
+          {
+            properties: {
+              provider: { const: 'ga4' },
+              config: { $ref: '#/components/schemas/Ga4MarketingIntegrationConfig' },
+            },
+            required: ['provider', 'config'],
+          },
+          {
+            properties: {
+              provider: { const: 'meta_pixel' },
+              config: { $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig' },
+            },
+            required: ['provider', 'config'],
+          },
+          {
+            properties: {
+              provider: { const: 'generic_tag' },
+              config: { $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig' },
+            },
+            required: ['provider', 'config'],
+          },
+        ],
       },
       PublicEventMediaRendition: {
         type: 'object',
@@ -3309,6 +3353,7 @@ const rawOpenApiSpec = {
       },
       MarketingIntegration: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           id: { type: 'string' },
           tenantId: { type: 'string' },
@@ -3319,18 +3364,36 @@ const rawOpenApiSpec = {
             type: 'string',
             enum: ['ga4', 'meta_pixel', 'generic_tag'],
           },
-          config: {
-            type: 'object',
-            additionalProperties: true,
-            description:
-              'GA4 uses measurementId, Meta Pixel uses pixelId, generic tags use an HTTPS pixelUrl.',
-          },
+          config: true,
           consentRequired: { type: 'boolean' },
           status: { type: 'string', enum: ['active', 'disabled'] },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
         required: ['provider', 'config', 'consentRequired', 'status'],
+        oneOf: [
+          {
+            properties: {
+              provider: { const: 'ga4' },
+              config: { $ref: '#/components/schemas/Ga4MarketingIntegrationConfig' },
+            },
+            required: ['provider', 'config'],
+          },
+          {
+            properties: {
+              provider: { const: 'meta_pixel' },
+              config: { $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig' },
+            },
+            required: ['provider', 'config'],
+          },
+          {
+            properties: {
+              provider: { const: 'generic_tag' },
+              config: { $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig' },
+            },
+            required: ['provider', 'config'],
+          },
+        ],
       },
       MarketingIntegrationPage: {
         type: 'object',
@@ -10159,6 +10222,15 @@ const rawOpenApiSpec = {
     '/events/{eventId}/marketing-integrations/{provider}': {
       put: {
         summary: 'Create or update an event marketing integration',
+        'x-tixkit-provider-config-correlation': {
+          pathParameter: 'provider',
+          requestProperty: 'config',
+          mappings: {
+            ga4: '#/components/schemas/Ga4MarketingIntegrationConfig',
+            meta_pixel: '#/components/schemas/MetaPixelMarketingIntegrationConfig',
+            generic_tag: '#/components/schemas/GenericTagMarketingIntegrationConfig',
+          },
+        },
         security: [{ BearerAuth: [] }],
         parameters: [
           {
@@ -10183,8 +10255,16 @@ const rawOpenApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
-                  config: { type: 'object', additionalProperties: true },
+                  config: {
+                    oneOf: [
+                      { $ref: '#/components/schemas/Ga4MarketingIntegrationConfig' },
+                      { $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig' },
+                      { $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig' },
+                    ],
+                    description: 'Configuration must match the provider path parameter.',
+                  },
                   consentRequired: { type: 'boolean', default: true },
                   status: {
                     type: 'string',

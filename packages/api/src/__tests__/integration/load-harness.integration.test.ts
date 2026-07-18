@@ -393,6 +393,7 @@ async function cleanupAll(database: Database): Promise<void> {
   await database.deleteFrom('check_in_lists').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('ticket_types').where('event_id', '=', EVENT_ID).execute();
   await database.deleteFrom('inventory_pools').where('event_id', '=', EVENT_ID).execute();
+  await database.deleteFrom('audit_logs').where('tenant_id', '=', TENANT_ID).execute();
   await database.deleteFrom('events').where('id', '=', EVENT_ID).execute();
   await database.deleteFrom('brands').where('id', '=', BRAND_ID).execute();
   await database.deleteFrom('organizations').where('id', '=', ORG_ID).execute();

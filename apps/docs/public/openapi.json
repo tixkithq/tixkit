@@ -3048,8 +3048,50 @@
           "resaleListings"
         ]
       },
+      "Ga4MarketingIntegrationConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "measurementId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "measurementId"
+        ]
+      },
+      "MetaPixelMarketingIntegrationConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pixelId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "pixelId"
+        ]
+      },
+      "GenericTagMarketingIntegrationConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pixelUrl": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^[Hh][Tt][Tt][Pp][Ss]://(?![^/?#]*@)[^?#]+$",
+            "description": "Public HTTPS URL without credentials, query parameters, or fragments."
+          }
+        },
+        "required": [
+          "pixelUrl"
+        ]
+      },
       "PublicMarketingIntegration": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "provider": {
             "type": "string",
@@ -3059,11 +3101,7 @@
               "generic_tag"
             ]
           },
-          "config": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "Buyer-safe public config. GA4 exposes measurementId, Meta Pixel exposes pixelId, and generic tags expose an HTTPS pixelUrl."
-          },
+          "config": true,
           "consentRequired": {
             "type": "boolean"
           },
@@ -3080,6 +3118,50 @@
           "config",
           "consentRequired",
           "status"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "provider": {
+                "const": "ga4"
+              },
+              "config": {
+                "$ref": "#/components/schemas/Ga4MarketingIntegrationConfig"
+              }
+            },
+            "required": [
+              "provider",
+              "config"
+            ]
+          },
+          {
+            "properties": {
+              "provider": {
+                "const": "meta_pixel"
+              },
+              "config": {
+                "$ref": "#/components/schemas/MetaPixelMarketingIntegrationConfig"
+              }
+            },
+            "required": [
+              "provider",
+              "config"
+            ]
+          },
+          {
+            "properties": {
+              "provider": {
+                "const": "generic_tag"
+              },
+              "config": {
+                "$ref": "#/components/schemas/GenericTagMarketingIntegrationConfig"
+              }
+            },
+            "required": [
+              "provider",
+              "config"
+            ]
+          }
         ]
       },
       "PublicEventMediaRendition": {
@@ -5350,6 +5432,7 @@
       },
       "MarketingIntegration": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "id": {
             "type": "string"
@@ -5374,11 +5457,7 @@
               "generic_tag"
             ]
           },
-          "config": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "GA4 uses measurementId, Meta Pixel uses pixelId, generic tags use an HTTPS pixelUrl."
-          },
+          "config": true,
           "consentRequired": {
             "type": "boolean"
           },
@@ -5403,6 +5482,50 @@
           "config",
           "consentRequired",
           "status"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "provider": {
+                "const": "ga4"
+              },
+              "config": {
+                "$ref": "#/components/schemas/Ga4MarketingIntegrationConfig"
+              }
+            },
+            "required": [
+              "provider",
+              "config"
+            ]
+          },
+          {
+            "properties": {
+              "provider": {
+                "const": "meta_pixel"
+              },
+              "config": {
+                "$ref": "#/components/schemas/MetaPixelMarketingIntegrationConfig"
+              }
+            },
+            "required": [
+              "provider",
+              "config"
+            ]
+          },
+          {
+            "properties": {
+              "provider": {
+                "const": "generic_tag"
+              },
+              "config": {
+                "$ref": "#/components/schemas/GenericTagMarketingIntegrationConfig"
+              }
+            },
+            "required": [
+              "provider",
+              "config"
+            ]
+          }
         ]
       },
       "MarketingIntegrationPage": {
@@ -19507,7 +19630,9 @@
                   "items": [
                     {
                       "provider": "ga4",
-                      "config": {},
+                      "config": {
+                        "measurementId": "measurement_example"
+                      },
                       "consentRequired": true,
                       "status": "active"
                     }
@@ -19528,6 +19653,15 @@
     "/events/{eventId}/marketing-integrations/{provider}": {
       "put": {
         "summary": "Create or update an event marketing integration",
+        "x-tixkit-provider-config-correlation": {
+          "pathParameter": "provider",
+          "requestProperty": "config",
+          "mappings": {
+            "ga4": "#/components/schemas/Ga4MarketingIntegrationConfig",
+            "meta_pixel": "#/components/schemas/MetaPixelMarketingIntegrationConfig",
+            "generic_tag": "#/components/schemas/GenericTagMarketingIntegrationConfig"
+          }
+        },
         "security": [
           {
             "BearerAuth": []
@@ -19562,10 +19696,21 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "config": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/Ga4MarketingIntegrationConfig"
+                      },
+                      {
+                        "$ref": "#/components/schemas/MetaPixelMarketingIntegrationConfig"
+                      },
+                      {
+                        "$ref": "#/components/schemas/GenericTagMarketingIntegrationConfig"
+                      }
+                    ],
+                    "description": "Configuration must match the provider path parameter."
                   },
                   "consentRequired": {
                     "type": "boolean",
@@ -19585,7 +19730,9 @@
                 ]
               },
               "example": {
-                "config": {}
+                "config": {
+                  "measurementId": "measurement_example"
+                }
               }
             }
           }
@@ -19600,7 +19747,9 @@
                 },
                 "example": {
                   "provider": "ga4",
-                  "config": {},
+                  "config": {
+                    "measurementId": "measurement_example"
+                  },
                   "consentRequired": true,
                   "status": "active"
                 }
@@ -20959,7 +21108,9 @@
                   "marketingIntegrations": [
                     {
                       "provider": "ga4",
-                      "config": {},
+                      "config": {
+                        "measurementId": "measurement_example"
+                      },
                       "consentRequired": true,
                       "status": "active"
                     }
@@ -21083,7 +21234,9 @@
                   "marketingIntegrations": [
                     {
                       "provider": "ga4",
-                      "config": {},
+                      "config": {
+                        "measurementId": "measurement_example"
+                      },
                       "consentRequired": true,
                       "status": "active"
                     }
@@ -21216,7 +21369,9 @@
                     "marketingIntegrations": [
                       {
                         "provider": "ga4",
-                        "config": {},
+                        "config": {
+                          "measurementId": "measurement_example"
+                        },
                         "consentRequired": true,
                         "status": "active"
                       }
@@ -21429,7 +21584,9 @@
                   "items": [
                     {
                       "provider": "ga4",
-                      "config": {},
+                      "config": {
+                        "measurementId": "measurement_example"
+                      },
                       "consentRequired": true,
                       "status": "active"
                     }
@@ -39152,7 +39309,9 @@
                     "marketingIntegrations": [
                       {
                         "provider": "ga4",
-                        "config": {},
+                        "config": {
+                          "measurementId": "measurement_example"
+                        },
                         "consentRequired": true,
                         "status": "active"
                       }
@@ -39494,7 +39653,9 @@
                     "marketingIntegrations": [
                       {
                         "provider": "ga4",
-                        "config": {},
+                        "config": {
+                          "measurementId": "measurement_example"
+                        },
                         "consentRequired": true,
                         "status": "active"
                       }

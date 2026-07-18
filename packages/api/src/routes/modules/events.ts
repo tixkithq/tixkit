@@ -24,6 +24,8 @@ import { SCANNER_CONTRACT_VERSION, DEFAULT_CODE_FORMAT } from '@tixkit/domain';
 import type { CodeFormat } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
+  hasSafeMarketingIntegrationConfig,
+  isPublicMarketingPixelUrl,
   serializeEvent,
   serializeEventOccurrence,
   serializeMarketingIntegration,
@@ -161,8 +163,8 @@ const marketingIntegrationSchema = z.discriminatedUnion('provider', [
           pixelUrl: z
             .string()
             .url('pixelUrl must be a valid URL')
-            .refine((value) => new URL(value).protocol === 'https:', {
-              message: 'pixelUrl must use https',
+            .refine(isPublicMarketingPixelUrl, {
+              message: 'pixelUrl must use https without credentials, query, or fragment',
             }),
         })
         .strict(),
@@ -1372,7 +1374,9 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       .where('event_id', '=', eventId)
       .execute();
     return {
-      items: rows.map((row) => serializeMarketingIntegration(row)),
+      items: rows
+        .filter((row) => hasSafeMarketingIntegrationConfig(row.provider, row.config))
+        .map((row) => serializeMarketingIntegration(row)),
       nextCursor: null,
       hasMore: false,
     };
@@ -1395,94 +1399,120 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
-
-    const existing = await db
-      .selectFrom('marketing_integrations')
-      .selectAll()
-      .where('tenant_id', '=', event.tenant_id)
-      .where('organization_id', '=', event.organization_id)
-      .where('brand_id', '=', event.brand_id)
-      .where('event_id', '=', eventId)
-      .where('provider', '=', body.provider)
-      .executeTakeFirst();
-    const now = new Date();
-    if (existing) {
-      const updated = {
-        ...existing,
-        config: JSON.stringify(body.config),
-        consent_required: body.consentRequired,
-        status: body.status,
-        updated_at: now,
-      };
-      await db
-        .updateTable('marketing_integrations')
-        .set({
-          config: updated.config,
-          consent_required: updated.consent_required,
-          status: updated.status,
-          updated_at: now,
-        })
-        .where('id', '=', existing.id)
-        .where('tenant_id', '=', event.tenant_id)
-        .where('organization_id', '=', event.organization_id)
-        .where('brand_id', '=', event.brand_id)
-        .where('event_id', '=', eventId)
-        .where('provider', '=', body.provider)
-        .execute();
-      return serializeMarketingIntegration(updated);
-    }
-    const values = {
-      id: `mkt_${ulid()}`,
-      tenant_id: event.tenant_id,
-      organization_id: event.organization_id,
-      brand_id: event.brand_id,
-      event_id: eventId,
+    await app.context.marketingIntegrationCheckpoint?.({
+      stage: 'before_transaction',
+      eventId,
       provider: body.provider,
-      config: JSON.stringify(body.config),
-      consent_required: body.consentRequired,
-      status: body.status,
-      created_at: now,
-      updated_at: now,
-    };
+    });
+
+    const executeUpsert = () =>
+      db.transaction().execute(async (transaction) => {
+        const currentEvent = await transaction
+          .selectFrom('events')
+          .selectAll()
+          .where('id', '=', eventId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!currentEvent) throw new NotFoundError('Event', eventId);
+        ClerkAuthService.requireResourceTenant(principal, currentEvent, 'Event', eventId);
+        ClerkAuthService.requireOrganizationScope(principal, currentEvent.organization_id);
+        ClerkAuthService.requireBrandScope(principal, currentEvent.brand_id);
+        ClerkAuthService.requireEventScope(principal, eventId);
+
+        const existing = await transaction
+          .selectFrom('marketing_integrations')
+          .selectAll()
+          .where('tenant_id', '=', currentEvent.tenant_id)
+          .where('organization_id', '=', currentEvent.organization_id)
+          .where('brand_id', '=', currentEvent.brand_id)
+          .where('event_id', '=', eventId)
+          .where('provider', '=', body.provider)
+          .forUpdate()
+          .executeTakeFirst();
+        const now = new Date();
+        const saved = existing
+          ? {
+              ...existing,
+              config: JSON.stringify(body.config),
+              consent_required: body.consentRequired,
+              status: body.status,
+              updated_at: now,
+            }
+          : {
+              id: `mkt_${ulid()}`,
+              tenant_id: currentEvent.tenant_id,
+              organization_id: currentEvent.organization_id,
+              brand_id: currentEvent.brand_id,
+              event_id: eventId,
+              provider: body.provider,
+              config: JSON.stringify(body.config),
+              consent_required: body.consentRequired,
+              status: body.status,
+              created_at: now,
+              updated_at: now,
+            };
+        if (existing) {
+          await transaction
+            .updateTable('marketing_integrations')
+            .set({
+              config: saved.config,
+              consent_required: saved.consent_required,
+              status: saved.status,
+              updated_at: now,
+            })
+            .where('id', '=', existing.id)
+            .where('tenant_id', '=', currentEvent.tenant_id)
+            .where('organization_id', '=', currentEvent.organization_id)
+            .where('brand_id', '=', currentEvent.brand_id)
+            .where('event_id', '=', eventId)
+            .where('provider', '=', body.provider)
+            .execute();
+        } else {
+          await transaction.insertInto('marketing_integrations').values(saved).execute();
+        }
+
+        const persisted = await transaction
+          .selectFrom('marketing_integrations')
+          .selectAll()
+          .where('id', '=', saved.id)
+          .where('tenant_id', '=', currentEvent.tenant_id)
+          .where('organization_id', '=', currentEvent.organization_id)
+          .where('brand_id', '=', currentEvent.brand_id)
+          .where('event_id', '=', eventId)
+          .where('provider', '=', body.provider)
+          .executeTakeFirst();
+        if (!persisted) throw new NotFoundError('MarketingIntegration', saved.id);
+        const updatedEvent = await new EventRepository(transaction).update(eventId, {});
+        const serialized = serializeMarketingIntegration(persisted);
+        await writeAuditLog(
+          new AuditLogRepository(transaction),
+          request,
+          principal,
+          {
+            action: 'event.marketing_integration.upserted',
+            organizationId: currentEvent.organization_id,
+            brandId: currentEvent.brand_id,
+            resourceType: 'MarketingIntegration',
+            resourceId: persisted.id,
+            diffSummary: {
+              eventId,
+              provider: body.provider,
+              before: existing ? serializeMarketingIntegration(existing) : null,
+              after: serialized,
+              previousVersion: Number(currentEvent.version),
+              newVersion: Number(updatedEvent.version),
+            },
+          },
+          { failClosed: true },
+        );
+        return serialized;
+      });
+
     try {
-      await db.insertInto('marketing_integrations').values(values).execute();
-      return serializeMarketingIntegration(values);
+      return await executeUpsert();
     } catch (error) {
       if (!isMarketingIntegrationEventProviderDuplicateInsert(error)) throw error;
-      const concurrent = await db
-        .selectFrom('marketing_integrations')
-        .selectAll()
-        .where('tenant_id', '=', event.tenant_id)
-        .where('organization_id', '=', event.organization_id)
-        .where('brand_id', '=', event.brand_id)
-        .where('event_id', '=', eventId)
-        .where('provider', '=', body.provider)
-        .executeTakeFirst();
-      if (!concurrent) throw error;
-      const recoveredAt = new Date();
-      const recovered = {
-        ...concurrent,
-        config: JSON.stringify(body.config),
-        consent_required: body.consentRequired,
-        status: body.status,
-        updated_at: recoveredAt,
-      };
-      await db
-        .updateTable('marketing_integrations')
-        .set({
-          config: recovered.config,
-          consent_required: recovered.consent_required,
-          status: recovered.status,
-          updated_at: recoveredAt,
-        })
-        .where('id', '=', concurrent.id)
-        .where('tenant_id', '=', event.tenant_id)
-        .where('organization_id', '=', event.organization_id)
-        .where('brand_id', '=', event.brand_id)
-        .where('event_id', '=', eventId)
-        .where('provider', '=', body.provider)
-        .execute();
-      return serializeMarketingIntegration(recovered);
+      return executeUpsert();
     }
   });
 

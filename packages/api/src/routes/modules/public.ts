@@ -12,6 +12,7 @@ import {
 import { accessRuleMatches, NotFoundError, ValidationError } from '@tixkit/domain';
 import type { AccessRuleRecord, Question } from '@tixkit/domain';
 import {
+  hasSafeMarketingIntegrationConfig,
   parseJsonValue,
   serializeBrandTheme,
   serializeEventOccurrence,
@@ -262,12 +263,13 @@ export async function loadPublicEventById(db: Database, eventId: string): Promis
 }
 
 export async function loadPublicMarketingIntegrations(db: Database, eventId: string) {
-  return db
+  const rows = await db
     .selectFrom('marketing_integrations')
     .select(['provider', 'config', 'consent_required', 'status'])
     .where('event_id', '=', eventId)
     .where('status', '=', 'active')
     .execute();
+  return rows.filter((row) => hasSafeMarketingIntegrationConfig(row.provider, row.config));
 }
 
 export async function loadPublicEventMedia(

@@ -116,6 +116,11 @@ export type AppContext = {
     stage: 'before_transaction';
     eventId: string;
   }) => void | Promise<void>;
+  marketingIntegrationCheckpoint?: (input: {
+    stage: 'before_transaction';
+    eventId: string;
+    provider: 'ga4' | 'meta_pixel' | 'generic_tag';
+  }) => void | Promise<void>;
   eventPagePublishCheckpoint?: (input: {
     stage: 'after_event_locked';
     eventId: string;

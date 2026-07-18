@@ -3413,7 +3413,9 @@ export const apiReferenceOperations = [
               "items": [
                 {
                   "provider": "ga4",
-                  "config": {},
+                  "config": {
+                    "measurementId": "measurement_example"
+                  },
                   "consentRequired": true,
                   "status": "active"
                 }
@@ -3470,10 +3472,21 @@ export const apiReferenceOperations = [
         "application/json": {
           "schema": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
               "config": {
-                "type": "object",
-                "additionalProperties": true
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Ga4MarketingIntegrationConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MetaPixelMarketingIntegrationConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GenericTagMarketingIntegrationConfig"
+                  }
+                ],
+                "description": "Configuration must match the provider path parameter."
               },
               "consentRequired": {
                 "type": "boolean",
@@ -3493,7 +3506,9 @@ export const apiReferenceOperations = [
             ]
           },
           "example": {
-            "config": {}
+            "config": {
+              "measurementId": "measurement_example"
+            }
           }
         }
       }
@@ -3508,7 +3523,9 @@ export const apiReferenceOperations = [
             },
             "example": {
               "provider": "ga4",
-              "config": {},
+              "config": {
+                "measurementId": "measurement_example"
+              },
               "consentRequired": true,
               "status": "active"
             }
@@ -4928,7 +4945,9 @@ export const apiReferenceOperations = [
               "marketingIntegrations": [
                 {
                   "provider": "ga4",
-                  "config": {},
+                  "config": {
+                    "measurementId": "measurement_example"
+                  },
                   "consentRequired": true,
                   "status": "active"
                 }
@@ -5048,7 +5067,9 @@ export const apiReferenceOperations = [
               "marketingIntegrations": [
                 {
                   "provider": "ga4",
-                  "config": {},
+                  "config": {
+                    "measurementId": "measurement_example"
+                  },
                   "consentRequired": true,
                   "status": "active"
                 }
@@ -5187,7 +5208,9 @@ export const apiReferenceOperations = [
                 "marketingIntegrations": [
                   {
                     "provider": "ga4",
-                    "config": {},
+                    "config": {
+                      "measurementId": "measurement_example"
+                    },
                     "consentRequired": true,
                     "status": "active"
                   }
@@ -5419,7 +5442,9 @@ export const apiReferenceOperations = [
               "items": [
                 {
                   "provider": "ga4",
-                  "config": {},
+                  "config": {
+                    "measurementId": "measurement_example"
+                  },
                   "consentRequired": true,
                   "status": "active"
                 }
@@ -23455,7 +23480,9 @@ export const apiReferenceOperations = [
                 "marketingIntegrations": [
                   {
                     "provider": "ga4",
-                    "config": {},
+                    "config": {
+                      "measurementId": "measurement_example"
+                    },
                     "consentRequired": true,
                     "status": "active"
                   }
@@ -23806,7 +23833,9 @@ export const apiReferenceOperations = [
                 "marketingIntegrations": [
                   {
                     "provider": "ga4",
-                    "config": {},
+                    "config": {
+                      "measurementId": "measurement_example"
+                    },
                     "consentRequired": true,
                     "status": "active"
                   }
@@ -32347,6 +32376,39 @@ export const apiReferenceSchemas = [
     ]
   },
   {
+    "name": "Ga4MarketingIntegrationConfig",
+    "type": "object",
+    "description": "",
+    "required": [
+      "measurementId"
+    ],
+    "properties": [
+      "measurementId"
+    ]
+  },
+  {
+    "name": "MetaPixelMarketingIntegrationConfig",
+    "type": "object",
+    "description": "",
+    "required": [
+      "pixelId"
+    ],
+    "properties": [
+      "pixelId"
+    ]
+  },
+  {
+    "name": "GenericTagMarketingIntegrationConfig",
+    "type": "object",
+    "description": "",
+    "required": [
+      "pixelUrl"
+    ],
+    "properties": [
+      "pixelUrl"
+    ]
+  },
+  {
     "name": "PublicMarketingIntegration",
     "type": "object",
     "description": "",
@@ -32361,6 +32423,104 @@ export const apiReferenceSchemas = [
       "config",
       "consentRequired",
       "status"
+    ],
+    "variants": [
+      {
+        "name": "provider = ga4",
+        "type": "object",
+        "required": [
+          "provider",
+          "config"
+        ],
+        "properties": [
+          {
+            "name": "provider",
+            "type": "string",
+            "const": "ga4",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "config",
+            "type": "reference",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "provider = meta_pixel",
+        "type": "object",
+        "required": [
+          "provider",
+          "config"
+        ],
+        "properties": [
+          {
+            "name": "provider",
+            "type": "string",
+            "const": "meta_pixel",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "config",
+            "type": "reference",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "provider = generic_tag",
+        "type": "object",
+        "required": [
+          "provider",
+          "config"
+        ],
+        "properties": [
+          {
+            "name": "provider",
+            "type": "string",
+            "const": "generic_tag",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "config",
+            "type": "reference",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      }
     ]
   },
   {
@@ -33335,6 +33495,104 @@ export const apiReferenceSchemas = [
       "status",
       "createdAt",
       "updatedAt"
+    ],
+    "variants": [
+      {
+        "name": "provider = ga4",
+        "type": "object",
+        "required": [
+          "provider",
+          "config"
+        ],
+        "properties": [
+          {
+            "name": "provider",
+            "type": "string",
+            "const": "ga4",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "config",
+            "type": "reference",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "provider = meta_pixel",
+        "type": "object",
+        "required": [
+          "provider",
+          "config"
+        ],
+        "properties": [
+          {
+            "name": "provider",
+            "type": "string",
+            "const": "meta_pixel",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "config",
+            "type": "reference",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "provider = generic_tag",
+        "type": "object",
+        "required": [
+          "provider",
+          "config"
+        ],
+        "properties": [
+          {
+            "name": "provider",
+            "type": "string",
+            "const": "generic_tag",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "config",
+            "type": "reference",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      }
     ]
   },
   {

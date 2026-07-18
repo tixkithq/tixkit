@@ -536,12 +536,25 @@ export type ReadinessAcknowledgement = {
   acknowledgedAt: string;
 };
 
-export type PublicMarketingIntegration = {
-  provider: 'ga4' | 'meta_pixel' | 'generic_tag';
-  config: Record<string, unknown>;
-  consentRequired: boolean;
-  status: 'active' | 'disabled' | string;
+export type MarketingIntegrationProvider = 'ga4' | 'meta_pixel' | 'generic_tag';
+
+export type MarketingIntegrationConfigByProvider = {
+  ga4: { measurementId: string };
+  meta_pixel: { pixelId: string };
+  generic_tag: { pixelUrl: string };
 };
+
+type PublicMarketingIntegrationCommon = {
+  consentRequired: boolean;
+  status: 'active' | 'disabled';
+};
+
+export type PublicMarketingIntegration = {
+  [Provider in MarketingIntegrationProvider]: PublicMarketingIntegrationCommon & {
+    provider: Provider;
+    config: MarketingIntegrationConfigByProvider[Provider];
+  };
+}[MarketingIntegrationProvider];
 
 export type PublicEventMediaRendition = {
   variant: 'thumbnail' | 'card' | 'page' | 'social';
@@ -650,19 +663,24 @@ export type EventOccurrence = {
   updatedAt?: string;
 };
 
-export type MarketingIntegration = {
+type MarketingIntegrationCommon = {
   id?: string;
   tenantId?: string;
   organizationId?: string;
   brandId?: string;
   eventId?: string;
-  provider: 'ga4' | 'meta_pixel' | 'generic_tag';
-  config: Record<string, unknown>;
   consentRequired: boolean;
-  status: 'active' | 'disabled' | string;
+  status: 'active' | 'disabled';
   createdAt?: string;
   updatedAt?: string;
 };
+
+export type MarketingIntegration = {
+  [Provider in MarketingIntegrationProvider]: MarketingIntegrationCommon & {
+    provider: Provider;
+    config: MarketingIntegrationConfigByProvider[Provider];
+  };
+}[MarketingIntegrationProvider];
 
 export type AccessRule = {
   id: string;
@@ -4303,11 +4321,11 @@ class EventResource {
     return this.client.request('GET', `/events/${eventId}/marketing-integrations`);
   }
 
-  async upsertMarketingIntegration(
+  async upsertMarketingIntegration<Provider extends MarketingIntegrationProvider>(
     eventId: string,
-    provider: MarketingIntegration['provider'],
+    provider: Provider,
     input: {
-      config: Record<string, unknown>;
+      config: MarketingIntegrationConfigByProvider[Provider];
       consentRequired?: boolean;
       status?: 'active' | 'disabled';
     },

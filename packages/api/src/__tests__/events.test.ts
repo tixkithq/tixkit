@@ -131,7 +131,6 @@ function createEventMutationDb(
     concurrentMarketingIntegrationError?: unknown;
     concurrentMarketingIntegrationSystemTimeAfterInsert?: Date;
     marketingIntegrations?: Record<string, unknown>[];
-    marketingIntegrationAfterRecoveryUpdate?: Record<string, unknown>;
     feeRules?: Record<string, unknown>[];
   } = {},
 ) {
@@ -261,12 +260,6 @@ function createEventMutationDb(
             if (!row) return { numUpdatedRows: BigInt(0) };
             Object.assign(row, values);
             updates.push(values);
-            if (
-              table === 'marketing_integrations' &&
-              seed.marketingIntegrationAfterRecoveryUpdate
-            ) {
-              Object.assign(row, seed.marketingIntegrationAfterRecoveryUpdate);
-            }
             return { numUpdatedRows: BigInt(1) };
           },
           executeTakeFirst: async () => updateQuery.execute(),
@@ -1033,7 +1026,30 @@ describe('event routes', () => {
     await app.close();
   });
 
-  it('lists only marketing integrations that match the authorized event scope', async () => {
+  it.each([
+    'not-a-url',
+    'http://metrics.example.test/pixel.gif',
+    'https://user:password@metrics.example.test/pixel.gif',
+    'https://metrics.example.test/pixel.gif?token=secret',
+    'https://metrics.example.test/pixel.gif#secret',
+  ])('rejects unsafe generic marketing pixel URL %s without throwing', async (pixelUrl) => {
+    const { db, inserted } = createEventMutationDb({
+      event: baseEventRow({ status: 'published' }),
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/marketing-integrations/generic_tag',
+      payload: { config: { pixelUrl } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(inserted).toHaveLength(0);
+    await app.close();
+  });
+
+  it('lists only safe marketing integrations that match the authorized event scope', async () => {
     const scopedIntegration = {
       id: 'mkt_scoped',
       tenant_id: 'tnt_1',
@@ -1053,9 +1069,17 @@ describe('event routes', () => {
       tenant_id: 'tnt_other',
       config: JSON.stringify({ measurementId: 'G-OTHER' }),
     };
+    const unsafeLegacyIntegration = {
+      ...scopedIntegration,
+      id: 'mkt_unsafe_legacy',
+      provider: 'generic_tag',
+      config: JSON.stringify({
+        pixelUrl: 'https://user:password@metrics.example.test/pixel.gif',
+      }),
+    };
     const { db } = createEventMutationDb({
       event: baseEventRow({ status: 'published' }),
-      marketingIntegrations: [scopedIntegration, mismatchedIntegration],
+      marketingIntegrations: [scopedIntegration, unsafeLegacyIntegration, mismatchedIntegration],
     });
     const app = await setupEventApp(db, writePrincipal);
 
@@ -1108,7 +1132,13 @@ describe('event routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(updates).toHaveLength(0);
+    expect(updates.filter((update) => 'config' in update)).toHaveLength(0);
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        public_revision: expect.anything(),
+        updated_at: expect.any(Date),
+      }),
+    );
     expect(inserted).toContainEqual(
       expect.objectContaining({
         tenant_id: 'tnt_1',
@@ -1207,12 +1237,6 @@ describe('event routes', () => {
         concurrentMarketingIntegration: existing,
         concurrentMarketingIntegrationError,
         concurrentMarketingIntegrationSystemTimeAfterInsert: new Date('2026-06-01T00:00:02.000Z'),
-        marketingIntegrationAfterRecoveryUpdate: {
-          config: JSON.stringify({ measurementId: 'G-LATER' }),
-          consent_required: true,
-          status: 'disabled',
-          updated_at: new Date('2026-06-01T00:00:03.000Z'),
-        },
       });
       const app = await setupEventApp(db, writePrincipal);
 
