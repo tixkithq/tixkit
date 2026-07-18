@@ -1348,6 +1348,7 @@ describe('privacy idempotency recovery', () => {
     });
     expect(first.statusCode).toBe(500);
     expect(tables.privacy_requests).toHaveLength(1);
+    expect(tables.audit_logs).toHaveLength(1);
     const requestId = tables.privacy_requests[0]?.id;
 
     const retry = await app.inject({
@@ -1360,7 +1361,7 @@ describe('privacy idempotency recovery', () => {
     expect(retry.statusCode).toBe(202);
     expect(retry.json()).toMatchObject({
       id: requestId,
-      subjectEmail: 'buyer@example.test',
+      subjectEmail: null,
       status: 'pending',
     });
     expect(tables.privacy_requests).toHaveLength(1);
@@ -1374,9 +1375,13 @@ describe('privacy idempotency recovery', () => {
       resource_type: 'PrivacyRequest',
       resource_id: requestId,
       diff_summary: JSON.stringify({
+        requestType: 'export',
         subjectType: 'buyer',
-        subjectId: null,
-        subjectEmail: 'buyer@example.test',
+        subjectSha256: hashRequest({
+          subjectType: 'buyer',
+          subjectId: null,
+          subjectEmail: 'buyer@example.test',
+        }),
       }),
     });
     expect(startPrivacyRequest).toHaveBeenCalledTimes(2);
@@ -1458,7 +1463,7 @@ describe('privacy scoped principal boundaries', () => {
     expect(res.statusCode).toBe(202);
     expect(res.json()).toMatchObject({
       brandId: 'brd_A',
-      subjectEmail: 'buyer@example.test',
+      subjectEmail: null,
     });
     expect(tables.privacy_requests).toHaveLength(1);
     expect(tables.privacy_requests[0]).toMatchObject({ brand_id: 'brd_A' });

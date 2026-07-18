@@ -2462,6 +2462,19 @@ describe('holdExpirationWorkflow', () => {
     );
   });
 
+  it('keeps recurring maintenance alive when a privacy handoff misses one tick', async () => {
+    let attempts = 0;
+    setActivity('recoverPendingPrivacyRequestHandoffsActivity', async () => {
+      attempts += 1;
+      return attempts === 1
+        ? errResult('PRIVACY_HANDOFF_RECOVERY_FAILED', 'Temporal unavailable', true)
+        : okResult({ recoveredCount: 1, skippedUnauditedCount: 0 });
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 2 })).resolves.toBeUndefined();
+    expect(attempts).toBe(2);
+  });
+
   it('continues as new after the configured production rollover threshold', async () => {
     const calls: string[] = [];
     setActivity('expireStaleHoldsActivity', async () => {

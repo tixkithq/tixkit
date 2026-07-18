@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { createDb, EmailJobRepository, SmsJobRepository, sql, type Database } from '@tixkit/db';
 import { runMigrations } from '@tixkit/db/migrate';
 import { ulid } from 'ulid';
@@ -40,7 +41,10 @@ import {
   type EmailJobNotificationHandoffRow,
   type SmsJobNotificationHandoffRow,
 } from '../activities/activity-clients.js';
-import { recoverQueuedMessageHandoffsActivity } from '../activities/hold-expiration.js';
+import {
+  recoverPendingPrivacyRequestHandoffsActivity,
+  recoverQueuedMessageHandoffsActivity,
+} from '../activities/hold-expiration.js';
 
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
 const originalDbDriver = process.env.DB_DRIVER;
@@ -97,6 +101,15 @@ describe.skipIf(!dbUrl)('message handoff recovery database integration', () => {
     temporalMock.failuresRemaining.clear();
     vi.clearAllMocks();
     await deleteJobs(db);
+    await db.deleteFrom('audit_logs').where('actor_id', '=', `usr_handoff_${RUN_ID}`).execute();
+    await db
+      .deleteFrom('privacy_requests')
+      .where('requested_by', '=', `usr_handoff_${RUN_ID}`)
+      .execute();
+    await db
+      .deleteFrom('idempotency_records')
+      .where('key', 'like', `privacy-handoff-${RUN_ID}%`)
+      .execute();
   });
 
   afterEach(async () => {
@@ -252,7 +265,110 @@ describe.skipIf(!dbUrl)('message handoff recovery database integration', () => {
       smsWorkflowId: `sms-delivery:${jobs.sms.id}`,
     });
   });
+
+  it('recovers only audited pending privacy intents with deterministic workflow identity', async () => {
+    const idempotencyKey = `privacy-handoff-${RUN_ID}-crash`;
+    const requestHash = createHash('sha256').update(`request-${RUN_ID}`).digest('hex');
+    const auditedId = deterministicPrivacyRequestId(TENANT_ID, idempotencyKey, requestHash);
+    const unauditedId = `prv_handoff_${RUN_ID}_unaudited`;
+    await seedPrivacyRequest(db, unauditedId);
+    await seedPrivacyRequest(db, auditedId);
+    await seedPrivacyAudit(db, auditedId);
+    await db
+      .insertInto('idempotency_records')
+      .values({
+        id: `idm_privacy_${RUN_ID}`,
+        key: idempotencyKey,
+        tenant_id: TENANT_ID,
+        request_hash: requestHash,
+        response_status: 0,
+        response_body: 'null',
+        status: 'in_progress',
+        created_at: new Date(),
+        expires_at: new Date(Date.now() + 86_400_000),
+      })
+      .execute();
+
+    await expect(recoverPendingPrivacyRequestHandoffsActivity()).resolves.toEqual({
+      ok: true,
+      value: { recoveredCount: 1, skippedUnauditedCount: 0 },
+    });
+    expect(startOptionsFor(`privacy-request:${auditedId}`)).toMatchObject({
+      workflowId: `privacy-request:${auditedId}`,
+      args: [{ version: 1, requestId: auditedId }],
+    });
+    expect(startOptionsFor(`privacy-request:${unauditedId}`)).toBeUndefined();
+    const reservation = await db
+      .selectFrom('idempotency_records')
+      .selectAll()
+      .where('key', '=', idempotencyKey)
+      .executeTakeFirstOrThrow();
+    expect(reservation).toMatchObject({ status: 'completed', response_status: 202 });
+    expect(reservation.response_body).not.toContain(PRIVATE_EMAIL);
+    expect(reservation.response_body).not.toContain(`buyer_${RUN_ID}`);
+
+    temporalMock.alreadyStartedWorkflowIds.add(`privacy-request:${auditedId}`);
+    await expect(recoverPendingPrivacyRequestHandoffsActivity()).resolves.toEqual({
+      ok: true,
+      value: { recoveredCount: 1, skippedUnauditedCount: 0 },
+    });
+  });
 });
+
+function deterministicPrivacyRequestId(tenantId: string, key: string, requestHash: string): string {
+  const digest = createHash('sha256')
+    .update(tenantId)
+    .update('\0')
+    .update(key)
+    .update('\0')
+    .update(requestHash)
+    .digest('hex')
+    .slice(0, 26);
+  return `prv_${digest}`;
+}
+
+async function seedPrivacyRequest(db: Database, id: string): Promise<void> {
+  await db
+    .insertInto('privacy_requests')
+    .values({
+      id,
+      tenant_id: TENANT_ID,
+      organization_id: ORGANIZATION_ID,
+      brand_id: BRAND_ID,
+      request_type: 'erasure',
+      subject_type: 'buyer',
+      subject_id: `buyer_${RUN_ID}`,
+      subject_email: PRIVATE_EMAIL,
+      status: 'pending',
+      requested_by: `usr_handoff_${RUN_ID}`,
+      result: null,
+      error: null,
+      created_at: new Date(),
+      completed_at: null,
+    })
+    .execute();
+}
+
+async function seedPrivacyAudit(db: Database, requestId: string): Promise<void> {
+  await db
+    .insertInto('audit_logs')
+    .values({
+      id: `aud_privacy_${RUN_ID}`,
+      tenant_id: TENANT_ID,
+      organization_id: ORGANIZATION_ID,
+      brand_id: BRAND_ID,
+      actor_type: 'user',
+      actor_id: `usr_handoff_${RUN_ID}`,
+      action: 'privacy.erasure.requested',
+      resource_type: 'PrivacyRequest',
+      resource_id: requestId,
+      diff_summary: JSON.stringify({ requestType: 'erasure', subjectType: 'buyer' }),
+      ip: null,
+      user_agent: 'vitest',
+      created_at: new Date(),
+    })
+    .execute();
+}
 
 function startOptionsFor(workflowId: string): WorkflowStartOptions | undefined {
   return temporalMock.workflowStart.mock.calls

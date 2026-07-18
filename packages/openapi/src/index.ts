@@ -17889,6 +17889,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Queue GDPR data export request (Idempotency-Key required)',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['settings.write'],
         parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,
@@ -17914,6 +17915,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Queue GDPR erasure request (Idempotency-Key required)',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['settings.write'],
         parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,

@@ -74,6 +74,7 @@ export async function withIdempotency(
     inProgressWaitMs?: number;
     inProgressPollIntervalMs?: number;
     discardErrorCodes?: readonly string[];
+    sanitizeStoredResponse?: (body: unknown) => unknown;
   },
   handler: (context: IdempotencyHandlerContext) => Promise<IdempotentResponse>,
 ): Promise<IdempotentResponse> {
@@ -92,7 +93,20 @@ export async function withIdempotency(
         if (existing.request_hash !== input.requestHash) {
           throw new IdempotencyConflictError(input.key);
         }
-        return { status: existing.response_status, body: JSON.parse(existing.response_body) };
+        const storedBody = JSON.parse(existing.response_body);
+        const body = input.sanitizeStoredResponse?.(storedBody) ?? storedBody;
+        if (input.sanitizeStoredResponse) {
+          const sanitizedResponseBody = JSON.stringify(body);
+          if (sanitizedResponseBody !== existing.response_body) {
+            await db
+              .updateTable('idempotency_records')
+              .set({ response_body: sanitizedResponseBody })
+              .where('id', '=', existing.id)
+              .where('status', '=', 'completed')
+              .execute();
+          }
+        }
+        return { status: existing.response_status, body };
       }
       if (isExpired(existing)) {
         // eslint-disable-next-line no-await-in-loop -- expired records must be removed before this key can be reserved again.

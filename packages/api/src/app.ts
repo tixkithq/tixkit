@@ -139,6 +139,11 @@ export type AppContext = {
     eventId: string;
     campaignId: string;
   }) => void | Promise<void>;
+  privacyRequestWriteCheckpoint?: (input: {
+    stage: 'before_transaction' | 'after_transaction_before_workflow';
+    requestId: string;
+    requestType: 'export' | 'erasure';
+  }) => void | Promise<void>;
   eventPagePublishCheckpoint?: (input: {
     stage: 'after_event_locked';
     eventId: string;

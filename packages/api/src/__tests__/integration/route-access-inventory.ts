@@ -83,6 +83,10 @@ export type NegativeAuthorizationEvidence = {
 
 const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
+    'privacy-erasure-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'privacy-erasure-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'message-campaign-write-route-authorization-db.integration.test.ts',
     resolve(
       import.meta.dirname,
@@ -271,6 +275,10 @@ function evidenceBindings(
 }
 
 const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
+  ...evidenceBindings(['postPrivacyErasures'], {
+    source: 'privacy-erasure-route-authorization-db.integration.test.ts',
+    persistenceSource: 'privacy-erasure-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['postEventsByEventIdMessages'], {
     source: 'message-campaign-write-route-authorization-db.integration.test.ts',
     persistenceSource: 'message-campaign-write-route-authorization-db.integration.test.ts',
@@ -604,6 +612,7 @@ const organizationWideScopeGuards = new Set([
   'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
 ]);
+const privacyRequestScopeGuards = new Set(['createPrivacyRequest']);
 const scopedJobAuthorizationOperations = new Set([
   'assessMigrationRollback',
   'getMigrationJob',
@@ -621,6 +630,10 @@ const delegatedPermissionContracts = new Map<
   string,
   Readonly<{ guard: string; permissions: readonly Permission[] }>
 >([
+  ...['postPrivacyDataExports', 'postPrivacyErasures'].map(
+    (operationId) =>
+      [operationId, { guard: 'createPrivacyRequest', permissions: ['settings.write'] }] as const,
+  ),
   ...[
     'getAgentPrincipalsById',
     'postAgentDelegations',
@@ -942,6 +955,9 @@ function boundariesFor(
   }
   if (guardEvidence.some((guard) => organizationWideScopeGuards.has(guard))) {
     boundaries.push('brand', 'event');
+  }
+  if (guardEvidence.some((guard) => privacyRequestScopeGuards.has(guard))) {
+    boundaries.push('organization', 'brand');
   }
   if (guardEvidence.includes('scopedJob')) boundaries.push('organization');
   if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');

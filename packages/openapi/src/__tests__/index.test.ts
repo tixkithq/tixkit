@@ -2863,6 +2863,12 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/privacy/data-exports'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
+    expect(openApiSpec.paths['/privacy/data-exports'].post['x-required-permissions']).toEqual([
+      'settings.write',
+    ]);
+    expect(openApiSpec.paths['/privacy/erasures'].post['x-required-permissions']).toEqual([
+      'settings.write',
+    ]);
     expect(
       openApiSpec.paths['/privacy/erasures'].post.requestBody.content['application/json'].schema,
     ).toEqual({

@@ -175,8 +175,50 @@ async function assertPrivacyScope(
   ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
   ClerkAuthService.requireBrandScope(principal, input.brandId);
   if (brand.organization_id !== input.organizationId) {
-    throw new ValidationError('Brand does not belong to the requested organization');
+    throw new NotFoundError('Brand', input.brandId);
   }
+}
+
+async function assertLockedPrivacyScope(
+  principal: Principal,
+  db: Database,
+  input: { organizationId: string; brandId?: string },
+): Promise<void> {
+  ClerkAuthService.requireNoEventScope(principal, 'privacy requests');
+  const organization = await db
+    .selectFrom('organizations')
+    .select(['id', 'tenant_id'])
+    .where('id', '=', input.organizationId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!organization) throw new NotFoundError('Organization', input.organizationId);
+  ClerkAuthService.requireResourceTenant(
+    principal,
+    organization,
+    'Organization',
+    input.organizationId,
+  );
+  ClerkAuthService.requireOrganizationScope(principal, input.organizationId);
+
+  if (!input.brandId) {
+    if (principal.brandIds && principal.brandIds.length > 0) {
+      throw new ForbiddenError('Brand-scoped principals must provide brandId for privacy requests');
+    }
+    return;
+  }
+
+  const brand = await db
+    .selectFrom('brands')
+    .select(['id', 'tenant_id', 'organization_id'])
+    .where('id', '=', input.brandId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!brand || brand.organization_id !== input.organizationId) {
+    throw new NotFoundError('Brand', input.brandId);
+  }
+  ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', input.brandId);
+  ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+  ClerkAuthService.requireBrandScope(principal, input.brandId);
 }
 
 function scopedBrandIdsForPrivacyList(
@@ -210,7 +252,10 @@ function serializeAuditLog(row: Record<string, unknown>) {
   };
 }
 
-function serializePrivacyRequest(row: Record<string, unknown>) {
+function serializePrivacyRequest(
+  row: Record<string, unknown>,
+  options: { redactSubject?: boolean } = {},
+) {
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -218,8 +263,8 @@ function serializePrivacyRequest(row: Record<string, unknown>) {
     brandId: row.brand_id ?? null,
     requestType: row.request_type,
     subjectType: row.subject_type,
-    subjectId: row.subject_id ?? null,
-    subjectEmail: row.subject_email ?? null,
+    subjectId: options.redactSubject ? null : (row.subject_id ?? null),
+    subjectEmail: options.redactSubject ? null : (row.subject_email ?? null),
     status: row.status,
     requestedBy: row.requested_by,
     result: parseJsonValue(row.result, null),
@@ -229,9 +274,13 @@ function serializePrivacyRequest(row: Record<string, unknown>) {
   };
 }
 
+function redactPrivacyRequestResponse(body: unknown): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  return { ...(body as Record<string, unknown>), subjectId: null, subjectEmail: null };
+}
+
 export const privacyRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
-  const auditRepo = () => new AuditLogRepository(db);
   const privacyRepo = () => new PrivacyRequestRepository(db);
 
   app.get('/audit-logs', async (request) => {
@@ -368,11 +417,38 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Idempotency-Key header is required for privacy requests');
     }
 
-    const requestHash = hashRequest({ requestType, ...body });
-    const requestId = deterministicPrivacyRequestId({
+    const actorBoundRequestHash = hashRequest({
+      requestType,
+      actor: { type: principal.type, id: principal.id },
+      ...body,
+    });
+    const legacyRequestHash = hashRequest({ requestType, ...body });
+    const legacyRequestId = deterministicPrivacyRequestId({
       tenantId: principal.tenantId,
       idempotencyKey,
-      requestHash,
+      requestHash: legacyRequestHash,
+    });
+    const legacyRequest = await privacyRepo().findById(legacyRequestId);
+    const useLegacyIdentity =
+      legacyRequest?.tenant_id === principal.tenantId &&
+      legacyRequest.requested_by === principal.id;
+    const requestHash = useLegacyIdentity ? legacyRequestHash : actorBoundRequestHash;
+    const requestId = useLegacyIdentity
+      ? legacyRequestId
+      : deterministicPrivacyRequestId({
+          tenantId: principal.tenantId,
+          idempotencyKey,
+          requestHash,
+        });
+    const subjectSha256 = hashRequest({
+      subjectType: body.subjectType,
+      subjectId: body.subjectId ?? null,
+      subjectEmail: body.subjectEmail ?? null,
+    });
+    await app.context.privacyRequestWriteCheckpoint?.({
+      stage: 'before_transaction',
+      requestId,
+      requestType,
     });
 
     const result = await withIdempotency(
@@ -381,45 +457,89 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
         key: idempotencyKey,
         tenantId: principal.tenantId,
         requestHash,
+        discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
+        sanitizeStoredResponse: redactPrivacyRequestResponse,
       },
       async () => {
-        let row = await privacyRepo().findById(requestId);
-        if (!row) {
-          try {
-            row = await privacyRepo().create({
-              id: requestId,
-              tenantId: principal.tenantId,
-              organizationId: body.organizationId,
-              brandId: body.brandId ?? null,
-              requestType,
-              subjectType: body.subjectType,
-              subjectId: body.subjectId ?? null,
-              subjectEmail: body.subjectEmail ?? null,
-              requestedBy: principal.id,
-            });
-          } catch (error) {
-            const existing = await privacyRepo().findById(requestId);
-            if (!existing) throw error;
-            row = existing;
-          }
-        }
-
-        await app.context.temporalClient.startPrivacyRequest({ requestId: row.id });
-
-        await writeAuditLog(auditRepo(), request, principal, {
-          action: `privacy.${requestType}.requested`,
-          organizationId: body.organizationId,
-          brandId: body.brandId ?? null,
-          resourceType: 'PrivacyRequest',
-          resourceId: row.id,
-          diffSummary: {
+        const row = await db.transaction().execute(async (transaction) => {
+          await assertLockedPrivacyScope(principal, transaction, body);
+          const transactionPrivacyRepo = new PrivacyRequestRepository(transaction);
+          let existing = await transaction
+            .selectFrom('privacy_requests')
+            .selectAll()
+            .where('id', '=', requestId)
+            .forUpdate()
+            .executeTakeFirst();
+          existing ??= await transactionPrivacyRepo.create({
+            id: requestId,
+            tenantId: principal.tenantId,
+            organizationId: body.organizationId,
+            brandId: body.brandId ?? null,
+            requestType,
             subjectType: body.subjectType,
             subjectId: body.subjectId ?? null,
             subjectEmail: body.subjectEmail ?? null,
-          },
+            requestedBy: principal.id,
+          });
+
+          if (
+            existing.tenant_id !== principal.tenantId ||
+            existing.organization_id !== body.organizationId ||
+            existing.brand_id !== (body.brandId ?? null) ||
+            existing.request_type !== requestType ||
+            existing.subject_type !== body.subjectType ||
+            existing.subject_id !== (body.subjectId ?? null) ||
+            existing.subject_email !== (body.subjectEmail ?? null) ||
+            existing.requested_by !== principal.id
+          ) {
+            throw new ValidationError('Privacy request identity collision');
+          }
+
+          const auditAction = `privacy.${requestType}.requested`;
+          const existingAudit = await transaction
+            .selectFrom('audit_logs')
+            .select('id')
+            .where('tenant_id', '=', principal.tenantId)
+            .where('action', '=', auditAction)
+            .where('resource_type', '=', 'PrivacyRequest')
+            .where('resource_id', '=', existing.id)
+            .executeTakeFirst();
+          if (!existingAudit) {
+            await writeAuditLog(
+              new AuditLogRepository(transaction),
+              request,
+              principal,
+              {
+                action: auditAction,
+                organizationId: body.organizationId,
+                brandId: body.brandId ?? null,
+                resourceType: 'PrivacyRequest',
+                resourceId: existing.id,
+                diffSummary: {
+                  requestType,
+                  subjectType: body.subjectType,
+                  subjectSha256,
+                },
+              },
+              { failClosed: true },
+            );
+          }
+          return existing;
         });
 
-        return { status: 202, body: serializePrivacyRequest(row) };
+        await app.context.privacyRequestWriteCheckpoint?.({
+          stage: 'after_transaction_before_workflow',
+          requestId,
+          requestType,
+        });
+
+        try {
+          await app.context.temporalClient.startPrivacyRequest({ requestId: row.id });
+        } catch {
+          throw new Error('Privacy workflow dispatch failed');
+        }
+
+        return { status: 202, body: serializePrivacyRequest(row, { redactSubject: true }) };
       },
     );
 
@@ -430,7 +550,8 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     createPrivacyRequest('export', request, reply),
   );
 
-  app.post('/privacy/erasures', async (request, reply) =>
-    createPrivacyRequest('erasure', request, reply),
-  );
+  app.post('/privacy/erasures', async (request, reply) => {
+    ClerkAuthService.requireNoEventScope(request.principal!, 'privacy requests');
+    return createPrivacyRequest('erasure', request, reply);
+  });
 };

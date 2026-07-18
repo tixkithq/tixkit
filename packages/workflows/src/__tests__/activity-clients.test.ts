@@ -29,6 +29,10 @@ vi.mock('../workflows/notification.js', () => ({
   smsDeliveryWorkflow: vi.fn(),
 }));
 
+vi.mock('../workflows/privacy.js', () => ({
+  privacyRequestWorkflow: vi.fn(),
+}));
+
 function notificationInput(jobId: string) {
   return {
     jobId,
@@ -111,6 +115,30 @@ describe('activity Temporal clients', () => {
     await expect(startNotificationDeliveryWorkflow(notificationInput('emj_1'))).resolves.toBe(
       'notification:emj_1',
     );
+
+    await closeActivityClients();
+  });
+
+  it('starts privacy recovery with a deterministic workflow id and tolerates replay', async () => {
+    const { startPrivacyRequestWorkflow, closeActivityClients } =
+      await import('../activities/activity-clients.js');
+
+    await expect(startPrivacyRequestWorkflow('prv_1')).resolves.toBe('privacy-request:prv_1');
+    expect(temporalMock.workflowStart).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        taskQueue: 'tixkit',
+        workflowId: 'privacy-request:prv_1',
+        args: [{ version: 1, requestId: 'prv_1' }],
+      }),
+    );
+
+    temporalMock.workflowStart.mockRejectedValue(
+      Object.assign(new Error('Workflow execution already started'), {
+        name: 'WorkflowExecutionAlreadyStartedError',
+      }),
+    );
+    await expect(startPrivacyRequestWorkflow('prv_1')).resolves.toBe('privacy-request:prv_1');
 
     await closeActivityClients();
   });

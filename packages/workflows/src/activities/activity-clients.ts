@@ -3,11 +3,14 @@ import { createDb, EmailJobRepository, SmsJobRepository, type Database } from '@
 import type { ProviderClientRuntime } from '@tixkit/provider-clients';
 import {
   notificationWorkflowId,
+  privacyRequestWorkflowId,
   smsDeliveryWorkflowId,
   NOTIFICATION_WORKFLOW_VERSION,
+  PRIVACY_REQUEST_WORKFLOW_VERSION,
   SMS_DELIVERY_WORKFLOW_VERSION,
 } from '../shared/types.js';
 import { notificationDeliveryWorkflow, smsDeliveryWorkflow } from '../workflows/notification.js';
+import { privacyRequestWorkflow } from '../workflows/privacy.js';
 import type {
   NotificationDeliveryWorkflowInput,
   SmsDeliveryWorkflowInput,
@@ -141,6 +144,22 @@ export async function startSmsDeliveryWorkflow(
     if (isWorkflowAlreadyStartedError(err)) {
       return workflowId;
     }
+    throw err;
+  }
+}
+
+export async function startPrivacyRequestWorkflow(requestId: string): Promise<string> {
+  const workflowId = privacyRequestWorkflowId(requestId);
+  try {
+    const client = await getNotificationTemporalClient();
+    await client.workflow.start(privacyRequestWorkflow, {
+      taskQueue: temporalTaskQueue(),
+      workflowId,
+      args: [{ version: PRIVACY_REQUEST_WORKFLOW_VERSION, requestId }],
+    });
+    return workflowId;
+  } catch (err) {
+    if (isWorkflowAlreadyStartedError(err)) return workflowId;
     throw err;
   }
 }

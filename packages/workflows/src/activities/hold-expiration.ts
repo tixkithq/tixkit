@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { EmailJobRepository, type Database } from '@tixkit/db';
+import { EmailJobRepository, sql, type Database } from '@tixkit/db';
 import type { TemplateKey } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
@@ -7,6 +7,7 @@ import {
   getActivityDb,
   restartQueuedNotificationDeliveryWorkflow,
   restartQueuedSmsDeliveryWorkflow,
+  startPrivacyRequestWorkflow,
 } from './activity-clients.js';
 import {
   createMigrationMediaObjectStore,
@@ -88,6 +89,136 @@ export async function expireStaleHoldsActivity(): Promise<
 }
 
 const MESSAGE_HANDOFF_RECOVERY_BATCH_SIZE = 100;
+const PRIVACY_HANDOFF_RECOVERY_BATCH_SIZE = 100;
+
+function privacyRequestIdForIdempotencyRecord(input: {
+  tenantId: string;
+  key: string;
+  requestHash: string;
+}): string {
+  const digest = createHash('sha256')
+    .update(input.tenantId)
+    .update('\0')
+    .update(input.key)
+    .update('\0')
+    .update(input.requestHash)
+    .digest('hex')
+    .slice(0, 26);
+  return `prv_${digest}`;
+}
+
+function privacyAcceptanceEnvelope(request: Record<string, unknown>): Record<string, unknown> {
+  const iso = (value: unknown) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  };
+  return {
+    id: request.id,
+    tenantId: request.tenant_id,
+    organizationId: request.organization_id,
+    brandId: request.brand_id ?? null,
+    requestType: request.request_type,
+    subjectType: request.subject_type,
+    subjectId: null,
+    subjectEmail: null,
+    status: request.status,
+    requestedBy: request.requested_by,
+    result: null,
+    error: request.error ?? null,
+    createdAt: iso(request.created_at),
+    completedAt: iso(request.completed_at),
+  };
+}
+
+async function reconcilePrivacyIdempotencyRecord(
+  db: Database,
+  request: Record<string, unknown>,
+): Promise<void> {
+  const tenantId = String(request.tenant_id);
+  const records = await db
+    .selectFrom('idempotency_records')
+    .select(['id', 'key', 'request_hash'])
+    .where('tenant_id', '=', tenantId)
+    .where('status', '=', 'in_progress')
+    .execute();
+  const matchingRecord = records.find(
+    (record) =>
+      privacyRequestIdForIdempotencyRecord({
+        tenantId,
+        key: record.key,
+        requestHash: record.request_hash,
+      }) === request.id,
+  );
+  if (!matchingRecord) return;
+  await db
+    .updateTable('idempotency_records')
+    .set({
+      response_status: 202,
+      response_body: JSON.stringify(privacyAcceptanceEnvelope(request)),
+      status: 'completed',
+    })
+    .where('id', '=', matchingRecord.id)
+    .where('status', '=', 'in_progress')
+    .execute();
+}
+
+export async function recoverPendingPrivacyRequestHandoffsActivity(): Promise<
+  WorkflowActivityResult<{ recoveredCount: number; skippedUnauditedCount: number }>
+> {
+  const db = getActivityDb();
+  try {
+    const requests = await db
+      .selectFrom('privacy_requests')
+      .selectAll('privacy_requests')
+      .where('status', '=', 'pending')
+      .where(({ exists, ref, selectFrom }) =>
+        exists(
+          selectFrom('audit_logs')
+            .select('audit_logs.id')
+            .whereRef('audit_logs.tenant_id', '=', 'privacy_requests.tenant_id')
+            .whereRef('audit_logs.resource_id', '=', 'privacy_requests.id')
+            .where('audit_logs.resource_type', '=', 'PrivacyRequest')
+            .where(
+              'audit_logs.action',
+              '=',
+              sql<string>`concat('privacy.', ${ref('privacy_requests.request_type')}, '.requested')`,
+            ),
+        ),
+      )
+      .orderBy('created_at', 'asc')
+      .limit(PRIVACY_HANDOFF_RECOVERY_BATCH_SIZE)
+      .execute();
+    let recoveredCount = 0;
+    const skippedUnauditedCount = 0;
+    let failedCount = 0;
+    for (const request of requests) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- each audited intent uses a deterministic workflow id before the recovery cursor advances.
+        await startPrivacyRequestWorkflow(request.id);
+        // eslint-disable-next-line no-await-in-loop -- crash-surviving reservations are completed only after Temporal accepts the deterministic handoff.
+        await reconcilePrivacyIdempotencyRecord(db, request);
+        recoveredCount += 1;
+      } catch {
+        failedCount += 1;
+      }
+    }
+    if (failedCount > 0) {
+      return errResult(
+        'PRIVACY_HANDOFF_RECOVERY_FAILED',
+        `${failedCount} audited privacy handoff(s) could not reach Temporal`,
+        true,
+      );
+    }
+    return okResult({ recoveredCount, skippedUnauditedCount });
+  } catch (error) {
+    return errResult(
+      'PRIVACY_HANDOFF_RECOVERY_FAILED',
+      error instanceof Error ? error.message : 'Unknown error',
+      true,
+    );
+  }
+}
 
 export async function recoverQueuedMessageHandoffsActivity(): Promise<
   WorkflowActivityResult<{ recoveredEmailCount: number; recoveredSmsCount: number }>

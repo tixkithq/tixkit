@@ -13,6 +13,7 @@ const {
   expireStaleSessionsActivity,
   processWaitlistOffersActivity,
   recoverQueuedMessageHandoffsActivity,
+  recoverPendingPrivacyRequestHandoffsActivity,
   enforcePrivacyRetentionActivity,
   cleanupMigrationMediaObjectsActivity,
   processProviderAccountCleanupActivity,
@@ -28,6 +29,9 @@ const {
   >;
   recoverQueuedMessageHandoffsActivity(): Promise<
     WorkflowActivityResult<{ recoveredEmailCount: number; recoveredSmsCount: number }>
+  >;
+  recoverPendingPrivacyRequestHandoffsActivity(): Promise<
+    WorkflowActivityResult<{ recoveredCount: number; skippedUnauditedCount: number }>
   >;
   enforcePrivacyRetentionActivity(): Promise<
     WorkflowActivityResult<{ inspectedCount: number; repairedCount: number; skippedCount: number }>
@@ -117,6 +121,10 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
       // eslint-disable-next-line no-await-in-loop -- durable message handoff repair runs once per deterministic maintenance tick.
       const messageHandoffResult = await recoverQueuedMessageHandoffsActivity();
       throwIfMaintenanceFailed('Message handoff recovery', messageHandoffResult);
+    }
+    if (patched('privacy-handoff-recovery-v1')) {
+      // eslint-disable-next-line no-await-in-loop -- audited privacy intents are durably handed off once per maintenance tick.
+      await recoverPendingPrivacyRequestHandoffsActivity();
     }
     if (patched('privacy-retention-maintenance-v1')) {
       // eslint-disable-next-line no-await-in-loop -- privacy retention repair runs once per deterministic maintenance tick.

@@ -19,6 +19,7 @@ function queryFor(table: string) {
 }
 
 vi.mock('../activities/activity-clients.js', () => ({
+  closeActivityClients: vi.fn(async () => undefined),
   getActivityDb: () => ({ selectFrom: (table: string) => queryFor(table) }),
   restartQueuedNotificationDeliveryWorkflow: mocks.restartEmail,
   restartQueuedSmsDeliveryWorkflow: mocks.restartSms,
