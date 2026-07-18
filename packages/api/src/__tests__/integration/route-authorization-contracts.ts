@@ -97,6 +97,19 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
       source: 'event-route-authorization-db.integration.test.ts',
     }),
   ),
+  denialContract({
+    authorizedControl: { required: true, status: 202 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postEventsByEventIdMessages',
+    path: '/events/{eventId}/messages',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'message-campaign-write-route-authorization-db.integration.test.ts',
+    resourceParameters: ['eventId'],
+    sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'message-campaign-write-route-authorization-db.integration.test.ts',
+  }),
   ...(
     [
       ['/events/{eventId}/check-in-lists', 'postEventsByEventIdCheckInLists'],

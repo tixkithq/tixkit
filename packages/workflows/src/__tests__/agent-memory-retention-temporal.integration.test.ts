@@ -48,6 +48,9 @@ describeWithTemporal('agent memory retention on Temporal', () => {
         async processWaitlistOffersActivity() {
           return okResult({ expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 });
         },
+        async recoverQueuedMessageHandoffsActivity() {
+          return okResult({ recoveredEmailCount: 0, recoveredSmsCount: 0 });
+        },
         async enforcePrivacyRetentionActivity() {
           return okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 });
         },

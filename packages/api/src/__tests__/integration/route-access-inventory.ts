@@ -83,6 +83,13 @@ export type NegativeAuthorizationEvidence = {
 
 const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
+    'message-campaign-write-route-authorization-db.integration.test.ts',
+    resolve(
+      import.meta.dirname,
+      'message-campaign-write-route-authorization-db.integration.test.ts',
+    ),
+  ],
+  [
     'waitlist-offer-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'waitlist-offer-route-authorization-db.integration.test.ts'),
   ],
@@ -264,6 +271,10 @@ function evidenceBindings(
 }
 
 const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
+  ...evidenceBindings(['postEventsByEventIdMessages'], {
+    source: 'message-campaign-write-route-authorization-db.integration.test.ts',
+    persistenceSource: 'message-campaign-write-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'getEventsByEventId',

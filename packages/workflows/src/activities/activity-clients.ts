@@ -1,9 +1,17 @@
 import { Client, Connection } from '@temporalio/client';
-import { createDb, EmailJobRepository, type Database } from '@tixkit/db';
+import { createDb, EmailJobRepository, SmsJobRepository, type Database } from '@tixkit/db';
 import type { ProviderClientRuntime } from '@tixkit/provider-clients';
-import { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } from '../shared/types.js';
-import { notificationDeliveryWorkflow } from '../workflows/notification.js';
-import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
+import {
+  notificationWorkflowId,
+  smsDeliveryWorkflowId,
+  NOTIFICATION_WORKFLOW_VERSION,
+  SMS_DELIVERY_WORKFLOW_VERSION,
+} from '../shared/types.js';
+import { notificationDeliveryWorkflow, smsDeliveryWorkflow } from '../workflows/notification.js';
+import type {
+  NotificationDeliveryWorkflowInput,
+  SmsDeliveryWorkflowInput,
+} from '../workflows/notification.js';
 import { temporalConnectionOptions } from '../temporal-connection.js';
 import {
   createProviderIncidentEvidenceRuntime,
@@ -26,6 +34,17 @@ export type EmailJobNotificationHandoffRow = {
   template_version_id: string;
   to_email: string;
   to_name?: string | null;
+  variables: unknown;
+  provider_route_id: string;
+  status: string;
+  workflow_id?: string | null;
+  scheduled_at?: Date | string | null;
+};
+
+export type SmsJobNotificationHandoffRow = {
+  id: string;
+  tenant_id: string;
+  brand_id: string;
   variables: unknown;
   provider_route_id: string;
   status: string;
@@ -106,6 +125,26 @@ export async function startNotificationDeliveryWorkflow(
   }
 }
 
+export async function startSmsDeliveryWorkflow(
+  input: Omit<SmsDeliveryWorkflowInput, 'version'>,
+): Promise<string> {
+  const workflowId = smsDeliveryWorkflowId(input.jobId);
+  try {
+    const client = await getNotificationTemporalClient();
+    await client.workflow.start(smsDeliveryWorkflow, {
+      taskQueue: temporalTaskQueue(),
+      workflowId,
+      args: [{ version: SMS_DELIVERY_WORKFLOW_VERSION, ...input }],
+    });
+    return workflowId;
+  } catch (err) {
+    if (isWorkflowAlreadyStartedError(err)) {
+      return workflowId;
+    }
+    throw err;
+  }
+}
+
 function parseEmailJobVariables(value: unknown): Record<string, unknown> {
   if (typeof value === 'string') {
     const parsed = JSON.parse(value);
@@ -151,6 +190,36 @@ export async function restartQueuedNotificationDeliveryWorkflow(
     toEmail: job.to_email,
     toName: job.to_name ?? undefined,
     variables,
+    providerRouteId: job.provider_route_id,
+    notificationType: notificationTypeFromVariables(variables),
+    scheduledAt: job.scheduled_at ? new Date(job.scheduled_at).toISOString() : undefined,
+  });
+}
+
+export async function durablyStartSmsDeliveryWorkflow(
+  db: Database,
+  input: Omit<SmsDeliveryWorkflowInput, 'version'>,
+): Promise<void> {
+  const jobRepo = new SmsJobRepository(db);
+  try {
+    const workflowId = await startSmsDeliveryWorkflow(input);
+    await jobRepo.update(input.jobId, { status: 'queued', workflow_id: workflowId });
+  } catch (err) {
+    await jobRepo.update(input.jobId, { status: 'start_failed', workflow_id: null });
+    throw err;
+  }
+}
+
+export async function restartQueuedSmsDeliveryWorkflow(
+  db: Database,
+  job: SmsJobNotificationHandoffRow,
+): Promise<void> {
+  if ((job.status !== 'queued' && job.status !== 'start_failed') || job.workflow_id) return;
+  const variables = parseEmailJobVariables(job.variables);
+  await durablyStartSmsDeliveryWorkflow(db, {
+    jobId: job.id,
+    tenantId: job.tenant_id,
+    brandId: job.brand_id,
     providerRouteId: job.provider_route_id,
     notificationType: notificationTypeFromVariables(variables),
     scheduledAt: job.scheduled_at ? new Date(job.scheduled_at).toISOString() : undefined,

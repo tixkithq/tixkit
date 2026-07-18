@@ -12,6 +12,7 @@ const {
   expireStaleHoldsActivity,
   expireStaleSessionsActivity,
   processWaitlistOffersActivity,
+  recoverQueuedMessageHandoffsActivity,
   enforcePrivacyRetentionActivity,
   cleanupMigrationMediaObjectsActivity,
   processProviderAccountCleanupActivity,
@@ -24,6 +25,9 @@ const {
       offeredCount: number;
       queuedEmailCount: number;
     }>
+  >;
+  recoverQueuedMessageHandoffsActivity(): Promise<
+    WorkflowActivityResult<{ recoveredEmailCount: number; recoveredSmsCount: number }>
   >;
   enforcePrivacyRetentionActivity(): Promise<
     WorkflowActivityResult<{ inspectedCount: number; repairedCount: number; skippedCount: number }>
@@ -109,6 +113,11 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
     // eslint-disable-next-line no-await-in-loop -- waitlist maintenance follows inventory cleanup so newly freed capacity can be offered.
     const waitlistOffersResult = await processWaitlistOffersActivity();
     throwIfMaintenanceFailed('Waitlist offer processing', waitlistOffersResult);
+    if (patched('message-handoff-recovery-v1')) {
+      // eslint-disable-next-line no-await-in-loop -- durable message handoff repair runs once per deterministic maintenance tick.
+      const messageHandoffResult = await recoverQueuedMessageHandoffsActivity();
+      throwIfMaintenanceFailed('Message handoff recovery', messageHandoffResult);
+    }
     if (patched('privacy-retention-maintenance-v1')) {
       // eslint-disable-next-line no-await-in-loop -- privacy retention repair runs once per deterministic maintenance tick.
       const privacyRetentionResult = await enforcePrivacyRetentionActivity();

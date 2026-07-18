@@ -134,6 +134,11 @@ export type AppContext = {
     eventId: string;
     entryId: string;
   }) => void | Promise<void>;
+  messageCampaignWriteCheckpoint?: (input: {
+    stage: 'before_transaction' | 'after_email_jobs' | 'before_audit';
+    eventId: string;
+    campaignId: string;
+  }) => void | Promise<void>;
   eventPagePublishCheckpoint?: (input: {
     stage: 'after_event_locked';
     eventId: string;

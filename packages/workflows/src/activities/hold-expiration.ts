@@ -3,7 +3,11 @@ import { EmailJobRepository, type Database } from '@tixkit/db';
 import type { TemplateKey } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
-import { getActivityDb } from './activity-clients.js';
+import {
+  getActivityDb,
+  restartQueuedNotificationDeliveryWorkflow,
+  restartQueuedSmsDeliveryWorkflow,
+} from './activity-clients.js';
 import {
   createMigrationMediaObjectStore,
   processMigrationMediaCleanupJobs,
@@ -78,6 +82,92 @@ export async function expireStaleHoldsActivity(): Promise<
     return errResult(
       'EXPIRE_HOLDS_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  }
+}
+
+const MESSAGE_HANDOFF_RECOVERY_BATCH_SIZE = 100;
+
+export async function recoverQueuedMessageHandoffsActivity(): Promise<
+  WorkflowActivityResult<{ recoveredEmailCount: number; recoveredSmsCount: number }>
+> {
+  const db = getActivityDb();
+  try {
+    const [emailJobs, smsJobs] = await Promise.all([
+      db
+        .selectFrom('email_jobs')
+        .select([
+          'id',
+          'tenant_id',
+          'brand_id',
+          'template_key',
+          'template_version_id',
+          'to_email',
+          'to_name',
+          'variables',
+          'provider_route_id',
+          'status',
+          'workflow_id',
+          'scheduled_at',
+        ])
+        .where('status', 'in', ['queued', 'start_failed'])
+        .where('workflow_id', 'is', null)
+        .orderBy('created_at', 'asc')
+        .limit(MESSAGE_HANDOFF_RECOVERY_BATCH_SIZE)
+        .execute(),
+      db
+        .selectFrom('sms_jobs')
+        .select([
+          'id',
+          'tenant_id',
+          'brand_id',
+          'variables',
+          'provider_route_id',
+          'status',
+          'workflow_id',
+          'scheduled_at',
+        ])
+        .where('status', 'in', ['queued', 'start_failed'])
+        .where('workflow_id', 'is', null)
+        .orderBy('created_at', 'asc')
+        .limit(MESSAGE_HANDOFF_RECOVERY_BATCH_SIZE)
+        .execute(),
+    ]);
+
+    let recoveredEmailCount = 0;
+    let recoveredSmsCount = 0;
+    const failures: unknown[] = [];
+    for (const job of emailJobs) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- each deterministic workflow id must be durably recorded before advancing the recovery cursor.
+        await restartQueuedNotificationDeliveryWorkflow(db, job);
+        recoveredEmailCount += 1;
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    for (const job of smsJobs) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- each deterministic workflow id must be durably recorded before advancing the recovery cursor.
+        await restartQueuedSmsDeliveryWorkflow(db, job);
+        recoveredSmsCount += 1;
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      return errResult(
+        'MESSAGE_HANDOFF_RECOVERY_FAILED',
+        `${failures.length} queued message handoff(s) could not reach Temporal`,
+        true,
+      );
+    }
+    return okResult({ recoveredEmailCount, recoveredSmsCount });
+  } catch (error) {
+    return errResult(
+      'MESSAGE_HANDOFF_RECOVERY_FAILED',
+      error instanceof Error ? error.message : 'Unknown error',
       true,
     );
   }

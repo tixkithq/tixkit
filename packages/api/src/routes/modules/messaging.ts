@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import {
   type Database,
+  AuditLogRepository,
   ContentRepository,
   EmailDeliveryRepository,
   EmailJobRepository,
@@ -13,7 +14,8 @@ import {
   SmsProviderRouteRepository,
 } from '@tixkit/db';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { type Principal, ValidationError } from '@tixkit/domain';
+import { writeAuditLog } from '../../auth/audit.js';
+import { NotFoundError, type Principal, ValidationError } from '@tixkit/domain';
 import {
   normalizeSmsTemplateDocument,
   renderSmsTemplate,
@@ -43,6 +45,19 @@ type QueuedEmailJob = {
   providerRouteId: string;
   variables: Record<string, unknown>;
 };
+
+type QueuedSmsJob = {
+  jobId: string;
+  providerRouteId: string;
+};
+
+const MAX_INLINE_CAMPAIGN_ID_LENGTH = 128;
+
+function campaignIdFromIdempotencyKey(idempotencyKey: string): string {
+  return idempotencyKey.length <= MAX_INLINE_CAMPAIGN_ID_LENGTH
+    ? idempotencyKey
+    : `msg_${hashRequest(idempotencyKey)}`;
+}
 
 function requireMessageIdempotencyKey(headers: Record<string, unknown>): string {
   const value = headers['idempotency-key'];
@@ -392,221 +407,320 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
     }
     const templateKeys = resolveCampaignTemplateKeys(body);
 
-    const campaignId = idempotencyKey;
+    const campaignId = campaignIdFromIdempotencyKey(idempotencyKey);
+    const requestSha256 = hashRequest({ eventId, body });
+    const campaignIdSha256 = hashRequest(campaignId);
+    const auditCampaignId = `msg_${campaignIdSha256.slice(0, 28)}`;
     await loadAuthorizedEvent(eventId, principal, db);
+    await app.context.messageCampaignWriteCheckpoint?.({
+      stage: 'before_transaction',
+      eventId,
+      campaignId,
+    });
     const result = await withIdempotency(
       db,
       {
-        key: campaignId,
+        key: idempotencyKey,
         tenantId: principal.tenantId,
-        requestHash: hashRequest({ eventId, body }),
+        requestHash: requestSha256,
+        discardErrorCodes: ['NOT_FOUND', 'FORBIDDEN'],
       },
-      async () => {
+      async ({ completeInTransaction }) => {
         if (scheduledAt && scheduledAt.getTime() <= Date.now()) {
           throw new ValidationError('scheduledAt must be in the future', {
             field: 'scheduledAt',
           });
         }
 
-        const event = await loadAuthorizedEvent(eventId, principal, db);
+        const prepared = await db.transaction().execute(async (transaction) => {
+          const event = await loadLockedAuthorizedEvent(eventId, principal, transaction);
+          let emailTemplateVersionId: string | undefined;
+          let smsTemplateVersionId: string | undefined;
 
-        const audienceResolution = await resolveMessageAudience({
-          db,
-          tenantId: principal.tenantId,
-          eventId,
-          audience: body.audience,
-          attendeeIds: body.attendeeIds,
-          channel: body.channel,
-        });
-        if (audienceResolution.attendees.length === 0) {
-          throw new ValidationError('No matching recipients for this message campaign');
-        }
-        if (audienceResolution.eligibleRecipients.length === 0) {
-          throw new ValidationError('No eligible recipients for this message campaign', {
-            audienceCount: audienceResolution.attendees.length,
-            suppressedRecipients: audienceResolution.suppressedRecipients,
-            consentExclusions: audienceResolution.consentExclusions,
-            skippedRecipients: audienceResolution.skippedRecipients,
+          const audienceResolution = await resolveMessageAudience({
+            db: transaction,
+            tenantId: principal.tenantId,
+            eventId,
+            audience: body.audience,
+            attendeeIds: body.attendeeIds,
+            channel: body.channel,
           });
-        }
-
-        const notificationType = 'bulk' as const;
-        const variables: Record<string, unknown> = {
-          ...body.variables,
-          campaignEmailTemplateKey: templateKeys.emailTemplateKey,
-          campaignSmsTemplateKey: templateKeys.smsTemplateKey,
-          campaignAudience: body.audience,
-          campaignAudienceAttendeeIds: body.audience === 'specific' ? (body.attendeeIds ?? []) : [],
-          campaignAudienceCount: audienceResolution.attendees.length,
-          campaignSuppressedRecipients: audienceResolution.suppressedRecipients,
-          campaignConsentExclusions: audienceResolution.consentExclusions,
-          campaignSkippedRecipients: audienceResolution.skippedRecipients,
-        };
-        let queuedEmailJobs: QueuedEmailJob[] = [];
-        const queuedSmsJobIds: string[] = [];
-        if (body.channel === 'email' || body.channel === 'both') {
-          const emailTemplateKey = templateKeys.emailTemplateKey;
-          if (!emailTemplateKey) {
-            throw new ValidationError('emailTemplateKey is required for email message campaigns', {
-              field: 'emailTemplateKey',
+          if (audienceResolution.attendees.length === 0) {
+            throw new ValidationError('No matching recipients for this message campaign');
+          }
+          if (audienceResolution.eligibleRecipients.length === 0) {
+            throw new ValidationError('No eligible recipients for this message campaign', {
+              audienceCount: audienceResolution.attendees.length,
+              suppressedRecipients: audienceResolution.suppressedRecipients,
+              consentExclusions: audienceResolution.consentExclusions,
+              skippedRecipients: audienceResolution.skippedRecipients,
             });
           }
-          const publishedContentTemplate = await new ContentRepository(
-            db,
-          ).findPublishedEmailTemplate({
-            tenantId: principal.tenantId,
-            brandId: event.brand_id,
-            eventId,
-            key: emailTemplateKey,
-          });
-          const templateVersionId = publishedContentTemplate?.version.id;
-          if (!templateVersionId) {
-            throw new ValidationError(
-              `Published email content template not found: ${emailTemplateKey}`,
+
+          const notificationType = 'bulk' as const;
+          const variables: Record<string, unknown> = {
+            ...body.variables,
+            campaignEmailTemplateKey: templateKeys.emailTemplateKey,
+            campaignSmsTemplateKey: templateKeys.smsTemplateKey,
+            campaignAudience: body.audience,
+            campaignAudienceAttendeeIds:
+              body.audience === 'specific' ? (body.attendeeIds ?? []) : [],
+            campaignAudienceCount: audienceResolution.attendees.length,
+            campaignSuppressedRecipients: audienceResolution.suppressedRecipients,
+            campaignConsentExclusions: audienceResolution.consentExclusions,
+            campaignSkippedRecipients: audienceResolution.skippedRecipients,
+          };
+          let queuedEmailJobs: QueuedEmailJob[] = [];
+          const queuedSmsJobs: QueuedSmsJob[] = [];
+          if (body.channel === 'email' || body.channel === 'both') {
+            const emailTemplateKey = templateKeys.emailTemplateKey;
+            if (!emailTemplateKey) {
+              throw new ValidationError(
+                'emailTemplateKey is required for email message campaigns',
+                {
+                  field: 'emailTemplateKey',
+                },
+              );
+            }
+            const publishedContentTemplate = await new ContentRepository(
+              transaction,
+            ).findPublishedEmailTemplate({
+              tenantId: principal.tenantId,
+              brandId: event.brand_id,
+              eventId,
+              key: emailTemplateKey,
+            });
+            const templateVersionId = publishedContentTemplate?.version.id;
+            if (!templateVersionId) {
+              throw new ValidationError(
+                `Published email content template not found: ${emailTemplateKey}`,
+              );
+            }
+            emailTemplateVersionId = templateVersionId;
+            const emailRoutes = await new EmailProviderRouteRepository(
+              transaction,
+            ).findActiveByBrand(event.brand_id);
+            const emailRoute = selectCampaignProviderRoute(emailRoutes, notificationType);
+            if (!emailRoute) {
+              throw new ValidationError('No active email provider route for this brand');
+            }
+
+            const emailRepo = new EmailJobRepository(transaction);
+            const emailJobResults = await Promise.all(
+              audienceResolution.emailDecisions.map(
+                async (decision): Promise<QueuedEmailJob | undefined> => {
+                  const attendee = decision.attendee;
+                  if (decision.status === 'missing_contact' || !attendee.email) {
+                    return undefined;
+                  }
+                  if (decision.status === 'suppressed') {
+                    return undefined;
+                  }
+                  const recipientVariables = campaignRecipientVariables(variables, event, attendee);
+                  const jobKey = `${campaignId}:email:${attendee.id}`;
+                  const existing = await emailRepo.findByIdempotencyKey(principal.tenantId, jobKey);
+                  const job =
+                    existing ??
+                    (await emailRepo.create({
+                      tenantId: principal.tenantId,
+                      brandId: event.brand_id,
+                      templateKey: emailTemplateKey,
+                      templateVersionId,
+                      toEmail: attendee.email,
+                      toName:
+                        [attendee.first_name, attendee.last_name].filter(Boolean).join(' ') ||
+                        undefined,
+                      variables: {
+                        ...recipientVariables,
+                        attendeeId: attendee.id,
+                        eventId,
+                        notificationType,
+                      },
+                      providerRouteId: emailRoute.id,
+                      priority: 'low',
+                      scheduledAt,
+                      idempotencyKey: jobKey,
+                    }));
+                  if (job.status !== 'suppressed') {
+                    return {
+                      jobId: job.id,
+                      toEmail: attendee.email,
+                      toName: attendeeName(attendee),
+                      templateVersionId,
+                      providerRouteId: emailRoute.id,
+                      variables: {
+                        ...recipientVariables,
+                        attendeeId: attendee.id,
+                        eventId,
+                        notificationType,
+                      },
+                    };
+                  }
+                  return undefined;
+                },
+              ),
             );
-          }
-          const emailRoutes = await new EmailProviderRouteRepository(db).findActiveByBrand(
-            event.brand_id,
-          );
-          const emailRoute = selectCampaignProviderRoute(emailRoutes, notificationType);
-          if (!emailRoute) {
-            throw new ValidationError('No active email provider route for this brand');
+            queuedEmailJobs = emailJobResults.filter((job): job is QueuedEmailJob => Boolean(job));
           }
 
-          const emailRepo = new EmailJobRepository(db);
-          const emailJobResults = await Promise.all(
-            audienceResolution.emailDecisions.map(
-              async (decision): Promise<QueuedEmailJob | undefined> => {
+          if (body.channel === 'sms' || body.channel === 'both') {
+            const smsTemplateKey = templateKeys.smsTemplateKey;
+            if (!smsTemplateKey) {
+              throw new ValidationError('smsTemplateKey is required for SMS message campaigns', {
+                field: 'smsTemplateKey',
+              });
+            }
+            const publishedSmsTemplate = await new ContentRepository(
+              transaction,
+            ).findPublishedSmsTemplate({
+              tenantId: principal.tenantId,
+              brandId: event.brand_id,
+              eventId,
+              key: smsTemplateKey,
+            });
+            if (!publishedSmsTemplate) {
+              throw new ValidationError(
+                `Published SMS content template not found: ${smsTemplateKey}`,
+              );
+            }
+            smsTemplateVersionId = publishedSmsTemplate.version.id;
+            const smsTemplate = normalizeSmsTemplateDocument(
+              publishedSmsTemplate.version.contentJson,
+            );
+            if (!smsTemplate) {
+              throw new ValidationError(
+                'Published SMS content template is not canonical SMS JSON',
+                {
+                  templateKey: smsTemplateKey,
+                },
+              );
+            }
+            const smsRoutes = await new SmsProviderRouteRepository(transaction).findActiveByBrand(
+              event.brand_id,
+            );
+            const smsRoute = selectCampaignProviderRoute(smsRoutes, notificationType);
+            if (!smsRoute) {
+              throw new ValidationError('No active SMS provider route for this brand');
+            }
+
+            const smsRepo = new SmsJobRepository(transaction);
+            const smsJobResults = await Promise.all(
+              audienceResolution.smsDecisions.map(async (decision) => {
                 const attendee = decision.attendee;
-                if (decision.status === 'missing_contact' || !attendee.email) {
+                if (decision.status === 'missing_contact' || !attendee.phone) {
                   return undefined;
                 }
+                const jobKey = `${campaignId}:sms:${attendee.id}`;
                 if (decision.status === 'suppressed') {
                   return undefined;
                 }
-                const recipientVariables = campaignRecipientVariables(variables, event, attendee);
-                const jobKey = `${campaignId}:email:${attendee.id}`;
-                const existing = await emailRepo.findByIdempotencyKey(principal.tenantId, jobKey);
+                const existing = await smsRepo.findByIdempotencyKey(principal.tenantId, jobKey);
                 const job =
                   existing ??
-                  (await emailRepo.create({
+                  (await smsRepo.create({
                     tenantId: principal.tenantId,
                     brandId: event.brand_id,
-                    templateKey: emailTemplateKey,
-                    templateVersionId,
-                    toEmail: attendee.email,
-                    toName:
-                      [attendee.first_name, attendee.last_name].filter(Boolean).join(' ') ||
-                      undefined,
+                    toPhone: attendee.phone,
+                    body: renderCampaignSmsBody(smsTemplate, event, attendee, variables),
+                    templateKey: smsTemplateKey,
                     variables: {
-                      ...recipientVariables,
+                      ...variables,
+                      contentVersionId: publishedSmsTemplate.version.id,
                       attendeeId: attendee.id,
                       eventId,
                       notificationType,
                     },
-                    providerRouteId: emailRoute.id,
+                    providerRouteId: smsRoute.id,
                     priority: 'low',
                     scheduledAt,
                     idempotencyKey: jobKey,
                   }));
                 if (job.status !== 'suppressed') {
-                  return {
-                    jobId: job.id,
-                    toEmail: attendee.email,
-                    toName: attendeeName(attendee),
-                    templateVersionId,
-                    providerRouteId: emailRoute.id,
-                    variables: {
-                      ...recipientVariables,
-                      attendeeId: attendee.id,
-                      eventId,
-                      notificationType,
-                    },
-                  };
+                  return { jobId: job.id, providerRouteId: smsRoute.id };
                 }
                 return undefined;
-              },
-            ),
-          );
-          queuedEmailJobs = emailJobResults.filter((job): job is QueuedEmailJob => Boolean(job));
-        }
-
-        if (body.channel === 'sms' || body.channel === 'both') {
-          const smsTemplateKey = templateKeys.smsTemplateKey;
-          if (!smsTemplateKey) {
-            throw new ValidationError('smsTemplateKey is required for SMS message campaigns', {
-              field: 'smsTemplateKey',
-            });
-          }
-          const publishedSmsTemplate = await new ContentRepository(db).findPublishedSmsTemplate({
-            tenantId: principal.tenantId,
-            brandId: event.brand_id,
-            eventId,
-            key: smsTemplateKey,
-          });
-          if (!publishedSmsTemplate) {
-            throw new ValidationError(
-              `Published SMS content template not found: ${smsTemplateKey}`,
+              }),
+            );
+            queuedSmsJobs.push(
+              ...smsJobResults.filter((job): job is QueuedSmsJob => job !== undefined),
             );
           }
-          const smsTemplate = normalizeSmsTemplateDocument(
-            publishedSmsTemplate.version.contentJson,
-          );
-          if (!smsTemplate) {
-            throw new ValidationError('Published SMS content template is not canonical SMS JSON', {
-              templateKey: smsTemplateKey,
-            });
-          }
-          const smsRoutes = await new SmsProviderRouteRepository(db).findActiveByBrand(
-            event.brand_id,
-          );
-          const smsRoute = selectCampaignProviderRoute(smsRoutes, notificationType);
-          if (!smsRoute) {
-            throw new ValidationError('No active SMS provider route for this brand');
-          }
 
-          const smsRepo = new SmsJobRepository(db);
-          const smsJobResults = await Promise.all(
-            audienceResolution.smsDecisions.map(async (decision) => {
-              const attendee = decision.attendee;
-              if (decision.status === 'missing_contact' || !attendee.phone) {
-                return undefined;
-              }
-              const jobKey = `${campaignId}:sms:${attendee.id}`;
-              if (decision.status === 'suppressed') {
-                return undefined;
-              }
-              const existing = await smsRepo.findByIdempotencyKey(principal.tenantId, jobKey);
-              const job =
-                existing ??
-                (await smsRepo.create({
-                  tenantId: principal.tenantId,
-                  brandId: event.brand_id,
-                  toPhone: attendee.phone,
-                  body: renderCampaignSmsBody(smsTemplate, event, attendee, variables),
-                  templateKey: smsTemplateKey,
-                  variables: {
-                    ...variables,
-                    contentVersionId: publishedSmsTemplate.version.id,
-                    attendeeId: attendee.id,
-                    eventId,
-                    notificationType,
-                  },
-                  providerRouteId: smsRoute.id,
-                  priority: 'low',
-                  scheduledAt,
-                  idempotencyKey: jobKey,
-                }));
-              if (job.status !== 'suppressed') {
-                return job.id;
-              }
-              return undefined;
-            }),
+          await app.context.messageCampaignWriteCheckpoint?.({
+            stage: 'after_email_jobs',
+            eventId,
+            campaignId,
+          });
+          const queuedBody = {
+            campaignId,
+            eventId,
+            emailTemplateKey: templateKeys.emailTemplateKey,
+            smsTemplateKey: templateKeys.smsTemplateKey,
+            channel: body.channel,
+            status:
+              queuedEmailJobs.length + queuedSmsJobs.length > 0
+                ? ('queued' as const)
+                : ('suppressed' as const),
+            audienceCount: audienceResolution.attendees.length,
+            queuedEmailJobs: queuedEmailJobs.length,
+            queuedSmsJobs: queuedSmsJobs.length,
+            startFailedEmailJobs: 0,
+            startFailedSmsJobs: 0,
+            scheduledAt: scheduledAt?.toISOString(),
+            suppressedRecipients: audienceResolution.suppressedRecipients,
+            consentExclusions: audienceResolution.consentExclusions,
+            skippedRecipients: audienceResolution.skippedRecipients,
+            emailJobIds: queuedEmailJobs.map((job) => job.jobId),
+            smsJobIds: queuedSmsJobs.map((job) => job.jobId),
+          };
+          await app.context.messageCampaignWriteCheckpoint?.({
+            stage: 'before_audit',
+            eventId,
+            campaignId,
+          });
+          await writeAuditLog(
+            new AuditLogRepository(transaction),
+            request,
+            principal,
+            {
+              action: 'event.message_campaign.queued',
+              organizationId: event.organization_id,
+              brandId: event.brand_id,
+              resourceType: 'MessageCampaign',
+              resourceId: auditCampaignId,
+              diffSummary: {
+                eventId,
+                campaignIdSha256,
+                channel: body.channel,
+                audience: body.audience,
+                emailTemplateKey: templateKeys.emailTemplateKey,
+                smsTemplateKey: templateKeys.smsTemplateKey,
+                emailTemplateVersionId,
+                smsTemplateVersionId,
+                requestSha256,
+                audienceCount: audienceResolution.attendees.length,
+                queuedEmailJobs: queuedEmailJobs.length,
+                queuedSmsJobs: queuedSmsJobs.length,
+                suppressedRecipients: audienceResolution.suppressedRecipients,
+                consentExclusions: audienceResolution.consentExclusions,
+                skippedRecipients: audienceResolution.skippedRecipients,
+                emailJobIds: queuedEmailJobs.map((job) => job.jobId),
+                smsJobIds: queuedSmsJobs.map((job) => job.jobId),
+              },
+            },
+            { failClosed: true },
           );
-          queuedSmsJobIds.push(
-            ...smsJobResults.filter((jobId): jobId is string => typeof jobId === 'string'),
-          );
-        }
+          const queuedResponse = { status: 202, body: queuedBody };
+          await completeInTransaction(transaction, queuedResponse);
+          return {
+            event,
+            notificationType,
+            queuedEmailJobs,
+            queuedSmsJobs,
+            queuedBody,
+          };
+        });
+        const { event, notificationType, queuedEmailJobs, queuedSmsJobs, queuedBody } = prepared;
 
         const startFailedEmailJobIds: string[] = [];
         const startFailedSmsJobIds: string[] = [];
@@ -645,23 +759,22 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         }
 
         if (body.channel === 'sms' || body.channel === 'both') {
-          const smsRouteId = await getSmsProviderRouteId(db, event.brand_id, notificationType);
           const smsStartResults = await Promise.allSettled(
-            queuedSmsJobIds.map(async (jobId) => {
+            queuedSmsJobs.map(async (job) => {
               await app.context.temporalClient.startSmsDelivery({
-                jobId,
+                jobId: job.jobId,
                 tenantId: principal.tenantId,
                 brandId: event.brand_id,
-                providerRouteId: smsRouteId,
+                providerRouteId: job.providerRouteId,
                 notificationType,
                 scheduledAt: scheduledAt?.toISOString(),
               });
-              return jobId;
+              return job.jobId;
             }),
           );
           for (let index = 0; index < smsStartResults.length; index++) {
             if (smsStartResults[index].status === 'fulfilled') continue;
-            const jobId = queuedSmsJobIds[index];
+            const jobId = queuedSmsJobs[index].jobId;
             startFailedSmsJobIds.push(jobId);
             // eslint-disable-next-line no-await-in-loop -- each failed start must be durably marked before the campaign response is persisted.
             await new SmsJobRepository(db).update(jobId, { status: 'start_failed' });
@@ -669,33 +782,22 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
         }
 
         const startedEmailJobs = queuedEmailJobs.length - startFailedEmailJobIds.length;
-        const startedSmsJobs = queuedSmsJobIds.length - startFailedSmsJobIds.length;
+        const startedSmsJobs = queuedSmsJobs.length - startFailedSmsJobIds.length;
         const startFailedJobs = startFailedEmailJobIds.length + startFailedSmsJobIds.length;
         return {
           status: 202,
           body: {
-            campaignId,
-            eventId,
-            emailTemplateKey: templateKeys.emailTemplateKey,
-            smsTemplateKey: templateKeys.smsTemplateKey,
-            channel: body.channel,
+            ...queuedBody,
             status:
               startFailedJobs > 0
                 ? 'failed'
-                : queuedEmailJobs.length + queuedSmsJobIds.length > 0
+                : queuedEmailJobs.length + queuedSmsJobs.length > 0
                   ? 'queued'
                   : 'suppressed',
-            audienceCount: audienceResolution.attendees.length,
             queuedEmailJobs: startedEmailJobs,
             queuedSmsJobs: startedSmsJobs,
             startFailedEmailJobs: startFailedEmailJobIds.length,
             startFailedSmsJobs: startFailedSmsJobIds.length,
-            scheduledAt: scheduledAt?.toISOString(),
-            suppressedRecipients: audienceResolution.suppressedRecipients,
-            consentExclusions: audienceResolution.consentExclusions,
-            skippedRecipients: audienceResolution.skippedRecipients,
-            emailJobIds: queuedEmailJobs.map((job) => job.jobId),
-            smsJobIds: queuedSmsJobIds,
           },
         };
       },
@@ -709,11 +811,26 @@ async function loadAuthorizedEvent(eventId: string, principal: Principal, db: Da
   const eventRepo = new EventRepository(db);
   const event = await eventRepo.findById(eventId);
   if (!event) {
-    throw new ValidationError('Event not found');
+    throw new NotFoundError('Event', eventId);
   }
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
   ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
   ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+  ClerkAuthService.requireEventScope(principal, eventId);
+  return event;
+}
+
+async function loadLockedAuthorizedEvent(eventId: string, principal: Principal, db: Database) {
+  const event = await db
+    .selectFrom('events')
+    .selectAll()
+    .where('id', '=', eventId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!event) throw new NotFoundError('Event', eventId);
+  ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+  ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+  ClerkAuthService.requireBrandScope(principal, event.brand_id);
   ClerkAuthService.requireEventScope(principal, eventId);
   return event;
 }
@@ -1311,13 +1428,6 @@ function campaignStatus(statuses: string[]) {
   if (statuses.every((status) => status === 'sent')) return 'sent';
   if (statuses.some((status) => status === 'processing')) return 'processing';
   return 'queued';
-}
-
-async function getSmsProviderRouteId(db: Database, brandId: string, notificationType: string) {
-  const routes = await new SmsProviderRouteRepository(db).findActiveByBrand(brandId);
-  const route = selectCampaignProviderRoute(routes, notificationType);
-  if (!route) throw new ValidationError('No active SMS provider route for this brand');
-  return route.id;
 }
 
 export function selectCampaignProviderRoute<T extends { allowed_categories: unknown }>(

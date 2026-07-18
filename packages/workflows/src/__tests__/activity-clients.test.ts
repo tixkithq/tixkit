@@ -26,6 +26,7 @@ vi.mock('@tixkit/db', () => ({
 
 vi.mock('../workflows/notification.js', () => ({
   notificationDeliveryWorkflow: vi.fn(),
+  smsDeliveryWorkflow: vi.fn(),
 }));
 
 function notificationInput(jobId: string) {
@@ -121,6 +122,38 @@ describe('activity Temporal clients', () => {
 
     await expect(startNotificationDeliveryWorkflow(notificationInput('emj_1'))).rejects.toThrow(
       'Temporal unavailable',
+    );
+
+    await closeActivityClients();
+  });
+
+  it('starts SMS delivery with a deterministic workflow id and versioned input', async () => {
+    const { startSmsDeliveryWorkflow, closeActivityClients } =
+      await import('../activities/activity-clients.js');
+
+    await expect(
+      startSmsDeliveryWorkflow({
+        jobId: 'smj_1',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+        providerRouteId: 'spr_1',
+        notificationType: 'bulk',
+      }),
+    ).resolves.toBe('sms-delivery:smj_1');
+
+    expect(temporalMock.workflowStart).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        taskQueue: 'tixkit',
+        workflowId: 'sms-delivery:smj_1',
+        args: [
+          expect.objectContaining({
+            version: 1,
+            jobId: 'smj_1',
+            providerRouteId: 'spr_1',
+          }),
+        ],
+      }),
     );
 
     await closeActivityClients();

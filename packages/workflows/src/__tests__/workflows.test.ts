@@ -253,6 +253,8 @@ const defaultActivities = {
   expireStaleSessionsActivity: async () => okResult({ expiredCount: 0 }),
   processWaitlistOffersActivity: async () =>
     okResult({ expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 }),
+  recoverQueuedMessageHandoffsActivity: async () =>
+    okResult({ recoveredEmailCount: 0, recoveredSmsCount: 0 }),
   enforcePrivacyRetentionActivity: async () =>
     okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 }),
   eraseExpiredAgentMemoryActivity: async () => ({ erasedCount: 0 }),
@@ -2448,6 +2450,16 @@ describe('holdExpirationWorkflow', () => {
 
     expect(calls).toEqual(['holds', 'sessions', 'waitlist']);
     expect(mockState.sleeps).toEqual([]);
+  });
+
+  it('fails the maintenance tick when queued message handoffs cannot reach Temporal', async () => {
+    setActivity('recoverQueuedMessageHandoffsActivity', async () =>
+      errResult('MESSAGE_HANDOFF_RECOVERY_FAILED', 'Temporal unavailable', true),
+    );
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'Message handoff recovery failed (MESSAGE_HANDOFF_RECOVERY_FAILED): Temporal unavailable',
+    );
   });
 
   it('continues as new after the configured production rollover threshold', async () => {
