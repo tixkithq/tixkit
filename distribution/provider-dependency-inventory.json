@@ -1,11 +1,284 @@
 {
   "$schema": "./provider-dependency-inventory.schema.json",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "registry": {
     "path": "distribution/provider-integration-registry.json",
-    "sha256": "6002bd94f505933f6ba02800dd46a96507d2eccc777c4c262fc8fd05da61db5f"
+    "sha256": "fd43d4c310774717b5065a4d51f7a0a89e0488c9a376afb3a2f7c45af44f7035"
   },
+  "declarations": [
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^7.5.0",
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "integrationIds": ["clerk-identity-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^7.0.0",
+      "dependency": "@stripe/stripe-js",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/checkout/package.json",
+      "integrationIds": ["stripe-browser-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^3.1075.0",
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "integrationIds": ["s3-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^3.1075.0",
+      "dependency": "@aws-sdk/s3-request-presigner",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "integrationIds": ["s3-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^3.8.0",
+      "dependency": "@clerk/backend",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "integrationIds": ["clerk-identity-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "1.9.1",
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.0",
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.1",
+      "dependency": "@temporalio/interceptors-opentelemetry",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["contained-sdk"],
+      "declaredVersion": "^22.2.0",
+      "dependency": "stripe",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "integrationIds": ["stripe-server-gateway"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "1.9.1",
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/provider-clients/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["contained-sdk", "runtime-boundary"],
+      "declaredVersion": "^22.2.0",
+      "dependency": "stripe",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/provider-clients/package.json",
+      "integrationIds": ["stripe-server-gateway", "stripe-webhook-verification"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "1.9.1",
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "0.219.0",
+      "dependency": "@opentelemetry/exporter-trace-otlp-http",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "2.8.0",
+      "dependency": "@opentelemetry/resources",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "0.219.0",
+      "dependency": "@opentelemetry/sdk-node",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "2.8.0",
+      "dependency": "@opentelemetry/sdk-trace-base",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^3.1075.0",
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["s3-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "1.9.1",
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "2.8.0",
+      "dependency": "@opentelemetry/core",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "2.8.0",
+      "dependency": "@opentelemetry/resources",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "2.8.0",
+      "dependency": "@opentelemetry/sdk-trace-base",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["opentelemetry-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.0",
+      "dependency": "@temporalio/activity",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.0",
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.0",
+      "dependency": "@temporalio/common",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "unreferenced"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.1",
+      "dependency": "@temporalio/interceptors-opentelemetry",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.0",
+      "dependency": "@temporalio/testing",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.0",
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "declaredVersion": "^1.18.0",
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["temporal-runtime"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["contained-sdk"],
+      "declaredVersion": "^22.2.0",
+      "dependency": "stripe",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "integrationIds": ["stripe-server-gateway"],
+      "usage": "test"
+    }
+  ],
   "imports": [
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/integration/event-media-route-authorization-db.integration.test.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
     {
       "classifications": ["runtime-boundary"],
       "dependency": "@aws-sdk/client-s3",

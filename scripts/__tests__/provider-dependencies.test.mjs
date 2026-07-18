@@ -8,6 +8,7 @@ import {
   buildProviderDependencyInventoryArtifact,
   providerDependencyInventory,
   providerDependencyViolations,
+  renderProviderDependencyDeclarations,
   renderProviderDependencyInventory,
   validateProviderDependencyInventoryArtifact,
 } from '../lib/provider-dependencies.mjs';
@@ -47,6 +48,8 @@ function fixture({
             package: 'mystery-sdk',
             paths: [
               'packages/api/src/__tests__/provider.integration.test.ts',
+              'packages/api/src/runtime.ts',
+              'packages/api/test/helpers/provider.ts',
               'packages/provider-clients/src/client.ts',
             ],
           },
@@ -125,6 +128,41 @@ test('checked-in manifests and provider SDK imports match the registry', () => {
       `${a.dependency}\0${a.importPath}`.localeCompare(`${b.dependency}\0${b.importPath}`),
     ),
   );
+  const declarations = renderProviderDependencyDeclarations(registry, audit);
+  assert.deepEqual(
+    declarations
+      .filter(
+        ({ dependency, dependencyOwner }) =>
+          dependency === 'stripe' &&
+          [
+            'packages/api/package.json',
+            'packages/provider-clients/package.json',
+            'packages/workflows/package.json',
+          ].includes(dependencyOwner),
+      )
+      .map(({ dependencyClass, dependencyOwner, usage }) => ({
+        dependencyClass,
+        dependencyOwner,
+        usage,
+      })),
+    [
+      {
+        dependencyClass: 'devDependencies',
+        dependencyOwner: 'packages/api/package.json',
+        usage: 'test',
+      },
+      {
+        dependencyClass: 'dependencies',
+        dependencyOwner: 'packages/provider-clients/package.json',
+        usage: 'runtime',
+      },
+      {
+        dependencyClass: 'devDependencies',
+        dependencyOwner: 'packages/workflows/package.json',
+        usage: 'test',
+      },
+    ],
+  );
 });
 
 test('dependency inventory is schema-valid, deterministic, and rejects stale or tampered data', () => {
@@ -134,8 +172,28 @@ test('dependency inventory is schema-valid, deterministic, and rejects stale or 
       inventoryFixture.root,
       inventoryFixture.registry,
     );
-    assert.equal(artifact.schemaVersion, 1);
+    assert.equal(artifact.schemaVersion, 2);
+    assert.equal(artifact.declarations.length, 2);
     assert.equal(artifact.imports.length, 2);
+    assert.deepEqual(
+      artifact.declarations.map(({ dependencyClass, dependencyOwner, usage }) => ({
+        dependencyClass,
+        dependencyOwner,
+        usage,
+      })),
+      [
+        {
+          dependencyClass: 'devDependencies',
+          dependencyOwner: 'packages/api/package.json',
+          usage: 'test',
+        },
+        {
+          dependencyClass: 'dependencies',
+          dependencyOwner: 'packages/provider-clients/package.json',
+          usage: 'runtime',
+        },
+      ],
+    );
     assert.deepEqual(
       validateProviderDependencyInventoryArtifact(
         inventoryFixture.root,
@@ -169,8 +227,20 @@ test('dependency inventory is schema-valid, deterministic, and rejects stale or 
       /inventory is stale or tampered/u,
     );
 
+    const misplaced = structuredClone(artifact);
+    misplaced.declarations[0].dependencyClass = 'dependencies';
+    assert.throws(
+      () =>
+        validateProviderDependencyInventoryArtifact(
+          inventoryFixture.root,
+          misplaced,
+          inventoryFixture.registry,
+        ),
+      /inventory is stale or tampered/u,
+    );
+
     const invalid = structuredClone(artifact);
-    invalid.schemaVersion = 2;
+    invalid.schemaVersion = 3;
     assert.throws(
       () =>
         validateProviderDependencyInventoryArtifact(
@@ -239,6 +309,76 @@ test('rejects production-only test SDKs and unclassified dependencies in either 
     );
   } finally {
     rmSync(devTest.root, { recursive: true, force: true });
+  }
+});
+
+test('requires runtime SDK imports to use production dependencies', () => {
+  const runtimeFromDevelopment = fixture();
+  try {
+    write(
+      runtimeFromDevelopment.root,
+      'packages/api/src/runtime.ts',
+      "import Provider from 'mystery-sdk';\nvoid Provider;\n",
+    );
+    assert.ok(
+      providerDependencyViolations(
+        runtimeFromDevelopment.root,
+        runtimeFromDevelopment.registry,
+      ).some((violation) =>
+        violation.includes(
+          'packages/api/src/runtime.ts: runtime import mystery-sdk must be declared in dependencies, not devDependencies',
+        ),
+      ),
+    );
+  } finally {
+    rmSync(runtimeFromDevelopment.root, { recursive: true, force: true });
+  }
+
+  const testHelper = fixture();
+  try {
+    write(
+      testHelper.root,
+      'packages/api/test/helpers/provider.ts',
+      "import Provider from 'mystery-sdk';\nvoid Provider;\n",
+    );
+    assert.ok(
+      providerDependencyViolations(testHelper.root, testHelper.registry).every(
+        (violation) => !violation.includes('runtime import mystery-sdk'),
+      ),
+    );
+  } finally {
+    rmSync(testHelper.root, { recursive: true, force: true });
+  }
+});
+
+test('rejects provider dependencies in unsupported manifest sections', () => {
+  for (const dependencyClass of ['optionalDependencies', 'peerDependencies']) {
+    const unsupported = fixture({ rogueDependencyClass: dependencyClass });
+    try {
+      assert.ok(
+        providerDependencyViolations(unsupported.root, unsupported.registry).some((violation) =>
+          violation.includes(`rogue-sdk uses unsupported ${dependencyClass}`),
+        ),
+      );
+    } finally {
+      rmSync(unsupported.root, { recursive: true, force: true });
+    }
+  }
+
+  const classified = fixture();
+  try {
+    write(classified.root, 'packages/api/package.json', {
+      name: '@tixkit/api',
+      devDependencies: { 'mystery-sdk': '1.0.0' },
+      optionalDependencies: { 'mystery-sdk': '1.0.0' },
+    });
+    assert.ok(
+      providerDependencyViolations(classified.root, classified.registry).some((violation) =>
+        violation.includes('mystery-sdk uses unsupported optionalDependencies'),
+      ),
+    );
+  } finally {
+    rmSync(classified.root, { recursive: true, force: true });
   }
 });
 

@@ -15,7 +15,8 @@ import {
 const sourceExtension = /\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx)$/u;
 const ignoredSegment =
   /(?:^|\/)(?:\.astro|\.dart_tool|\.expo|\.next|\.nuxt|\.output|\.svelte-kit|\.turbo|build|coverage|dist|generated|node_modules|out|test-results)(?:\/|$)/u;
-const testPath = /(?:^|\/)(?:__tests__\/|[^/]+\.(?:integration\.)?(?:spec|test)\.)/u;
+const testPath =
+  /(?:^|\/)(?:(?:__tests__|e2e|test|tests)\/|[^/]+\.(?:integration\.)?(?:spec|test)\.)/u;
 
 export const PROVIDER_DEPENDENCY_INVENTORY_PATH = 'distribution/provider-dependency-inventory.json';
 export const PROVIDER_DEPENDENCY_INVENTORY_SCHEMA_PATH =
@@ -189,19 +190,6 @@ function maskJavaScriptComments(source) {
   return output;
 }
 
-function sourceMayContainClassifiedDependency(source, classifiedDependencies) {
-  const decoded = source
-    .replace(/\\x([0-9a-f]{2})/giu, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/\\u([0-9a-f]{4})/giu, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/\\u\{([0-9a-f]{1,6})\}/giu, (_match, hex) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    );
-  const compact = decoded.replace(/[^a-z0-9]/giu, '').toLowerCase();
-  return [...classifiedDependencies].some((dependency) =>
-    compact.includes(dependency.replace(/[^a-z0-9]/giu, '').toLowerCase()),
-  );
-}
-
 function sourceMayContainDynamicModuleLoad(source) {
   const withoutStaticLoads = source.replace(
     /\b(?:import|require)\s*\(\s*(?:'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`$\\])*`)\s*\)/gu,
@@ -351,6 +339,16 @@ export function providerDependencyViolations(
         }
       }
     }
+    for (const dependencyClass of ['optionalDependencies', 'peerDependencies']) {
+      for (const dependency of Object.keys(manifest[dependencyClass] ?? {})) {
+        if (dependency.startsWith('@tixkit/')) continue;
+        if (classifiedDependencies.has(dependency) || !nonProviderDependencies.has(dependency)) {
+          violations.push(
+            `${manifestPath}: ${dependency} uses unsupported ${dependencyClass}; provider-audited packages must classify runtime dependencies in dependencies and test-only dependencies in devDependencies`,
+          );
+        }
+      }
+    }
   }
 
   for (const [key, integrationIds] of inventory.dependencyAllowances) {
@@ -379,6 +377,10 @@ export function providerDependencyViolations(
     if (!declaredClass) {
       violations.push(
         `${imported.path}: ${imported.dependency} is imported without a direct package dependency`,
+      );
+    } else if (!imported.testOnly && declaredClass !== 'dependencies') {
+      violations.push(
+        `${imported.path}: runtime import ${imported.dependency} must be declared in dependencies, not ${declaredClass}`,
       );
     }
   }
@@ -434,6 +436,52 @@ export function renderProviderDependencyInventory(
   });
 }
 
+export function renderProviderDependencyDeclarations(registry, inventory) {
+  const declarations = [];
+  for (const { path: manifestPath, manifest } of inventory.manifests) {
+    for (const [dependencyClass, dependencies] of [
+      ['dependencies', manifest.dependencies ?? {}],
+      ['devDependencies', manifest.devDependencies ?? {}],
+    ]) {
+      for (const [dependency, declaredVersion] of Object.entries(dependencies)) {
+        if (!inventory.importPolicies.has(dependency)) continue;
+        const integrations = registry.integrations.filter(({ allowedDependencies }) =>
+          allowedDependencies.some(
+            (allowance) =>
+              allowance.package === dependency &&
+              allowance.packagePath === manifestPath &&
+              allowance.dependencyClass === dependencyClass,
+          ),
+        );
+        const imports = inventory.imports.filter(
+          (entry) => entry.manifestPath === manifestPath && entry.dependency === dependency,
+        );
+        declarations.push({
+          classifications: [
+            ...new Set(integrations.map(({ classification }) => classification)),
+          ].sort(),
+          declaredVersion,
+          dependency,
+          dependencyClass,
+          dependencyOwner: manifestPath,
+          integrationIds: integrations.map(({ id }) => id).sort(),
+          usage:
+            imports.length === 0
+              ? 'unreferenced'
+              : imports.some(({ testOnly }) => !testOnly)
+                ? 'runtime'
+                : 'test',
+        });
+      }
+    }
+  }
+  return declarations.sort((left, right) =>
+    `${left.dependencyOwner}\0${left.dependency}\0${left.dependencyClass}`.localeCompare(
+      `${right.dependencyOwner}\0${right.dependency}\0${right.dependencyClass}`,
+    ),
+  );
+}
+
 export function buildProviderDependencyInventoryArtifact(
   root,
   registry,
@@ -442,13 +490,14 @@ export function buildProviderDependencyInventoryArtifact(
   const repositoryRoot = resolve(root);
   return {
     $schema: './provider-dependency-inventory.schema.json',
-    schemaVersion: 1,
+    schemaVersion: 2,
     registry: {
       path: 'distribution/provider-integration-registry.json',
       sha256: sha256(
         readFileSync(resolve(repositoryRoot, 'distribution/provider-integration-registry.json')),
       ),
     },
+    declarations: renderProviderDependencyDeclarations(registry, inventory),
     imports: renderProviderDependencyInventory(repositoryRoot, registry, inventory),
   };
 }
