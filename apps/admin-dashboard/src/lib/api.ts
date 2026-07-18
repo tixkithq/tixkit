@@ -1112,6 +1112,8 @@ export type AdminMessageCampaignDetail = AdminMessageCampaign & {
   updatedAt?: string;
   queuedEmailJobs: number;
   queuedSmsJobs: number;
+  startFailedEmailJobs: number;
+  startFailedSmsJobs: number;
   suppressedRecipients: number;
   consentExclusions: number;
   skippedRecipients: number;
@@ -1143,7 +1145,8 @@ export type AdminMessageProviderEvent = {
 };
 
 type BackendMessageCampaign = {
-  id: string;
+  id?: string;
+  campaignId?: string;
   eventId: string;
   templateKey?: string;
   emailTemplateKey?: string;
@@ -1157,6 +1160,8 @@ type BackendMessageCampaign = {
   audienceCount?: number;
   queuedEmailJobs?: number;
   queuedSmsJobs?: number;
+  startFailedEmailJobs?: number;
+  startFailedSmsJobs?: number;
   sentCount?: number;
   deliveredCount?: number;
   failedCount?: number;
@@ -1191,12 +1196,16 @@ function messageAudienceLabel(
   return 'All attendees';
 }
 
-function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessageCampaign {
+export function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessageCampaign {
+  const campaignId = campaign.campaignId ?? campaign.id ?? `message_${campaign.eventId}`;
   const queuedCount = Number(campaign.queuedEmailJobs ?? 0) + Number(campaign.queuedSmsJobs ?? 0);
   const sentCount = Number(campaign.sentCount ?? (campaign.status === 'sent' ? queuedCount : 0));
   const deliveredCount = Number(campaign.deliveredCount ?? 0);
+  const startFailedCount =
+    Number(campaign.startFailedEmailJobs ?? 0) + Number(campaign.startFailedSmsJobs ?? 0);
   const failedCount = Number(
-    campaign.failedCount ?? (campaign.status === 'failed' ? queuedCount : 0),
+    campaign.failedCount ??
+      (startFailedCount > 0 ? startFailedCount : campaign.status === 'failed' ? queuedCount : 0),
   );
   const suppressedCount = Number(campaign.suppressedRecipients ?? 0);
   const audience = campaign.audience ?? 'all_attendees';
@@ -1207,9 +1216,9 @@ function normalizeMessageCampaign(campaign: BackendMessageCampaign): AdminMessag
       ? campaign.emailTemplateKey === campaign.smsTemplateKey
         ? campaign.emailTemplateKey
         : `${campaign.emailTemplateKey} + ${campaign.smsTemplateKey}`
-      : (campaign.emailTemplateKey ?? campaign.smsTemplateKey ?? campaign.id));
+      : (campaign.emailTemplateKey ?? campaign.smsTemplateKey ?? campaignId));
   return {
-    id: campaign.id,
+    id: campaignId,
     eventId: campaign.eventId,
     name: templateName,
     templateKey: campaign.templateKey,
@@ -1239,6 +1248,8 @@ function normalizeMessageCampaignDetail(
     updatedAt: campaign.updatedAt,
     queuedEmailJobs: Number(campaign.queuedEmailJobs ?? 0),
     queuedSmsJobs: Number(campaign.queuedSmsJobs ?? 0),
+    startFailedEmailJobs: Number(campaign.startFailedEmailJobs ?? 0),
+    startFailedSmsJobs: Number(campaign.startFailedSmsJobs ?? 0),
     suppressedRecipients: Number(campaign.suppressedRecipients ?? 0),
     consentExclusions: Number(campaign.consentExclusions ?? 0),
     skippedRecipients: Number(campaign.skippedRecipients ?? 0),
@@ -7543,7 +7554,20 @@ export const adminApi: AdminApi = {
           body: JSON.stringify(input),
         });
         if (!result.ok) return result;
-        return ok(normalizeMessageCampaign(result.data));
+        const audience =
+          input.audience === 'all'
+            ? 'all_attendees'
+            : input.audience === 'specific'
+              ? 'custom'
+              : input.audience;
+        return ok(
+          normalizeMessageCampaign({
+            ...result.data,
+            audience,
+            audienceKey: input.audience,
+            audienceAttendeeIds: input.attendeeIds,
+          }),
+        );
       },
       () => {
         const emailTemplateKey =
@@ -7613,6 +7637,8 @@ export const adminApi: AdminApi = {
           ...campaign,
           queuedEmailJobs: campaign.channel === 'email' ? campaign.queuedCount : 0,
           queuedSmsJobs: campaign.channel === 'sms' ? campaign.queuedCount : 0,
+          startFailedEmailJobs: 0,
+          startFailedSmsJobs: 0,
           suppressedRecipients: campaign.suppressedCount,
           consentExclusions: 0,
           skippedRecipients: 0,

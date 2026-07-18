@@ -2721,6 +2721,8 @@ export type MessageQueued = {
   audienceCount: number;
   queuedEmailJobs: number;
   queuedSmsJobs: number;
+  startFailedEmailJobs: number;
+  startFailedSmsJobs: number;
   suppressedRecipients: number;
   consentExclusions: number;
   skippedRecipients: number;

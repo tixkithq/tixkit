@@ -20954,9 +20954,6 @@ export const apiReferenceOperations = [
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "eventId": {
-                    "type": "string"
-                  },
                   "emailTemplateKey": {
                     "type": "string",
                     "minLength": 1,
@@ -21005,9 +21002,6 @@ export const apiReferenceOperations = [
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "eventId": {
-                    "type": "string"
-                  },
                   "smsTemplateKey": {
                     "type": "string",
                     "minLength": 1,
@@ -21056,9 +21050,6 @@ export const apiReferenceOperations = [
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "eventId": {
-                    "type": "string"
-                  },
                   "emailTemplateKey": {
                     "type": "string",
                     "minLength": 1,
@@ -21132,10 +21123,12 @@ export const apiReferenceOperations = [
               "campaignId": "campaign_example",
               "eventId": "event_example",
               "channel": "email",
-              "status": "status example",
+              "status": "queued",
               "audienceCount": 1,
               "queuedEmailJobs": 1,
               "queuedSmsJobs": 1,
+              "startFailedEmailJobs": 1,
+              "startFailedSmsJobs": 1,
               "suppressedRecipients": 1,
               "consentExclusions": 1,
               "skippedRecipients": 1,
@@ -35836,6 +35829,8 @@ export const apiReferenceSchemas = [
       "audienceCount",
       "queuedEmailJobs",
       "queuedSmsJobs",
+      "startFailedEmailJobs",
+      "startFailedSmsJobs",
       "suppressedRecipients",
       "consentExclusions",
       "skippedRecipients",
@@ -35852,6 +35847,8 @@ export const apiReferenceSchemas = [
       "audienceCount",
       "queuedEmailJobs",
       "queuedSmsJobs",
+      "startFailedEmailJobs",
+      "startFailedSmsJobs",
       "suppressedRecipients",
       "consentExclusions",
       "skippedRecipients",

@@ -10443,7 +10443,12 @@
             ]
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "queued",
+              "failed",
+              "suppressed"
+            ]
           },
           "audienceCount": {
             "type": "integer"
@@ -10452,6 +10457,12 @@
             "type": "integer"
           },
           "queuedSmsJobs": {
+            "type": "integer"
+          },
+          "startFailedEmailJobs": {
+            "type": "integer"
+          },
+          "startFailedSmsJobs": {
             "type": "integer"
           },
           "suppressedRecipients": {
@@ -10488,6 +10499,8 @@
           "audienceCount",
           "queuedEmailJobs",
           "queuedSmsJobs",
+          "startFailedEmailJobs",
+          "startFailedSmsJobs",
           "suppressedRecipients",
           "consentExclusions",
           "skippedRecipients",
@@ -36817,7 +36830,7 @@
       },
       "post": {
         "summary": "Queue event message campaign",
-        "x-compatibility-breaking-change": "API 2026-08-19 restricts message-campaign Idempotency-Key to 1-255 safe token characters.",
+        "x-compatibility-breaking-change": "API 2026-08-19 restricts message-campaign Idempotency-Key to 1-255 safe token characters and rejects the removed body eventId; the path eventId is authoritative.",
         "security": [
           {
             "BearerAuth": []
@@ -36846,9 +36859,6 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                      "eventId": {
-                        "type": "string"
-                      },
                       "emailTemplateKey": {
                         "type": "string",
                         "minLength": 1,
@@ -36897,9 +36907,6 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                      "eventId": {
-                        "type": "string"
-                      },
                       "smsTemplateKey": {
                         "type": "string",
                         "minLength": 1,
@@ -36948,9 +36955,6 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                      "eventId": {
-                        "type": "string"
-                      },
                       "emailTemplateKey": {
                         "type": "string",
                         "minLength": 1,
@@ -37024,10 +37028,12 @@
                   "campaignId": "campaign_example",
                   "eventId": "event_example",
                   "channel": "email",
-                  "status": "status example",
+                  "status": "queued",
                   "audienceCount": 1,
                   "queuedEmailJobs": 1,
                   "queuedSmsJobs": 1,
+                  "startFailedEmailJobs": 1,
+                  "startFailedSmsJobs": 1,
                   "suppressedRecipients": 1,
                   "consentExclusions": 1,
                   "skippedRecipients": 1,

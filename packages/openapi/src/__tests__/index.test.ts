@@ -1948,6 +1948,7 @@ describe('openApiSpec', () => {
     });
     expect(requestSchema.oneOf[1].properties.smsTemplateKey.maxLength).toBe(128);
     expect(requestSchema.oneOf.every((schema) => 'scheduledAt' in schema.properties)).toBe(true);
+    expect(requestSchema.oneOf.every((schema) => !('eventId' in schema.properties))).toBe(true);
     expect(messagePost.responses['202'].content['application/json'].schema).toEqual({
       $ref: '#/components/schemas/MessageQueued',
     });
@@ -1958,9 +1959,11 @@ describe('openApiSpec', () => {
       eventId: { type: 'string' },
       emailTemplateKey: { type: 'string' },
       smsTemplateKey: { type: 'string' },
-      status: { type: 'string' },
+      status: { type: 'string', enum: ['queued', 'failed', 'suppressed'] },
       queuedEmailJobs: { type: 'integer' },
       queuedSmsJobs: { type: 'integer' },
+      startFailedEmailJobs: { type: 'integer' },
+      startFailedSmsJobs: { type: 'integer' },
       scheduledAt: { type: 'string', format: 'date-time' },
     });
     expect(messageQueued.required).toEqual(
@@ -1972,6 +1975,8 @@ describe('openApiSpec', () => {
         'audienceCount',
         'queuedEmailJobs',
         'queuedSmsJobs',
+        'startFailedEmailJobs',
+        'startFailedSmsJobs',
         'emailJobIds',
         'smsJobIds',
       ]),

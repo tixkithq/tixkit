@@ -584,6 +584,17 @@ describe('webhook and OAuth URL policy', () => {
 });
 
 describe('messaging schemas', () => {
+  it('rejects a body eventId instead of ignoring a path-binding conflict', () => {
+    expect(() =>
+      parseBody(sendMessageSchema, {
+        eventId: 'evt_other',
+        channel: 'sms',
+        audience: 'all',
+        smsTemplateKey: 'attendee-message',
+      }),
+    ).toThrow(ValidationError);
+  });
+
   it('rejects unsafe template keys and oversized variables', () => {
     expect(() =>
       parseBody(sendMessageSchema, {

@@ -468,10 +468,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           const emailRoutes = await new EmailProviderRouteRepository(db).findActiveByBrand(
             event.brand_id,
           );
-          const emailRoute =
-            emailRoutes.find((route) =>
-              safeJsonArray(route.allowed_categories).includes(notificationType),
-            ) ?? emailRoutes[0];
+          const emailRoute = selectCampaignProviderRoute(emailRoutes, notificationType);
           if (!emailRoute) {
             throw new ValidationError('No active email provider route for this brand');
           }
@@ -563,10 +560,7 @@ export const messagingRoutes: FastifyPluginAsync = async (app) => {
           const smsRoutes = await new SmsProviderRouteRepository(db).findActiveByBrand(
             event.brand_id,
           );
-          const smsRoute =
-            smsRoutes.find((route) =>
-              safeJsonArray(route.allowed_categories).includes(notificationType),
-            ) ?? smsRoutes[0];
+          const smsRoute = selectCampaignProviderRoute(smsRoutes, notificationType);
           if (!smsRoute) {
             throw new ValidationError('No active SMS provider route for this brand');
           }
@@ -1321,12 +1315,18 @@ function campaignStatus(statuses: string[]) {
 
 async function getSmsProviderRouteId(db: Database, brandId: string, notificationType: string) {
   const routes = await new SmsProviderRouteRepository(db).findActiveByBrand(brandId);
-  const route =
-    routes.find((candidate) =>
-      safeJsonArray(candidate.allowed_categories).includes(notificationType),
-    ) ?? routes[0];
+  const route = selectCampaignProviderRoute(routes, notificationType);
   if (!route) throw new ValidationError('No active SMS provider route for this brand');
   return route.id;
+}
+
+export function selectCampaignProviderRoute<T extends { allowed_categories: unknown }>(
+  routes: readonly T[],
+  notificationType: string,
+): T | undefined {
+  return routes.find((candidate) =>
+    safeJsonArray(candidate.allowed_categories).includes(notificationType),
+  );
 }
 
 function safeJsonArray(value: unknown) {

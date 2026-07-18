@@ -2704,6 +2704,8 @@ describe('TixkitClient new resource methods', () => {
       audienceCount: 2,
       queuedEmailJobs: 2,
       queuedSmsJobs: 2,
+      startFailedEmailJobs: 0,
+      startFailedSmsJobs: 0,
       suppressedRecipients: 0,
       consentExclusions: 0,
       skippedRecipients: 0,
@@ -2738,6 +2740,8 @@ describe('TixkitClient new resource methods', () => {
       scheduledAt: '2026-07-02T15:00:00.000Z',
     });
     expect(result.scheduledAt).toBe('2026-07-02T15:00:00.000Z');
+    expect(result.startFailedEmailJobs).toBe(0);
+    expect(result.startFailedSmsJobs).toBe(0);
   });
 
   it('content resource sends lifecycle requests', async () => {

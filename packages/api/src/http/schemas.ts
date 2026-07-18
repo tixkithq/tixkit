@@ -883,7 +883,6 @@ export const updateWebhookEndpointSchema = z
 // Messaging schema
 export const sendMessageSchema = z
   .object({
-    eventId: ulidSchema.optional(),
     emailTemplateKey: messageTemplateKeySchema.optional(),
     smsTemplateKey: messageTemplateKeySchema.optional(),
     audience: z.enum(['all', 'checked_in', 'not_checked_in', 'specific']),

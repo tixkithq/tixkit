@@ -4409,6 +4409,48 @@ describe('messaging endpoint', () => {
       sms_jobs: [],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
+    const invalidBinding = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages',
+      headers: { 'Idempotency-Key': 'msg_invalid_event_binding' },
+      payload: {
+        eventId: 'evt_other',
+        smsTemplateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'sms',
+      },
+    });
+    expect(invalidBinding.statusCode).toBe(400);
+    expect(tables.sms_jobs).toEqual([]);
+    expect(app.context.temporalClient.startSmsDelivery).not.toHaveBeenCalled();
+
+    await app.context.db
+      .updateTable('sms_provider_routes')
+      .set({ allowed_categories: JSON.stringify(['transactional']) })
+      .where('id', '=', 'spr_1')
+      .execute();
+    const disallowedRoute = await app.inject({
+      method: 'POST',
+      url: '/events/evt_1/messages',
+      headers: { 'Idempotency-Key': 'msg_disallowed_route' },
+      payload: {
+        smsTemplateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'sms',
+      },
+    });
+    expect(disallowedRoute.statusCode).toBe(400);
+    expect(disallowedRoute.json()).toMatchObject({
+      message: 'No active SMS provider route for this brand',
+    });
+    expect(tables.sms_jobs).toEqual([]);
+    expect(app.context.temporalClient.startSmsDelivery).not.toHaveBeenCalled();
+    await app.context.db
+      .updateTable('sms_provider_routes')
+      .set({ allowed_categories: JSON.stringify(['bulk']) })
+      .where('id', '=', 'spr_1')
+      .execute();
+
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages',

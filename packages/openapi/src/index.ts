@@ -5624,10 +5624,12 @@ const rawOpenApiSpec = {
           emailTemplateKey: { type: 'string' },
           smsTemplateKey: { type: 'string' },
           channel: { type: 'string', enum: ['email', 'sms', 'both'] },
-          status: { type: 'string' },
+          status: { type: 'string', enum: ['queued', 'failed', 'suppressed'] },
           audienceCount: { type: 'integer' },
           queuedEmailJobs: { type: 'integer' },
           queuedSmsJobs: { type: 'integer' },
+          startFailedEmailJobs: { type: 'integer' },
+          startFailedSmsJobs: { type: 'integer' },
           suppressedRecipients: { type: 'integer' },
           consentExclusions: { type: 'integer' },
           skippedRecipients: { type: 'integer' },
@@ -5643,6 +5645,8 @@ const rawOpenApiSpec = {
           'audienceCount',
           'queuedEmailJobs',
           'queuedSmsJobs',
+          'startFailedEmailJobs',
+          'startFailedSmsJobs',
           'suppressedRecipients',
           'consentExclusions',
           'skippedRecipients',
@@ -17545,7 +17549,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Queue event message campaign',
         'x-compatibility-breaking-change':
-          'API 2026-08-19 restricts message-campaign Idempotency-Key to 1-255 safe token characters.',
+          'API 2026-08-19 restricts message-campaign Idempotency-Key to 1-255 safe token characters and rejects the removed body eventId; the path eventId is authoritative.',
         security: [{ BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/MessageCampaignIdempotencyKey' }],
         requestBody: {
@@ -17558,7 +17562,6 @@ const rawOpenApiSpec = {
                     type: 'object',
                     additionalProperties: false,
                     properties: {
-                      eventId: { type: 'string' },
                       emailTemplateKey: {
                         type: 'string',
                         minLength: 1,
@@ -17588,7 +17591,6 @@ const rawOpenApiSpec = {
                     type: 'object',
                     additionalProperties: false,
                     properties: {
-                      eventId: { type: 'string' },
                       smsTemplateKey: {
                         type: 'string',
                         minLength: 1,
@@ -17618,7 +17620,6 @@ const rawOpenApiSpec = {
                     type: 'object',
                     additionalProperties: false,
                     properties: {
-                      eventId: { type: 'string' },
                       emailTemplateKey: {
                         type: 'string',
                         minLength: 1,

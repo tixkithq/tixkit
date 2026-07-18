@@ -581,7 +581,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/reference/migrations/2026-08-18-to-2026-08-19": {
     sourcePath: "docs/public/reference/migrations/2026-08-18-to-2026-08-19.mdx",
-    frontmatter: {"title":"Migrate API 2026-08-18 to 2026-08-19","description":"Adopt the bounded safe-token contract for message-campaign idempotency keys.","audience":["developer"],"product_area":"api","content_type":"reference","status":"experimental","owner":"developer-platform","last_verified":"2026-07-17","prerequisites":["An integration using API version 2026-08-18"],"related":["/reference/api-versions","/reference/api-release-train","/operators/messaging"]},
+    frontmatter: {"title":"Migrate API 2026-08-18 to 2026-08-19","description":"Adopt bounded message-campaign idempotency keys and path-only event binding.","audience":["developer"],"product_area":"api","content_type":"reference","status":"experimental","owner":"developer-platform","last_verified":"2026-07-17","prerequisites":["An integration using API version 2026-08-18"],"related":["/reference/api-versions","/reference/api-release-train","/operators/messaging"]},
     headings: [],
     load: () => import("../../../../docs/public/reference/migrations/2026-08-18-to-2026-08-19.mdx"),
   },

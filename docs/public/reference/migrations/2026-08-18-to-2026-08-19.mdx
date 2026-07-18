@@ -1,6 +1,6 @@
 ---
 title: Migrate API 2026-08-18 to 2026-08-19
-description: Adopt the bounded safe-token contract for message-campaign idempotency keys.
+description: Adopt bounded message-campaign idempotency keys and path-only event binding.
 audience:
   - developer
 product_area: api
@@ -23,3 +23,7 @@ Valid examples include `campaign-42`, `release_2026.08.19`, and `tenant:campaign
 This is intentionally breaking because earlier releases accepted some whitespace, punctuation and oversized values. Generate a stable token before sending the request; do not trim or otherwise rewrite an invalid value after an ambiguous response.
 
 Retry the same event and byte-equivalent request intent with the same key. Do not reuse a key for a different event, audience, message content or campaign configuration. Tixkit binds idempotent replay to the original request intent and rejects conflicting reuse.
+
+The event identifier now appears only in the URL path. Remove `eventId` from the JSON request body;
+strict validation rejects it with `400` instead of silently ignoring a conflicting value. This keeps
+authorization, idempotency identity and campaign persistence bound to one authoritative event ID.
