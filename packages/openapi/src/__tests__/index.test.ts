@@ -77,6 +77,25 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
 }
 
 describe('openApiSpec', () => {
+  it('keeps waitlist settings strict and aligned with the runtime bounds', () => {
+    const settings = openApiSpec.components.schemas.WaitlistSettings;
+
+    expect(settings).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        autoOfferEnabled: { type: 'boolean' },
+        offerTtlMinutes: { type: 'integer', minimum: 5, maximum: 20160 },
+      },
+      required: ['autoOfferEnabled', 'offerTtlMinutes'],
+    });
+    expect(
+      openApiSpec.paths['/events/{eventId}/waitlist/settings'].patch.requestBody.content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/WaitlistSettings' });
+  });
+
   it('documents event media purposes and safe test checkout tagging', () => {
     expect(openApiSpec.components.schemas.CreateUploadArtifact.properties.purpose.enum).toEqual(
       expect.arrayContaining(['event_poster', 'event_cover', 'event_social', 'event_seo_image']),

@@ -2,9 +2,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { ulid } from 'ulid';
-import { EventRepository, getDriver, type Database } from '@tixkit/db';
+import { AuditLogRepository, EventRepository, getDriver, type Database } from '@tixkit/db';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { ClerkAuthService } from '../../auth/clerk.js';
+import { writeAuditLog } from '../../auth/audit.js';
 import { parseBody } from '../../http/schemas.js';
 
 const joinWaitlistSchema = z
@@ -234,37 +235,47 @@ export const waitlistRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
+    await app.context.waitlistSettingsCheckpoint?.({ stage: 'before_transaction', eventId });
 
-    const updateQuery = db
-      .updateTable('events')
-      .set({
-        waitlist_auto_offer_enabled: body.autoOfferEnabled,
-        waitlist_offer_ttl_minutes: body.offerTtlMinutes,
-        updated_at: new Date(),
-      })
-      .where('id', '=', eventId);
-    const updated =
-      getDriver() === 'postgres'
-        ? await updateQuery
-            .returning(['waitlist_auto_offer_enabled', 'waitlist_offer_ttl_minutes'])
-            .executeTakeFirst()
-        : await updateQuery
-            .execute()
-            .then(() =>
-              db
-                .selectFrom('events')
-                .select(['waitlist_auto_offer_enabled', 'waitlist_offer_ttl_minutes'])
-                .where('id', '=', eventId)
-                .executeTakeFirst(),
-            );
-
-    if (!updated) {
-      return publicSettings({
+    return db.transaction().execute(async (transaction) => {
+      const currentEvent = await transaction
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentEvent) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, currentEvent, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, currentEvent.organization_id);
+      ClerkAuthService.requireBrandScope(principal, currentEvent.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      const before = publicSettings(currentEvent);
+      const updated = await new EventRepository(transaction).update(eventId, {
         waitlist_auto_offer_enabled: body.autoOfferEnabled,
         waitlist_offer_ttl_minutes: body.offerTtlMinutes,
       });
-    }
-    return publicSettings(updated);
+      const after = publicSettings(updated);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'event.waitlist.settings.updated',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'Event',
+          resourceId: eventId,
+          diffSummary: {
+            before,
+            after,
+            previousVersion: Number(currentEvent.version),
+            newVersion: Number(updated.version),
+          },
+        },
+        { failClosed: true },
+      );
+      return after;
+    });
   });
 
   app.post('/events/:eventId/waitlist/:entryId/offer', async (request) => {

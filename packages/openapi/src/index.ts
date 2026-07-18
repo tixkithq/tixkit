@@ -3465,9 +3465,10 @@ const rawOpenApiSpec = {
       },
       WaitlistSettings: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           autoOfferEnabled: { type: 'boolean' },
-          offerTtlMinutes: { type: 'integer', minimum: 5, maximum: 10080 },
+          offerTtlMinutes: { type: 'integer', minimum: 5, maximum: 20160 },
         },
         required: ['autoOfferEnabled', 'offerTtlMinutes'],
       },
