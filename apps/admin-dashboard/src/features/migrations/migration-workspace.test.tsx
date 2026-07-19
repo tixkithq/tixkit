@@ -456,9 +456,11 @@ describe('MigrationWorkspace', () => {
     await waitFor(() => expect(screen.getByLabelText('Migration job')).toHaveTextContent('job_1'));
     const confirmation = screen.getByLabelText(/Type commit:job_1/);
     confirmation.focus();
+    const commit = screen.getByRole('button', { name: 'Commit migration' });
+    expect(commit).toBeDisabled();
     fireEvent.change(confirmation, { target: { value: 'commit:job_1' } });
     expect(confirmation).toHaveFocus();
-    const commit = screen.getByRole('button', { name: 'Commit migration' });
+    await waitFor(() => expect(commit).toBeEnabled());
     commit.focus();
     expect(commit).toHaveFocus();
     fireEvent.click(commit);
