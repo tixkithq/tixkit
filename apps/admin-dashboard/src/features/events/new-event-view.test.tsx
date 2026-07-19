@@ -17,6 +17,14 @@ const bootstrapState = vi.hoisted(() => ({
   } as Record<string, unknown>,
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: () => bootstrapState.value,
@@ -241,5 +249,154 @@ describe('NewEventView', () => {
     rerender(<NewEventView />);
     expect(screen.getByLabelText('Currency')).toHaveValue('USD');
     expect(screen.getByLabelText('Venue country')).toHaveValue('');
+  });
+
+  it('ignores an out-of-order saved-venue response from the previous workspace', async () => {
+    const workspaceA = deferred<{
+      ok: true;
+      data: Array<{
+        id: string;
+        organizationId: string;
+        name: string;
+        address: { country: string };
+        timezone: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+    }>();
+    const workspaceB = deferred<{
+      ok: true;
+      data: Array<{
+        id: string;
+        organizationId: string;
+        name: string;
+        address: { country: string };
+        timezone: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+    }>();
+    listSavedVenues.mockImplementation((organizationId: string) =>
+      organizationId === 'org_a' ? workspaceA.promise : workspaceB.promise,
+    );
+    bootstrapState.value = {
+      organizationId: 'org_a',
+      brandId: 'brd_a',
+      brands: [],
+      organizations: [
+        { id: 'org_a', eventDefaults: { defaultVenueId: 'ven_a' } },
+        { id: 'org_b', eventDefaults: { defaultVenueId: 'ven_b' } },
+      ],
+    };
+    const view = render(<NewEventView />);
+    await waitFor(() => expect(listSavedVenues).toHaveBeenCalledWith('org_a'));
+
+    bootstrapState.value = {
+      ...bootstrapState.value,
+      organizationId: 'org_b',
+      brandId: 'brd_b',
+    };
+    view.rerender(<NewEventView />);
+    await waitFor(() => expect(listSavedVenues).toHaveBeenCalledWith('org_b'));
+
+    workspaceB.resolve({
+      ok: true,
+      data: [
+        {
+          id: 'ven_b',
+          organizationId: 'org_b',
+          name: 'Workspace B Hall',
+          address: { country: 'US' },
+          timezone: 'America/Chicago',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+    expect(await screen.findByRole('option', { name: 'Workspace B Hall' })).toBeInTheDocument();
+    workspaceA.resolve({
+      ok: true,
+      data: [
+        {
+          id: 'ven_a',
+          organizationId: 'org_a',
+          name: 'Workspace A Hall',
+          address: { country: 'US' },
+          timezone: 'America/New_York',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('option', { name: 'Workspace A Hall' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('option', { name: 'Workspace B Hall' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Venue name/)).toHaveValue('Workspace B Hall');
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Workspace B Event' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(createEvent).toHaveBeenCalled());
+    expect(createEvent.mock.calls[0]![0]).toMatchObject({
+      organizationId: 'org_b',
+      brandId: 'brd_b',
+      venueId: 'ven_b',
+    });
+  });
+
+  it('clears prior-workspace venues and the current default binding when venue loading fails', async () => {
+    listSavedVenues
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [
+          {
+            id: 'ven_a',
+            organizationId: 'org_a',
+            name: 'Workspace A Hall',
+            address: { country: 'US' },
+            timezone: 'America/New_York',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'network_error', message: 'Unable to load venues' },
+      });
+    bootstrapState.value = {
+      organizationId: 'org_a',
+      brandId: 'brd_a',
+      brands: [],
+      organizations: [
+        { id: 'org_a', eventDefaults: { defaultVenueId: 'ven_a' } },
+        { id: 'org_b', eventDefaults: { defaultVenueId: 'ven_b' } },
+      ],
+    };
+    const view = render(<NewEventView />);
+    expect(await screen.findByRole('option', { name: 'Workspace A Hall' })).toBeInTheDocument();
+
+    bootstrapState.value = {
+      ...bootstrapState.value,
+      organizationId: 'org_b',
+      brandId: 'brd_b',
+    };
+    view.rerender(<NewEventView />);
+
+    await waitFor(() => expect(listSavedVenues).toHaveBeenCalledWith('org_b'));
+    await waitFor(() =>
+      expect(screen.queryByRole('option', { name: 'Workspace A Hall' })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText('Saved venue')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Workspace B Event' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(createEvent).toHaveBeenCalled());
+    expect(createEvent.mock.calls[0]![0]).toMatchObject({
+      organizationId: 'org_b',
+      brandId: 'brd_b',
+      venueId: null,
+    });
   });
 });

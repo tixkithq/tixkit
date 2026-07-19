@@ -134,6 +134,7 @@ export function NewEventView() {
   const creationRequest = React.useRef<{ fingerprint: string; idempotencyKey: string } | undefined>(
     undefined,
   );
+  const venueLoadGeneration = React.useRef(0);
   const recoveryPending = React.useRef(false);
   const fieldRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
   const { events: sourceEvents } = useAllEvents({
@@ -154,14 +155,33 @@ export function NewEventView() {
     void adminApi.reportOnboardingEvent({ stage: 'onboarding_started', outcome: 'started' });
   }, [organizationId, organizations]);
   React.useEffect(() => {
+    const generation = ++venueLoadGeneration.current;
+    setSavedVenues([]);
     if (!organizationId) return;
+    const defaultVenueId =
+      organizations.find((organization) => organization.id === organizationId)?.eventDefaults
+        ?.defaultVenueId || '';
+    let cancelled = false;
     void adminApi.listSavedVenues(organizationId).then((result) => {
-      if (!result.ok) return;
+      if (cancelled || generation !== venueLoadGeneration.current) return;
+      if (!result.ok) {
+        setSavedVenues([]);
+        setVenueId((current) => (current === defaultVenueId ? '' : current));
+        return;
+      }
       setSavedVenues(result.data);
-      const selected = result.data.find((venue) => venue.id === venueId);
-      if (selected) setVenueName(selected.name);
+      if (!defaultVenueId) return;
+      const selected = result.data.find((venue) => venue.id === defaultVenueId);
+      if (!selected) {
+        setVenueId((current) => (current === defaultVenueId ? '' : current));
+        return;
+      }
+      setVenueName((current) => current || selected.name);
     });
-  }, [organizationId, venueId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, organizations]);
   React.useEffect(() => {
     const selectedBrand = brands.find((brand) => brand.id === brandId);
     const organizationDefaults = organizations.find(
