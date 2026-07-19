@@ -170,14 +170,19 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     : ticketsLoading ||
         permissionsLoading ||
         (canManageMessages && messagesLoading) ||
-        readinessLoading
+        readinessLoading ||
+        operationalHealthLoading
       ? 'checking'
       : ticketsError ||
           (canManageMessages && messagesError) ||
           readinessError ||
-          !launchReadiness
+          !launchReadiness ||
+          operationalHealthError ||
+          !operationalHealth
         ? 'incomplete'
         : 'ready';
+  const operationalHealthUnavailable =
+    !operationalHealthLoading && Boolean(operationalHealthError || !operationalHealth);
   const messagingHealthCopy = (() => {
     if (permissionsLoading) return 'Checking messaging access…';
     if (permissionsError) return 'Messaging access could not be verified.';
@@ -347,13 +352,18 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             checkInStep.status !== 'not_applicable',
           )}
           messagingFailureCount={canManageMessages ? messagingFailures : 0}
+          failedWebhookDeliveryCount={
+            operationalHealth?.organizationFailedWebhookDeliveries ?? 0
+          }
+          failedExportCount={operationalHealth?.failedExports ?? 0}
           signalState={publishedSignalState}
           can={can}
           onCopyPublicUrl={copyShareUrl}
           onRetrySignals={() => {
-            void refetchTickets();
-            if (canManageMessages) void refetchMessages();
-            void refetchReadiness();
+            if (ticketsError) void refetchTickets();
+            if (canManageMessages && messagesError) void refetchMessages();
+            if (readinessError || !launchReadiness) void refetchReadiness();
+            if (operationalHealthError || !operationalHealth) void refetchOperationalHealth();
           }}
         />
       ) : null}
@@ -364,14 +374,21 @@ export function EventDetailView({ eventId }: { eventId: string }) {
               <CardTitle>Operational health</CardTitle>
             </CardHeader>
             <CardContent>
-              {ticketsLoading || permissionsLoading || (canManageMessages && messagesLoading) ? (
+              {ticketsLoading ||
+              permissionsLoading ||
+              (canManageMessages && messagesLoading) ||
+              operationalHealthLoading ? (
                 <output className="mb-3 block text-sm text-muted-foreground">
-                  {canManageMessages || permissionsLoading
-                    ? 'Checking inventory and messaging health…'
-                    : 'Checking inventory health…'}
+                  {operationalHealthLoading
+                    ? 'Checking inventory, messaging, webhook, and export health…'
+                    : canManageMessages || permissionsLoading
+                      ? 'Checking inventory and messaging health…'
+                      : 'Checking inventory health…'}
                 </output>
               ) : null}
-              {ticketsError || (canManageMessages && messagesError) ? (
+              {ticketsError ||
+              (canManageMessages && messagesError) ||
+              operationalHealthUnavailable ? (
                 <div
                   role="alert"
                   className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 p-3 text-sm"
@@ -384,8 +401,9 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      void refetchTickets();
-                      if (canManageMessages) void refetchMessages();
+                      if (ticketsError) void refetchTickets();
+                      if (canManageMessages && messagesError) void refetchMessages();
+                      if (operationalHealthUnavailable) void refetchOperationalHealth();
                     }}
                   >
                     Retry health checks
@@ -431,7 +449,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   <p className="text-muted-foreground">
                     {operationalHealthLoading
                       ? 'Checking webhook delivery health…'
-                      : operationalHealthError
+                      : operationalHealthUnavailable
                         ? 'Webhook delivery health unavailable.'
                         : operationalHealth?.organizationFailedWebhookDeliveries
                           ? `${operationalHealth.organizationFailedWebhookDeliveries} failed or dead-lettered ${operationalHealth.organizationFailedWebhookDeliveries === 1 ? 'webhook delivery' : 'webhook deliveries'} across this organization.`
@@ -446,7 +464,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   <p className="text-muted-foreground">
                     {operationalHealthLoading
                       ? 'Checking export health…'
-                      : operationalHealthError
+                      : operationalHealthUnavailable
                         ? 'Export health unavailable.'
                         : operationalHealth?.failedExports
                           ? `${operationalHealth.failedExports} failed export${operationalHealth.failedExports === 1 ? '' : 's'}.`
@@ -460,16 +478,6 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   </Link>
                 </li>
               </ul>
-              {operationalHealthError ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void refetchOperationalHealth()}
-                >
-                  Retry webhook and export health
-                </Button>
-              ) : null}
             </CardContent>
           </Card>
           <details className="rounded-lg border p-4">

@@ -24,6 +24,8 @@ export function PublishedEventNextActions({
   lowInventoryCount,
   checkInNeedsAttention,
   messagingFailureCount,
+  failedWebhookDeliveryCount,
+  failedExportCount,
   signalState,
   can,
   onCopyPublicUrl,
@@ -34,6 +36,8 @@ export function PublishedEventNextActions({
   lowInventoryCount: number;
   checkInNeedsAttention: boolean;
   messagingFailureCount: number;
+  failedWebhookDeliveryCount: number;
+  failedExportCount: number;
   signalState: PublishedEventSignalState;
   can: (permission: Permission) => boolean;
   onCopyPublicUrl: () => void | Promise<void>;
@@ -64,6 +68,22 @@ export function PublishedEventNextActions({
       title: 'Review message outcomes',
       description: `${messagingFailureCount} failed delivery outcome${messagingFailureCount === 1 ? '' : 's'} need review.`,
       href: routes.eventMessages(eventId),
+    });
+  }
+  if (failedWebhookDeliveryCount > 0 && can('developers.write')) {
+    actions.push({
+      id: 'webhooks',
+      title: 'Review webhook failures',
+      description: `${failedWebhookDeliveryCount} failed or dead-lettered webhook ${failedWebhookDeliveryCount === 1 ? 'delivery needs' : 'deliveries need'} review across this organization.`,
+      href: routes.developerWebhooks,
+    });
+  }
+  if (failedExportCount > 0 && can('reports.read')) {
+    actions.push({
+      id: 'exports',
+      title: 'Retry failed exports',
+      description: `${failedExportCount} failed export${failedExportCount === 1 ? ' needs' : 's need'} review.`,
+      href: routes.eventReports(eventId),
     });
   }
   actions.push({
@@ -102,8 +122,8 @@ export function PublishedEventNextActions({
               </h2>
             </CardTitle>
             <p className="text-sm text-foreground/80">
-              Inventory, messaging, and check-in issues are listed first. Choose the next useful
-              action for your role.
+              Inventory, messaging, webhook, export, and check-in issues are listed first. Choose
+              the next useful action for your role.
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={onCopyPublicUrl}>
@@ -113,7 +133,8 @@ export function PublishedEventNextActions({
         <CardContent className="space-y-4">
           {signalState === 'checking' ? (
             <output className="block rounded-md border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950 dark:bg-blue-950/20 dark:text-blue-100">
-              Checking inventory, messaging, and launch health. Action priority may change.
+              Checking inventory, messaging, launch, webhook, and export health. Action priority
+              may change.
             </output>
           ) : null}
           {signalState === 'incomplete' ? (
@@ -155,7 +176,7 @@ export function PublishedEventNextActions({
             />
           </div>
           <ol className="grid gap-3 sm:grid-cols-2" aria-labelledby={titleId}>
-            {actions.slice(0, 4).map((action, index) => (
+            {actions.map((action, index) => (
               <li key={action.id} className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {index === 0 && signalState === 'ready'

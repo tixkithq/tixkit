@@ -73,6 +73,32 @@ const launchReadiness = {
   steps: [],
 };
 
+type OperationalHealthQuery = {
+  data?: {
+    eventId: string;
+    organizationFailedWebhookDeliveries: number;
+    failedExports: number;
+    checkedAt: string;
+  };
+  loading: boolean;
+  error: Error | null;
+  refetch: ReturnType<typeof vi.fn>;
+};
+
+function healthyOperationalHealth(): OperationalHealthQuery {
+  return {
+    data: {
+      eventId: 'evt_1',
+      organizationFailedWebhookDeliveries: 0,
+      failedExports: 0,
+      checkedAt: '2026-07-01T00:00:00.000Z',
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  };
+}
+
 function setClipboard(clipboard: Clipboard | undefined) {
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
@@ -80,7 +106,9 @@ function setClipboard(clipboard: Clipboard | undefined) {
   });
 }
 
-function mockLoadedEventDetail() {
+function mockLoadedEventDetail(
+  operationalHealthQuery: OperationalHealthQuery = healthyOperationalHealth(),
+) {
   useBootstrapMock.mockReturnValue({ brands: [] });
   usePermissionsMock.mockReturnValue({
     can: vi.fn(() => true),
@@ -111,6 +139,7 @@ function mockLoadedEventDetail() {
         refetch: vi.fn(),
       };
     }
+    if (key === 'eventOperationalHealth') return operationalHealthQuery;
     return { data: undefined, loading: false, error: null, refetch: vi.fn() };
   });
 }
@@ -287,7 +316,11 @@ describe('EventDetailView', () => {
   });
 
   it.each([
-    ['listTicketTypes', 'checking', 'Checking inventory, messaging, and launch health'],
+    [
+      'listTicketTypes',
+      'checking',
+      'Checking inventory, messaging, launch, webhook, and export health',
+    ],
     ['listMessages', 'failed', 'Health checks are incomplete'],
     ['eventLaunchReadiness', 'failed', 'Health checks are incomplete'],
   ])('does not recommend from incomplete %s signals (%s)', async (failedKey, _state, notice) => {
@@ -332,6 +365,7 @@ describe('EventDetailView', () => {
           refetch: refetchMessages,
         };
       }
+      if (key === 'eventOperationalHealth') return healthyOperationalHealth();
       return {
         data: undefined,
         loading: false,
@@ -346,9 +380,9 @@ describe('EventDetailView', () => {
     expect(view.queryByText('Recommended next')).not.toBeInTheDocument();
     if (failedKey === 'listMessages') {
       fireEvent.click(view.getAllByRole('button', { name: 'Retry health checks' })[0]);
-      expect(refetchTickets).toHaveBeenCalledOnce();
+      expect(refetchTickets).not.toHaveBeenCalled();
       expect(refetchMessages).toHaveBeenCalledOnce();
-      expect(refetchReadiness).toHaveBeenCalledOnce();
+      expect(refetchReadiness).not.toHaveBeenCalled();
     }
   });
 
@@ -679,8 +713,94 @@ describe('EventDetailView', () => {
     });
     fireEvent.click(retryHealthChecks!);
     expect(refetchTickets).toHaveBeenCalledOnce();
-    expect(refetchReadiness).toHaveBeenCalledOnce();
+    expect(refetchReadiness).not.toHaveBeenCalled();
     expect(refetchMessages).not.toHaveBeenCalled();
+  });
+
+  it('does not recommend an action while webhook and export health is loading', async () => {
+    mockLoadedEventDetail({
+      data: undefined,
+      loading: true,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(
+      await view.findByText('Checking inventory, messaging, webhook, and export health…'),
+    ).toBeInTheDocument();
+    expect(
+      view.getByText(/Checking inventory, messaging, launch, webhook, and export health/),
+    ).toBeInTheDocument();
+    expect(view.queryByText('Recommended next')).not.toBeInTheDocument();
+  });
+
+  it('retries the failed webhook and export signal without refetching healthy signals', async () => {
+    const refetchOperationalHealth = vi.fn();
+    mockLoadedEventDetail({
+      data: undefined,
+      loading: false,
+      error: new Error('operational health unavailable'),
+      refetch: refetchOperationalHealth,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText(/Health checks are incomplete/)).toBeInTheDocument();
+    expect(view.queryByText('Recommended next')).not.toBeInTheDocument();
+    const [retryHealthChecks] = view.getAllByRole('button', { name: 'Retry health checks' });
+    fireEvent.click(retryHealthChecks!);
+    expect(refetchOperationalHealth).toHaveBeenCalledOnce();
+  });
+
+  it('treats a missing webhook and export response as unavailable instead of healthy', async () => {
+    const refetchOperationalHealth = vi.fn();
+    mockLoadedEventDetail({
+      data: undefined,
+      loading: false,
+      error: null,
+      refetch: refetchOperationalHealth,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText(/Health checks are incomplete/)).toBeInTheDocument();
+    expect(view.getByText('Webhook delivery health unavailable.')).toBeInTheDocument();
+    expect(view.getByText('Export health unavailable.')).toBeInTheDocument();
+    expect(view.queryByText(/No failed webhook deliveries detected/)).not.toBeInTheDocument();
+    expect(view.queryByText(/No failed exports detected/)).not.toBeInTheDocument();
+    expect(view.queryByText('Recommended next')).not.toBeInTheDocument();
+
+    const retries = view.getAllByRole('button', { name: 'Retry health checks' });
+    expect(retries).toHaveLength(2);
+    fireEvent.click(retries[0]!);
+    fireEvent.click(retries[1]!);
+    expect(refetchOperationalHealth).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces current webhook and export incidents in the recommended action order', async () => {
+    mockLoadedEventDetail({
+      data: {
+        eventId: 'evt_1',
+        organizationFailedWebhookDeliveries: 2,
+        failedExports: 1,
+        checkedAt: '2026-07-01T00:00:00.000Z',
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText('Recommended next')).toBeInTheDocument();
+    expect(view.getByText('Review webhook failures')).toBeInTheDocument();
+    expect(view.getByText('Retry failed exports')).toBeInTheDocument();
+    expect(
+      view.getByText('2 failed or dead-lettered webhook deliveries across this organization.'),
+    ).toBeInTheDocument();
+    expect(view.getByText('1 failed export.')).toBeInTheDocument();
   });
 
   it('shows the Messages quick link with messages.write', async () => {
