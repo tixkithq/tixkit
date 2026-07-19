@@ -19,7 +19,11 @@ const joinWaitlistSchema = z
   })
   .strict();
 
-const waitlistOfferTtlMinutesSchema = z.number().int().min(5).max(60 * 24 * 14);
+const waitlistOfferTtlMinutesSchema = z
+  .number()
+  .int()
+  .min(5)
+  .max(60 * 24 * 14);
 
 const offerWaitlistSchema = z
   .object({
