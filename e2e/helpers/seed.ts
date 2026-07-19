@@ -576,6 +576,15 @@ function compactIdPart(suffix: string, maxLength = 18): string {
   return `${safe.slice(0, headLength)}-${safe.slice(-tailLength)}`;
 }
 
+function futureEventWindow(offsetDays: number): { startsAt: string; endsAt: string } {
+  const startsAt = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1_000);
+  startsAt.setUTCSeconds(0, 0);
+  return {
+    startsAt: startsAt.toISOString(),
+    endsAt: new Date(startsAt.getTime() + 3 * 60 * 60 * 1_000).toISOString(),
+  };
+}
+
 async function publishEventWithRetry(
   request: APIRequestContext,
   eventId: string,
@@ -608,6 +617,7 @@ export async function seedFreeCheckoutEvent(
   await ensureDevTenantGraph();
 
   const eventTitle = `E2E Checkout ${suffix}`;
+  const { startsAt, endsAt } = futureEventWindow(30);
   const event = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events`, {
       data: {
@@ -618,8 +628,8 @@ export async function seedFreeCheckoutEvent(
         description: 'Seeded by Playwright for hosted checkout coverage.',
         currency: 'USD',
         timezone: 'America/New_York',
-        startsAt: '2026-07-15T23:00:00.000Z',
-        endsAt: '2026-07-16T02:00:00.000Z',
+        startsAt,
+        endsAt,
         visibility: 'public',
       },
     }),
@@ -997,6 +1007,7 @@ export async function seedPaidCheckoutEvent(
   options: { brandId?: string } = {},
 ): Promise<SeededPaidCheckoutEvent> {
   const eventTitle = `E2E Paid Checkout ${suffix}`;
+  const { startsAt, endsAt } = futureEventWindow(45);
   const event = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events`, {
       data: {
@@ -1007,8 +1018,8 @@ export async function seedPaidCheckoutEvent(
         description: 'Seeded by Playwright for paid checkout capture-mode coverage.',
         currency: 'USD',
         timezone: 'America/New_York',
-        startsAt: '2026-09-18T23:00:00.000Z',
-        endsAt: '2026-09-19T02:00:00.000Z',
+        startsAt,
+        endsAt,
         visibility: 'public',
       },
     }),
@@ -1057,12 +1068,7 @@ export async function seedPaidCheckoutEvent(
     ),
     201,
   );
-  await expectJsonResponse(
-    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
-      data: {},
-    }),
-    200,
-  );
+  await expectJsonResponse(await publishEventWithRetry(request, event.id), 200);
 
   return { event, ticketType, inventoryPool };
 }
@@ -1246,6 +1252,7 @@ export async function seedTicketVariantCheckoutEvent(
   const safeSuffix = compactIdPart(suffix);
   const accessCode = `VIP-${safeSuffix}`;
   const eventTitle = `E2E Ticket Variants ${suffix}`;
+  const { startsAt, endsAt } = futureEventWindow(60);
   const event = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events`, {
       data: {
@@ -1257,8 +1264,8 @@ export async function seedTicketVariantCheckoutEvent(
           'Seeded by Playwright for hidden, locked, donation, and shared-pool checkout coverage.',
         currency: 'USD',
         timezone: 'America/New_York',
-        startsAt: '2026-10-20T23:00:00.000Z',
-        endsAt: '2026-10-21T02:00:00.000Z',
+        startsAt,
+        endsAt,
         visibility: 'public',
       },
     }),
@@ -1371,12 +1378,7 @@ export async function seedTicketVariantCheckoutEvent(
     201,
   );
 
-  await expectJsonResponse(
-    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
-      data: {},
-    }),
-    200,
-  );
+  await expectJsonResponse(await publishEventWithRetry(request, event.id), 200);
 
   const soldOutSession = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/checkout/sessions`, {
@@ -1562,6 +1564,7 @@ export async function seedPaidRefundableOrder(
   const safeSuffix = safeIdPart(suffix);
   const eventTitle = `E2E Refund ${suffix}`;
   const buyerEmail = `refund-workflow+${suffix}@example.com`;
+  const { startsAt, endsAt } = futureEventWindow(75);
 
   const event = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events`, {
@@ -1573,8 +1576,8 @@ export async function seedPaidRefundableOrder(
         description: 'Seeded by Playwright for refund workflow coverage.',
         currency: 'USD',
         timezone: 'America/New_York',
-        startsAt: '2026-08-21T23:00:00.000Z',
-        endsAt: '2026-08-22T02:00:00.000Z',
+        startsAt,
+        endsAt,
         visibility: 'public',
       },
     }),
@@ -1618,12 +1621,7 @@ export async function seedPaidRefundableOrder(
     201,
   );
   await seedRefundNotificationPrerequisites(suffix, event.id);
-  await expectJsonResponse(
-    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
-      data: {},
-    }),
-    200,
-  );
+  await expectJsonResponse(await publishEventWithRetry(request, event.id), 200);
 
   const checkoutSessionId = `cks_ref_${safeSuffix}`.slice(0, 32);
   const paymentIntentId = `pi_ref_${safeSuffix}`.slice(0, 32);

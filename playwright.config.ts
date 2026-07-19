@@ -138,6 +138,13 @@ const localWorkerEnv = {
 };
 const checkoutPublicEnv = {
   NODE_ENV: 'production',
+  TIXKIT_DEPLOYMENT_PROFILE: 'test',
+  API_BASE_URL: apiUrl,
+  INTERNAL_API_BASE_URL: apiUrl,
+  TIXKIT_CHECKOUT_URL: checkoutUrl,
+  S3_PUBLIC_ENDPOINT: process.env.S3_PUBLIC_ENDPOINT ?? 'http://localhost:9000',
+  TIXKIT_BUILD_REVISION: `e2e-${playwrightRunId}`,
+  STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
   NEXT_PUBLIC_DISABLE_REACT_DEVTOOLS: '1',
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: `${apiUrl}/v1`,
   NEXT_PUBLIC_ADMIN_API_BASE_URL: apiUrl,
@@ -241,6 +248,12 @@ export default defineConfig({
       name: 'mobile-webkit-event-media',
       testMatch: /event-media-journeys\.spec\.ts/u,
       use: { ...devices['iPhone 13'] },
+    },
+    {
+      name: 'mobile-chromium-buyer-event-day',
+      testMatch: /(admin-checkin-workflows|checkout-paid-capture-workflow)\.spec\.ts/u,
+      grep: /completes a paid order through hosted checkout UI in local capture mode|validates online scanning, duplicate detection, offline manifest, and offline sync/u,
+      use: { ...devices['Pixel 5'] },
     },
   ],
 
