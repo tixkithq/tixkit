@@ -81,6 +81,11 @@ const defaultDashboardFeed = {
 };
 const mockGetDashboardActions = vi.fn().mockResolvedValue(defaultDashboardFeed);
 const mockCan = vi.fn<(permission: string) => boolean>(() => true);
+const mockPermissionState = {
+  loading: false,
+  error: null as Error | null,
+  retry: vi.fn(),
+};
 
 vi.mock('@/lib/api', () => ({
   adminApi: {
@@ -124,7 +129,7 @@ vi.mock('@/context/bootstrap-provider', () => ({
 }));
 
 vi.mock('@/context/permission-provider', () => ({
-  usePermissions: () => ({ can: mockCan, loading: false, error: null }),
+  usePermissions: () => ({ can: mockCan, ...mockPermissionState }),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -230,6 +235,9 @@ describe('DashboardView error states', () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     mockCan.mockReturnValue(true);
+    mockPermissionState.loading = false;
+    mockPermissionState.error = null;
+    mockPermissionState.retry.mockReset();
   });
 
   it('renders the role-owned workspace action and finance remediation', async () => {
@@ -239,9 +247,10 @@ describe('DashboardView error states', () => {
     render(<DashboardView />);
 
     expect(await screen.findByText(/Critical · Owner: Finance/)).toBeVisible();
-    expect(
-      screen.getByRole('link', { name: 'Resolve Prepare the payment path' }),
-    ).toHaveAttribute('href', '/settings/payments');
+    expect(screen.getByRole('link', { name: 'Resolve Prepare the payment path' })).toHaveAttribute(
+      'href',
+      '/settings/payments',
+    );
   });
 
   it('hands a workspace action to its owner when the viewer lacks remediation permission', async () => {
@@ -252,9 +261,87 @@ describe('DashboardView error states', () => {
     render(<DashboardView />);
 
     expect(await screen.findByText('Finance action required')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Resolve Prepare the payment path' })).toBeNull();
+  });
+
+  it('requires settings access before linking workspace selection to its guarded destination', async () => {
+    mockGetWorkspaceReadiness.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        generatedAt: new Date(0).toISOString(),
+        paymentMode: 'capture',
+        complete: false,
+        steps: [],
+        actionFeed: [
+          {
+            id: 'workspace:workspace_selection',
+            stepId: 'workspace_selection',
+            severity: 'critical',
+            owner: 'organizer',
+            deadlineAt: null,
+            status: 'blocked',
+            reasonCodes: ['organization_inactive'],
+            actionId: 'select_workspace',
+            requiredPermission: 'settings.write',
+            updatedAt: null,
+          },
+        ],
+      },
+    });
+    mockCan.mockImplementation((permission) => permission !== 'settings.write');
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+    const view = render(<DashboardView />);
+
+    expect(await screen.findByText('Organizer action required')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Resolve Confirm workspace context' })).toBeNull();
+
+    mockCan.mockReturnValue(true);
+    view.rerender(<DashboardView />);
+    expect(screen.getByRole('link', { name: 'Resolve Confirm workspace context' })).toHaveAttribute(
+      'href',
+      '/settings/workspace',
+    );
+  });
+
+  it('does not report an owner handoff while workspace action access is loading', async () => {
+    mockPermissionState.loading = true;
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText('Checking access…')).toBeVisible();
+    expect(screen.queryByText('Finance action required')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Resolve Prepare the payment path' })).toBeNull();
+  });
+
+  it('distinguishes unavailable workspace action access from permission denial', async () => {
+    mockPermissionState.error = new Error('permission service unavailable');
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    const view = render(<DashboardView />);
+
     expect(
-      screen.queryByRole('link', { name: 'Resolve Prepare the payment path' }),
-    ).toBeNull();
+      (await screen.findByText('Action access could not be verified')).closest('[role="alert"]'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Finance action required')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Resolve Prepare the payment path' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry action access' }));
+    expect(mockPermissionState.retry).toHaveBeenCalledTimes(1);
+
+    mockPermissionState.error = null;
+    mockPermissionState.loading = true;
+    view.rerender(<DashboardView />);
+    expect(screen.getByText('Checking access…')).toBeVisible();
+
+    mockPermissionState.loading = false;
+    view.rerender(<DashboardView />);
+    expect(screen.getByRole('link', { name: 'Resolve Prepare the payment path' })).toBeVisible();
   });
 
   it('retries a failed workspace readiness request without hiding other dashboard data', async () => {

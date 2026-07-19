@@ -4733,7 +4733,7 @@ export const adminApi: AdminApi = {
                       : 'workspace_selected',
                 ],
                 actionId: 'select_workspace',
-                requiredPermission: null,
+                requiredPermission: 'settings.write',
                 updatedAt: brand?.updatedAt ?? null,
                 acknowledgedAt: null,
                 acknowledgementValid: null,

@@ -113,11 +113,19 @@ export function workspaceReadinessViewModel(
 }
 
 function WorkspaceActionRow({ action: item }: { action: AdminWorkspaceDashboardAction }) {
-  const { can } = usePermissions();
+  const {
+    can,
+    loading: permissionsLoading,
+    error: permissionsError,
+    retry: retryPermissions,
+  } = usePermissions();
   const actionRoute = workspaceActionRoute(item.actionId);
-  const permitted = item.requiredPermission
-    ? can(item.requiredPermission as TixkitPermission)
-    : true;
+  const permissionRequired = Boolean(item.requiredPermission);
+  const permitted = !permissionRequired
+    ? true
+    : !permissionsLoading && !permissionsError && item.requiredPermission
+      ? can(item.requiredPermission as TixkitPermission)
+      : false;
   const Icon = item.status === 'blocked' ? LockKeyhole : Circle;
   const label = stepLabels[item.stepId] ?? 'Workspace readiness step';
   return (
@@ -145,14 +153,24 @@ function WorkspaceActionRow({ action: item }: { action: AdminWorkspaceDashboardA
             .join(' ')}
         </p>
       </div>
-      {actionRoute && permitted ? (
+      {permissionRequired && permissionsLoading ? (
+        <span className="text-xs text-muted-foreground">Checking access…</span>
+      ) : permissionRequired && permissionsError ? (
+        <div className="flex items-center gap-2" role="alert">
+          <span className="text-xs text-muted-foreground">Action access could not be verified</span>
+          <Button type="button" variant="outline" size="sm" onClick={retryPermissions}>
+            Retry action access
+          </Button>
+        </div>
+      ) : actionRoute && permitted ? (
         <Button variant="outline" size="sm" asChild>
           <Link href={actionRoute} aria-label={`Resolve ${label}`}>
             Resolve
           </Link>
         </Button>
       ) : null}
-      {!actionRoute || !permitted ? (
+      {(!permissionRequired || (!permissionsLoading && !permissionsError)) &&
+      (!actionRoute || !permitted) ? (
         <span className="text-xs text-muted-foreground">
           {ownerLabels[item.owner]} action required
         </span>
@@ -180,8 +198,7 @@ function WorkspaceReadinessDetail({ step }: { step: AdminReadinessStep }) {
         {step.reasonCodes.length > 0
           ? step.reasonCodes
               .map(
-                (code) =>
-                  reasonLabels[code] ?? 'Review this workspace setting before continuing.',
+                (code) => reasonLabels[code] ?? 'Review this workspace setting before continuing.',
               )
               .join(' ')
           : 'No additional action is required for this step.'}

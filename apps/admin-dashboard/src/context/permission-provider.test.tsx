@@ -447,4 +447,34 @@ describe('PermissionProvider (production, Clerk key present)', () => {
     expect(second.result.current.error).toBeNull();
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  it('retries a failed lookup in place and restores authorized content', async () => {
+    const spy = vi
+      .spyOn(adminApi, 'getPrincipal')
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'network_error', message: 'API unavailable' },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          permissions: ['events.read'],
+          tenantId: 't1',
+          organizationIds: ['o1'],
+        },
+      });
+    const { result } = renderHook(usePermissionsHook, { wrapper });
+
+    await waitFor(() => expect(result.current.error).toBe('API unavailable'));
+    act(() => result.current.retry());
+    expect(result.current.loading).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(result.current.permissions).toEqual([]);
+    expect(result.current.can('events.read')).toBe(false);
+    await waitFor(() => expect(result.current.permissions).toEqual(['events.read']));
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.can('events.read')).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
 });

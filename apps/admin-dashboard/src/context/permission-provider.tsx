@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import { LOCAL_DEV_PERMISSIONS, type TixkitPermission, hasPermission } from '@/lib/permissions';
 import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
@@ -14,6 +14,8 @@ type PermissionContextValue = {
   loading: boolean;
   /** Set when the principal fetch failed (production). Null when OK or in dev. */
   error: string | null;
+  /** Re-resolve the active principal after a transient failure. */
+  retry: () => void;
 };
 
 const PermissionContext = createContext<PermissionContextValue | null>(null);
@@ -109,6 +111,7 @@ function LocalPermissionProvider({ children }: { children: React.ReactNode }) {
       can: (permission?: TixkitPermission) => hasPermission(LOCAL_DEV_PERMISSIONS, permission),
       loading: false,
       error: null,
+      retry: () => undefined,
     }),
     [],
   );
@@ -123,6 +126,7 @@ function UnavailablePermissionProvider({ children }: { children: React.ReactNode
       can: () => false,
       loading: false,
       error: 'Dashboard authentication is not configured.',
+      retry: () => undefined,
     }),
     [],
   );
@@ -135,6 +139,14 @@ function ClerkPermissionProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<TixkitPermission[]>(() => []);
   const [loading, setLoading] = useState<boolean>(() => true);
   const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const retry = useCallback(() => {
+    resetPrincipalCache();
+    setPermissions([]);
+    setLoading(true);
+    setError(null);
+    setRetryNonce((current) => current + 1);
+  }, []);
 
   useEffect(
     () =>
@@ -186,7 +198,7 @@ function ClerkPermissionProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoaded, isSignedIn, sessionId, userId, orgId]);
+  }, [isLoaded, isSignedIn, sessionId, userId, orgId, retryNonce]);
 
   const value = useMemo<PermissionContextValue>(
     () => ({
@@ -194,8 +206,9 @@ function ClerkPermissionProvider({ children }: { children: React.ReactNode }) {
       can: (permission?: TixkitPermission) => hasPermission(permissions, permission),
       loading,
       error,
+      retry,
     }),
-    [permissions, loading, error],
+    [permissions, loading, error, retry],
   );
 
   return <PermissionContext value={value}>{children}</PermissionContext>;

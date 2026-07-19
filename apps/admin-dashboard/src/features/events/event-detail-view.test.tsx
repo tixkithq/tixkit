@@ -108,6 +108,7 @@ function setClipboard(clipboard: Clipboard | undefined) {
 
 function mockLoadedEventDetail(
   operationalHealthQuery: OperationalHealthQuery = healthyOperationalHealth(),
+  eventData = event,
 ) {
   useBootstrapMock.mockReturnValue({ brands: [] });
   usePermissionsMock.mockReturnValue({
@@ -118,7 +119,7 @@ function mockLoadedEventDetail(
   useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
     const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
     if (key === 'getEvent') {
-      return { data: event, loading: false, error: null, refetch: vi.fn() };
+      return { data: eventData, loading: false, error: null, refetch: vi.fn() };
     }
     if (key === 'listTicketTypes') {
       return { data: [], loading: false, error: null, refetch: vi.fn() };
@@ -523,6 +524,57 @@ describe('EventDetailView', () => {
     expect(view.queryByRole('link', { name: 'Messages' })).not.toBeInTheDocument();
   });
 
+  it('filters mutation and role-owned event actions for a read-only organizer', async () => {
+    mockLoadedEventDetail(healthyOperationalHealth(), { ...event, description: '' });
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn(() => false),
+      loading: false,
+      error: null,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText('No event actions are available for your role.')).toBeVisible();
+    for (const name of [
+      'Tickets',
+      'Products',
+      'Checkout Form',
+      'Event Page',
+      'Embed studio',
+      'Attendees',
+      'Check-in',
+      'Messages',
+      'Reports',
+      'Authenticated preview',
+      'Settings',
+      'Add tickets →',
+      'Review webhooks',
+      'Review exports',
+    ]) {
+      expect(view.queryByRole('link', { name })).not.toBeInTheDocument();
+    }
+    expect(view.getByText('No event description has been added.')).toBeVisible();
+  });
+
+  it('keeps the read-only embed studio visible without advertising event mutations', async () => {
+    mockLoadedEventDetail();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn((permission: string) => permission === 'events.read'),
+      loading: false,
+      error: null,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByRole('link', { name: 'Embed studio' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/distribution/embed',
+    );
+    for (const name of ['Tickets', 'Products', 'Checkout Form', 'Event Page', 'Settings']) {
+      expect(view.queryByRole('link', { name })).not.toBeInTheDocument();
+    }
+  });
+
   it('disables protected order and messaging queries and labels unavailable data', async () => {
     mockLoadedEventDetail();
     usePermissionsMock.mockReturnValue({
@@ -566,6 +618,10 @@ describe('EventDetailView', () => {
     const view = render(<EventDetailView eventId="evt_1" />);
 
     expect(await view.findByLabelText('Checking orders access')).toBeInTheDocument();
+    expect(view.getByLabelText('Checking event action access')).toBeInTheDocument();
+    expect(
+      view.queryByText('No event actions are available for your role.'),
+    ).not.toBeInTheDocument();
     expect(view.getByText('Checking messaging access…')).toBeInTheDocument();
     expect(view.queryByText(/access is required/)).not.toBeInTheDocument();
     expect(
@@ -597,10 +653,12 @@ describe('EventDetailView', () => {
 
   it('distinguishes permission lookup failure from an access denial', async () => {
     mockLoadedEventDetail();
+    const retryPermissions = vi.fn();
     usePermissionsMock.mockReturnValue({
       can: vi.fn(() => false),
       loading: false,
       error: new Error('permission service unavailable'),
+      retry: retryPermissions,
     });
 
     const view = render(<EventDetailView eventId="evt_1" />);
@@ -609,11 +667,43 @@ describe('EventDetailView', () => {
       'role',
       'alert',
     );
+    expect(
+      view.getByText('Event action access could not be verified.').closest('[role="alert"]'),
+    ).toBeInTheDocument();
     expect(view.getByText('Messaging access could not be verified.')).toBeInTheDocument();
     expect(view.queryByText(/access is required/)).not.toBeInTheDocument();
     expect(view.queryByRole('button', { name: 'Retry health checks' })).not.toBeInTheDocument();
     expect(view.queryByText('Recommended next')).not.toBeInTheDocument();
     expect(view.getByText(/Action priority is unavailable/)).toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Retry event access' }));
+    expect(retryPermissions).toHaveBeenCalledTimes(1);
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn(() => false),
+      loading: true,
+      error: null,
+      retry: retryPermissions,
+    });
+    view.rerender(<EventDetailView eventId="evt_1" />);
+    expect(view.getByLabelText('Checking event action access')).toBeInTheDocument();
+    expect(
+      view.queryByText('No event actions are available for your role.'),
+    ).not.toBeInTheDocument();
+
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn(() => true),
+      loading: false,
+      error: null,
+      retry: retryPermissions,
+    });
+    view.rerender(<EventDetailView eventId="evt_1" />);
+    expect(await view.findByRole('link', { name: 'Tickets' })).toBeInTheDocument();
+    let latestOrdersQuery: unknown[] | undefined;
+    for (const call of useAdminDataMock.mock.calls) {
+      const [queryKey] = call;
+      if (Array.isArray(queryKey) && queryKey[0] === 'listOrders') latestOrdersQuery = call;
+    }
+    expect(latestOrdersQuery?.[2]).toEqual({ enabled: true });
   });
 
   it('uses inventory-only progress copy when messaging access is unavailable', async () => {

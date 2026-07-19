@@ -28,7 +28,7 @@ type PermissionGuardProps = {
  * prevents manual navigation to routes the user lacks permissions for.
  */
 export function PermissionGuard({ required, anyOf, children }: PermissionGuardProps) {
-  const { can, loading } = usePermissions();
+  const { can, loading, error, retry } = usePermissions();
   const allowed = anyOf
     ? anyOf.some((permission) => can(permission))
     : required
@@ -44,11 +44,44 @@ export function PermissionGuard({ required, anyOf, children }: PermissionGuardPr
     );
   }
 
+  if (error) {
+    return <AccessUnavailable onRetry={retry} />;
+  }
+
   if (!allowed) {
     return <AccessDenied />;
   }
 
   return <>{children}</>;
+}
+
+function AccessUnavailable({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="mx-auto max-w-lg py-16" role="alert">
+      <Card>
+        <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+          <div className="flex size-14 items-center justify-center rounded-full bg-amber-500/10">
+            <ShieldAlertIcon className="size-8 text-amber-700 dark:text-amber-300" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight">Access could not be verified</h1>
+          <p className="text-sm text-muted-foreground">
+            Permission information is temporarily unavailable. Try again before treating this as an
+            access denial.
+          </p>
+          <div className="mt-2 flex flex-wrap justify-center gap-2">
+            <Button type="button" onClick={onRetry}>
+              Retry access check
+            </Button>
+            <Button asChild variant="outline">
+              <Link href={routes.dashboard} prefetch={false}>
+                Back to dashboard
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function AccessDenied() {

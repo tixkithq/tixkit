@@ -104,7 +104,7 @@
         "type": "workspace-export",
         "path": "apps/admin-dashboard/src/lib/api.ts",
         "export": "issueAdminUploadCompletionUrl",
-        "sha256": "7b03353d60cc70f614c1965ee9390d7b23fbf25c85329c1c316655734f8eba1c"
+        "sha256": "a1339a2944e2fbf4d159e9ac07e161d3260b9f70808aaed0e87d490a6ed8926b"
       },
       "allowedSinks": [
         {
@@ -122,7 +122,7 @@
         "type": "workspace-export",
         "path": "apps/admin-dashboard/src/lib/api.ts",
         "export": "issueAdminUploadUrl",
-        "sha256": "7b03353d60cc70f614c1965ee9390d7b23fbf25c85329c1c316655734f8eba1c"
+        "sha256": "a1339a2944e2fbf4d159e9ac07e161d3260b9f70808aaed0e87d490a6ed8926b"
       },
       "allowedSinks": [
         {

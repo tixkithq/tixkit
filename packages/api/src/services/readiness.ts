@@ -460,7 +460,7 @@ export class ReadinessService {
               ? ['brand_inactive']
               : ['workspace_selected'],
         actionId: 'select_workspace',
-        requiredPermission: null,
+        requiredPermission: 'settings.write',
         updatedAt: iso(brand.updated_at),
         acknowledgedAt: null,
       }),

@@ -39,9 +39,26 @@ import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const runtimeConfig = useRuntimeConfig();
-  const { can, loading: permissionsLoading, error: permissionsError } = usePermissions();
+  const {
+    can,
+    loading: permissionsLoading,
+    error: permissionsError,
+    retry: retryPermissions,
+  } = usePermissions();
   const permissionsReady = !permissionsLoading && !permissionsError;
+  const canReadEvent = permissionsReady && can('events.read');
+  const canManageEvent = permissionsReady && can('events.write');
+  const canManageTickets = permissionsReady && can('tickets.write');
   const canReadOrders = permissionsReady && can('orders.read');
+  const canReadAttendees = permissionsReady && can('attendees.read');
+  const canReadReports = permissionsReady && can('reports.read');
+  const canReviewWebhooks = permissionsReady && can('developers.write');
+  const canOperateDoor =
+    permissionsReady &&
+    (can('checkins.write') ||
+      can('checkins.read') ||
+      can('box_office.write') ||
+      can('orders.write'));
   const canManageMessages = permissionsReady && can('messages.write');
   const {
     data: event,
@@ -215,25 +232,41 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   };
 
   const quickLinks = [
-    { title: 'Tickets', icon: Ticket, href: routes.eventTickets(eventId) },
-    { title: 'Products', icon: Package, href: routes.eventProducts(eventId) },
-    {
-      title: 'Checkout Form',
-      icon: ClipboardList,
-      href: routes.eventCheckoutForm(eventId),
-    },
-    {
-      title: 'Event Page',
-      icon: PenTool,
-      href: routes.eventContentEventPage(eventId),
-    },
-    {
-      title: 'Embed studio',
-      icon: Globe,
-      href: routes.eventEmbedStudio(eventId),
-    },
-    { title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) },
-    { title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) },
+    ...(canManageTickets
+      ? [
+          { title: 'Tickets', icon: Ticket, href: routes.eventTickets(eventId) },
+          { title: 'Products', icon: Package, href: routes.eventProducts(eventId) },
+        ]
+      : []),
+    ...(canManageEvent
+      ? [
+          {
+            title: 'Checkout Form',
+            icon: ClipboardList,
+            href: routes.eventCheckoutForm(eventId),
+          },
+          {
+            title: 'Event Page',
+            icon: PenTool,
+            href: routes.eventContentEventPage(eventId),
+          },
+        ]
+      : []),
+    ...(canReadEvent
+      ? [
+          {
+            title: 'Embed studio',
+            icon: Globe,
+            href: routes.eventEmbedStudio(eventId),
+          },
+        ]
+      : []),
+    ...(canReadAttendees
+      ? [{ title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) }]
+      : []),
+    ...(canOperateDoor
+      ? [{ title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) }]
+      : []),
     ...(canManageMessages
       ? [
           {
@@ -243,12 +276,14 @@ export function EventDetailView({ eventId }: { eventId: string }) {
           },
         ]
       : []),
-    { title: 'Reports', icon: BarChart3, href: routes.eventReports(eventId) },
+    ...(canReadReports
+      ? [{ title: 'Reports', icon: BarChart3, href: routes.eventReports(eventId) }]
+      : []),
   ];
 
   return (
     <div className="space-y-6">
-      {showCreationFollowUp && can('events.write') ? (
+      {showCreationFollowUp && canManageEvent ? (
         <output className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 p-4 text-sm">
           <span>
             <span className="block font-semibold">Your event draft is ready.</span>
@@ -296,7 +331,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {can('events.write') && event.status !== 'published' && event.status !== 'archived' ? (
+          {canManageEvent && event.status !== 'published' && event.status !== 'archived' ? (
             <Button
               className="disabled:bg-slate-700 disabled:text-white disabled:opacity-100"
               disabled={readinessLoading || Boolean(readinessError) || !launchReadiness}
@@ -305,17 +340,17 @@ export function EventDetailView({ eventId }: { eventId: string }) {
               {readinessLoading ? 'Checking readiness…' : 'Review and publish'}
             </Button>
           ) : null}
-          {can('events.write') && event.status === 'published' ? (
+          {canManageEvent && event.status === 'published' ? (
             <Button variant="outline" onClick={() => setLifecycleAction('pause')}>
               Pause sales
             </Button>
           ) : null}
-          {can('events.write') && event.status !== 'archived' ? (
+          {canManageEvent && event.status !== 'archived' ? (
             <Button variant="destructive" onClick={() => setLifecycleAction('archive')}>
               Archive
             </Button>
           ) : null}
-          {event.status === 'published' ? null : (
+          {event.status === 'published' || !canManageEvent ? null : (
             <Button variant="outline" asChild>
               <Link href={routes.eventPreview(eventId)}>
                 <ExternalLink className="size-4" />
@@ -323,12 +358,14 @@ export function EventDetailView({ eventId }: { eventId: string }) {
               </Link>
             </Button>
           )}
-          <Button variant="outline" asChild>
-            <Link href={routes.eventSettings(eventId)}>
-              <Pencil className="size-4" />
-              Settings
-            </Link>
-          </Button>
+          {canManageEvent ? (
+            <Button variant="outline" asChild>
+              <Link href={routes.eventSettings(eventId)}>
+                <Pencil className="size-4" />
+                Settings
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -352,9 +389,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             checkInStep.status !== 'not_applicable',
           )}
           messagingFailureCount={canManageMessages ? messagingFailures : 0}
-          failedWebhookDeliveryCount={
-            operationalHealth?.organizationFailedWebhookDeliveries ?? 0
-          }
+          failedWebhookDeliveryCount={operationalHealth?.organizationFailedWebhookDeliveries ?? 0}
           failedExportCount={operationalHealth?.failedExports ?? 0}
           signalState={publishedSignalState}
           can={can}
@@ -455,9 +490,11 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                           ? `${operationalHealth.organizationFailedWebhookDeliveries} failed or dead-lettered ${operationalHealth.organizationFailedWebhookDeliveries === 1 ? 'webhook delivery' : 'webhook deliveries'} across this organization.`
                           : 'No failed webhook deliveries detected across this organization.'}
                   </p>
-                  <Link className="text-primary hover:underline" href={routes.developerWebhooks}>
-                    Review webhooks
-                  </Link>
+                  {canReviewWebhooks ? (
+                    <Link className="text-primary hover:underline" href={routes.developerWebhooks}>
+                      Review webhooks
+                    </Link>
+                  ) : null}
                 </li>
                 <li className="rounded-md border p-3">
                   <span className="font-medium">Exports</span>
@@ -470,12 +507,14 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                           ? `${operationalHealth.failedExports} failed export${operationalHealth.failedExports === 1 ? '' : 's'}.`
                           : 'No failed exports detected.'}
                   </p>
-                  <Link
-                    className="text-primary hover:underline"
-                    href={routes.eventReports(eventId)}
-                  >
-                    Review exports
-                  </Link>
+                  {canReadReports ? (
+                    <Link
+                      className="text-primary hover:underline"
+                      href={routes.eventReports(eventId)}
+                    >
+                      Review exports
+                    </Link>
+                  ) : null}
                 </li>
               </ul>
             </CardContent>
@@ -567,8 +606,9 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              No description yet. Add the canonical event copy in Settings, then place or style it
-              in the Event Page editor.
+              {canManageEvent
+                ? 'No description yet. Add the canonical event copy in Settings, then place or style it in the Event Page editor.'
+                : 'No event description has been added.'}
             </p>
           )}
         </CardContent>
@@ -580,19 +620,36 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             <CardTitle>Quick Links</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {quickLinks.map((link) => (
-                <Link
-                  key={link.title}
-                  href={link.href}
-                  prefetch={false}
-                  className="flex items-center gap-3 rounded-lg border p-3 hover:bg-accent/50 transition-colors"
-                >
-                  <link.icon className="size-5 text-muted-foreground" />
-                  <span className="font-medium">{link.title}</span>
-                </Link>
-              ))}
-            </div>
+            {permissionsLoading ? (
+              <Skeleton className="h-24 w-full" aria-label="Checking event action access" />
+            ) : permissionsError ? (
+              <div role="alert" className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                  Event action access could not be verified.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={retryPermissions}>
+                  Retry event access
+                </Button>
+              </div>
+            ) : quickLinks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No event actions are available for your role.
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {quickLinks.map((link) => (
+                  <Link
+                    key={link.title}
+                    href={link.href}
+                    prefetch={false}
+                    className="flex items-center gap-3 rounded-lg border p-3 hover:bg-accent/50 transition-colors"
+                  >
+                    <link.icon className="size-5 text-muted-foreground" />
+                    <span className="font-medium">{link.title}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -650,14 +707,19 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         <CardContent>
           {tickets.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No ticket types configured.{' '}
-              <Link
-                href={routes.eventTickets(eventId)}
-                prefetch={false}
-                className="font-medium underline"
-              >
-                Add tickets →
-              </Link>
+              No ticket types configured.
+              {canManageTickets ? (
+                <>
+                  {' '}
+                  <Link
+                    href={routes.eventTickets(eventId)}
+                    prefetch={false}
+                    className="font-medium underline"
+                  >
+                    Add tickets →
+                  </Link>
+                </>
+              ) : null}
             </p>
           ) : (
             <div className="space-y-2">

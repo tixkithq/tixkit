@@ -1,3 +1,4 @@
+import { PermissionGuard } from '@/components/permission-guard';
 import { EventMarketingView } from '@/features/events/event-marketing-view';
 
 export default function Page({ params }: { params: Promise<{ eventId: string }> }) {
@@ -6,5 +7,9 @@ export default function Page({ params }: { params: Promise<{ eventId: string }> 
 
 async function EventMarketingPageWrapper({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
-  return <EventMarketingView eventId={eventId} />;
+  return (
+    <PermissionGuard required="events.write">
+      <EventMarketingView eventId={eventId} />
+    </PermissionGuard>
+  );
 }
