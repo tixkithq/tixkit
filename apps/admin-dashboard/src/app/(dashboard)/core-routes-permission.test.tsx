@@ -10,6 +10,7 @@ import ReportsPage from './reports/page';
 import EventAttendeesPage from './events/[eventId]/attendees/page';
 import EventCheckInPage from './events/[eventId]/check-in/page';
 import EventReportsPage from './events/[eventId]/reports/page';
+import EventSettingsPage from './events/[eventId]/settings/page';
 
 const routeMocks = vi.hoisted(() => ({
   permissionGuard: vi.fn(),
@@ -22,6 +23,7 @@ const routeMocks = vi.hoisted(() => ({
   reportsView: vi.fn(),
   eventAttendeesView: vi.fn(),
   eventReportsView: vi.fn(),
+  eventSettingsView: vi.fn(),
 }));
 
 vi.mock('@/components/permission-guard', () => ({
@@ -102,6 +104,13 @@ vi.mock('@/features/events/event-reports-view', () => ({
   EventReportsView: ({ eventId }: { eventId: string }) => {
     routeMocks.eventReportsView(eventId);
     return <div data-testid="event-reports-view" />;
+  },
+}));
+
+vi.mock('@/features/events/event-settings-view', () => ({
+  EventSettingsView: ({ eventId }: { eventId: string }) => {
+    routeMocks.eventSettingsView(eventId);
+    return <div data-testid="event-settings-view" />;
   },
 }));
 
@@ -204,5 +213,14 @@ describe('core dashboard route permission guards', () => {
     expect(routeMocks.permissionGuard).toHaveBeenLastCalledWith('reports.read');
     expect(routeMocks.eventReportsView).toHaveBeenCalledWith('evt_1');
     expect(eventReports.getByTestId('permission-guard-reports.read')).toBeInTheDocument();
+    eventReports.unmount();
+
+    const eventSettingsElement = await EventSettingsPage({
+      params: Promise.resolve({ eventId: 'evt_1' }),
+    });
+    const eventSettings = render(eventSettingsElement);
+    expect(routeMocks.permissionGuard).toHaveBeenLastCalledWith('events.write');
+    expect(routeMocks.eventSettingsView).toHaveBeenCalledWith('evt_1');
+    expect(eventSettings.getByTestId('permission-guard-events.write')).toBeInTheDocument();
   });
 });
