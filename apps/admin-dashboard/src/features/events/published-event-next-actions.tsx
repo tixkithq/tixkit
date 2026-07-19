@@ -16,7 +16,7 @@ type PublishedAction = {
   external?: boolean;
 };
 
-export type PublishedEventSignalState = 'checking' | 'incomplete' | 'ready';
+export type PublishedEventSignalState = 'checking' | 'incomplete' | 'unavailable' | 'ready';
 
 export function PublishedEventNextActions({
   eventId,
@@ -130,6 +130,15 @@ export function PublishedEventNextActions({
                   Retry health checks
                 </Button>
               </div>
+            </div>
+          ) : null}
+          {signalState === 'unavailable' ? (
+            <div
+              role="alert"
+              className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100"
+            >
+              Action priority is unavailable because your access could not be verified. Reload or
+              sign in again before acting on role-specific recommendations.
             </div>
           ) : null}
           <div className="space-y-1.5">

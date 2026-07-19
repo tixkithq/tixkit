@@ -363,7 +363,12 @@ describe('EventDetailView', () => {
         return { data: [], loading: false, error: null, refetch: vi.fn() };
       }
       if (key === 'listOrders') {
-        return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+        return {
+          data: { items: [] },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
       }
       if (key === 'listMessages') {
         return {
@@ -390,7 +395,12 @@ describe('EventDetailView', () => {
         };
       }
       if (key === 'eventLaunchReadiness') {
-        return { data: launchReadiness, loading: false, error: null, refetch: vi.fn() };
+        return {
+          data: launchReadiness,
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
       }
       return { data: undefined, loading: false, error: null, refetch: vi.fn() };
     });
@@ -414,7 +424,12 @@ describe('EventDetailView', () => {
         return { data: [], loading: false, error: null, refetch: vi.fn() };
       }
       if (key === 'listOrders') {
-        return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+        return {
+          data: { items: [] },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
       }
       if (key === 'listMessages') {
         return {
@@ -441,7 +456,12 @@ describe('EventDetailView', () => {
         };
       }
       if (key === 'eventLaunchReadiness') {
-        return { data: launchReadiness, loading: false, error: null, refetch: vi.fn() };
+        return {
+          data: launchReadiness,
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
       }
       return { data: undefined, loading: false, error: null, refetch: vi.fn() };
     });
@@ -467,6 +487,200 @@ describe('EventDetailView', () => {
 
     expect(await view.findByRole('link', { name: 'Tickets' })).toBeInTheDocument();
     expect(view.queryByRole('link', { name: 'Messages' })).not.toBeInTheDocument();
+  });
+
+  it('disables protected order and messaging queries and labels unavailable data', async () => {
+    mockLoadedEventDetail();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn(
+        (permission: string) => permission !== 'orders.read' && permission !== 'messages.write',
+      ),
+      loading: false,
+      error: null,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(
+      await view.findByText('Orders access is required to view recent purchases.'),
+    ).toBeInTheDocument();
+    expect(
+      view.getByText('Messaging access is required to view delivery health.'),
+    ).toBeInTheDocument();
+    expect(view.queryByText('No orders yet.')).not.toBeInTheDocument();
+    expect(view.queryByText(/Health checks are incomplete/)).not.toBeInTheDocument();
+    expect(view.queryByText('Review message outcomes')).not.toBeInTheDocument();
+
+    const ordersQuery = useAdminDataMock.mock.calls.find(
+      ([queryKey]) => Array.isArray(queryKey) && queryKey[0] === 'listOrders',
+    );
+    const messagesQuery = useAdminDataMock.mock.calls.find(
+      ([queryKey]) => Array.isArray(queryKey) && queryKey[0] === 'listMessages',
+    );
+    expect(ordersQuery?.[2]).toEqual({ enabled: false });
+    expect(messagesQuery?.[2]).toEqual({ enabled: false });
+  });
+
+  it('keeps protected data pending until permissions resolve without showing a false denial', async () => {
+    mockLoadedEventDetail();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn(() => false),
+      loading: true,
+      error: null,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByLabelText('Checking orders access')).toBeInTheDocument();
+    expect(view.getByText('Checking messaging access…')).toBeInTheDocument();
+    expect(view.queryByText(/access is required/)).not.toBeInTheDocument();
+    expect(
+      useAdminDataMock.mock.calls.find(
+        ([queryKey]) => Array.isArray(queryKey) && queryKey[0] === 'listOrders',
+      )?.[2],
+    ).toEqual({ enabled: false });
+
+    useAdminDataMock.mockClear();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn(() => true),
+      loading: false,
+      error: null,
+    });
+    view.rerender(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText('No orders yet.')).toBeInTheDocument();
+    expect(
+      useAdminDataMock.mock.calls.find(
+        ([queryKey]) => Array.isArray(queryKey) && queryKey[0] === 'listOrders',
+      )?.[2],
+    ).toEqual({ enabled: true });
+    expect(
+      useAdminDataMock.mock.calls.find(
+        ([queryKey]) => Array.isArray(queryKey) && queryKey[0] === 'listMessages',
+      )?.[2],
+    ).toEqual({ enabled: true });
+  });
+
+  it('distinguishes permission lookup failure from an access denial', async () => {
+    mockLoadedEventDetail();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn(() => false),
+      loading: false,
+      error: new Error('permission service unavailable'),
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText('Orders access could not be verified.')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+    expect(view.getByText('Messaging access could not be verified.')).toBeInTheDocument();
+    expect(view.queryByText(/access is required/)).not.toBeInTheDocument();
+    expect(view.queryByRole('button', { name: 'Retry health checks' })).not.toBeInTheDocument();
+    expect(view.queryByText('Recommended next')).not.toBeInTheDocument();
+    expect(view.getByText(/Action priority is unavailable/)).toBeInTheDocument();
+  });
+
+  it('uses inventory-only progress copy when messaging access is unavailable', async () => {
+    mockLoadedEventDetail();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn((permission: string) => permission !== 'messages.write'),
+      loading: false,
+      error: null,
+    });
+    useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+      if (key === 'getEvent') {
+        return { data: event, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listTicketTypes') {
+        return { data: [], loading: true, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listOrders') {
+        return {
+          data: { items: [] },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'eventLaunchReadiness') {
+        return {
+          data: launchReadiness,
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      return { data: undefined, loading: false, error: null, refetch: vi.fn() };
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText('Checking inventory health…')).toBeInTheDocument();
+    expect(view.queryByText('Checking inventory and messaging health…')).not.toBeInTheDocument();
+  });
+
+  it('does not retry a disabled messaging query when another health signal fails', async () => {
+    mockLoadedEventDetail();
+    const refetchTickets = vi.fn();
+    const refetchMessages = vi.fn();
+    const refetchReadiness = vi.fn();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn((permission: string) => permission !== 'messages.write'),
+      loading: false,
+      error: null,
+    });
+    useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+      if (key === 'getEvent') {
+        return { data: event, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listTicketTypes') {
+        return {
+          data: [],
+          loading: false,
+          error: new Error('inventory unavailable'),
+          refetch: refetchTickets,
+        };
+      }
+      if (key === 'listOrders') {
+        return {
+          data: { items: [] },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'listMessages') {
+        return {
+          data: undefined,
+          loading: false,
+          error: null,
+          refetch: refetchMessages,
+        };
+      }
+      if (key === 'eventLaunchReadiness') {
+        return {
+          data: launchReadiness,
+          loading: false,
+          error: null,
+          refetch: refetchReadiness,
+        };
+      }
+      return { data: undefined, loading: false, error: null, refetch: vi.fn() };
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    const [retryHealthChecks] = await view.findAllByRole('button', {
+      name: 'Retry health checks',
+    });
+    fireEvent.click(retryHealthChecks!);
+    expect(refetchTickets).toHaveBeenCalledOnce();
+    expect(refetchReadiness).toHaveBeenCalledOnce();
+    expect(refetchMessages).not.toHaveBeenCalled();
   });
 
   it('shows the Messages quick link with messages.write', async () => {

@@ -39,6 +39,10 @@ import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const runtimeConfig = useRuntimeConfig();
+  const { can, loading: permissionsLoading, error: permissionsError } = usePermissions();
+  const permissionsReady = !permissionsLoading && !permissionsError;
+  const canReadOrders = permissionsReady && can('orders.read');
+  const canManageMessages = permissionsReady && can('messages.write');
   const {
     data: event,
     loading,
@@ -50,19 +54,29 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     error: ticketsError,
     refetch: refetchTickets,
   } = useAdminQuery(['listTicketTypes', eventId], () => adminApi.listTicketTypes(eventId));
-  const { data: ordersData } = useAdminQuery(['listOrders', eventId], () =>
-    adminApi.listOrders({
-      filters: { eventId: { type: 'select', values: [eventId] } },
-      limit: 5,
-    }),
+  const {
+    data: ordersData,
+    loading: ordersLoading,
+    error: ordersError,
+    refetch: refetchOrders,
+  } = useAdminQuery(
+    ['listOrders', eventId],
+    () =>
+      adminApi.listOrders({
+        filters: { eventId: { type: 'select', values: [eventId] } },
+        limit: 5,
+      }),
+    { enabled: canReadOrders },
   );
   const {
     data: messages,
     loading: messagesLoading,
     error: messagesError,
     refetch: refetchMessages,
-  } = useAdminQuery(['listMessages', eventId, 'operational-health'], () =>
-    adminApi.listMessages(eventId),
+  } = useAdminQuery(
+    ['listMessages', eventId, 'operational-health'],
+    () => adminApi.listMessages(eventId),
+    { enabled: canManageMessages },
   );
   const {
     data: launchReadiness,
@@ -81,7 +95,6 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     adminApi.getEventOperationalHealth(eventId),
   );
   const { brands } = useBootstrap();
-  const { can } = usePermissions();
   const [preflightOpen, setPreflightOpen] = React.useState(false);
   const [lifecycleAction, setLifecycleAction] = React.useState<'pause' | 'archive'>();
   const [lifecycleError, setLifecycleError] = React.useState<string>();
@@ -152,13 +165,23 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     (total, message) => total + message.suppressedCount,
     0,
   );
-  const publishedSignalState =
-    ticketsLoading || messagesLoading || readinessLoading
+  const publishedSignalState = permissionsError
+    ? 'unavailable'
+    : ticketsLoading ||
+        permissionsLoading ||
+        (canManageMessages && messagesLoading) ||
+        readinessLoading
       ? 'checking'
-      : ticketsError || messagesError || readinessError || !launchReadiness
+      : ticketsError ||
+          (canManageMessages && messagesError) ||
+          readinessError ||
+          !launchReadiness
         ? 'incomplete'
         : 'ready';
   const messagingHealthCopy = (() => {
+    if (permissionsLoading) return 'Checking messaging access…';
+    if (permissionsError) return 'Messaging access could not be verified.';
+    if (!canManageMessages) return 'Messaging access is required to view delivery health.';
     if (messagesLoading || messagesError) return 'Messaging health unavailable.';
     const suppressionCopy = messagingSuppressions
       ? `${messagingSuppressions} recipient${messagingSuppressions === 1 ? ' was' : 's were'} safely suppressed by consent or delivery policy.`
@@ -206,7 +229,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     },
     { title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) },
     { title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) },
-    ...(can('messages.write')
+    ...(canManageMessages
       ? [
           {
             title: 'Messages',
@@ -323,13 +346,13 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             checkInStep.status !== 'complete' &&
             checkInStep.status !== 'not_applicable',
           )}
-          messagingFailureCount={messagingFailures}
+          messagingFailureCount={canManageMessages ? messagingFailures : 0}
           signalState={publishedSignalState}
           can={can}
           onCopyPublicUrl={copyShareUrl}
           onRetrySignals={() => {
             void refetchTickets();
-            void refetchMessages();
+            if (canManageMessages) void refetchMessages();
             void refetchReadiness();
           }}
         />
@@ -341,12 +364,14 @@ export function EventDetailView({ eventId }: { eventId: string }) {
               <CardTitle>Operational health</CardTitle>
             </CardHeader>
             <CardContent>
-              {ticketsLoading || messagesLoading ? (
+              {ticketsLoading || permissionsLoading || (canManageMessages && messagesLoading) ? (
                 <output className="mb-3 block text-sm text-muted-foreground">
-                  Checking inventory and messaging health…
+                  {canManageMessages || permissionsLoading
+                    ? 'Checking inventory and messaging health…'
+                    : 'Checking inventory health…'}
                 </output>
               ) : null}
-              {ticketsError || messagesError ? (
+              {ticketsError || (canManageMessages && messagesError) ? (
                 <div
                   role="alert"
                   className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 p-3 text-sm"
@@ -360,7 +385,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                     size="sm"
                     onClick={() => {
                       void refetchTickets();
-                      void refetchMessages();
+                      if (canManageMessages) void refetchMessages();
                     }}
                   >
                     Retry health checks
@@ -568,7 +593,21 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             <CardTitle>Recent Orders</CardTitle>
           </CardHeader>
           <CardContent>
-            {recentOrders.length === 0 ? (
+            {permissionsLoading ? (
+              <Skeleton className="h-16 w-full" aria-label="Checking orders access" />
+            ) : permissionsError ? (
+              <p role="alert" className="text-sm text-muted-foreground">
+                Orders access could not be verified.
+              </p>
+            ) : !canReadOrders ? (
+              <p className="text-sm text-muted-foreground">
+                Orders access is required to view recent purchases.
+              </p>
+            ) : ordersLoading ? (
+              <Skeleton className="h-16 w-full" aria-label="Loading recent orders" />
+            ) : ordersError ? (
+              <ApiErrorState error={ordersError} onRetry={() => void refetchOrders()} />
+            ) : recentOrders.length === 0 ? (
               <p className="text-sm text-muted-foreground">No orders yet.</p>
             ) : (
               <div className="space-y-2">

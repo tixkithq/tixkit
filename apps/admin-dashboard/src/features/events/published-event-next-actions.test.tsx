@@ -66,6 +66,7 @@ describe('PublishedEventNextActions', () => {
   it.each([
     ['checking', 'Checking inventory, messaging, and launch health'],
     ['incomplete', 'Health checks are incomplete'],
+    ['unavailable', 'Action priority is unavailable'],
   ] as const)('does not recommend an action while live signals are %s', (signalState, notice) => {
     const retrySignals = vi.fn();
     const view = render(
