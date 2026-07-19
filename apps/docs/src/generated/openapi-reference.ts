@@ -21616,7 +21616,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "settings.write"
+    ],
     "parameters": [
       {
         "$ref": "#/components/parameters/RequiredIdempotencyKey"
@@ -21674,7 +21676,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "settings.write"
+    ],
     "parameters": [
       {
         "$ref": "#/components/parameters/RequiredIdempotencyKey"

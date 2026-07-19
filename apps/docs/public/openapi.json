@@ -37511,6 +37511,9 @@
             "BearerAuth": []
           }
         ],
+        "x-required-permissions": [
+          "settings.write"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/RequiredIdempotencyKey"
@@ -37566,6 +37569,9 @@
           {
             "BearerAuth": []
           }
+        ],
+        "x-required-permissions": [
+          "settings.write"
         ],
         "parameters": [
           {
