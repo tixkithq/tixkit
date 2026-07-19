@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AdminWorkspaceReadiness } from '@/lib/api';
 import {
   workspaceReadinessCollapseStorageKey,
+  workspaceActionRoute,
   workspaceReadinessViewModel,
 } from './workspace-readiness';
 
@@ -32,6 +33,16 @@ function readiness(
 }
 
 describe('workspaceReadinessViewModel', () => {
+  it('routes only to settings surfaces that can resolve the readiness action', () => {
+    expect(workspaceActionRoute('select_workspace')).toBe('/settings/workspace');
+    expect(workspaceActionRoute('configure_brand')).toBe('/settings/branding');
+    expect(workspaceActionRoute('configure_payments')).toBe('/settings/payments');
+    expect(workspaceActionRoute('manage_team')).toBe('/settings/members');
+    expect(workspaceActionRoute('configure_legal')).toBe('/settings/branding');
+    expect(workspaceActionRoute('configure_sender')).toBeUndefined();
+    expect(workspaceActionRoute(null)).toBeUndefined();
+  });
+
   it('scopes collapse preferences to the organization and brand', () => {
     expect(workspaceReadinessCollapseStorageKey('org_1', 'brd_1')).not.toBe(
       workspaceReadinessCollapseStorageKey('org_1', 'brd_2'),

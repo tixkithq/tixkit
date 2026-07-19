@@ -19,6 +19,7 @@ import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
 import { formatCurrency, formatNumber, formatDate } from '@/lib/format';
 import { AuthenticatedEventImage } from '@/features/events/authenticated-event-image';
+import { WorkspaceReadinessChecklist } from './workspace-readiness';
 
 export function DashboardView() {
   const { organizationId, brandId } = useBootstrap();
@@ -120,6 +121,7 @@ export function DashboardView() {
         ) : null}
       </div>
 
+      <WorkspaceReadinessChecklist />
       <DashboardActionFeed />
 
       {!workspaceSelected ? (

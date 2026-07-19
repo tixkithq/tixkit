@@ -53,14 +53,17 @@ const reasonLabels: Readonly<Record<string, string>> = {
   permission_required: 'A workspace owner with the required permission must complete this step.',
 };
 
-const actionRoutes: Readonly<Record<string, string>> = {
+const actionRoutes: Readonly<Partial<Record<string, string>>> = {
   select_workspace: routes.settingsWorkspace,
   configure_brand: routes.settingsBranding,
   configure_payments: routes.settingsPayments,
   manage_team: routes.settingsMembers,
-  configure_legal: routes.settingsOrganization,
-  configure_sender: routes.settingsBranding,
+  configure_legal: routes.settingsBranding,
 };
+
+export function workspaceActionRoute(actionId: string | null): string | undefined {
+  return actionId ? actionRoutes[actionId] : undefined;
+}
 
 const ownerLabels: Readonly<Record<AdminWorkspaceDashboardAction['owner'], string>> = {
   organizer: 'Organizer',
@@ -111,7 +114,7 @@ export function workspaceReadinessViewModel(
 
 function WorkspaceActionRow({ action: item }: { action: AdminWorkspaceDashboardAction }) {
   const { can } = usePermissions();
-  const actionRoute = item.actionId ? actionRoutes[item.actionId] : undefined;
+  const actionRoute = workspaceActionRoute(item.actionId);
   const permitted = item.requiredPermission
     ? can(item.requiredPermission as TixkitPermission)
     : true;
@@ -154,6 +157,35 @@ function WorkspaceActionRow({ action: item }: { action: AdminWorkspaceDashboardA
           {ownerLabels[item.owner]} action required
         </span>
       ) : null}
+    </li>
+  );
+}
+
+const statusLabels: Readonly<Record<AdminReadinessStep['status'], string>> = {
+  complete: 'Complete',
+  incomplete: 'Needs attention',
+  blocked: 'Blocked',
+  not_applicable: 'Not applicable',
+};
+
+function WorkspaceReadinessDetail({ step }: { step: AdminReadinessStep }) {
+  const label = stepLabels[step.id] ?? 'Workspace readiness step';
+  return (
+    <li className="border-t py-3 first:border-t-0">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">{label}</p>
+        <span className="text-xs font-medium text-foreground/80">{statusLabels[step.status]}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {step.reasonCodes.length > 0
+          ? step.reasonCodes
+              .map(
+                (code) =>
+                  reasonLabels[code] ?? 'Review this workspace setting before continuing.',
+              )
+              .join(' ')
+          : 'No additional action is required for this step.'}
+      </p>
     </li>
   );
 }
@@ -263,6 +295,16 @@ function ScopedWorkspaceReadiness({
               <WorkspaceActionRow key={action.id} action={action} />
             ))}
           </ul>
+          {data.steps.length > 0 ? (
+            <div className="mt-4 border-t pt-3">
+              <h3 className="text-sm font-semibold">Readiness details</h3>
+              <ul aria-label="Workspace readiness details">
+                {data.steps.map((step) => (
+                  <WorkspaceReadinessDetail key={step.id} step={step} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <a
             className="mt-3 inline-block text-sm font-medium text-primary"
             href={docUrl('localQuickstart')}

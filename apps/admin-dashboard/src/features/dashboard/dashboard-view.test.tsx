@@ -228,7 +228,197 @@ function deferred<T>() {
 describe('DashboardView error states', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     mockCan.mockReturnValue(true);
+  });
+
+  it('renders the role-owned workspace action and finance remediation', async () => {
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText(/Critical · Owner: Finance/)).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Resolve Prepare the payment path' }),
+    ).toHaveAttribute('href', '/settings/payments');
+  });
+
+  it('hands a workspace action to its owner when the viewer lacks remediation permission', async () => {
+    mockCan.mockImplementation((permission) => permission !== 'billing.write');
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText('Finance action required')).toBeVisible();
+    expect(
+      screen.queryByRole('link', { name: 'Resolve Prepare the payment path' }),
+    ).toBeNull();
+  });
+
+  it('retries a failed workspace readiness request without hiding other dashboard data', async () => {
+    mockGetWorkspaceReadiness
+      .mockResolvedValueOnce(makeError(503, 'UNAVAILABLE', 'Workspace readiness is unavailable.'))
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          tenantId: 'tnt_1',
+          organizationId: 'org_1',
+          brandId: 'brd_1',
+          generatedAt: new Date(0).toISOString(),
+          paymentMode: 'capture',
+          complete: false,
+          steps: [],
+          actionFeed: [
+            {
+              id: 'workspace:payment_path',
+              stepId: 'payment_path',
+              severity: 'critical',
+              owner: 'finance',
+              deadlineAt: null,
+              status: 'blocked',
+              reasonCodes: ['payment_path_missing'],
+              actionId: 'configure_payments',
+              requiredPermission: 'billing.write',
+              updatedAt: null,
+            },
+          ],
+        },
+      });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText('Workspace readiness is unavailable.')).toBeVisible();
+    expect(screen.getByText(/No events yet/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(
+      await screen.findByRole('link', { name: 'Resolve Prepare the payment path' }),
+    ).toHaveAttribute('href', '/settings/payments');
+    expect(mockGetWorkspaceReadiness).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts a completed workspace checklist collapsed while keeping it inspectable', async () => {
+    mockGetWorkspaceReadiness.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        generatedAt: new Date(0).toISOString(),
+        paymentMode: 'capture',
+        complete: true,
+        steps: [
+          {
+            id: 'workspace_selection',
+            status: 'complete',
+            priority: 'required',
+            reasonCodes: ['workspace_selected'],
+            actionId: null,
+            requiredPermission: null,
+            updatedAt: null,
+            acknowledgedAt: null,
+            acknowledgementValid: null,
+          },
+        ],
+        actionFeed: [],
+      },
+    });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText('Workspace setup complete')).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      ),
+    );
+    expect(screen.queryByRole('list', { name: 'Prioritized workspace actions' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(screen.getByRole('list', { name: 'Workspace readiness details' })).toBeVisible();
+    expect(screen.getByText('Confirm workspace context')).toBeVisible();
+    expect(screen.getByText('Workspace context is selected.')).toBeVisible();
+    expect(screen.getByText('Complete')).toBeVisible();
+  });
+
+  it('links legal readiness to its editable brand settings surface', async () => {
+    mockGetWorkspaceReadiness.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        generatedAt: new Date(0).toISOString(),
+        paymentMode: 'capture',
+        complete: false,
+        steps: [],
+        actionFeed: [
+          {
+            id: 'workspace:legal_configuration',
+            stepId: 'legal_configuration',
+            severity: 'high',
+            owner: 'support',
+            deadlineAt: null,
+            status: 'incomplete',
+            reasonCodes: ['legal_configuration_missing'],
+            actionId: 'configure_legal',
+            requiredPermission: 'settings.write',
+            updatedAt: null,
+          },
+        ],
+      },
+    });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(
+      await screen.findByRole('link', { name: 'Resolve Configure legal settings' }),
+    ).toHaveAttribute('href', '/settings/branding');
+  });
+
+  it('hands sender verification to marketing without linking to an unrelated settings page', async () => {
+    mockGetWorkspaceReadiness.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        generatedAt: new Date(0).toISOString(),
+        paymentMode: 'capture',
+        complete: false,
+        steps: [],
+        actionFeed: [
+          {
+            id: 'workspace:sender_identity',
+            stepId: 'sender_identity',
+            severity: 'medium',
+            owner: 'marketing',
+            deadlineAt: null,
+            status: 'blocked',
+            reasonCodes: ['sender_identity_missing'],
+            actionId: 'configure_sender',
+            requiredPermission: 'messages.write',
+            updatedAt: null,
+          },
+        ],
+      },
+    });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText('Marketing action required')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Resolve Verify sender identity' })).toBeNull();
   });
 
   it('renders the optimized recent-event thumbnail with intrinsic dimensions', async () => {
