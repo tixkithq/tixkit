@@ -188,12 +188,17 @@ jobs:
           POSTGRES_PWD: tixkit
     env:
       DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
+      DATABASE_URL_MIGRATION_TEST: postgres://tixkit:tixkit@localhost:5432/tixkit_migration_test
       REDIS_URL: redis://localhost:6379
       TEMPORAL_ADDRESS: localhost:7233
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
+      - name: Provision isolated PostgreSQL migration-test database
+        run: |
+          docker exec "${{ job.services.postgres.id }}" sh -eu -c \
+            "psql -U tixkit -tAc \"select 1 from pg_database where datname = 'tixkit_migration_test'\" | grep -q 1 || createdb -U tixkit tixkit_migration_test"
       - name: Wait for Temporal
         run: |
           for i in $(seq 1 60); do

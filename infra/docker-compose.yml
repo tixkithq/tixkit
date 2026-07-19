@@ -9,6 +9,7 @@ services:
       - '5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U tixkit']
       interval: 5s
@@ -27,11 +28,43 @@ services:
       - '3306:3306'
     volumes:
       - mysqldata:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-u', 'tixkit', '-ptixkit']
       interval: 5s
       timeout: 3s
       retries: 10
+
+  postgres-migration-test-init:
+    image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: tixkit
+    entrypoint: ['sh', '-eu', '-c']
+    command:
+      - >-
+        psql -h postgres -U tixkit -d postgres -tAc
+        "select 1 from pg_database where datname = 'tixkit_migration_test'" | grep -q 1 ||
+        createdb -h postgres -U tixkit tixkit_migration_test
+    restart: 'no'
+
+  mysql-migration-test-init:
+    image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_PWD: tixkit
+    entrypoint: ['sh', '-eu', '-c']
+    command:
+      - >-
+        mysql -h mysql -uroot -e
+        "CREATE DATABASE IF NOT EXISTS tixkit_migration_test;
+        GRANT ALL PRIVILEGES ON tixkit_migration_test.* TO 'tixkit'@'%';
+        FLUSH PRIVILEGES;"
+    restart: 'no'
 
   redis:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99

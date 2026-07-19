@@ -276,6 +276,20 @@ function buildMigrationFailureMessage(error: unknown): string {
   ].join('\n');
 }
 
+async function restoreTestControlRows(db: Database): Promise<void> {
+  const now = new Date();
+  const updated = await db
+    .updateTable('payment_account_refresh_control')
+    .set({ maintenance: 0, updated_at: now })
+    .where('id', '=', 'singleton')
+    .executeTakeFirst();
+  if (Number(updated.numUpdatedRows) > 0) return;
+  await db
+    .insertInto('payment_account_refresh_control')
+    .values({ id: 'singleton', maintenance: 0, updated_at: now })
+    .execute();
+}
+
 export class TixkitMigrationProvider implements MigrationProvider {
   async getMigrations(): Promise<Record<string, Migration>> {
     return {
@@ -608,7 +622,9 @@ export async function dropAllTables(db: Database): Promise<void> {
  * Remove all rows from all Tixkit tables without dropping the schema.
  * Intended for test `beforeEach` cleanup so that multiple test suites can
  * share the same migrated database without one suite's `dropTable` destroying
- * another's concurrent queries.
+ * another's concurrent queries. Migration-owned singleton control rows are
+ * restored to their safe default after cleanup so later suites see a valid
+ * migrated runtime rather than a partially erased schema contract.
  *
  * Uses each driver's compatible bulk cleanup syntax while resetting
  * auto-increment/identity counters where the database supports it.
@@ -624,6 +640,7 @@ export async function truncateAllData(db: Database): Promise<void> {
       await sql`TRUNCATE TABLE ${sql.raw(table)}`.execute(db).catch(() => undefined);
     }
     await sql`SET FOREIGN_KEY_CHECKS = 1`.execute(db);
+    await restoreTestControlRows(db);
     return;
   }
 
@@ -718,11 +735,13 @@ export async function truncateAllData(db: Database): Promise<void> {
           .catch(() => undefined);
       }
     }
+    await restoreTestControlRows(db);
     return;
   }
 
   // PostgreSQL: single TRUNCATE with CASCADE resets all tables atomically.
   await sql.raw(`TRUNCATE TABLE ${tableList} RESTART IDENTITY CASCADE`).execute(db);
+  await restoreTestControlRows(db);
 }
 
 /**

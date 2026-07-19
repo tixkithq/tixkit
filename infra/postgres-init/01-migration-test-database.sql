@@ -1,0 +1,1 @@
+CREATE DATABASE tixkit_migration_test;

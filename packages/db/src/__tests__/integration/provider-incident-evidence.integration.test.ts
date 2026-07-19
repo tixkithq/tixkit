@@ -188,7 +188,10 @@ describe.sequential.each(driverCases)(
         }),
       ).resolves.toEqual([expect.objectContaining({ id: second.id })]);
 
-      const recapturedAt = new Date(captureInput(5).expiresAt.getTime() + 1);
+      // MySQL DATETIME stores whole seconds for this cross-engine contract. Cross
+      // the expiry boundary by one full storage quantum so the assertion proves
+      // recapture semantics instead of depending on engine-specific precision.
+      const recapturedAt = new Date(captureInput(5).expiresAt.getTime() + 1_000);
       const recaptured = await repository.capture({
         ...captureInput(5, 10),
         id: `pie_${'7'.repeat(26)}`,

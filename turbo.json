@@ -45,7 +45,9 @@
       "env": [
         "AUTH_PROVIDER",
         "DATABASE_URL",
+        "DATABASE_URL_MIGRATION_TEST",
         "DATABASE_URL_MYSQL",
+        "DATABASE_URL_MYSQL_MIGRATION_TEST",
         "DATABASE_URL_MSSQL",
         "DB_DRIVER",
         "DB_INTEGRATION_DRIVER",
@@ -70,7 +72,9 @@
       "env": [
         "AUTH_PROVIDER",
         "DATABASE_URL",
+        "DATABASE_URL_MIGRATION_TEST",
         "DATABASE_URL_MYSQL",
+        "DATABASE_URL_MYSQL_MIGRATION_TEST",
         "DATABASE_URL_MSSQL",
         "DB_DRIVER",
         "REDIS_URL",
@@ -94,7 +98,9 @@
       "env": [
         "AUTH_PROVIDER",
         "DATABASE_URL",
+        "DATABASE_URL_MIGRATION_TEST",
         "DATABASE_URL_MYSQL",
+        "DATABASE_URL_MYSQL_MIGRATION_TEST",
         "DATABASE_URL_MSSQL",
         "DB_DRIVER",
         "DB_INTEGRATION_DRIVER",

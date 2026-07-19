@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { Migrator } from 'kysely/migration';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../../client.js';
 import { createDb } from '../../client.js';
-import { runMigrations, TixkitMigrationProvider, truncateAllData } from '../../migrate.js';
+import { runMigrations, truncateAllData } from '../../migrate.js';
+import { ResaleSettlementsMigration } from '../../migrations/0089_resale_settlements.js';
 import {
   AttendeeRepository,
   BrandRepository,
@@ -42,6 +43,27 @@ const driverCases = (
 
 if (driverCases.length === 0) {
   it.skip('resale settlement integration (skipped: no PostgreSQL/MySQL URL)', () => {});
+}
+
+async function restoreResaleSettlementMigrationSchema(
+  db: Database,
+  driver: DriverCase['driver'],
+): Promise<void> {
+  await db.schema.dropTable('resale_settlement_entries').ifExists().execute();
+  if (driver === 'postgres') {
+    await sql`drop function if exists reject_resale_settlement_entry_mutation()`.execute(db);
+  }
+  await db.schema.dropTable('resale_settlements').ifExists().execute();
+  const listingColumns = (await db.introspection.getTables())
+    .find((table) => table.name === 'ticket_listings')
+    ?.columns.map((column) => column.name);
+  for (const column of ['refund_model', 'settlement_model', 'seller_terms_version'] as const) {
+    if (listingColumns?.includes(column)) {
+      // eslint-disable-next-line no-await-in-loop -- recovery removes each partially applied 0089 column before one clean reapply.
+      await db.schema.alterTable('ticket_listings').dropColumn(column).execute();
+    }
+  }
+  await ResaleSettlementsMigration.up(db);
 }
 
 describe.sequential.each(driverCases)(
@@ -433,24 +455,51 @@ describe.sequential.each(driverCases)(
       ).resolves.toEqual([]);
     });
 
-    it('rolls migration 0089 down and reapplies it cleanly', async () => {
+    it('rolls migration 0089 down and reapplies it cleanly without crossing later irreversible migrations', async () => {
       const legacy = await createFixture('legacy-backfill');
-      const migrator = new Migrator({ db, provider: new TixkitMigrationProvider() });
-      const down = await migrator.migrateDown();
-      expect(down.error).toBeUndefined();
-      expect(down.results?.at(-1)).toMatchObject({
-        migrationName: '0089_resale_settlements',
-        direction: 'Down',
-        status: 'Success',
-      });
+      const migrationRowsBefore = await sql<{ name: string; timestamp: string | Date }>`
+        select name, timestamp
+        from kysely_migration
+        where name in ('0089_resale_settlements', '0094_provider_account_cleanup_commands')
+        order by name
+      `.execute(db);
+      expect(migrationRowsBefore.rows.map((row) => row.name)).toEqual([
+        '0089_resale_settlements',
+        '0094_provider_account_cleanup_commands',
+      ]);
+      await expect(
+        db
+          .selectFrom('provider_account_cleanup_commands')
+          .select(({ fn }) => fn.countAll().as('count'))
+          .executeTakeFirstOrThrow(),
+      ).resolves.toBeDefined();
 
-      const up = await migrator.migrateUp();
-      expect(up.error).toBeUndefined();
-      expect(up.results?.at(-1)).toMatchObject({
-        migrationName: '0089_resale_settlements',
-        direction: 'Up',
-        status: 'Success',
-      });
+      const migrateDown = ResaleSettlementsMigration.down;
+      if (!migrateDown) throw new Error('Migration 0089 must retain its rollback implementation');
+      let schemaRestored = false;
+      try {
+        await migrateDown(db);
+        await ResaleSettlementsMigration.up(db);
+        schemaRestored = true;
+      } finally {
+        if (!schemaRestored) {
+          await restoreResaleSettlementMigrationSchema(db, driver);
+        }
+      }
+
+      const migrationRowsAfter = await sql<{ name: string; timestamp: string | Date }>`
+        select name, timestamp
+        from kysely_migration
+        where name in ('0089_resale_settlements', '0094_provider_account_cleanup_commands')
+        order by name
+      `.execute(db);
+      expect(migrationRowsAfter.rows).toEqual(migrationRowsBefore.rows);
+      await expect(
+        db
+          .selectFrom('provider_account_cleanup_commands')
+          .select(({ fn }) => fn.countAll().as('count'))
+          .executeTakeFirstOrThrow(),
+      ).resolves.toBeDefined();
 
       const backfilled = await db
         .selectFrom('resale_settlements')
@@ -485,6 +534,47 @@ describe.sequential.each(driverCases)(
           new ResaleSettlementRepository(trx).createAndAccrue(fixture.accrual),
         );
       expect(settlement).toMatchObject({ state: 'pending', listing_id: fixture.listing.id });
+    });
+
+    it('recovers a partially applied 0089 reapply without changing migration ledger state', async () => {
+      const migrationRowsBefore = await sql<{ name: string; timestamp: string | Date }>`
+        select name, timestamp
+        from kysely_migration
+        where name in ('0089_resale_settlements', '0094_provider_account_cleanup_commands')
+        order by name
+      `.execute(db);
+      const migrateDown = ResaleSettlementsMigration.down;
+      if (!migrateDown) throw new Error('Migration 0089 must retain its rollback implementation');
+      let restored = false;
+      try {
+        await migrateDown(db);
+        await db.schema
+          .createTable('resale_settlements')
+          .addColumn('id', 'varchar(32)', (column) => column.primaryKey())
+          .execute();
+        await restoreResaleSettlementMigrationSchema(db, driver);
+        restored = true;
+
+        const tables = await db.introspection.getTables();
+        expect(tables.some((table) => table.name === 'resale_settlements')).toBe(true);
+        expect(tables.some((table) => table.name === 'resale_settlement_entries')).toBe(true);
+        expect(
+          tables
+            .find((table) => table.name === 'ticket_listings')
+            ?.columns.map((column) => column.name),
+        ).toEqual(
+          expect.arrayContaining(['refund_model', 'settlement_model', 'seller_terms_version']),
+        );
+        const migrationRowsAfter = await sql<{ name: string; timestamp: string | Date }>`
+          select name, timestamp
+          from kysely_migration
+          where name in ('0089_resale_settlements', '0094_provider_account_cleanup_commands')
+          order by name
+        `.execute(db);
+        expect(migrationRowsAfter.rows).toEqual(migrationRowsBefore.rows);
+      } finally {
+        if (!restored) await restoreResaleSettlementMigrationSchema(db, driver);
+      }
     });
   },
 );
