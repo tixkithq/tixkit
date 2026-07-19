@@ -1,6 +1,6 @@
 import { ALL_PERMISSIONS, type Permission } from '@tixkit/domain';
 import { openApiSpec } from '@tixkit/openapi';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseSync } from 'oxc-parser';
 import { buildRouteManifest, type RouteAccess } from './route-manifest.js';
@@ -73,7 +73,7 @@ export type NegativeAuthorizationEvidence = {
       }>
     | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>
     | null;
-  denialKind: 'permission' | 'policy' | 'resource-boundary';
+  denialKind: 'permission' | 'policy' | 'principal-type' | 'resource-boundary';
   deniedCode: 'FORBIDDEN' | 'NOT_FOUND';
   deniedStatus: 403 | 404;
   persistenceSource: string | null;
@@ -82,6 +82,13 @@ export type NegativeAuthorizationEvidence = {
 };
 
 const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
+  [
+    'agent-action-execution-route-authorization-db.integration.test.ts',
+    resolve(
+      import.meta.dirname,
+      'agent-action-execution-route-authorization-db.integration.test.ts',
+    ),
+  ],
   [
     'privacy-erasure-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'privacy-erasure-route-authorization-db.integration.test.ts'),
@@ -275,6 +282,10 @@ function evidenceBindings(
 }
 
 const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
+  ...evidenceBindings(['postAgentActionsByActionIdExecutions'], {
+    source: 'agent-action-execution-route-authorization-db.integration.test.ts',
+    persistenceSource: 'agent-action-execution-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['postPrivacyDataExports', 'postPrivacyErasures'], {
     source: 'privacy-erasure-route-authorization-db.integration.test.ts',
     persistenceSource: 'privacy-erasure-route-authorization-db.integration.test.ts',
@@ -773,18 +784,36 @@ function isEnforcingPermissionCall(name: string): boolean {
 }
 
 function staticallyUnreachable(node: SyntaxNode, parents: WeakMap<object, SyntaxNode>): boolean {
+  const booleanValue = (value: SyntaxNode | undefined): boolean | undefined =>
+    value?.type === 'Literal' || value?.type === 'BooleanLiteral'
+      ? typeof value.value === 'boolean'
+        ? value.value
+        : undefined
+      : undefined;
   let current: SyntaxNode | undefined = node;
   while (current) {
     const parent = parents.get(current);
     if (!parent) break;
     const expression = syntaxNode(parent.test);
+    const logicalLeft = syntaxNode(parent.left);
     if (
       parent.type === 'IfStatement' &&
-      expression?.type === 'Literal' &&
-      expression.value === false &&
+      booleanValue(expression) === false &&
       current === parent.consequent
     ) {
       return true;
+    }
+    if (
+      parent.type === 'LogicalExpression' &&
+      parent.operator === '&&' &&
+      booleanValue(logicalLeft) === false &&
+      current === parent.right
+    ) {
+      return true;
+    }
+    if (parent.type === 'ConditionalExpression') {
+      if (booleanValue(expression) === false && current === parent.consequent) return true;
+      if (booleanValue(expression) === true && current === parent.alternate) return true;
     }
     current = parent;
   }
@@ -962,6 +991,7 @@ function boundariesFor(
   if (guardEvidence.includes('scopedJob')) boundaries.push('organization');
   if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');
   if (guardEvidence.includes('requireHumanUserPrincipal')) boundaries.push('principal-type');
+  if (guardEvidence.includes('requireAgent')) boundaries.push('principal-type');
   if (guardEvidence.includes('requireUploadArtifactAccess')) {
     boundaries.push('organization', 'brand', 'event', 'owner', 'principal-type');
   }
@@ -978,12 +1008,72 @@ function contractError(contract: RouteAuthorizationDenialContract, message: stri
   );
 }
 
+function executableEvidenceCalls(source: string, testTitle: string): { calls: SyntaxNode[] } {
+  const parsed = parseSync('authorization-evidence.test.ts', source);
+  if (parsed.errors.length > 0) throw new Error('authorization evidence source is not parseable');
+  const parents = new WeakMap<object, SyntaxNode>();
+  const calls: SyntaxNode[] = [];
+  const tests: SyntaxNode[] = [];
+  const walk = (
+    value: unknown,
+    visitor: (node: SyntaxNode) => boolean | void,
+    parent?: SyntaxNode,
+    seen = new WeakSet<object>(),
+  ): void => {
+    const node = syntaxNode(value);
+    if (!node || seen.has(node)) return;
+    seen.add(node);
+    if (parent) parents.set(node, parent);
+    if (visitor(node) === false) return;
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'parent' || key === 'scope') continue;
+      if (Array.isArray(child)) {
+        for (const entry of child) walk(entry, visitor, node, seen);
+      } else {
+        walk(child, visitor, node, seen);
+      }
+    }
+  };
+  walk(parsed.program, (node) => {
+    if (node.type !== 'CallExpression' || calleeName(node.callee) !== 'it') return;
+    const title = syntaxNode(Array.isArray(node.arguments) ? node.arguments[0] : undefined);
+    if (title?.type === 'Literal' && title.value === testTitle) tests.push(node);
+  });
+  if (tests.length !== 1)
+    throw new Error(`assertion test must be unique and executable: ${testTitle}`);
+  const test = tests[0]!;
+  const callback = syntaxNode(Array.isArray(test.arguments) ? test.arguments[1] : undefined);
+  if (
+    !callback ||
+    (callback.type !== 'ArrowFunctionExpression' && callback.type !== 'FunctionExpression')
+  )
+    throw new Error(`assertion test callback is not executable: ${testTitle}`);
+  const body = syntaxNode(callback.body);
+  if (!body) throw new Error(`assertion test body is missing: ${testTitle}`);
+  walk(body, (node) => {
+    if (
+      node !== body &&
+      (node.type === 'FunctionDeclaration' ||
+        node.type === 'FunctionExpression' ||
+        node.type === 'ArrowFunctionExpression' ||
+        node.type === 'ClassDeclaration' ||
+        node.type === 'ClassExpression')
+    ) {
+      return false;
+    }
+    if (node.type === 'CallExpression' && !staticallyUnreachable(node, parents)) calls.push(node);
+    return true;
+  });
+  return { calls };
+}
+
 export function negativeAuthorizationEvidenceForRoutes(
   routes: readonly Pick<
     RouteAccessInventoryEntry,
     'access' | 'boundaries' | 'guardEvidence' | 'method' | 'operationId' | 'path'
   >[],
   contracts: readonly RouteAuthorizationDenialContract[] = ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  evidenceSourceOverrides: ReadonlyMap<string, string> = new Map(),
 ): Map<string, NegativeAuthorizationEvidence[]> {
   const routesByKey = new Map(routes.map((route) => [`${route.method} ${route.path}`, route]));
   const evidenceByRoute = new Map<string, NegativeAuthorizationEvidence[]>();
@@ -1040,6 +1130,65 @@ export function negativeAuthorizationEvidenceForRoutes(
     const sourcePath = EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES.get(contract.source);
     if (!sourcePath || !existsSync(sourcePath))
       throw contractError(contract, 'source must name a registered existing executable test file');
+    if (contract.assertions) {
+      if (
+        contract.assertions.length === 0 ||
+        new Set(contract.assertions.map(({ id }) => id)).size !== contract.assertions.length
+      )
+        throw contractError(contract, 'assertion IDs must be non-empty and unique');
+      const sourceText =
+        evidenceSourceOverrides.get(contract.source) ?? readFileSync(sourcePath, 'utf8');
+      for (const assertion of contract.assertions) {
+        if (!/^agent-execution:[a-z0-9-]+$/u.test(assertion.id))
+          throw contractError(contract, `invalid assertion ID ${assertion.id}`);
+        let executable: ReturnType<typeof executableEvidenceCalls>;
+        try {
+          executable = executableEvidenceCalls(sourceText, assertion.testTitle);
+        } catch (error) {
+          throw contractError(
+            contract,
+            error instanceof Error ? error.message : 'invalid evidence',
+          );
+        }
+        const namedCalls = new Set(
+          executable.calls.map((call) => calleeName(call.callee)).filter(Boolean),
+        );
+        const marker = executable.calls.find((call) => {
+          if (calleeName(call.callee) !== 'registerAgentExecutionEvidence') return false;
+          const first = syntaxNode(Array.isArray(call.arguments) ? call.arguments[0] : undefined);
+          return first?.type === 'Literal' && first.value === assertion.id;
+        });
+        if (!marker) throw contractError(contract, `test body omits assertion ID ${assertion.id}`);
+        const semanticArgument = syntaxNode(
+          Array.isArray(marker.arguments) ? marker.arguments[1] : undefined,
+        );
+        if (
+          !semanticArgument ||
+          semanticArgument.type === 'Literal' ||
+          semanticArgument.type === 'BooleanLiteral'
+        )
+          throw contractError(
+            contract,
+            `assertion marker is not bound to semantic proof ${assertion.id}`,
+          );
+        if (
+          assertion.requiredCallNames.length === 0 ||
+          assertion.requiredCallNames.some((name) => !namedCalls.has(name))
+        )
+          throw contractError(contract, `test body omits semantic proof for ${assertion.id}`);
+        const expectCall = executable.calls.find((call) => calleeName(call.callee) === 'expect');
+        if (
+          !expectCall ||
+          typeof expectCall.start !== 'number' ||
+          typeof marker.start !== 'number' ||
+          expectCall.start >= marker.start
+        )
+          throw contractError(
+            contract,
+            `assertion marker precedes executable proof ${assertion.id}`,
+          );
+      }
+    }
     if (
       contract.permissionDenialResponse &&
       (contract.permissionDenialResponse.status !== 403 ||
@@ -1047,6 +1196,15 @@ export function negativeAuthorizationEvidenceForRoutes(
     ) {
       throw contractError(contract, 'permission denial must be 403 FORBIDDEN');
     }
+    if (
+      contract.principalTypeDenialResponse &&
+      (contract.principalTypeDenialResponse.status !== 403 ||
+        contract.principalTypeDenialResponse.code !== 'FORBIDDEN')
+    ) {
+      throw contractError(contract, 'principal-type denial must be 403 FORBIDDEN');
+    }
+    if (contract.principalTypeDenialResponse && !route.boundaries.includes('principal-type'))
+      throw contractError(contract, 'inventory omits principal-type boundary');
     const policyDeniedBoundaries = contract.policyDeniedBoundaries ?? [];
     if (policyDeniedBoundaries.length > 0 && !contract.policyDenialResponse) {
       throw contractError(contract, 'policy denials require an explicit response');
@@ -1174,6 +1332,24 @@ export function negativeAuthorizationEvidenceForRoutes(
         denialKind: 'permission',
         deniedCode: contract.permissionDenialResponse.code,
         deniedStatus: contract.permissionDenialResponse.status,
+        persistenceSource: contract.persistenceSource ?? null,
+        sideEffectAssertions: [...contract.sideEffectAssertions],
+        source: contract.source,
+      });
+    }
+    if (contract.principalTypeDenialResponse) {
+      const pair = `${routeKey} principal-type`;
+      if (routeBoundaryPairs.has(pair)) {
+        throw contractError(contract, 'duplicate route/boundary pair principal-type');
+      }
+      routeBoundaryPairs.add(pair);
+      evidence.push({
+        authorizedControlStatus: contract.authorizedControl.status,
+        boundary: 'principal-type',
+        condition: null,
+        denialKind: 'principal-type',
+        deniedCode: contract.principalTypeDenialResponse.code,
+        deniedStatus: contract.principalTypeDenialResponse.status,
         persistenceSource: contract.persistenceSource ?? null,
         sideEffectAssertions: [...contract.sideEffectAssertions],
         source: contract.source,

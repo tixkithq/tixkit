@@ -601,7 +601,13 @@ function assertAudit(
 }
 
 export class AgentExecutionRepository implements AgentExecutionStore {
-  constructor(private readonly db: Kysely<DB>) {}
+  constructor(
+    private readonly db: Kysely<DB>,
+    private readonly reservationGuard?: (
+      tx: Transaction<DB>,
+      input: Parameters<AgentExecutionStore['reserveAndConsume']>[0],
+    ) => Promise<void>,
+  ) {}
 
   async getExecution(tenantId: string, executionId: string): Promise<AgentExecution | undefined> {
     const row = await this.db
@@ -1439,7 +1445,8 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           return { created: false, execution: toExecution(existing) };
         }
 
-        const now = transactionNow;
+        await this.reservationGuard?.(tx, input);
+        const now = await databaseNow(tx);
         const permissions: unknown = JSON.parse(approval.approver_permission_snapshot);
         if (
           safeInteger(approval.policy_version, 'approval policy version') !==

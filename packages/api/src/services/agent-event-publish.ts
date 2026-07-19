@@ -23,6 +23,7 @@ import { EventUpdateService, projectEventUpdateFields } from './event-update.js'
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
 
 export type EventPublishAgentAdapterCheckpoints = {
+  beforeExecutionReserve?: () => Promise<void> | void;
   beforeExecutionRun?: () => Promise<void> | void;
   beforeInvocationTransaction?: () => Promise<void> | void;
   beforeProductAudit?: () => Promise<void> | void;

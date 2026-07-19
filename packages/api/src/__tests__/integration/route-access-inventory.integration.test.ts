@@ -8,6 +8,7 @@ import {
 } from './route-access-inventory.js';
 import { buildAuthenticatedRouteTestApp, buildRouteManifest } from './route-manifest.js';
 import {
+  AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -151,15 +152,25 @@ describe('API route access inventory (C-123)', () => {
     expect(RESALE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(106);
+    expect(AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(107);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
         (contract) =>
           Object.isFrozen(contract) &&
           Object.isFrozen(contract.deniedBoundaries) &&
+          (!contract.assertions ||
+            (Object.isFrozen(contract.assertions) &&
+              contract.assertions.every((assertion) => Object.isFrozen(assertion)))) &&
+          (!contract.assertions ||
+            contract.assertions.every((assertion) =>
+              Object.isFrozen(assertion.requiredCallNames),
+            )) &&
           (!contract.permissionDenialResponse ||
             Object.isFrozen(contract.permissionDenialResponse)) &&
+          (!contract.principalTypeDenialResponse ||
+            Object.isFrozen(contract.principalTypeDenialResponse)) &&
           (!contract.policyDenialResponse || Object.isFrozen(contract.policyDenialResponse)) &&
           (!contract.policyCondition || Object.isFrozen(contract.policyCondition)) &&
           (!contract.policyDeniedBoundaries || Object.isFrozen(contract.policyDeniedBoundaries)) &&
@@ -167,8 +178,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(106);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(441);
+    expect(coveredRoutes).toHaveLength(107);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(443);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
@@ -392,8 +403,68 @@ describe('API route access inventory (C-123)', () => {
     const scopedJobRoute = inventory.routes.find(
       (candidate) => candidate.operationId === scopedJobContract.operationId,
     )!;
+    const agentExecutionContract = AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const agentExecutionRoute = inventory.routes.find(
+      (candidate) => candidate.operationId === agentExecutionContract.operationId,
+    )!;
+    const assertionGroups = new Map<string, typeof agentExecutionContract.assertions>();
+    for (const assertion of agentExecutionContract.assertions!) {
+      assertionGroups.set(assertion.testTitle, [
+        ...(assertionGroups.get(assertion.testTitle) ?? []),
+        assertion,
+      ]);
+    }
+    const evidenceMutationSource = (
+      mode:
+        | 'body-stripped'
+        | 'comments-only'
+        | 'false-logical'
+        | 'false-ternary'
+        | 'marker-only'
+        | 'nested-function'
+        | 'strings-only'
+        | 'unreachable',
+    ): string =>
+      [...assertionGroups]
+        .map(([testTitle, assertions]) => {
+          const markers = assertions!
+            .map(({ id }) => `registerAgentExecutionEvidence('${id}', true);`)
+            .join('\n    ');
+          const body =
+            mode === 'marker-only'
+              ? markers
+              : mode === 'comments-only'
+                ? assertions!
+                    .map(
+                      ({ id }) =>
+                        `// expect(executeRequest()); consequentialSnapshot(); registerAgentExecutionEvidence('${id}', verified);`,
+                    )
+                    .join('\n    ')
+                : mode === 'strings-only'
+                  ? assertions!
+                      .map(
+                        ({ id }) =>
+                          `void "expect(executeRequest()); consequentialSnapshot(); registerAgentExecutionEvidence('${id}', verified);";`,
+                      )
+                      .join('\n    ')
+                  : mode === 'nested-function'
+                    ? `const DEAD_NESTED_FUNCTION_ACCEPTED = () => { expect(executeRequest()); consequentialSnapshot(); ${markers} }; void DEAD_NESTED_FUNCTION_ACCEPTED;`
+                    : mode === 'false-logical'
+                      ? `false && (() => { expect(executeRequest()); consequentialSnapshot(); ${markers} })();`
+                      : mode === 'false-ternary'
+                        ? `false ? (() => { expect(executeRequest()); consequentialSnapshot(); ${markers} })() : undefined;`
+                        : mode === 'unreachable'
+                          ? `if (false) { expect(executeRequest()); consequentialSnapshot(); ${markers} }`
+                          : 'expect(true).toBe(true);';
+          return `it('${testTitle}', async () => {\n    ${body}\n  });`;
+        })
+        .join('\n') +
+      (mode === 'body-stripped'
+        ? `\n${agentExecutionContract.assertions!.map(({ id }) => `registerAgentExecutionEvidence('${id}', verified);`).join('\n')}`
+        : '');
     const invalidFixtures: Array<{
       contracts: readonly RouteAuthorizationDenialContract[];
+      evidenceSourceOverrides?: ReadonlyMap<string, string>;
       message: RegExp;
       routes: typeof inventory.routes;
     }> = [
@@ -491,6 +562,107 @@ describe('API route access inventory (C-123)', () => {
       {
         contracts: [
           {
+            ...agentExecutionContract,
+            principalTypeDenialResponse: { code: 'FORBIDDEN', status: 404 },
+          } as unknown as RouteAuthorizationDenialContract,
+        ],
+        message: /principal-type denial must be 403 FORBIDDEN/,
+        routes: [agentExecutionRoute],
+      },
+      {
+        contracts: [agentExecutionContract],
+        message: /inventory omits principal-type boundary/,
+        routes: [
+          {
+            ...agentExecutionRoute,
+            boundaries: agentExecutionRoute.boundaries.filter(
+              (boundary) => boundary !== 'principal-type',
+            ),
+          },
+        ],
+      },
+      {
+        contracts: [
+          {
+            ...agentExecutionContract,
+            assertions: [
+              agentExecutionContract.assertions![0]!,
+              agentExecutionContract.assertions![0]!,
+            ],
+          },
+        ],
+        message: /assertion IDs must be non-empty and unique/,
+        routes: [agentExecutionRoute],
+      },
+      {
+        contracts: [agentExecutionContract],
+        evidenceSourceOverrides: new Map([
+          [
+            'agent-action-execution-route-authorization-db.integration.test.ts',
+            evidenceMutationSource('marker-only'),
+          ],
+        ]),
+        message: /assertion marker is not bound to semantic proof/,
+        routes: [agentExecutionRoute],
+      },
+      {
+        contracts: [agentExecutionContract],
+        evidenceSourceOverrides: new Map([
+          [
+            'agent-action-execution-route-authorization-db.integration.test.ts',
+            evidenceMutationSource('comments-only'),
+          ],
+        ]),
+        message: /test body omits assertion ID/,
+        routes: [agentExecutionRoute],
+      },
+      ...(['nested-function', 'false-logical', 'false-ternary'] as const).map((mode) => ({
+        contracts: [agentExecutionContract],
+        evidenceSourceOverrides: new Map([
+          [
+            'agent-action-execution-route-authorization-db.integration.test.ts',
+            evidenceMutationSource(mode),
+          ],
+        ]),
+        message: /test body omits assertion ID/,
+        routes: [agentExecutionRoute],
+      })),
+      {
+        contracts: [agentExecutionContract],
+        evidenceSourceOverrides: new Map([
+          [
+            'agent-action-execution-route-authorization-db.integration.test.ts',
+            evidenceMutationSource('strings-only'),
+          ],
+        ]),
+        message: /test body omits assertion ID/,
+        routes: [agentExecutionRoute],
+      },
+      {
+        contracts: [agentExecutionContract],
+        evidenceSourceOverrides: new Map([
+          [
+            'agent-action-execution-route-authorization-db.integration.test.ts',
+            evidenceMutationSource('unreachable'),
+          ],
+        ]),
+        message: /test body omits assertion ID/,
+        routes: [agentExecutionRoute],
+      },
+      {
+        contracts: [agentExecutionContract],
+        evidenceSourceOverrides: new Map([
+          [
+            'agent-action-execution-route-authorization-db.integration.test.ts',
+            evidenceMutationSource('body-stripped'),
+          ],
+        ]),
+        message: /test body omits assertion ID/,
+        routes: [agentExecutionRoute],
+      },
+      {
+        contracts: [
+          {
             ...deleteMutation,
             permissionDenialResponse: { code: 'FORBIDDEN', status: 404 },
           } as unknown as RouteAuthorizationDenialContract,
@@ -532,7 +704,11 @@ describe('API route access inventory (C-123)', () => {
 
     for (const fixture of invalidFixtures) {
       expect(() =>
-        negativeAuthorizationEvidenceForRoutes(fixture.routes, fixture.contracts),
+        negativeAuthorizationEvidenceForRoutes(
+          fixture.routes,
+          fixture.contracts,
+          fixture.evidenceSourceOverrides,
+        ),
       ).toThrow(fixture.message);
     }
   });

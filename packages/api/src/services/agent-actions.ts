@@ -1781,7 +1781,22 @@ export class AgentActionService {
       createdAt: now,
       updatedAt: now,
     };
-    const repository = new AgentExecutionRepository(this.db);
+    const repository = new AgentExecutionRepository(this.db, async (tx, reservation) => {
+      const action = await tx
+        .selectFrom('agent_actions')
+        .select(['action_digest', 'expires_at'])
+        .where('tenant_id', '=', reservation.execution.tenantId)
+        .where('id', '=', reservation.execution.actionId)
+        .forUpdate()
+        .executeTakeFirst();
+      const now = await databaseNow(tx);
+      if (
+        !action ||
+        action.action_digest !== reservation.execution.actionDigest ||
+        new Date(action.expires_at).getTime() <= now.getTime()
+      )
+        throw new Error('AGENT_ACTION_EXPIRED');
+    });
     const adapter = new EventPublishAgentAdapter(this.db, this.eventPublishCheckpoints);
     const executionService = new DurableAgentExecutionService(
       repository,
@@ -1821,6 +1836,8 @@ export class AgentActionService {
       });
       return (await repository.getExecution(input.tenantId, executionId)) ?? completed;
     }
+    if (new Date(prepared.expiresAt).getTime() <= (await databaseNow(this.db)).getTime())
+      throw new AgentExecutionConflictError('agent action preparation expired');
     let current: Awaited<ReturnType<EventPublishAgentAdapter['load']>>;
     try {
       current = await adapter.load({
@@ -1840,6 +1857,7 @@ export class AgentActionService {
     }
     let reserved: AgentExecution;
     try {
+      await this.eventPublishCheckpoints.beforeExecutionReserve?.();
       reserved = await executionService.reserve({
         principal: current.principal,
         delegation: current.delegation,
@@ -1857,7 +1875,8 @@ export class AgentActionService {
       if (
         message === 'AGENT_APPROVAL_INVALID' ||
         message === 'AGENT_APPROVAL_CONSUMED' ||
-        message === 'AGENT_EXECUTION_IDEMPOTENCY_CONFLICT'
+        message === 'AGENT_EXECUTION_IDEMPOTENCY_CONFLICT' ||
+        message === 'AGENT_ACTION_EXPIRED'
       )
         throw new AgentExecutionConflictError('agent execution reservation conflicted');
       throw error;

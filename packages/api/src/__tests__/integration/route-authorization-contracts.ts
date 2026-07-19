@@ -17,6 +17,11 @@ export type AuthorizationPolicyCondition =
   | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>;
 
 export type RouteAuthorizationDenialContract = Readonly<{
+  assertions?: readonly Readonly<{
+    id: string;
+    requiredCallNames: readonly string[];
+    testTitle: string;
+  }>[];
   authorizedControl: Readonly<{
     required: true;
     status: 200 | 201 | 202 | 204 | 410;
@@ -30,6 +35,10 @@ export type RouteAuthorizationDenialContract = Readonly<{
   operationId: string;
   path: string;
   permissionDenialResponse?: Readonly<{
+    code: 'FORBIDDEN';
+    status: 403;
+  }>;
+  principalTypeDenialResponse?: Readonly<{
     code: 'FORBIDDEN';
     status: 403;
   }>;
@@ -55,6 +64,21 @@ function denialContract(
     deniedBoundaries: Object.freeze([...contract.deniedBoundaries]),
     ...(contract.permissionDenialResponse
       ? { permissionDenialResponse: Object.freeze({ ...contract.permissionDenialResponse }) }
+      : {}),
+    ...(contract.principalTypeDenialResponse
+      ? { principalTypeDenialResponse: Object.freeze({ ...contract.principalTypeDenialResponse }) }
+      : {}),
+    ...(contract.assertions
+      ? {
+          assertions: Object.freeze(
+            contract.assertions.map((assertion) =>
+              Object.freeze({
+                ...assertion,
+                requiredCallNames: Object.freeze([...assertion.requiredCallNames]),
+              }),
+            ),
+          ),
+        }
       : {}),
     ...(contract.policyDenialResponse
       ? { policyDenialResponse: Object.freeze({ ...contract.policyDenialResponse }) }
@@ -1325,6 +1349,52 @@ export const PRIVACY_EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze
   }),
 ]);
 
+export const AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    assertions: [
+      {
+        id: 'agent-execution:authorized-control',
+        requiredCallNames: ['executeRequest', 'expect', 'consequentialSnapshot'],
+        testTitle:
+          'publishes once under concurrent exact route calls and replays one execution identity',
+      },
+      {
+        id: 'agent-execution:resource-concealment-zero-effects',
+        requiredCallNames: ['executeRequest', 'expect', 'consequentialSnapshot'],
+        testTitle:
+          'binds execution to the exact agent, tenant, action, approval, delegation, and sponsor',
+      },
+      {
+        id: 'agent-execution:principal-type-denial-zero-effects',
+        requiredCallNames: ['executeRequest', 'expect', 'consequentialSnapshot'],
+        testTitle: 'rejects human, API-key, and non-agent principals before effects',
+      },
+      {
+        id: 'agent-execution:live-authority-invalidation-zero-effects',
+        requiredCallNames: ['executeRequest', 'expect', 'consequentialSnapshot'],
+        testTitle: 'invalidates post-approval live authority changes without consequential effects',
+      },
+      {
+        id: 'agent-execution:concurrent-single-effect',
+        requiredCallNames: ['executeRequest', 'expect', 'consequentialSnapshot'],
+        testTitle:
+          'publishes once under concurrent exact route calls and replays one execution identity',
+      },
+    ],
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant'],
+    method: 'POST',
+    operationId: 'postAgentActionsByActionIdExecutions',
+    path: '/agent/actions/{actionId}/executions',
+    principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'agent-action-execution-route-authorization-db.integration.test.ts',
+    resourceParameters: ['actionId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'agent-action-execution-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -1362,4 +1432,5 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PRIVACY_ERASURE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PRIVACY_EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);
