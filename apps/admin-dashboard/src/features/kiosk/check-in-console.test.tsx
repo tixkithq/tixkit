@@ -19,8 +19,10 @@ const subscribeToCheckInActivity = vi.fn((..._args: unknown[]) => vi.fn());
 const useTicketScanner = vi.fn((_options: unknown) => ({
   scanning: false,
   lastResult: null,
+  scanError: null,
   acceptedScanCount: 0,
   scan: vi.fn(),
+  retryLastScan: vi.fn(),
   reset: vi.fn(),
 }));
 
@@ -121,8 +123,10 @@ describe('CheckInConsole', () => {
     useTicketScanner.mockImplementation((_options: unknown) => ({
       scanning: false,
       lastResult: null,
+      scanError: null,
       acceptedScanCount: 0,
       scan: vi.fn(),
+      retryLastScan: vi.fn(),
       reset: vi.fn(),
     }));
   });
@@ -301,8 +305,10 @@ describe('CheckInConsole', () => {
     useTicketScanner.mockImplementation((_options: unknown) => ({
       scanning: false,
       lastResult: null,
+      scanError: null,
       acceptedScanCount: 1,
       scan: vi.fn(),
+      retryLastScan: vi.fn(),
       reset: vi.fn(),
     }));
 

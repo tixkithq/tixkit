@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckInScanResult } from '@/lib/api';
@@ -69,10 +69,14 @@ const defaultProps = () => ({
   checkInListId: 'cil_1',
   scanning: false,
   lastResult: null as CheckInScanResult | null,
+  scanError: null as string | null,
   scanBlockedReason: undefined as string | undefined,
   onScan: vi.fn().mockResolvedValue(makeAcceptedResult()) as unknown as (
     payload: string,
   ) => Promise<CheckInScanResult | null>,
+  onRetry: vi
+    .fn()
+    .mockResolvedValue(makeAcceptedResult()) as unknown as () => Promise<CheckInScanResult | null>,
 });
 
 beforeEach(() => {
@@ -138,6 +142,91 @@ describe('ScannerPanel', () => {
     await waitFor(() => {
       expect(input.value).toBe('');
     });
+  });
+
+  it('retains the payload and announces a retryable transport failure', async () => {
+    const props = defaultProps();
+    props.onScan = vi.fn().mockRejectedValue(new Error('Network unavailable'));
+    const view = render(<ScannerPanel {...props} />);
+    const input = screen.getByPlaceholderText('Enter QR code or ticket ID') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '  tkt_retry  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Scan' }));
+    await waitFor(() => expect(props.onScan).toHaveBeenCalledTimes(1));
+    view.rerender(<ScannerPanel {...props} scanError="Network unavailable" />);
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveAttribute('aria-live', 'assertive');
+    expect(alert).toHaveTextContent('Network unavailable');
+    expect(alert).toHaveTextContent('The ticket result is still unknown.');
+    expect(input.value).toBe('  tkt_retry  ');
+    expect(screen.queryByText('invalid')).not.toBeInTheDocument();
+  });
+
+  it('keeps the focused retry alert mounted and busy until recovery completes', async () => {
+    const props = defaultProps();
+    let resolveRetry!: (result: CheckInScanResult) => void;
+    const pendingRetry = new Promise<CheckInScanResult>((resolve) => {
+      resolveRetry = resolve;
+    });
+    props.onScan = vi.fn().mockRejectedValueOnce(new Error('Network unavailable'));
+    props.onRetry = vi.fn(() => pendingRetry);
+    const view = render(<ScannerPanel {...props} />);
+    const input = screen.getByPlaceholderText('Enter QR code or ticket ID') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '  tkt_retry_exact  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Scan' }));
+    await waitFor(() => expect(props.onScan).toHaveBeenCalledTimes(1));
+    view.rerender(<ScannerPanel {...props} scanError="Network unavailable" />);
+
+    const retry = screen.getByRole('button', { name: 'Retry scan' });
+    retry.focus();
+    expect(retry).toHaveFocus();
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(props.onRetry).toHaveBeenCalledTimes(1));
+    expect(props.onScan).toHaveBeenNthCalledWith(1, 'tkt_retry_exact');
+    props.scanning = true;
+    props.scanError = 'Network unavailable';
+    view.rerender(<ScannerPanel {...props} />);
+
+    const pendingButton = screen.getByRole('button', { name: 'Retrying…' });
+    expect(pendingButton).toBe(retry);
+    expect(pendingButton).toHaveFocus();
+    expect(pendingButton).toBeDisabled();
+    const pendingAlert = screen.getByRole('alert');
+    expect(pendingAlert).toHaveAttribute('aria-live', 'assertive');
+    expect(pendingAlert).toHaveAttribute('aria-busy', 'true');
+    expect(pendingAlert).toHaveTextContent('Network unavailable');
+
+    await act(async () => {
+      resolveRetry(makeAcceptedResult());
+      await pendingRetry;
+    });
+    await waitFor(() => expect(input.value).toBe(''));
+    props.scanning = false;
+    props.scanError = null;
+    view.rerender(<ScannerPanel {...props} />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('clears manual input when the event or check-in list changes', () => {
+    const props = defaultProps();
+    const view = render(<ScannerPanel {...props} />);
+    const input = screen.getByPlaceholderText('Enter QR code or ticket ID') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'tkt_old_context' } });
+
+    view.rerender(<ScannerPanel {...props} checkInListId="cil_2" />);
+
+    expect(input.value).toBe('');
+  });
+
+  it('hides a prior ticket result while the current outcome is unknown', () => {
+    const props = defaultProps();
+    props.lastResult = makeAcceptedResult();
+    props.scanError = 'Network unavailable';
+    render(<ScannerPanel {...props} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('result is still unknown');
+    expect(screen.queryByText('accepted')).not.toBeInTheDocument();
   });
 
   it('disables the Scan button when the input is empty', () => {

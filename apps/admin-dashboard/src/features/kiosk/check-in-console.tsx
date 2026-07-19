@@ -575,7 +575,9 @@ export function CheckInConsole({
                         checkInListId={selectedCheckInListId}
                         scanning={scanner.scanning}
                         lastResult={scanner.lastResult}
+                        scanError={scanner.scanError}
                         onScan={scanner.scan}
+                        onRetry={scanner.retryLastScan}
                       />
                       <Card>
                         <CardHeader>

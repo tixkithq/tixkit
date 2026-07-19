@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { QrCode, Camera, Keyboard } from 'lucide-react';
+import { AlertTriangle, QrCode, Camera, Keyboard, RefreshCw } from 'lucide-react';
 import { type CheckInScanResult } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,9 @@ export type ScannerPanelProps = {
   scanBlockedReason?: string;
   scanning: boolean;
   lastResult: CheckInScanResult | null;
+  scanError: string | null;
   onScan: (qrPayload: string) => Promise<CheckInScanResult | null>;
+  onRetry: () => Promise<CheckInScanResult | null>;
 };
 
 type ScanMode = 'camera' | 'manual';
@@ -34,12 +36,14 @@ const CameraScanner = React.lazy(async () => {
  * the parent's `useTicketScanner` hook.
  */
 export function ScannerPanel({
-  eventId: _eventId,
-  checkInListId: _checkInListId,
+  eventId,
+  checkInListId,
   scanBlockedReason,
   scanning,
   lastResult,
+  scanError,
   onScan,
+  onRetry,
 }: ScannerPanelProps) {
   const [mode, setMode] = React.useState<ScanMode>('manual');
   const [qrPayload, setQrPayload] = React.useState('');
@@ -50,6 +54,10 @@ export function ScannerPanel({
   React.useEffect(() => {
     setMounted(true);
   }, []);
+
+  React.useEffect(() => {
+    setQrPayload('');
+  }, [eventId, checkInListId]);
 
   // Default to Camera when a camera is available; otherwise stay on Manual.
   React.useEffect(() => {
@@ -62,10 +70,29 @@ export function ScannerPanel({
   const trimmedQrPayload = qrPayload.trim();
   const canScanManual = Boolean(trimmedQrPayload) && !scanBlockedReason && !scanning;
 
+  const executeScan = React.useCallback(
+    async (payload: string): Promise<CheckInScanResult | null> => {
+      const exactPayload = payload.trim();
+      if (!exactPayload) return null;
+      try {
+        return await onScan(exactPayload);
+      } catch {
+        return null;
+      }
+    },
+    [onScan],
+  );
+
   const handleManualSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!canScanManual) return;
-    const result = await onScan(trimmedQrPayload);
+    const result = await executeScan(trimmedQrPayload);
+    if (result) setQrPayload('');
+  };
+
+  const handleRetry = async () => {
+    if (scanning) return;
+    const result = await onRetry().catch(() => null);
     if (result) setQrPayload('');
   };
 
@@ -120,7 +147,7 @@ export function ScannerPanel({
                   />
                 }
               >
-                <CameraScanner onScan={onScan} disabled={scanning} />
+                <CameraScanner onScan={executeScan} disabled={scanning} />
               </React.Suspense>
             )}
           </TabsContent>
@@ -139,7 +166,7 @@ export function ScannerPanel({
                 id={ticketInputId}
                 autoComplete="off"
                 inputMode="text"
-                aria-describedby={scanStatusId}
+                aria-describedby={scanError ? scanStatusId : undefined}
                 disabled={scanning}
                 placeholder="Enter QR code or ticket ID"
                 value={qrPayload}
@@ -152,7 +179,36 @@ export function ScannerPanel({
           </TabsContent>
         </Tabs>
 
-        {lastResult && <ScanResult result={lastResult} />}
+        {scanError ? (
+          <div
+            id={scanStatusId}
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+            aria-busy={scanning}
+            className="flex flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-amber-800 sm:flex-row sm:items-center sm:justify-between dark:text-amber-300"
+          >
+            <span className="flex items-start gap-2 text-sm">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <span>
+                <span className="block font-medium">Scan not submitted</span>
+                <span className="block">{scanError} The ticket result is still unknown.</span>
+              </span>
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={scanning}
+              onClick={() => void handleRetry()}
+            >
+              <RefreshCw aria-hidden="true" className="size-4" />
+              {scanning ? 'Retrying…' : 'Retry scan'}
+            </Button>
+          </div>
+        ) : null}
+
+        {!scanning && !scanError && lastResult ? <ScanResult result={lastResult} /> : null}
       </CardContent>
     </Card>
   );
