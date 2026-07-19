@@ -17,7 +17,7 @@ vi.mock('@/lib/runtime-config-server', () => ({
   }),
 }));
 
-import { generateMetadata } from './page';
+import CustomDomainEventPage, { generateMetadata } from './page';
 
 function bootstrap(contentPage: PublicEventPageBootstrap['contentPage']): PublicEventPageBootstrap {
   return {
@@ -106,5 +106,29 @@ describe('custom-domain event metadata', () => {
     expect(metadata.title).toEqual({ absolute: 'All Access Chicago' });
     expect(metadata.description).toBe('The public event description.');
     expect(metadata.twitter).toMatchObject({ card: 'summary' });
+  });
+
+  it('passes the requested locale to both bootstrap loading and the buyer client', async () => {
+    const initialBootstrap = bootstrap(null);
+    mocks.getEventPageBootstrapBySlug.mockResolvedValue(initialBootstrap);
+
+    const page = await CustomDomainEventPage({
+      params: Promise.resolve({ eventSlug: 'all-access' }),
+      searchParams: Promise.resolve({ locale: 'ar-eg' }),
+    });
+
+    expect(mocks.getEventPageBootstrapBySlug).toHaveBeenCalledWith(
+      'all-access',
+      'events.example.com',
+      'ar-EG',
+    );
+    expect(page.type).toBe('div');
+    expect(page.props).toMatchObject({ lang: 'ar-EG', dir: 'rtl' });
+    expect(page.props.children.props).toMatchObject({
+      eventSlug: 'all-access',
+      customDomainHost: 'events.example.com',
+      locale: 'ar-EG',
+      initialBootstrap,
+    });
   });
 });

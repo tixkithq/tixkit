@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import EventPageClient from '@/app/e/[eventId]/event-page-client';
 import {
+  CheckoutApiError,
   publicApi,
   type AvailabilityItem,
   type PublicContentPage,
@@ -312,9 +313,58 @@ describe('EventPageClient Puck runtime', () => {
       'all-access',
       'events.example.com',
       expect.any(AbortSignal),
+      'en',
     );
     expect(publicApi.getEventPageBySlug).not.toHaveBeenCalled();
     expect(publicApi.getEventPage).not.toHaveBeenCalled();
+  });
+
+  it('preserves a canonical locale through loading, document semantics, and checkout', async () => {
+    publicApiMock.getEventPageBootstrap.mockResolvedValue({
+      event: eventFixture({ id: 'evt_ar' }),
+      contentPage: null,
+      availability: [activeTicket()],
+      resaleListings: emptyResaleListings,
+    });
+
+    const view = render(
+      React.createElement(EventPageClient, {
+        eventId: 'evt_ar',
+        locale: 'ar-eg',
+      }),
+    );
+
+    expect(await view.findByRole('button', { name: /Get tickets/i })).toBeInTheDocument();
+    expect(publicApiMock.getEventPageBootstrap).toHaveBeenCalledWith(
+      'evt_ar',
+      expect.any(AbortSignal),
+      'ar-EG',
+    );
+    expect(document.documentElement).toHaveAttribute('lang', 'ar-EG');
+    expect(document.documentElement).toHaveAttribute('dir', 'rtl');
+
+    fireEvent.click(view.getByRole('button', { name: /Get tickets/i }));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining('locale=ar-EG'));
+  });
+
+  it('preserves the requested locale when bootstrap loading falls back to separate resources', async () => {
+    publicApiMock.getEventPageBootstrap.mockRejectedValue(
+      new CheckoutApiError('BOOTSTRAP_UNAVAILABLE', 'Bootstrap unavailable', 503),
+    );
+    publicApiMock.getEvent.mockResolvedValue(eventFixture({ id: 'evt_fallback' }));
+    publicApiMock.getAvailability.mockResolvedValue([activeTicket()]);
+    publicApiMock.getEventPage.mockResolvedValue(puckContentPage(null));
+
+    const view = render(
+      React.createElement(EventPageClient, { eventId: 'evt_fallback', locale: 'es-mx' }),
+    );
+
+    expect(await view.findByRole('button', { name: /Get tickets/i })).toBeInTheDocument();
+    expect(publicApiMock.getEventPage).toHaveBeenCalledWith(
+      'evt_fallback',
+      expect.any(AbortSignal),
+      'es-MX',
+    );
   });
 
   it('keeps missing content valid while still rendering checkout chrome', async () => {

@@ -33,11 +33,13 @@ import {
 } from '@tixkit/content-event-page-react/puck';
 import { RefreshNotifier } from '@/components/refresh-notifier';
 import { resolveEventPageMedia } from '@/lib/event-media';
+import { eventPageLocaleDirection, resolveEventPageLocale } from '@/lib/event-page-locale';
 
 type Props = {
   eventId?: string;
   eventSlug?: string;
   customDomainHost?: string;
+  locale?: string;
   brandId?: string;
   supportUrl?: string;
   termsUrl?: string;
@@ -53,6 +55,7 @@ export default function EventPageClient({
   eventId,
   eventSlug,
   customDomainHost,
+  locale,
   brandId,
   supportUrl,
   termsUrl,
@@ -78,6 +81,23 @@ export default function EventPageClient({
   const [loading, setLoading] = useState(() => !initialBootstrap);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const requestedLocale = useMemo(() => resolveEventPageLocale(locale), [locale]);
+  const resolvedLocale = useMemo(
+    () => resolveEventPageLocale(contentPage?.document.locale ?? requestedLocale),
+    [contentPage?.document.locale, requestedLocale],
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const previousLang = root.lang;
+    const previousDirection = root.dir;
+    root.lang = resolvedLocale;
+    root.dir = eventPageLocaleDirection(resolvedLocale);
+    return () => {
+      root.lang = previousLang;
+      root.dir = previousDirection;
+    };
+  }, [resolvedLocale]);
 
   const brand: ResolvedBrand = useResolvedBrand(
     useMemo(
@@ -124,11 +144,12 @@ export default function EventPageClient({
 
         try {
           const bootstrap = eventId
-            ? await publicApi.getEventPageBootstrap(eventId, controller.signal)
+            ? await publicApi.getEventPageBootstrap(eventId, controller.signal, requestedLocale)
             : await publicApi.getEventPageBootstrapBySlug(
                 eventSlug!,
                 customDomainHost!,
                 controller.signal,
+                requestedLocale,
               );
           loadedEvent = bootstrap.event;
           loadedAvailability = bootstrap.availability;
@@ -144,8 +165,14 @@ export default function EventPageClient({
             : await publicApi.getEventBySlug(eventSlug!, customDomainHost!, controller.signal);
           const loadContentPage =
             eventSlug && customDomainHost
-              ? () => publicApi.getEventPageBySlug(eventSlug, customDomainHost, controller.signal)
-              : () => publicApi.getEventPage(loadedEvent.id, controller.signal);
+              ? () =>
+                  publicApi.getEventPageBySlug(
+                    eventSlug,
+                    customDomainHost,
+                    controller.signal,
+                    requestedLocale,
+                  )
+              : () => publicApi.getEventPage(loadedEvent.id, controller.signal, requestedLocale);
           [loadedAvailability, loadedContentPage, loadedResaleListings] = await Promise.all([
             publicApi.getAvailability(loadedEvent.id, controller.signal),
             loadContentPage().catch((err) => {
@@ -187,7 +214,7 @@ export default function EventPageClient({
       cancelled = true;
       controller.abort();
     };
-  }, [customDomainHost, eventId, eventSlug, initialBootstrap]);
+  }, [customDomainHost, eventId, eventSlug, initialBootstrap, requestedLocale]);
 
   const visibleTickets = useMemo(
     () => availability.filter((t) => t.status === 'active' || t.status === 'sold_out'),
@@ -220,7 +247,7 @@ export default function EventPageClient({
       coverImageUrl: pageMedia?.url ?? event.coverImageUrl,
       coverImageAlt: pageMedia?.altText ?? event.title,
       publicUrl: `/e/${event.id}`,
-      locale: 'en',
+      locale: resolvedLocale,
     };
     if (hasPublishedPuckContent && publishedPuckData) {
       return materializeEventPageDocument(
@@ -228,7 +255,7 @@ export default function EventPageClient({
           schemaVersion: 2,
           editor: { provider: '@puckeditor/core', data: publishedPuckData },
           settings: {
-            locale: 'en',
+            locale: resolvedLocale,
             discovery: { summary: event.description ?? event.title, tags: [] },
           },
         },
@@ -236,7 +263,14 @@ export default function EventPageClient({
       );
     }
     return materializeEventPageDocument(createDefaultEventPageDocument(input), input);
-  }, [brand.fallback, brand.name, event, hasPublishedPuckContent, publishedPuckData]);
+  }, [
+    brand.fallback,
+    brand.name,
+    event,
+    hasPublishedPuckContent,
+    publishedPuckData,
+    resolvedLocale,
+  ]);
 
   const goToCheckout = useCallback(
     (resaleListingId?: string) => {
@@ -253,6 +287,7 @@ export default function EventPageClient({
       if (presetDiscountCode) params.set('discount', presetDiscountCode);
       if (trackingId) params.set('tracking', trackingId);
       if (affiliateCode) params.set('affiliateCode', affiliateCode);
+      params.set('locale', resolvedLocale);
       router.push(`/checkout?${params.toString()}`);
     },
     [
@@ -264,6 +299,7 @@ export default function EventPageClient({
       presetDiscountCode,
       privacyUrl,
       refundUrl,
+      resolvedLocale,
       router,
       supportUrl,
       termsUrl,

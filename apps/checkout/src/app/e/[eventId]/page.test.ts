@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PublicEventPageBootstrap } from '@/lib/api';
 import { eventPageMetadataFromBootstrap } from '@/lib/event-page-metadata';
+
+const mocks = vi.hoisted(() => ({
+  getEventPageBootstrap: vi.fn(),
+}));
+
+vi.mock('@/lib/api-server', () => ({
+  getServerEventPageBootstrap: mocks.getEventPageBootstrap,
+}));
+
+import EventPage from './page';
 
 function bootstrap(overrides: Partial<PublicEventPageBootstrap> = {}): PublicEventPageBootstrap {
   return {
@@ -18,6 +28,62 @@ function bootstrap(overrides: Partial<PublicEventPageBootstrap> = {}): PublicEve
     ...overrides,
   };
 }
+
+describe('hosted event route locale', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes the requested locale to both bootstrap loading and the buyer client', async () => {
+    const initialBootstrap = bootstrap({
+      contentPage: {
+        document: {
+          eventId: 'evt_1',
+          channel: 'event_page',
+          key: 'main',
+          name: 'Arabic event page',
+          locale: 'ar-EG',
+          updatedAt: '2026-07-18T00:00:00.000Z',
+        },
+        version: { versionNumber: 1 },
+        page: {
+          provider: '@puckeditor/core',
+          puckData: null,
+          discovery: { title: 'Arabic event', summary: 'Arabic summary', tags: [] },
+        },
+      },
+    });
+    mocks.getEventPageBootstrap.mockResolvedValue(initialBootstrap);
+
+    const page = await EventPage({
+      params: Promise.resolve({ eventId: 'evt_1' }),
+      searchParams: Promise.resolve({ locale: 'ar-eg' }),
+    });
+
+    expect(mocks.getEventPageBootstrap).toHaveBeenCalledWith('evt_1', 'ar-EG');
+    expect(page.type).toBe('div');
+    expect(page.props).toMatchObject({ lang: 'ar-EG', dir: 'rtl' });
+    expect(page.props.children.props).toMatchObject({
+      eventId: 'evt_1',
+      locale: 'ar-EG',
+      initialBootstrap,
+    });
+  });
+
+  it('fails closed to English before loading an invalid or overlong locale', async () => {
+    const initialBootstrap = bootstrap();
+    mocks.getEventPageBootstrap.mockResolvedValue(initialBootstrap);
+
+    const page = await EventPage({
+      params: Promise.resolve({ eventId: 'evt_1' }),
+      searchParams: Promise.resolve({ locale: `invalid_${'x'.repeat(80)}` }),
+    });
+
+    expect(mocks.getEventPageBootstrap).toHaveBeenCalledWith('evt_1', 'en');
+    expect(page.props).toMatchObject({ lang: 'en', dir: 'ltr' });
+    expect(page.props.children.props.locale).toBe('en');
+  });
+});
 
 describe('eventPageMetadataFromBootstrap', () => {
   it('uses stored SEO and social overrides for hosted event pages', () => {

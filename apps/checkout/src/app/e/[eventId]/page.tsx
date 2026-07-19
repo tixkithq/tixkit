@@ -3,6 +3,7 @@ import type { PublicEventPageBootstrap } from '@/lib/api';
 import { getServerEventPageBootstrap } from '@/lib/api-server';
 import { eventPageMetadataFromBootstrap } from '@/lib/event-page-metadata';
 import type { Metadata } from 'next';
+import { eventPageLocaleDirection, resolveEventPageLocale } from '@/lib/event-page-locale';
 
 type PageProps = {
   params: Promise<{ eventId: string }>;
@@ -29,7 +30,10 @@ async function loadInitialBootstrap(
 export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
   const { eventId } = await params;
   const query = await searchParams;
-  const bootstrap = await loadInitialBootstrap(eventId, firstParam(query.locale));
+  const bootstrap = await loadInitialBootstrap(
+    eventId,
+    resolveEventPageLocale(firstParam(query.locale)),
+  );
   if (!bootstrap) return {};
   return eventPageMetadataFromBootstrap(bootstrap);
 }
@@ -38,22 +42,28 @@ export default async function EventPage({ params, searchParams }: PageProps) {
   const { eventId } = await params;
   const query = await searchParams;
 
-  const locale = firstParam(query.locale);
+  const requestedLocale = resolveEventPageLocale(firstParam(query.locale));
 
-  const initialBootstrap = await loadInitialBootstrap(eventId, locale);
+  const initialBootstrap = await loadInitialBootstrap(eventId, requestedLocale);
+  const locale = resolveEventPageLocale(
+    initialBootstrap?.contentPage?.document.locale ?? requestedLocale,
+  );
 
   return (
-    <EventPageClient
-      eventId={eventId}
-      initialBootstrap={initialBootstrap}
-      brandId={firstParam(query.brand)}
-      supportUrl={firstParam(query.supportUrl)}
-      termsUrl={firstParam(query.termsUrl)}
-      privacyUrl={firstParam(query.privacyUrl)}
-      refundUrl={firstParam(query.refundUrl)}
-      presetDiscountCode={firstParam(query.discount)}
-      trackingId={firstParam(query.tracking)}
-      affiliateCode={firstParam(query.affiliateCode) || firstParam(query.affiliate)}
-    />
+    <div lang={locale} dir={eventPageLocaleDirection(locale)}>
+      <EventPageClient
+        eventId={eventId}
+        locale={locale}
+        initialBootstrap={initialBootstrap}
+        brandId={firstParam(query.brand)}
+        supportUrl={firstParam(query.supportUrl)}
+        termsUrl={firstParam(query.termsUrl)}
+        privacyUrl={firstParam(query.privacyUrl)}
+        refundUrl={firstParam(query.refundUrl)}
+        presetDiscountCode={firstParam(query.discount)}
+        trackingId={firstParam(query.tracking)}
+        affiliateCode={firstParam(query.affiliateCode) || firstParam(query.affiliate)}
+      />
+    </div>
   );
 }

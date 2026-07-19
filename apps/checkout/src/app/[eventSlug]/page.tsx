@@ -7,6 +7,7 @@ import { getServerEventPageBootstrapBySlug } from '@/lib/api-server';
 import { parseCheckoutRuntimeConfig } from '@/lib/runtime-config-server';
 import { eventPageMetadataFromBootstrap } from '@/lib/event-page-metadata';
 import type { Metadata } from 'next';
+import { eventPageLocaleDirection, resolveEventPageLocale } from '@/lib/event-page-locale';
 
 type PageProps = {
   params: Promise<{ eventSlug: string }>;
@@ -36,7 +37,11 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   const host = publicHostHeader(await headers(), runtimeConfig.checkoutUrl);
 
   if (isSharedCheckoutHost(host, runtimeConfig.checkoutUrl)) return {};
-  const bootstrap = await loadInitialBootstrap(eventSlug, host, firstParam(query.locale));
+  const bootstrap = await loadInitialBootstrap(
+    eventSlug,
+    host,
+    resolveEventPageLocale(firstParam(query.locale)),
+  );
   return bootstrap ? eventPageMetadataFromBootstrap(bootstrap) : {};
 }
 
@@ -47,21 +52,27 @@ export default async function CustomDomainEventPage({ params, searchParams }: Pa
   const host = publicHostHeader(await headers(), runtimeConfig.checkoutUrl);
 
   if (isSharedCheckoutHost(host, runtimeConfig.checkoutUrl)) notFound();
-  const locale = firstParam(query.locale);
-  const initialBootstrap = await loadInitialBootstrap(eventSlug, host, locale);
+  const requestedLocale = resolveEventPageLocale(firstParam(query.locale));
+  const initialBootstrap = await loadInitialBootstrap(eventSlug, host, requestedLocale);
+  const locale = resolveEventPageLocale(
+    initialBootstrap?.contentPage?.document.locale ?? requestedLocale,
+  );
 
   return (
-    <EventPageClient
-      eventSlug={eventSlug}
-      customDomainHost={host}
-      initialBootstrap={initialBootstrap}
-      supportUrl={firstParam(query.supportUrl)}
-      termsUrl={firstParam(query.termsUrl)}
-      privacyUrl={firstParam(query.privacyUrl)}
-      refundUrl={firstParam(query.refundUrl)}
-      presetDiscountCode={firstParam(query.discount)}
-      trackingId={firstParam(query.tracking)}
-      affiliateCode={firstParam(query.affiliateCode) || firstParam(query.affiliate)}
-    />
+    <div lang={locale} dir={eventPageLocaleDirection(locale)}>
+      <EventPageClient
+        eventSlug={eventSlug}
+        customDomainHost={host}
+        locale={locale}
+        initialBootstrap={initialBootstrap}
+        supportUrl={firstParam(query.supportUrl)}
+        termsUrl={firstParam(query.termsUrl)}
+        privacyUrl={firstParam(query.privacyUrl)}
+        refundUrl={firstParam(query.refundUrl)}
+        presetDiscountCode={firstParam(query.discount)}
+        trackingId={firstParam(query.tracking)}
+        affiliateCode={firstParam(query.affiliateCode) || firstParam(query.affiliate)}
+      />
+    </div>
   );
 }
