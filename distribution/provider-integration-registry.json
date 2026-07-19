@@ -158,7 +158,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/src/lib/api.ts",
         "export": "issueCheckoutApiUrl",
-        "sha256": "220291929abbf4830a62395fc0012fb07e0cdb44d5f5d55bc1e5766964f972a2"
+        "sha256": "493c8cbdc0e563fef80bdde644af6ea3dda46f16d7c8812c366971842ef24537"
       },
       "allowedSinks": [
         {
@@ -248,7 +248,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/src/lib/api.ts",
         "export": "issueCheckoutUploadCompletionUrl",
-        "sha256": "220291929abbf4830a62395fc0012fb07e0cdb44d5f5d55bc1e5766964f972a2"
+        "sha256": "493c8cbdc0e563fef80bdde644af6ea3dda46f16d7c8812c366971842ef24537"
       },
       "allowedSinks": [
         {
@@ -266,7 +266,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/src/lib/api.ts",
         "export": "issueCheckoutUploadUrl",
-        "sha256": "220291929abbf4830a62395fc0012fb07e0cdb44d5f5d55bc1e5766964f972a2"
+        "sha256": "493c8cbdc0e563fef80bdde644af6ea3dda46f16d7c8812c366971842ef24537"
       },
       "allowedSinks": [
         {

@@ -35,7 +35,7 @@ describe('isRetryable', () => {
     expect(isRetryable(new CheckoutApiError('NETWORK_ERROR', 'x', 0))).toBe(true);
     expect(isRetryable(new CheckoutApiError('X', 'x', 503))).toBe(true);
     expect(isRetryable(new CheckoutApiError('SERVICE_UNAVAILABLE', 'x', 503))).toBe(true);
-    expect(isRetryable(new CheckoutApiError('INVALID_RESPONSE', 'x', 200))).toBe(true);
+    expect(isRetryable(new CheckoutApiError('INVALID_RESPONSE', 'x', 200))).toBe(false);
   });
 
   it('treats 4xx as non-retryable', () => {
@@ -69,7 +69,7 @@ describe('checkout API response parsing', () => {
     });
   });
 
-  it('returns a retryable typed error when a successful response body is not JSON', async () => {
+  it('returns a terminal typed error when a successful response body is not JSON', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -93,6 +93,32 @@ describe('checkout API response parsing', () => {
       code: 'INVALID_RESPONSE',
       message: 'Checkout service returned an invalid response. Please try again.',
       status: 200,
+    });
+    expect(isRetryable(caught)).toBe(false);
+  });
+
+  it('normalizes an interrupted response body as an ambiguous network error', async () => {
+    const response = new Response('', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    vi.spyOn(response, 'text').mockRejectedValue(new TypeError('terminated'));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    );
+
+    let caught: unknown;
+    try {
+      await publicApi.getAvailability('evt_1');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      code: 'NETWORK_ERROR',
+      status: 0,
+      message: 'Checkout response was interrupted: terminated',
     });
     expect(isRetryable(caught)).toBe(true);
   });
@@ -334,15 +360,18 @@ describe('checkoutApi.createSession', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await checkoutApi.createSession({
-      eventId: 'evt_1',
-      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
-      buyer: { email: 'buyer@example.com' },
-      discountCode: 'SAVE10',
-      accessCode: 'VIP123',
-      trackingId: 'campaign-123',
-      affiliateCode: 'AFF123',
-    });
+    await checkoutApi.createSession(
+      {
+        eventId: 'evt_1',
+        items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+        buyer: { email: 'buyer@example.com' },
+        discountCode: 'SAVE10',
+        accessCode: 'VIP123',
+        trackingId: 'campaign-123',
+        affiliateCode: 'AFF123',
+      },
+      'checkout_attempt_1',
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [_url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -353,6 +382,29 @@ describe('checkoutApi.createSession', () => {
       accessCode: 'VIP123',
       trackingId: 'campaign-123',
       affiliateCode: 'AFF123',
+    });
+    expect((init.headers as Record<string, string>)['Idempotency-Key']).toBe('checkout_attempt_1');
+  });
+});
+
+describe('checkoutApi.confirmSession', () => {
+  it('forwards a caller-owned confirmation key with the scoped session token', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ clientSecret: 'pi_secret', currency: 'USD', totalCents: 2500 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await checkoutApi.confirmSession('cs_1', 'session_token_1', 'confirm_attempt_1');
+
+    const [_url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.body).toBe('{}');
+    expect(init.headers).toMatchObject({
+      'Idempotency-Key': 'confirm_attempt_1',
+      'X-Checkout-Session-Token': 'session_token_1',
     });
   });
 });

@@ -3,7 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import React from 'react';
 import CheckoutFlow from '@/app/checkout/checkout-flow';
-import { publicApi, checkoutApi, type AvailabilityItem, type PublicEvent } from '@/lib/api';
+import {
+  publicApi,
+  checkoutApi,
+  CheckoutApiError,
+  type AvailabilityItem,
+  type PublicEvent,
+} from '@/lib/api';
 
 const push = vi.fn();
 
@@ -12,6 +18,8 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/lib/api', () => {
+  let checkoutKeySequence = 0;
+  let confirmKeySequence = 0;
   class CheckoutApiError extends Error {
     code: string;
     status: number;
@@ -46,6 +54,10 @@ vi.mock('@/lib/api', () => {
       settlementModel: 'organizer_managed',
       refundModel: 'manual_coordinated_resolution',
     },
+    newCheckoutIdempotencyKey: () => `checkout_test_${++checkoutKeySequence}`,
+    newConfirmIdempotencyKey: () => `confirm_test_${++confirmKeySequence}`,
+    isRetryable: (error: unknown) =>
+      error instanceof CheckoutApiError && (error.status === 0 || error.status >= 500),
     userFacingMessage: (error: unknown) =>
       error instanceof Error ? error.message : 'Checkout is temporarily unavailable.',
   };
@@ -93,6 +105,7 @@ const publicApiMock = publicApi as unknown as {
 const checkoutApiMock = checkoutApi as unknown as {
   createSession: ReturnType<typeof vi.fn>;
   exchangeHandoff: ReturnType<typeof vi.fn>;
+  confirmSession: ReturnType<typeof vi.fn>;
 };
 
 afterEach(() => {
@@ -132,6 +145,24 @@ function renderCheckoutFlow(props: Partial<React.ComponentProps<typeof CheckoutF
       ...props,
     }),
   );
+}
+
+function checkoutSession(id: string) {
+  return {
+    id,
+    eventId: event.id,
+    status: 'open',
+    currency: 'USD',
+    clientToken: `token_${id}`,
+    quote: {
+      subtotalCents: 2500,
+      discountCents: 0,
+      taxCents: 0,
+      feeCents: 0,
+      totalCents: 2500,
+    },
+    expiresAt: '2026-07-17T20:00:00.000Z',
+  };
 }
 
 function fillRequiredDatesOfBirth(view: ReturnType<typeof renderCheckoutFlow>) {
@@ -500,6 +531,181 @@ describe('CheckoutFlow buyer validation', () => {
       expect.objectContaining({
         buyer: { email: 'buyer@example.com' },
       }),
+      expect.any(String),
+    );
+  });
+
+  it('reuses the exact create key and body after an ambiguous response and rotates after success', async () => {
+    checkoutApiMock.createSession
+      .mockRejectedValueOnce(new CheckoutApiError('NETWORK_ERROR', 'Response was lost.', 0))
+      .mockResolvedValueOnce(checkoutSession('cs_replayed'))
+      .mockResolvedValueOnce(checkoutSession('cs_after_success'));
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    expect(await view.findByText('Response was lost.')).toBeVisible();
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledTimes(2));
+
+    const [firstInput, firstKey] = checkoutApiMock.createSession.mock.calls[0]!;
+    const [secondInput, secondKey] = checkoutApiMock.createSession.mock.calls[1]!;
+    expect(secondInput).toEqual(firstInput);
+    expect(secondKey).toBe(firstKey);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Edit order' }));
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledTimes(3));
+    expect(checkoutApiMock.createSession.mock.calls[2]![1]).not.toBe(firstKey);
+  });
+
+  it('keeps session creation single-flight during repeated activation', async () => {
+    let releaseCreate!: (value: ReturnType<typeof checkoutSession>) => void;
+    checkoutApiMock.createSession.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCreate = resolve;
+        }),
+    );
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    const continueButton = view.getByRole('button', { name: 'Continue' });
+    fireEvent.click(continueButton);
+    fireEvent.click(continueButton);
+
+    expect(checkoutApiMock.createSession).toHaveBeenCalledTimes(1);
+    releaseCreate(checkoutSession('cs_single_flight'));
+    expect(await view.findByRole('button', { name: 'Pay $25.00' })).toBeVisible();
+  });
+
+  it('rotates the create key when the buyer changes the request after an ambiguous response', async () => {
+    checkoutApiMock.createSession
+      .mockRejectedValueOnce(new CheckoutApiError('NETWORK_ERROR', 'Response was lost.', 0))
+      .mockResolvedValueOnce(checkoutSession('cs_changed'));
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'first@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    expect(await view.findByText('Response was lost.')).toBeVisible();
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'changed@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledTimes(2));
+
+    expect(checkoutApiMock.createSession.mock.calls[1]![0]).not.toEqual(
+      checkoutApiMock.createSession.mock.calls[0]![0],
+    );
+    expect(checkoutApiMock.createSession.mock.calls[1]![1]).not.toBe(
+      checkoutApiMock.createSession.mock.calls[0]![1],
+    );
+  });
+
+  it('rotates the create key after a terminal malformed success response', async () => {
+    checkoutApiMock.createSession
+      .mockRejectedValueOnce(
+        new CheckoutApiError('INVALID_RESPONSE', 'Malformed success response.', 200),
+      )
+      .mockResolvedValueOnce(checkoutSession('cs_after_malformed'));
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    expect(await view.findByText('Malformed success response.')).toBeVisible();
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledTimes(2));
+
+    expect(checkoutApiMock.createSession.mock.calls[1]![1]).not.toBe(
+      checkoutApiMock.createSession.mock.calls[0]![1],
+    );
+  });
+
+  it('rotates the create key when a successful response omits its session credential', async () => {
+    checkoutApiMock.createSession
+      .mockResolvedValueOnce({ ...checkoutSession('cs_missing_token'), clientToken: undefined })
+      .mockResolvedValueOnce(checkoutSession('cs_after_missing_token'));
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    expect(await view.findByText('Checkout session token was not returned.')).toBeVisible();
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledTimes(2));
+
+    expect(checkoutApiMock.createSession.mock.calls[1]![1]).not.toBe(
+      checkoutApiMock.createSession.mock.calls[0]![1],
+    );
+  });
+
+  it('reuses one confirmation key until the session reaches a terminal response', async () => {
+    checkoutApiMock.createSession.mockResolvedValue(checkoutSession('cs_confirm_replay'));
+    checkoutApiMock.confirmSession
+      .mockRejectedValueOnce(
+        new CheckoutApiError('NETWORK_ERROR', 'Confirmation response lost.', 0),
+      )
+      .mockResolvedValueOnce({ clientSecret: 'pi_secret', currency: 'USD', totalCents: 2500 });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    const payButton = await view.findByRole('button', { name: 'Pay $25.00' });
+    fireEvent.click(payButton);
+    expect(await view.findByText('Confirmation response lost.')).toBeVisible();
+    fireEvent.click(view.getByRole('button', { name: 'Pay $25.00' }));
+    await waitFor(() => expect(checkoutApiMock.confirmSession).toHaveBeenCalledTimes(2));
+
+    expect(checkoutApiMock.confirmSession.mock.calls[1]).toEqual(
+      checkoutApiMock.confirmSession.mock.calls[0],
+    );
+  });
+
+  it('rotates the confirmation key after a terminal malformed success response', async () => {
+    checkoutApiMock.createSession.mockResolvedValue(checkoutSession('cs_confirm_terminal'));
+    checkoutApiMock.confirmSession
+      .mockRejectedValueOnce(
+        new CheckoutApiError('INVALID_RESPONSE', 'Malformed confirmation response.', 200),
+      )
+      .mockResolvedValueOnce({ clientSecret: 'pi_secret', currency: 'USD', totalCents: 2500 });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await view.findByRole('button', { name: 'Pay $25.00' }));
+    expect(await view.findByText('Malformed confirmation response.')).toBeVisible();
+    fireEvent.click(view.getByRole('button', { name: 'Pay $25.00' }));
+    await waitFor(() => expect(checkoutApiMock.confirmSession).toHaveBeenCalledTimes(2));
+
+    expect(checkoutApiMock.confirmSession.mock.calls[1]![2]).not.toBe(
+      checkoutApiMock.confirmSession.mock.calls[0]![2],
     );
   });
 
@@ -564,6 +770,7 @@ describe('CheckoutFlow buyer validation', () => {
           accessCode: undefined,
           waitlistClaimToken: undefined,
         }),
+        expect.any(String),
       );
     });
   });
@@ -644,6 +851,7 @@ describe('CheckoutFlow buyer validation', () => {
           items: [{ resaleListingId: 'lst_51', quantity: 1 }],
           buyer: expect.objectContaining({ email: 'buyer@example.com' }),
         }),
+        expect.any(String),
       );
     });
   });

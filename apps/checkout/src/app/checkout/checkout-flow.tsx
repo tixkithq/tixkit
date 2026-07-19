@@ -30,6 +30,9 @@ import {
   checkoutApi,
   CheckoutApiError,
   CURRENT_RESALE_TERMS_ACCEPTANCE,
+  isRetryable,
+  newCheckoutIdempotencyKey,
+  newConfirmIdempotencyKey,
   userFacingMessage,
   type PublicEvent,
   type AvailabilityItem,
@@ -38,6 +41,7 @@ import {
   type Buyer,
   type CartItem,
   type ConfirmResult,
+  type CreateCheckoutSessionInput,
   type QuestionsResponse,
 } from '@/lib/api';
 import type { ResolvedBrand } from '@/lib/brand';
@@ -206,6 +210,14 @@ export default function CheckoutFlow({
   const [claimQuantity, setClaimQuantity] = useState(1);
   const didApplyPrefilledItemsRef = useRef(false);
   const didApplyWaitlistClaimRef = useRef(false);
+  const createSessionAttemptRef = useRef<
+    { fingerprint: string; idempotencyKey: string } | undefined
+  >(undefined);
+  const confirmSessionAttemptRef = useRef<
+    { sessionId: string; idempotencyKey: string } | undefined
+  >(undefined);
+  const createSessionInFlightRef = useRef(false);
+  const confirmSessionInFlightRef = useRef(false);
 
   const brand: ResolvedBrand = useResolvedBrand(
     useMemo(
@@ -943,6 +955,8 @@ export default function CheckoutFlow({
       setValidationError(cartError);
       return;
     }
+    if (createSessionInFlightRef.current) return;
+    createSessionInFlightRef.current = true;
     setValidationError(null);
 
     setLoading(true);
@@ -952,7 +966,7 @@ export default function CheckoutFlow({
       // Build successUrl without any token. The confirmation page resolves
       // the session via sessionId using the token from sessionStorage.
       const successUrl = `${window.location.origin}/checkout/confirmation?sessionId={sessionId}&orderId={orderId}`;
-      const created = await checkoutApi.createSession({
+      const createInput: CreateCheckoutSessionInput = {
         eventId,
         items: selectedItems,
         buyer: {
@@ -980,14 +994,23 @@ export default function CheckoutFlow({
           resaleListing && resaleTermsAccepted ? CURRENT_RESALE_TERMS_ACCEPTANCE : undefined,
         successUrl,
         cancelUrl: window.location.href,
-      });
+      };
+      const fingerprint = JSON.stringify(createInput);
+      const currentAttempt = createSessionAttemptRef.current;
+      const attempt =
+        currentAttempt?.fingerprint === fingerprint
+          ? currentAttempt
+          : { fingerprint, idempotencyKey: newCheckoutIdempotencyKey() };
+      createSessionAttemptRef.current = attempt;
+      const created = await checkoutApi.createSession(createInput, attempt.idempotencyKey);
       if (!created.clientToken) {
         throw new CheckoutApiError(
           'SESSION_TOKEN_MISSING',
           'Checkout session token was not returned.',
-          500,
+          200,
         );
       }
+      createSessionAttemptRef.current = undefined;
       setSession(created);
       setSessionId(created.id);
       setSessionToken(created.clientToken);
@@ -1011,18 +1034,32 @@ export default function CheckoutFlow({
         eventId,
       });
     } catch (err) {
+      if (!isRetryable(err)) createSessionAttemptRef.current = undefined;
       setError(userFacingMessage(err));
     } finally {
+      createSessionInFlightRef.current = false;
       setLoading(false);
     }
   }
 
   async function confirmSession() {
-    if (!session || !sessionToken) return;
+    if (!session || !sessionToken || confirmSessionInFlightRef.current) return;
+    confirmSessionInFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
-      const result = await checkoutApi.confirmSession(session.id, sessionToken);
+      const currentAttempt = confirmSessionAttemptRef.current;
+      const attempt =
+        currentAttempt?.sessionId === session.id
+          ? currentAttempt
+          : { sessionId: session.id, idempotencyKey: newConfirmIdempotencyKey() };
+      confirmSessionAttemptRef.current = attempt;
+      const result = await checkoutApi.confirmSession(
+        session.id,
+        sessionToken,
+        attempt.idempotencyKey,
+      );
+      confirmSessionAttemptRef.current = undefined;
       setConfirmResult(result);
       if ('order' in result) {
         setPhase('completed');
@@ -1052,8 +1089,10 @@ export default function CheckoutFlow({
         setPhase('payment');
       }
     } catch (err) {
+      if (!isRetryable(err)) confirmSessionAttemptRef.current = undefined;
       setError(userFacingMessage(err));
     } finally {
+      confirmSessionInFlightRef.current = false;
       setLoading(false);
     }
   }

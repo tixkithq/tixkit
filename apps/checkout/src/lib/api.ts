@@ -590,7 +590,18 @@ async function apiRequest<T>(
     );
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (err) {
+    throw new CheckoutApiError(
+      'NETWORK_ERROR',
+      err instanceof Error
+        ? `Checkout response was interrupted: ${err.message}`
+        : 'Checkout response was interrupted',
+      0,
+    );
+  }
   const data = parseApiResponseBody(text, response.status);
 
   if (!response.ok) {
@@ -894,24 +905,29 @@ export const publicApi = {
   },
 };
 
+export type CreateCheckoutSessionInput = {
+  eventId: string;
+  items: CartItem[];
+  buyer: Partial<Buyer>;
+  buyerFields?: Record<string, unknown>;
+  discountCode?: string;
+  affiliateCode?: string;
+  trackingId?: string;
+  accessCode?: string;
+  waitlistClaimToken?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+  resaleTermsAcceptance?: ResaleTermsAcceptance;
+};
+
 export const checkoutApi = {
-  async createSession(input: {
-    eventId: string;
-    items: CartItem[];
-    buyer: Partial<Buyer>;
-    buyerFields?: Record<string, unknown>;
-    discountCode?: string;
-    affiliateCode?: string;
-    trackingId?: string;
-    accessCode?: string;
-    waitlistClaimToken?: string;
-    successUrl?: string;
-    cancelUrl?: string;
-    resaleTermsAcceptance?: ResaleTermsAcceptance;
-  }): Promise<CheckoutSession> {
+  async createSession(
+    input: CreateCheckoutSessionInput,
+    idempotencyKey = newCheckoutIdempotencyKey(),
+  ): Promise<CheckoutSession> {
     return apiRequest<CheckoutSession>('/checkout/sessions', {
       method: 'POST',
-      idempotencyKey: newCheckoutIdempotencyKey(),
+      idempotencyKey,
       body: JSON.stringify(input),
     });
   },
@@ -990,12 +1006,16 @@ export const checkoutApi = {
     });
   },
 
-  async confirmSession(sessionId: string, sessionToken: string): Promise<ConfirmResult> {
+  async confirmSession(
+    sessionId: string,
+    sessionToken: string,
+    idempotencyKey = newConfirmIdempotencyKey(),
+  ): Promise<ConfirmResult> {
     return apiRequest<ConfirmResult>(
       `/checkout/sessions/${encodeURIComponent(sessionId)}/confirm`,
       {
         method: 'POST',
-        idempotencyKey: newConfirmIdempotencyKey(),
+        idempotencyKey,
         sessionToken,
         body: JSON.stringify({}),
       },
@@ -1009,7 +1029,6 @@ export function isRetryable(error: unknown): boolean {
       error.status === 0 ||
       error.status >= 500 ||
       error.code === 'NETWORK_ERROR' ||
-      error.code === 'INVALID_RESPONSE' ||
       error.code === 'SERVICE_UNAVAILABLE'
     );
   }
