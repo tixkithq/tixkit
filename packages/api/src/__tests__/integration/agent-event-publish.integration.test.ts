@@ -2679,7 +2679,7 @@ describe.sequential.each(driverCases)(
       });
     });
 
-    it('applies one resolved PATCH atomically and rolls media renewal back on stale version', async () => {
+    it('applies one resolved PATCH atomically, rolls stale media renewal back, and serializes a competing writer', async () => {
       const event = await db
         .selectFrom('events')
         .selectAll()
@@ -2806,7 +2806,7 @@ describe.sequential.each(driverCases)(
         eventId: event.id,
         patch: {
           expectedVersion: Number(raceEvent.version),
-          title: 'Losing compare-and-swap update',
+          title: 'Locked compare-and-swap update',
           coverImageUrl:
             'https://tixkit.local/v1/public/event-media/event_cover/upl_event_update_atomic',
         },
@@ -2816,23 +2816,35 @@ describe.sequential.each(driverCases)(
         .select(['expires_at', 'updated_at'])
         .where('id', '=', 'upl_event_update_atomic')
         .executeTakeFirstOrThrow();
-      const losingApply = racingService.applyResolvedPatch(racingResolved);
+      const lockedApply = racingService.applyResolvedPatch(racingResolved);
       await atCompareAndSwap;
-      await new EventRepository(db).update(event.id, {
-        title: 'Racing compare-and-swap winner',
+      const competingUpdate = new EventRepository(db).update(event.id, {
+        title: 'Serialized follow-up update',
       });
       releaseCompareAndSwap();
-      await expect(losingApply).resolves.toMatchObject({ applied: false });
+      await expect(lockedApply).resolves.toMatchObject({ applied: true });
+      await expect(competingUpdate).resolves.toMatchObject({
+        title: 'Serialized follow-up update',
+        version: Number(raceEvent.version) + 2,
+      });
+      const leaseAfterRace = await db
+        .selectFrom('upload_artifacts')
+        .select(['expires_at', 'updated_at'])
+        .where('id', '=', 'upl_event_update_atomic')
+        .executeTakeFirstOrThrow();
+      expect(new Date(leaseAfterRace.expires_at).getTime()).toBeGreaterThanOrEqual(
+        new Date(leaseBeforeRace.expires_at).getTime(),
+      );
       expect(
         await db
-          .selectFrom('upload_artifacts')
-          .select(['expires_at', 'updated_at'])
-          .where('id', '=', 'upl_event_update_atomic')
-          .executeTakeFirstOrThrow(),
-      ).toEqual(leaseBeforeRace);
-      expect(
-        await db.selectFrom('events').select('title').where('id', '=', event.id).executeTakeFirst(),
-      ).toEqual({ title: 'Racing compare-and-swap winner' });
+          .selectFrom('events')
+          .select(['title', 'version'])
+          .where('id', '=', event.id)
+          .executeTakeFirst(),
+      ).toEqual({
+        title: 'Serialized follow-up update',
+        version: Number(raceEvent.version) + 2,
+      });
     });
 
     it('rolls back an earlier media lease renewal when a later binding fails', async () => {
