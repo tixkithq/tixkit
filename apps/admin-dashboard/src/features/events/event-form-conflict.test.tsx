@@ -16,7 +16,20 @@ const api = vi.hoisted(() => ({
   createSavedVenue: vi.fn(),
 }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
-const queryState = vi.hoisted(() => ({ savedVenues: [] as Array<Record<string, unknown>> }));
+const queryState = vi.hoisted(() => ({
+  occurrences: {
+    data: [] as Array<Record<string, unknown>> | undefined,
+    loading: false,
+    error: undefined as { code: string; message: string } | undefined,
+    refetch: vi.fn(),
+  },
+  savedVenues: {
+    data: [] as Array<Record<string, unknown>> | undefined,
+    loading: false,
+    error: undefined as { code: string; message: string } | undefined,
+    refetch: vi.fn(),
+  },
+}));
 
 vi.mock('@/lib/api', () => ({ adminApi: api }));
 vi.mock('sonner', () => ({ toast }));
@@ -28,12 +41,8 @@ vi.mock('@/context/bootstrap-provider', () => ({
   }),
 }));
 vi.mock('@/hooks/use-admin-table-data', () => ({
-  useAdminQuery: (key: string[]) => ({
-    data: key[0] === 'listSavedVenues' ? queryState.savedVenues : [],
-    loading: false,
-    error: undefined,
-    refetch: vi.fn(),
-  }),
+  useAdminQuery: (key: string[]) =>
+    key[0] === 'listSavedVenues' ? queryState.savedVenues : queryState.occurrences,
 }));
 vi.mock('./event-marketing-view', () => ({ EventMarketingView: () => null }));
 vi.mock('./event-schedule-view', () => ({ EventScheduleView: () => null }));
@@ -74,7 +83,14 @@ function renderForm(event = baseEvent, onSuccess = vi.fn()) {
 beforeEach(() => {
   vi.clearAllMocks();
   window.sessionStorage.clear();
-  queryState.savedVenues = [];
+  queryState.occurrences.data = [];
+  queryState.occurrences.loading = false;
+  queryState.occurrences.error = undefined;
+  queryState.occurrences.refetch.mockReset();
+  queryState.savedVenues.data = [];
+  queryState.savedVenues.loading = false;
+  queryState.savedVenues.error = undefined;
+  queryState.savedVenues.refetch.mockReset();
   api.reportOnboardingEvent.mockResolvedValue({ ok: true, data: undefined });
 });
 
@@ -296,7 +312,7 @@ describe('EventForm optimistic merge recovery', () => {
 
   it('preserves a saved venue binding in the durable recovery snapshot', async () => {
     vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false);
-    queryState.savedVenues = [
+    queryState.savedVenues.data = [
       {
         id: 'ven_local',
         name: 'Local Hall',
@@ -330,7 +346,7 @@ describe('EventForm optimistic merge recovery', () => {
   });
 
   it('autosaves clearing a saved venue binding even when inline fields are unchanged', async () => {
-    queryState.savedVenues = [
+    queryState.savedVenues.data = [
       {
         id: 'ven_base',
         name: 'Base Hall',
@@ -361,6 +377,100 @@ describe('EventForm optimistic merge recovery', () => {
         ),
       { timeout: 2_000 },
     );
+  });
+
+  it('keeps schedule choices neutral until occurrence state is authoritative and retries failures', () => {
+    queryState.occurrences.data = undefined;
+    queryState.occurrences.loading = true;
+    const view = render(<EventForm event={baseEvent} section="schedule" onSuccess={vi.fn()} />);
+
+    expect(screen.getByText('Checking the current event schedule…')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'One-time event' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Start Date')).not.toBeInTheDocument();
+
+    queryState.occurrences.loading = false;
+    queryState.occurrences.error = { code: 'unavailable', message: 'Schedule unavailable' };
+    view.rerender(<EventForm event={baseEvent} section="schedule" onSuccess={vi.fn()} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The current schedule could not be loaded');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry current schedule' }));
+    expect(queryState.occurrences.refetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('tab', { name: 'One-time event' })).not.toBeInTheDocument();
+
+    queryState.occurrences.data = [{ id: 'occ_1' }];
+    queryState.occurrences.error = undefined;
+    view.rerender(<EventForm event={baseEvent} section="schedule" onSuccess={vi.fn()} />);
+
+    expect(screen.getByRole('tab', { name: 'Multiple occurrences' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
+  });
+
+  it('preserves an explicit multiple-occurrence choice across empty background refreshes', async () => {
+    queryState.occurrences.data = [];
+    const view = render(<EventForm event={baseEvent} section="schedule" onSuccess={vi.fn()} />);
+    const oneTimeTab = screen.getByRole('tab', { name: 'One-time event' });
+    fireEvent.focus(oneTimeTab);
+    fireEvent.keyDown(oneTimeTab, { key: 'ArrowRight', code: 'ArrowRight' });
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Multiple occurrences' })).toHaveAttribute(
+        'data-state',
+        'active',
+      ),
+    );
+
+    queryState.occurrences.data = [];
+    view.rerender(
+      <EventForm
+        event={{ ...baseEvent, title: 'Same event refreshed' }}
+        section="schedule"
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('tab', { name: 'Multiple occurrences' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
+  });
+
+  it('preserves an unavailable saved venue binding and enables it only after recovery', () => {
+    queryState.savedVenues.data = undefined;
+    queryState.savedVenues.loading = true;
+    const event = { ...baseEvent, venueId: 'ven_bound' };
+    const view = render(<EventForm event={event} section="schedule" onSuccess={vi.fn()} />);
+
+    expect(screen.getByRole('option', { name: 'Current saved venue (checking…)' })).toBeVisible();
+    expect(
+      screen.queryByRole('option', { name: 'Current saved venue (unavailable)' }),
+    ).not.toBeInTheDocument();
+
+    queryState.savedVenues.loading = false;
+    queryState.savedVenues.error = { code: 'unavailable', message: 'Venues unavailable' };
+    view.rerender(<EventForm event={event} section="schedule" onSuccess={vi.fn()} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('existing venue binding is preserved');
+    expect(screen.getByLabelText('Saved venue')).toBeDisabled();
+    expect(screen.getByLabelText('Saved venue')).toHaveValue('ven_bound');
+    expect(screen.getByRole('option', { name: 'Current saved venue (unavailable)' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry saved venues' }));
+    expect(queryState.savedVenues.refetch).toHaveBeenCalledTimes(1);
+
+    queryState.savedVenues.data = [
+      {
+        id: 'ven_bound',
+        name: 'Recovered Hall',
+        address: {},
+        timezone: 'America/Chicago',
+      },
+    ];
+    queryState.savedVenues.error = undefined;
+    view.rerender(<EventForm event={event} section="schedule" onSuccess={vi.fn()} />);
+
+    expect(screen.getByLabelText('Saved venue')).toBeEnabled();
+    expect(screen.getByRole('option', { name: 'Recovered Hall' })).toBeVisible();
+    expect(screen.queryByText(/existing venue binding is preserved/)).not.toBeInTheDocument();
   });
 
   it('discards corrupted or version-mismatched recovery data safely', async () => {

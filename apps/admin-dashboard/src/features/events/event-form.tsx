@@ -465,6 +465,8 @@ export function EventForm({
   >('idle');
   const [mergeConflicts, setMergeConflicts] = React.useState<EventFormConflictKey[]>([]);
   const [scheduleMode, setScheduleMode] = React.useState<ScheduleMode>('one-time');
+  const scheduleModeEventIdRef = React.useRef<string | undefined>(undefined);
+  const scheduleModeChosenLocallyRef = React.useRef(false);
   const [selectedVenueId, setSelectedVenueId] = React.useState(event?.venueId ?? '');
   const selectedVenueIdRef = React.useRef(event?.venueId ?? '');
   const updateSelectedVenueId = (venueId: string) => {
@@ -472,27 +474,51 @@ export function EventForm({
     setSelectedVenueId(venueId);
   };
   const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap();
+  const editingEventId = event?.id;
   const createDisabled = !event && (bootstrapLoading || !organizationId || !brandId);
-  const { data: existingOccurrences } = useAdminQuery(
+  const {
+    data: existingOccurrences,
+    loading: existingOccurrencesLoading,
+    error: existingOccurrencesError,
+    refetch: refetchExistingOccurrences,
+  } = useAdminQuery(
     ['listEventOccurrences', event?.id ?? 'none', 'form-schedule-mode'],
     () => adminApi.listEventOccurrences(event!.id),
     { enabled: Boolean(event?.id) },
   );
-  const { data: savedVenues, refetch: refetchSavedVenues } = useAdminQuery(
+  const {
+    data: savedVenues,
+    loading: savedVenuesLoading,
+    error: savedVenuesError,
+    refetch: refetchSavedVenues,
+  } = useAdminQuery(
     ['listSavedVenues', organizationId ?? 'none'],
     () => adminApi.listSavedVenues(organizationId!),
     { enabled: Boolean(organizationId) },
   );
 
   React.useEffect(() => {
-    if (!event) {
+    if (!editingEventId) {
+      scheduleModeEventIdRef.current = undefined;
+      scheduleModeChosenLocallyRef.current = false;
       setScheduleMode('one-time');
       return;
     }
-    if ((existingOccurrences?.length ?? 0) > 0) {
-      setScheduleMode('multiple');
+    if (existingOccurrencesLoading || existingOccurrencesError || !existingOccurrences) return;
+    if (scheduleModeEventIdRef.current !== editingEventId) {
+      scheduleModeEventIdRef.current = editingEventId;
+      scheduleModeChosenLocallyRef.current = false;
+      setScheduleMode(existingOccurrences.length > 0 ? 'multiple' : 'one-time');
+      return;
     }
-  }, [event, existingOccurrences]);
+    if (existingOccurrences.length > 0) setScheduleMode('multiple');
+    else if (!scheduleModeChosenLocallyRef.current) setScheduleMode('one-time');
+  }, [editingEventId, existingOccurrences, existingOccurrencesError, existingOccurrencesLoading]);
+
+  const selectedSavedVenue = savedVenues?.find((venue) => venue.id === selectedVenueId);
+  const savedVenueBindingUnavailable = Boolean(
+    selectedVenueId && !savedVenuesLoading && !savedVenuesError && !selectedSavedVenue,
+  );
 
   const initialValues = React.useMemo<EventFormValues>(
     () => (event ? eventToFormValues(event) : emptyEventFormValues()),
@@ -1106,21 +1132,49 @@ export function EventForm({
                   Choose a one-time event or manage multiple occurrences for tickets and check-in.
                 </p>
               </div>
-              <Tabs
-                value={scheduleMode}
-                onValueChange={(value) => setScheduleMode(value as ScheduleMode)}
-              >
-                <TabsList className="w-full">
-                  <TabsTrigger value="one-time" className="flex-1">
-                    One-time event
-                  </TabsTrigger>
-                  <TabsTrigger value="multiple" className="flex-1">
-                    Multiple occurrences
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+              {event && existingOccurrencesLoading ? (
+                <output className="block text-sm text-muted-foreground">
+                  Checking the current event schedule…
+                </output>
+              ) : event && existingOccurrencesError ? (
+                <div
+                  role="alert"
+                  className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                >
+                  <span>
+                    The current schedule could not be loaded. Schedule choices are unavailable until
+                    it is retried.
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void refetchExistingOccurrences()}
+                  >
+                    Retry current schedule
+                  </Button>
+                </div>
+              ) : (
+                <Tabs
+                  value={scheduleMode}
+                  onValueChange={(value) => {
+                    scheduleModeChosenLocallyRef.current = true;
+                    setScheduleMode(value as ScheduleMode);
+                  }}
+                >
+                  <TabsList className="w-full">
+                    <TabsTrigger value="one-time" className="flex-1">
+                      One-time event
+                    </TabsTrigger>
+                    <TabsTrigger value="multiple" className="flex-1">
+                      Multiple occurrences
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              )}
 
-              {scheduleMode === 'one-time' ? (
+              {(!event || (!existingOccurrencesLoading && !existingOccurrencesError)) &&
+              scheduleMode === 'one-time' ? (
                 <div className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <FormField
@@ -1175,7 +1229,9 @@ export function EventForm({
                     )}
                   />
                 </div>
-              ) : event ? (
+              ) : (!event || (!existingOccurrencesLoading && !existingOccurrencesError)) &&
+                scheduleMode === 'multiple' &&
+                event ? (
                 <div className="space-y-3">
                   <p className="text-xs text-muted-foreground">
                     Primary event start/end stay on the event for listings. Add each public
@@ -1219,7 +1275,8 @@ export function EventForm({
                   </div>
                   <EventScheduleView eventId={event.id} embedded />
                 </div>
-              ) : (
+              ) : (!event || (!existingOccurrencesLoading && !existingOccurrencesError)) &&
+                scheduleMode === 'multiple' ? (
                 <div className="space-y-3">
                   <p className="text-xs text-muted-foreground">
                     Set the primary event window now. After creating the event, open Edit to add
@@ -1278,10 +1335,34 @@ export function EventForm({
                     )}
                   />
                 </div>
-              )}
+              ) : null}
             </div>
             <div id="schedule-venue" className="scroll-mt-6 grid gap-4 sm:grid-cols-2">
-              {(savedVenues?.length ?? 0) > 0 ? (
+              {savedVenuesLoading ? (
+                <output className="block text-sm text-muted-foreground sm:col-span-2">
+                  Checking saved venues…
+                </output>
+              ) : null}
+              {savedVenuesError ? (
+                <div
+                  role="alert"
+                  className="flex flex-wrap items-center justify-between gap-2 text-sm sm:col-span-2"
+                >
+                  <span>
+                    Saved venues could not be loaded. Any existing venue binding is preserved but
+                    unavailable for changes.
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void refetchSavedVenues()}
+                  >
+                    Retry saved venues
+                  </Button>
+                </div>
+              ) : null}
+              {(savedVenues?.length ?? 0) > 0 || selectedVenueId ? (
                 <div className="space-y-2 sm:col-span-2">
                   <label className="text-sm font-medium" htmlFor="event-saved-venue">
                     Saved venue
@@ -1289,6 +1370,7 @@ export function EventForm({
                   <select
                     id="event-saved-venue"
                     className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                    disabled={savedVenuesLoading || Boolean(savedVenuesError)}
                     value={selectedVenueId}
                     onChange={(change) => {
                       const venueId = change.target.value;
@@ -1311,13 +1393,26 @@ export function EventForm({
                     }}
                   >
                     <option value="">Use inline venue details</option>
+                    {selectedVenueId && !selectedSavedVenue ? (
+                      <option value={selectedVenueId}>
+                        {savedVenuesLoading
+                          ? 'Current saved venue (checking…)'
+                          : 'Current saved venue (unavailable)'}
+                      </option>
+                    ) : null}
                     {savedVenues?.map((venue) => (
                       <option key={venue.id} value={venue.id}>
                         {venue.name}
                       </option>
                     ))}
                   </select>
-                  {selectedVenueId ? (
+                  {savedVenueBindingUnavailable ? (
+                    <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">
+                      The saved venue currently attached to this event is unavailable. Choose an
+                      available venue or use inline venue details before changing the binding.
+                    </p>
+                  ) : null}
+                  {selectedSavedVenue ? (
                     <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
