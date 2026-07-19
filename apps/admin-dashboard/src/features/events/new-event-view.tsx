@@ -108,6 +108,7 @@ export function NewEventView() {
   const { can, loading: permissionsLoading } = usePermissions();
   const [startingPoint, setStartingPoint] = React.useState<StartingPoint>('blank');
   const [sourceEventId, setSourceEventId] = React.useState('');
+  const [sourceEventWorkspaceKey, setSourceEventWorkspaceKey] = React.useState('');
   const [duplicateCopy, setDuplicateCopy] = React.useState<DuplicateCopyOptions>({
     basicsVenue: true,
     ticketTypes: true,
@@ -127,7 +128,13 @@ export function NewEventView() {
   const [venueName, setVenueName] = React.useState('');
   const [country, setCountry] = React.useState('');
   const [venueId, setVenueId] = React.useState('');
-  const [savedVenues, setSavedVenues] = React.useState<AdminSavedVenue[]>([]);
+  const [savedVenueState, setSavedVenueState] = React.useState<{
+    organizationId: string | null;
+    status: 'idle' | 'loading' | 'loaded' | 'error';
+    venues: AdminSavedVenue[];
+    error?: string;
+  }>({ organizationId: null, status: 'idle', venues: [] });
+  const [venueLoadNonce, setVenueLoadNonce] = React.useState(0);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const [errorField, setErrorField] = React.useState<string>();
@@ -137,11 +144,29 @@ export function NewEventView() {
   const venueLoadGeneration = React.useRef(0);
   const recoveryPending = React.useRef(false);
   const fieldRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
-  const { events: sourceEvents } = useAllEvents({
+  const {
+    events: sourceEvents,
+    loading: sourceEventsLoading,
+    error: sourceEventsError,
+    refetch: refetchSourceEvents,
+  } = useAllEvents({
     organizationId,
     brandId,
     enabled: Boolean(organizationId && brandId),
   });
+  const savedVenueStateIsCurrent = savedVenueState.organizationId === organizationId;
+  const savedVenues = savedVenueStateIsCurrent ? savedVenueState.venues : [];
+  const savedVenuesLoading =
+    Boolean(organizationId) && (!savedVenueStateIsCurrent || savedVenueState.status === 'loading');
+  const savedVenuesError =
+    savedVenueStateIsCurrent && savedVenueState.status === 'error'
+      ? savedVenueState.error
+      : undefined;
+  const configuredDefaultVenueId =
+    organizations.find((organization) => organization.id === organizationId)?.eventDefaults
+      ?.defaultVenueId ?? '';
+  const selectedVenueAvailable =
+    !venueId || savedVenues.some((savedVenue) => savedVenue.id === venueId);
 
   React.useEffect(() => {
     const defaults = organizations.find(
@@ -155,33 +180,59 @@ export function NewEventView() {
     void adminApi.reportOnboardingEvent({ stage: 'onboarding_started', outcome: 'started' });
   }, [organizationId, organizations]);
   React.useEffect(() => {
+    setSourceEventId('');
+    setSourceEventWorkspaceKey('');
+  }, [brandId, organizationId]);
+  React.useEffect(() => {
     const generation = ++venueLoadGeneration.current;
-    setSavedVenues([]);
-    if (!organizationId) return;
+    if (!organizationId) {
+      setSavedVenueState({ organizationId: null, status: 'idle', venues: [] });
+      return;
+    }
+    setSavedVenueState({ organizationId, status: 'loading', venues: [] });
     const defaultVenueId =
       organizations.find((organization) => organization.id === organizationId)?.eventDefaults
         ?.defaultVenueId || '';
     let cancelled = false;
-    void adminApi.listSavedVenues(organizationId).then((result) => {
-      if (cancelled || generation !== venueLoadGeneration.current) return;
-      if (!result.ok) {
-        setSavedVenues([]);
-        setVenueId((current) => (current === defaultVenueId ? '' : current));
-        return;
-      }
-      setSavedVenues(result.data);
-      if (!defaultVenueId) return;
-      const selected = result.data.find((venue) => venue.id === defaultVenueId);
-      if (!selected) {
-        setVenueId((current) => (current === defaultVenueId ? '' : current));
-        return;
-      }
-      setVenueName((current) => current || selected.name);
-    });
+    void adminApi
+      .listSavedVenues(organizationId)
+      .then((result) => {
+        if (cancelled || generation !== venueLoadGeneration.current) return;
+        if (!result.ok) {
+          setSavedVenueState({
+            organizationId,
+            status: 'error',
+            venues: [],
+            error: result.error.message,
+          });
+          return;
+        }
+        const scopedVenues = result.data.filter(
+          (savedVenue) => savedVenue.organizationId === organizationId,
+        );
+        setSavedVenueState({
+          organizationId,
+          status: 'loaded',
+          venues: scopedVenues,
+        });
+        if (!defaultVenueId) return;
+        const selected = scopedVenues.find((venue) => venue.id === defaultVenueId);
+        if (!selected) return;
+        setVenueName((current) => current || selected.name);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled || generation !== venueLoadGeneration.current) return;
+        setSavedVenueState({
+          organizationId,
+          status: 'error',
+          venues: [],
+          error: cause instanceof Error ? cause.message : 'Unable to load saved venues.',
+        });
+      });
     return () => {
       cancelled = true;
     };
-  }, [organizationId, organizations]);
+  }, [organizationId, organizations, venueLoadNonce]);
   React.useEffect(() => {
     const selectedBrand = brands.find((brand) => brand.id === brandId);
     const organizationDefaults = organizations.find(
@@ -210,6 +261,30 @@ export function NewEventView() {
     }
     if (!can('events.write')) {
       setError('You do not have permission to create events.');
+      return;
+    }
+    const currentWorkspaceKey = `${organizationId}:${brandId}`;
+    if (
+      startingPoint === 'duplicate' &&
+      (sourceEventsLoading ||
+        sourceEventsError ||
+        !sourceEventId ||
+        sourceEventWorkspaceKey !== currentWorkspaceKey ||
+        !sourceEvents.some((sourceEvent) => sourceEvent.id === sourceEventId))
+    ) {
+      setError(
+        sourceEventsError
+          ? 'Retry source events before choosing an event to duplicate.'
+          : sourceEventsLoading
+            ? 'Wait for source events to finish loading.'
+            : 'Choose an event from the current workspace to duplicate.',
+      );
+      setErrorField('new-event-source');
+      return;
+    }
+    if (venueId && (savedVenuesLoading || savedVenuesError || !selectedVenueAvailable)) {
+      setError('Retry saved venues or choose a one-time venue before creating this event.');
+      setErrorField('new-event-saved-venue');
       return;
     }
     if (!title.trim()) {
@@ -489,31 +564,75 @@ export function NewEventView() {
                 onChange={(change) => setCountry(change.target.value.toUpperCase())}
               />
             </label>
-            {savedVenues.length ? (
-              <label className="space-y-2 sm:col-span-2" htmlFor="new-event-saved-venue">
-                <span className="text-sm font-medium">Saved venue</span>
-                <select
-                  className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                  id="new-event-saved-venue"
-                  value={venueId}
-                  onChange={(change) => {
-                    const nextId = change.target.value;
-                    setVenueId(nextId);
-                    const selected = savedVenues.find((venue) => venue.id === nextId);
-                    if (selected) {
-                      setVenueName(selected.name);
-                      if (selected.timezone) setTimezone(selected.timezone);
+            {organizationId &&
+            (savedVenuesLoading || savedVenuesError || savedVenues.length > 0 || venueId) ? (
+              <div className="space-y-2 sm:col-span-2">
+                <label className="space-y-2" htmlFor="new-event-saved-venue">
+                  <span className="text-sm font-medium">Saved venue</span>
+                  <select
+                    className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                    id="new-event-saved-venue"
+                    aria-invalid={Boolean(errorField === 'new-event-saved-venue')}
+                    aria-describedby={
+                      errorField === 'new-event-saved-venue' ? 'new-event-error' : undefined
                     }
-                  }}
-                >
-                  <option value="">Use a one-time venue</option>
-                  {savedVenues.map((venue) => (
-                    <option key={venue.id} value={venue.id}>
-                      {venue.name}
+                    disabled={savedVenuesLoading}
+                    value={venueId}
+                    onChange={(change) => {
+                      const nextId = change.target.value;
+                      setVenueId(nextId);
+                      const selected = savedVenues.find((venue) => venue.id === nextId);
+                      if (selected) {
+                        setVenueName(selected.name);
+                        if (selected.timezone) setTimezone(selected.timezone);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {savedVenuesLoading ? 'Loading saved venues…' : 'Use a one-time venue'}
                     </option>
-                  ))}
-                </select>
-              </label>
+                    {venueId && !selectedVenueAvailable ? (
+                      <option value={venueId}>Configured default venue (unavailable)</option>
+                    ) : null}
+                    {savedVenues.map((venue) => (
+                      <option key={venue.id} value={venue.id}>
+                        {venue.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {savedVenuesLoading ? (
+                  <output className="block text-xs text-muted-foreground">
+                    Loading saved venues for this workspace…
+                  </output>
+                ) : null}
+                {savedVenuesError ? (
+                  <div
+                    role="alert"
+                    className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                  >
+                    <span>
+                      {configuredDefaultVenueId
+                        ? 'Saved venues could not be loaded. The configured default was preserved.'
+                        : 'Saved venues could not be loaded. Retry or use a one-time venue.'}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setVenueLoadNonce((value) => value + 1)}
+                    >
+                      Retry saved venues
+                    </Button>
+                  </div>
+                ) : null}
+                {!savedVenuesLoading && !savedVenuesError && venueId && !selectedVenueAvailable ? (
+                  <div role="alert" className="text-sm text-amber-700 dark:text-amber-300">
+                    The configured default venue is unavailable. Choose another saved venue or a
+                    one-time venue.
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             {startingPoint === 'duplicate' ? (
               <div className="space-y-4 sm:col-span-2">
@@ -523,8 +642,14 @@ export function NewEventView() {
                     className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
                     id="new-event-source"
                     required
+                    disabled={
+                      sourceEventsLoading || Boolean(sourceEventsError) || sourceEvents.length === 0
+                    }
                     value={sourceEventId}
-                    onChange={(event) => setSourceEventId(event.target.value)}
+                    onChange={(event) => {
+                      setSourceEventId(event.target.value);
+                      setSourceEventWorkspaceKey(`${organizationId}:${brandId}`);
+                    }}
                   >
                     <option value="">Choose an event</option>
                     {sourceEvents.map((source) => (
@@ -537,6 +662,25 @@ export function NewEventView() {
                     Choose only the setup the new draft should inherit.
                   </span>
                 </label>
+                {sourceEventsLoading ? (
+                  <output className="block text-sm text-muted-foreground">
+                    Loading events available to duplicate…
+                  </output>
+                ) : sourceEventsError ? (
+                  <div
+                    role="alert"
+                    className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                  >
+                    <span>Source events could not be loaded.</span>
+                    <Button type="button" variant="outline" size="sm" onClick={refetchSourceEvents}>
+                      Retry source events
+                    </Button>
+                  </div>
+                ) : sourceEvents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No events are available to duplicate in this workspace.
+                  </p>
+                ) : null}
                 <fieldset className="rounded-lg border p-4">
                   <legend className="px-1 text-sm font-medium">Configuration to copy</legend>
                   <p className="mb-3 text-xs text-muted-foreground">

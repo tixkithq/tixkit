@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAllEvents } from './use-all-events';
 
@@ -29,6 +29,14 @@ vi.mock('@/lib/api', () => ({
 import { adminApi } from '@/lib/api';
 
 const listEventsMock = vi.mocked(adminApi.listEvents);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 afterEach(() => {
   listEventsMock.mockReset();
@@ -131,5 +139,41 @@ describe('useAllEvents', () => {
     await waitFor(() => {
       expect(listEventsMock).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('quarantines prior-workspace events synchronously while the next scope loads', async () => {
+    const workspaceB = deferred<{
+      ok: true;
+      data: { items: ReturnType<typeof makeEvent>[]; nextCursor: undefined };
+    }>();
+    listEventsMock.mockImplementation((input) => {
+      if (input?.organizationId === 'org_a') {
+        return Promise.resolve({
+          ok: true,
+          data: { items: [makeEvent('evt_a', 'Workspace A Event')], nextCursor: undefined },
+        });
+      }
+      return workspaceB.promise;
+    });
+
+    const { result, rerender } = renderHook(
+      ({ organizationId, brandId }) => useAllEvents({ organizationId, brandId }),
+      { initialProps: { organizationId: 'org_a', brandId: 'brd_a' } },
+    );
+    await waitFor(() => expect(result.current.events.map((event) => event.id)).toEqual(['evt_a']));
+
+    rerender({ organizationId: 'org_b', brandId: 'brd_b' });
+    expect(result.current.events).toEqual([]);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.error).toBeUndefined();
+
+    await act(async () => {
+      workspaceB.resolve({
+        ok: true,
+        data: { items: [makeEvent('evt_b', 'Workspace B Event')], nextCursor: undefined },
+      });
+      await workspaceB.promise;
+    });
+    await waitFor(() => expect(result.current.events.map((event) => event.id)).toEqual(['evt_b']));
   });
 });

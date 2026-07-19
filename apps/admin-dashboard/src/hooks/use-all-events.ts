@@ -34,7 +34,9 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
   const [events, setEvents] = React.useState<AdminEventListItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<AdminApiError | undefined>(undefined);
+  const [resolvedScopeKey, setResolvedScopeKey] = React.useState<string>();
   const [nonce, setNonce] = React.useState(0);
+  const scopeKey = `${organizationId ?? ''}:${brandId ?? ''}:${enabled ? 'enabled' : 'disabled'}`;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -42,6 +44,7 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
       setEvents([]);
       setLoading(false);
       setError(undefined);
+      setResolvedScopeKey(scopeKey);
       return () => {
         cancelled = true;
       };
@@ -69,8 +72,10 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
           const result = await adminApi.listEvents(params);
           if (cancelled) return;
           if (!result.ok) {
+            setEvents([]);
             setError(result.error);
             setLoading(false);
+            setResolvedScopeKey(scopeKey);
             return;
           }
           const page = result.data as AdminTablePage<AdminEventListItem>;
@@ -81,22 +86,31 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
         if (cancelled) return;
         setEvents(all);
         setLoading(false);
+        setResolvedScopeKey(scopeKey);
       } catch (e: unknown) {
         if (cancelled) return;
         setError({
           code: 'fetch_error',
           message: e instanceof Error ? e.message : 'Failed to fetch events',
         });
+        setEvents([]);
         setLoading(false);
+        setResolvedScopeKey(scopeKey);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [nonce, organizationId, brandId, enabled]);
+  }, [nonce, organizationId, brandId, enabled, scopeKey]);
 
   const refetch = React.useCallback(() => setNonce((n) => n + 1), []);
 
-  return { events, loading, error, refetch };
+  const scopeResolved = resolvedScopeKey === scopeKey;
+  return {
+    events: scopeResolved ? events : [],
+    loading: enabled && !scopeResolved ? true : loading,
+    error: scopeResolved ? error : undefined,
+    refetch,
+  };
 }

@@ -8,6 +8,14 @@ const createEvent = vi.hoisted(() => vi.fn());
 const duplicateEvent = vi.hoisted(() => vi.fn());
 const reportOnboardingEvent = vi.hoisted(() => vi.fn());
 const listSavedVenues = vi.hoisted(() => vi.fn());
+const refetchSourceEvents = vi.hoisted(() => vi.fn());
+const allEventsState = vi.hoisted(() => ({
+  value: {
+    events: [{ id: 'evt_source', title: 'Source Gala' }],
+    loading: false,
+    error: undefined as { code: string; message: string } | undefined,
+  },
+}));
 const bootstrapState = vi.hoisted(() => ({
   value: {
     organizationId: 'org_1',
@@ -34,8 +42,8 @@ vi.mock('@/context/permission-provider', () => ({
 }));
 vi.mock('@/hooks/use-all-events', () => ({
   useAllEvents: () => ({
-    events: [{ id: 'evt_source', title: 'Source Gala' }],
-    loading: false,
+    ...allEventsState.value,
+    refetch: refetchSourceEvents,
   }),
 }));
 vi.mock('@/lib/api', () => ({
@@ -55,6 +63,11 @@ describe('NewEventView', () => {
     duplicateEvent.mockResolvedValue({ ok: true, data: { id: 'evt_duplicate' } });
     reportOnboardingEvent.mockResolvedValue({ ok: true, data: undefined });
     listSavedVenues.mockResolvedValue({ ok: true, data: [] });
+    allEventsState.value = {
+      events: [{ id: 'evt_source', title: 'Source Gala' }],
+      loading: false,
+      error: undefined,
+    };
     bootstrapState.value = {
       organizationId: 'org_1',
       brandId: 'brd_1',
@@ -132,11 +145,7 @@ describe('NewEventView', () => {
     );
     expect(createEvent).toHaveBeenCalledTimes(3);
     const idempotencyKeys = createEvent.mock.calls.map(([input]) => input.idempotencyKey);
-    expect(idempotencyKeys).toEqual([
-      idempotencyKeys[0],
-      idempotencyKeys[0],
-      idempotencyKeys[0],
-    ]);
+    expect(idempotencyKeys).toEqual([idempotencyKeys[0], idempotencyKeys[0], idempotencyKeys[0]]);
     expect(push).toHaveBeenCalledWith('/events/evt_recovered?created=1');
   });
 
@@ -374,7 +383,7 @@ describe('NewEventView', () => {
     });
   });
 
-  it('clears prior-workspace venues and the current default binding when venue loading fails', async () => {
+  it('preserves and quarantines the current workspace default until venue loading recovers', async () => {
     listSavedVenues
       .mockResolvedValueOnce({
         ok: true,
@@ -393,6 +402,20 @@ describe('NewEventView', () => {
       .mockResolvedValueOnce({
         ok: false,
         error: { code: 'network_error', message: 'Unable to load venues' },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [
+          {
+            id: 'ven_b',
+            organizationId: 'org_b',
+            name: 'Workspace B Hall',
+            address: { country: 'US' },
+            timezone: 'America/Chicago',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
       });
     bootstrapState.value = {
       organizationId: 'org_a',
@@ -417,15 +440,169 @@ describe('NewEventView', () => {
     await waitFor(() =>
       expect(screen.queryByRole('option', { name: 'Workspace A Hall' })).not.toBeInTheDocument(),
     );
-    expect(screen.queryByLabelText('Saved venue')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Saved venue')).toHaveValue('ven_b');
+    expect(
+      screen.getByRole('option', { name: 'Configured default venue (unavailable)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Saved venues could not be loaded. The configured default was preserved.',
+    );
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Workspace B Event' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
-    await waitFor(() => expect(createEvent).toHaveBeenCalled());
+    expect(await screen.findByText(/Retry saved venues or choose a one-time venue/)).toBeVisible();
+    expect(createEvent).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry saved venues' }));
+    expect(await screen.findByRole('option', { name: 'Workspace B Hall' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(createEvent).toHaveBeenCalledOnce());
     expect(createEvent.mock.calls[0]![0]).toMatchObject({
       organizationId: 'org_b',
       brandId: 'brd_b',
-      venueId: null,
+      venueId: 'ven_b',
     });
+  });
+
+  it('allows an explicit one-time venue after a rejected saved-venue request', async () => {
+    listSavedVenues.mockRejectedValueOnce(new Error('network unavailable'));
+    bootstrapState.value = {
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      brands: [],
+      organizations: [{ id: 'org_1', eventDefaults: { defaultVenueId: 'ven_default' } }],
+    };
+    render(<NewEventView />);
+
+    expect(
+      await screen.findByText(
+        'Saved venues could not be loaded. The configured default was preserved.',
+      ),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Saved venue'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'One-time Venue Event' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+
+    await waitFor(() => expect(createEvent).toHaveBeenCalledOnce());
+    expect(createEvent.mock.calls[0]![0]).toMatchObject({ venueId: null });
+  });
+
+  it('blocks a configured default omitted by a successful venue response until an explicit choice', async () => {
+    bootstrapState.value = {
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      brands: [],
+      organizations: [{ id: 'org_1', eventDefaults: { defaultVenueId: 'ven_removed' } }],
+    };
+    render(<NewEventView />);
+
+    expect(await screen.findByText(/The configured default venue is unavailable/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Missing Venue Event' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    expect(await screen.findByText(/Retry saved venues or choose a one-time venue/)).toBeVisible();
+    expect(createEvent).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Saved venue'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(createEvent).toHaveBeenCalledOnce());
+    expect(createEvent.mock.calls[0]![0]).toMatchObject({ venueId: null });
+  });
+
+  it.each([
+    ['loading', { events: [], loading: true, error: undefined }],
+    [
+      'failed',
+      {
+        events: [],
+        loading: false,
+        error: { code: 'network_error', message: 'Unable to load events' },
+      },
+    ],
+    ['empty', { events: [], loading: false, error: undefined }],
+    [
+      'unselected',
+      {
+        events: [{ id: 'evt_source', title: 'Source Gala' }],
+        loading: false,
+        error: undefined,
+      },
+    ],
+  ] as const)(
+    'validates a %s duplicate source before creation or recovery telemetry',
+    async (_state, sourceState) => {
+      allEventsState.value = {
+        events: [...sourceState.events],
+        loading: sourceState.loading,
+        error: sourceState.error,
+      };
+      render(<NewEventView />);
+      fireEvent.click(screen.getByRole('radio', { name: /Duplicate existing event/ }));
+      fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Duplicate Draft' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+
+      await waitFor(() =>
+        expect(document.getElementById('new-event-error')).toHaveTextContent(
+          /source events|current workspace/i,
+        ),
+      );
+      expect(duplicateEvent).not.toHaveBeenCalled();
+      expect(reportOnboardingEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ stage: 'preset_creation' }),
+      );
+      expect(reportOnboardingEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ stage: 'recovery' }),
+      );
+    },
+  );
+
+  it('shows duplicate-source loading, failure, empty, and recovered states', async () => {
+    allEventsState.value = { events: [], loading: true, error: undefined };
+    const view = render(<NewEventView />);
+    await waitFor(() => expect(listSavedVenues).toHaveBeenCalledWith('org_1'));
+    fireEvent.click(screen.getByRole('radio', { name: /Duplicate existing event/ }));
+
+    expect(screen.getByText('Loading events available to duplicate…')).toBeInTheDocument();
+    expect(view.container.querySelector('#new-event-source')).toBeDisabled();
+
+    allEventsState.value = {
+      events: [],
+      loading: false,
+      error: { code: 'network_error', message: 'Unable to load events' },
+    };
+    view.rerender(<NewEventView />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Source events could not be loaded.');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry source events' }));
+    expect(refetchSourceEvents).toHaveBeenCalledOnce();
+
+    allEventsState.value = { events: [], loading: false, error: undefined };
+    view.rerender(<NewEventView />);
+    expect(
+      screen.getByText('No events are available to duplicate in this workspace.'),
+    ).toBeInTheDocument();
+
+    allEventsState.value = {
+      events: [{ id: 'evt_recovered', title: 'Recovered Gala' }],
+      loading: false,
+      error: undefined,
+    };
+    view.rerender(<NewEventView />);
+    expect(screen.getByRole('option', { name: 'Recovered Gala' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Source event/)).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText(/Source event/), {
+      target: { value: 'evt_recovered' },
+    });
+    bootstrapState.value = {
+      organizationId: 'org_2',
+      brandId: 'brd_2',
+      brands: [],
+      organizations: [],
+    };
+    view.rerender(<NewEventView />);
+    await waitFor(() => expect(screen.getByLabelText(/Source event/)).toHaveValue(''));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Wrong Workspace Copy' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    expect(await screen.findByText(/Choose an event from the current workspace/)).toBeVisible();
+    expect(duplicateEvent).not.toHaveBeenCalled();
   });
 });
