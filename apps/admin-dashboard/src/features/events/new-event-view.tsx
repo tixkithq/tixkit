@@ -313,6 +313,11 @@ export function NewEventView() {
       router.push(`${routes.eventDetail(created.data.id)}?created=1`);
     } catch (cause) {
       recoveryPending.current = true;
+      void adminApi.reportOnboardingEvent({
+        stage: recovering ? 'recovery' : 'preset_creation',
+        outcome: 'failed',
+        reasonCode: 'request_failed',
+      });
       const message = cause instanceof Error ? cause.message : 'Unable to create the event draft.';
       setError(message);
     } finally {

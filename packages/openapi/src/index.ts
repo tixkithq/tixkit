@@ -9292,6 +9292,7 @@ const rawOpenApiSpec = {
                     enum: [
                       'onboarding_started',
                       'starting_point_selected',
+                      'preset_creation',
                       'recovery',
                       'autosave_failure',
                       'stale_version_conflict',

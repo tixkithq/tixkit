@@ -380,24 +380,47 @@ describe('event routes', () => {
       method: 'POST',
       url: '/onboarding-events',
       payload: {
-        stage: 'autosave_failure',
+        stage: 'preset_creation',
         outcome: 'failed',
         reasonCode: 'request_failed',
       },
     });
     expect(accepted.statusCode).toBe(204);
 
-    const rejected = await app.inject({
+    const rejectedReasonCode = await app.inject({
       method: 'POST',
       url: '/onboarding-events',
       payload: {
         stage: 'autosave_failure',
         outcome: 'failed',
         reasonCode: 'database_error_with_email@example.com',
+      },
+    });
+    expect(rejectedReasonCode.statusCode).toBe(400);
+
+    const rejectedTitle = await app.inject({
+      method: 'POST',
+      url: '/onboarding-events',
+      payload: {
+        stage: 'preset_creation',
+        outcome: 'failed',
+        reasonCode: 'request_failed',
         eventTitle: 'Sensitive title',
       },
     });
-    expect(rejected.statusCode).toBe(400);
+    expect(rejectedTitle.statusCode).toBe(400);
+
+    const rejectedError = await app.inject({
+      method: 'POST',
+      url: '/onboarding-events',
+      payload: {
+        stage: 'preset_creation',
+        outcome: 'failed',
+        reasonCode: 'request_failed',
+        error: 'Sensitive provider message',
+      },
+    });
+    expect(rejectedError.statusCode).toBe(400);
     await app.close();
   });
 

@@ -100,8 +100,29 @@ describe('NewEventView', () => {
     expect(push).not.toHaveBeenCalled();
     expect(createEvent).toHaveBeenCalledTimes(1);
     expect(createEvent.mock.calls[0][0]).toMatchObject({ startingPoint: 'free' });
+    await waitFor(() =>
+      expect(reportOnboardingEvent).toHaveBeenCalledWith({
+        stage: 'preset_creation',
+        outcome: 'failed',
+        reasonCode: 'request_failed',
+      }),
+    );
 
-    createEvent.mockResolvedValue({ ok: true, data: { id: 'evt_recovered' } });
+    createEvent.mockResolvedValueOnce({
+      ok: false,
+      error: { message: 'The retry also failed.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The retry also failed.');
+    await waitFor(() =>
+      expect(reportOnboardingEvent).toHaveBeenCalledWith({
+        stage: 'recovery',
+        outcome: 'failed',
+        reasonCode: 'request_failed',
+      }),
+    );
+
+    createEvent.mockResolvedValueOnce({ ok: true, data: { id: 'evt_recovered' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
     await waitFor(() =>
       expect(reportOnboardingEvent).toHaveBeenCalledWith({
@@ -109,6 +130,14 @@ describe('NewEventView', () => {
         outcome: 'completed',
       }),
     );
+    expect(createEvent).toHaveBeenCalledTimes(3);
+    const idempotencyKeys = createEvent.mock.calls.map(([input]) => input.idempotencyKey);
+    expect(idempotencyKeys).toEqual([
+      idempotencyKeys[0],
+      idempotencyKeys[0],
+      idempotencyKeys[0],
+    ]);
+    expect(push).toHaveBeenCalledWith('/events/evt_recovered?created=1');
   });
 
   it('retries duplication with one idempotency key and opens the media follow-up', async () => {
