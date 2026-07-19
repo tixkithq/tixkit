@@ -2,6 +2,11 @@
 
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, Circle, LockKeyhole, Rocket } from 'lucide-react';
+import type {
+  EventLaunchReadinessStepId,
+  ReadinessReasonCode,
+  readinessReasonCodeStepIds,
+} from '@tixkit/domain';
 import type { AdminEventLaunchReadiness, AdminReadinessStep } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,7 +29,31 @@ const stepLabels: Record<string, string> = {
   publication_status: 'Publication',
 };
 
-export const eventReadinessReasonCopy: Readonly<Record<string, string>> = {
+type EventReadinessReasonCode = {
+  [Code in ReadinessReasonCode]: Extract<
+    (typeof readinessReasonCodeStepIds)[Code][number],
+    EventLaunchReadinessStepId
+  > extends never
+    ? never
+    : Code;
+}[ReadinessReasonCode];
+
+export const eventReadinessReasonCopy: Readonly<Record<EventReadinessReasonCode, string>> = {
+  event_basics_valid: 'Event basics and schedule are valid.',
+  sellable_ticket_available: 'At least one active ticket has inventory available for sale.',
+  currency_coherent: 'Event, ticket, and product currencies are coherent.',
+  pricing_valid: 'Ticket pricing and fee handling are valid.',
+  checkout_reviewed: 'Checkout questions and consent language have been reviewed.',
+  public_content_published: 'Public event-page content is published.',
+  confirmation_content_valid: 'Order-confirmation content is published and valid.',
+  payment_not_required: 'This event does not require a payment account.',
+  payment_ready: 'The payment path is ready for this event.',
+  preview_reviewed: 'The current buyer preview has been reviewed.',
+  test_order_complete: 'A current test order proves this checkout configuration.',
+  test_order_not_applicable: 'Test orders are not applicable in the current payment mode.',
+  check_in_configured: 'A usable check-in configuration is ready.',
+  required_steps_complete: 'Every required launch step is complete.',
+  event_published: 'The event is published.',
   event_title_missing:
     'Guests cannot identify this event. Add a clear event title in event settings.',
   event_schedule_invalid:
@@ -59,8 +88,6 @@ export const eventReadinessReasonCopy: Readonly<Record<string, string>> = {
   preview_review_required: 'Open the authenticated preview and explicitly mark it reviewed.',
   test_order_recommended:
     'Checkout has not been proven for this configuration. Run a safe test order before publishing.',
-  test_order_stale:
-    'Tickets, pricing, checkout, or payments changed after the last test. Run another safe test order.',
   check_in_configuration_missing:
     'Door staff do not yet have a usable check-in setup. Configure check-in lists and access.',
   required_steps_incomplete:
@@ -71,6 +98,23 @@ export const eventReadinessReasonCopy: Readonly<Record<string, string>> = {
     'Configuration changed after this review. Review the updated preview or checkout and acknowledge it again.',
   permission_required: 'A teammate with the required permission must complete this step.',
 };
+
+export function eventReadinessReasonText(
+  step: AdminReadinessStep,
+  reason: ReadinessReasonCode,
+): string {
+  if (reason === 'acknowledgement_stale') {
+    if (step.id === 'checkout_consent') {
+      return 'Checkout questions or consent language changed after the last review. Review the current checkout and acknowledge it again.';
+    }
+    if (step.id === 'preview_review') {
+      return 'Event details, tickets, add-ons, or published content changed after the last preview review. Review the current buyer experience and acknowledge it again.';
+    }
+  }
+  return Object.hasOwn(eventReadinessReasonCopy, reason)
+    ? eventReadinessReasonCopy[reason as EventReadinessReasonCode]
+    : 'This launch check needs attention. Open its settings to review and correct the current configuration.';
+}
 
 function actionHref(eventId: string, step: AdminReadinessStep): string | undefined {
   switch (step.actionId) {
@@ -215,11 +259,7 @@ export function EventLaunchPanel({
                       <>
                         <p className="mt-1 text-sm text-foreground/80">
                           {step.reasonCodes
-                            .map(
-                              (reason) =>
-                                eventReadinessReasonCopy[reason] ??
-                                'This launch check needs attention. Open its settings to review and correct the current configuration.',
-                            )
+                            .map((reason) => eventReadinessReasonText(step, reason))
                             .join(' ')}
                         </p>
                         {href && !remediationAllowed ? (

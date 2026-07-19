@@ -14,7 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { eventReadinessReasonCopy } from './event-launch-panel';
+import { eventReadinessReasonText } from './event-launch-panel';
 
 function href(eventId: string, actionId: string | null): string | undefined {
   if (actionId === 'manage_tickets') return routes.eventTickets(eventId);
@@ -29,13 +29,6 @@ function href(eventId: string, actionId: string | null): string | undefined {
   if (actionId === 'edit_event_basics' || actionId === 'review_fees')
     return routes.eventSettings(eventId);
   return undefined;
-}
-
-function readableReason(code: string): string {
-  return (
-    eventReadinessReasonCopy[code] ??
-    'This launch check needs attention. Open its settings to review and correct the current configuration.'
-  );
 }
 
 export function PublishPreflightDialog({
@@ -107,7 +100,7 @@ export function PublishPreflightDialog({
                   <p className="font-medium">{step.id.replaceAll('_', ' ')}</p>
                   <ul className="list-disc pl-5 text-muted-foreground">
                     {step.reasonCodes.map((code) => (
-                      <li key={code}>{readableReason(code)}</li>
+                      <li key={code}>{eventReadinessReasonText(step, code)}</li>
                     ))}
                   </ul>
                   {href(eventId, step.actionId) ? (
@@ -129,7 +122,10 @@ export function PublishPreflightDialog({
             <ul className="mt-2 space-y-2 text-sm">
               {currentReadiness.recommendedWarnings.map((step) => (
                 <li key={step.id}>
-                  {step.id.replaceAll('_', ' ')} — {step.reasonCodes.map(readableReason).join(' ')}
+                  {step.id.replaceAll('_', ' ')} —{' '}
+                  {step.reasonCodes
+                    .map((code) => eventReadinessReasonText(step, code))
+                    .join(' ')}
                   {href(eventId, step.actionId) ? (
                     <Link
                       className="ml-2 font-medium text-primary"

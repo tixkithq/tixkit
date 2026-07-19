@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EventLaunchPanel } from './event-launch-panel';
+import { EventLaunchPanel, eventReadinessReasonText } from './event-launch-panel';
 import type { AdminEventLaunchReadiness } from '@/lib/api';
 
 const usePermissionsMock = vi.hoisted(() => vi.fn());
@@ -177,5 +177,43 @@ describe('EventLaunchPanel', () => {
       '/events/evt_1/tickets',
     );
     expect(screen.getByRole('link', { name: 'Open Sellable tickets' })).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      'checkout_consent',
+      'review_checkout',
+      'Checkout questions or consent language changed after the last review.',
+    ],
+    [
+      'preview_review',
+      'review_preview',
+      'Event details, tickets, add-ons, or published content changed after the last preview review.',
+    ],
+  ] as const)('explains what invalidated a stale %s acknowledgement', (id, actionId, copy) => {
+    const value = readiness();
+    value.steps = [
+      {
+        id,
+        status: 'incomplete',
+        priority: 'recommended',
+        reasonCodes: ['acknowledgement_stale'],
+        actionId,
+        requiredPermission: 'events.write',
+        updatedAt: null,
+        acknowledgedAt: new Date(0).toISOString(),
+        acknowledgementValid: false,
+      },
+    ];
+
+    render(<EventLaunchPanel eventId="evt_1" readiness={value} />);
+
+    expect(screen.getByText(new RegExp(copy))).toBeInTheDocument();
+  });
+
+  it('uses the safe fallback for a malformed prototype-key reason', () => {
+    expect(eventReadinessReasonText(readiness().steps[1]!, 'constructor' as never)).toBe(
+      'This launch check needs attention. Open its settings to review and correct the current configuration.',
+    );
   });
 });
