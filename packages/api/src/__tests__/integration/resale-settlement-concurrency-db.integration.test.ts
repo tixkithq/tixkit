@@ -350,7 +350,8 @@ describeWithIntegrationDatabase('resale settlement HTTP concurrency persistence'
     ]);
     expect(responses.map(({ statusCode }) => statusCode)).toEqual([200, 200]);
     const state = await persisted(fixture.listing.id);
-    expect(state.settlement).toMatchObject({ state: 'paid', version: 2 });
+    expect(state.settlement).toMatchObject({ state: 'paid' });
+    expect(Number(state.settlement.version)).toBe(2);
     expect(Number(state.settlement.paid_cents)).toBe(PAYABLE_CENTS);
     expect(state.entries.filter(({ kind }) => kind === 'payout_recorded')).toHaveLength(1);
     expect(
@@ -372,7 +373,8 @@ describeWithIntegrationDatabase('resale settlement HTTP concurrency persistence'
       'CONFLICT',
     );
     const state = await persisted(fixture.listing.id);
-    expect(state.settlement).toMatchObject({ state: 'paid', version: 2 });
+    expect(state.settlement).toMatchObject({ state: 'paid' });
+    expect(Number(state.settlement.version)).toBe(2);
     expect(Number(state.settlement.paid_cents)).toBe(PAYABLE_CENTS);
     expect(state.entries.filter(({ kind }) => kind === 'payout_recorded')).toHaveLength(1);
     expect(
@@ -413,7 +415,8 @@ describeWithIntegrationDatabase('resale settlement HTTP concurrency persistence'
     ]);
     expect(replayResponses.map(({ statusCode }) => statusCode)).toEqual([200, 200]);
     const replayState = await persisted(replayFixture.listing.id);
-    expect(replayState.settlement).toMatchObject({ state: 'reversed', version: 2 });
+    expect(replayState.settlement).toMatchObject({ state: 'reversed' });
+    expect(Number(replayState.settlement.version)).toBe(2);
     expect(Number(replayState.settlement.reversed_cents)).toBe(PAYABLE_CENTS);
     expect(replayState.entries.filter(({ kind }) => kind === 'payable_reversed')).toHaveLength(1);
     expect(
@@ -427,7 +430,8 @@ describeWithIntegrationDatabase('resale settlement HTTP concurrency persistence'
     ]);
     expect(conflictResponses.map(({ statusCode }) => statusCode).sort()).toEqual([200, 409]);
     const conflictState = await persisted(conflictFixture.listing.id);
-    expect(conflictState.settlement).toMatchObject({ state: 'reversed', version: 2 });
+    expect(conflictState.settlement).toMatchObject({ state: 'reversed' });
+    expect(Number(conflictState.settlement.version)).toBe(2);
     expect(conflictState.entries.filter(({ kind }) => kind === 'payable_reversed')).toHaveLength(1);
     expect(
       conflictState.audits.filter(({ action }) => action === 'resale.settlement.reversal_recorded'),
@@ -459,7 +463,8 @@ describeWithIntegrationDatabase('resale settlement HTTP concurrency persistence'
       });
       expect(denied.statusCode).toBe(404);
       const state = await persisted(fixture.listing.id);
-      expect(state.settlement).toMatchObject({ state: 'pending', version: 1 });
+      expect(state.settlement).toMatchObject({ state: 'pending' });
+      expect(Number(state.settlement.version)).toBe(1);
       expect(state.entries).toHaveLength(1);
       expect(state.audits).toHaveLength(0);
     } finally {

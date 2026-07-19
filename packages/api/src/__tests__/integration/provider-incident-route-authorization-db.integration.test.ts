@@ -197,7 +197,7 @@ describeWithIntegrationDatabase('provider incident route authorization matrix', 
           activePrincipal = authorizedPrincipal(overrides);
           const response = await operation.inject();
           expect(response.statusCode).toBe(404);
-          expect(response.json()).toMatchObject({ code: 'NOT_FOUND' });
+          expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
           expect(findActiveByCorrelation).not.toHaveBeenCalled();
           expect(reveal).not.toHaveBeenCalled();
           await expect(persistenceSnapshot()).resolves.toEqual(before);

@@ -772,6 +772,9 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
               .where('label', 'in', [authorizedQuestionLabel, forbiddenQuestionLabel])
               .execute(),
           );
+          await attemptCleanup(() =>
+            db.deleteFrom('audit_logs').where('tenant_id', 'in', [tenantA, tenantB]).execute(),
+          );
           for (const id of createdEventIds) {
             await attemptCleanup(() => db.deleteFrom('events').where('id', '=', id).execute());
           }
