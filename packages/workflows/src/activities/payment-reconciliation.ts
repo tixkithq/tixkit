@@ -520,6 +520,20 @@ export async function reconcileRefundActivity(input: {
     const piRepo = new PaymentIntentRepository(db);
     const orderRepo = new OrderRepository(db);
     const refundRepo = new RefundRepository(db);
+    const refundEvidence = (providerRefundId: string) => {
+      const requestIdempotencyKey = `provider:${input.provider}:${providerRefundId}`;
+      const requestNonce = input.providerEventId;
+      return {
+        requestIdempotencyKey,
+        requestNonce,
+        metadata: {
+          refundReservationStatus: 'succeeded',
+          stripeRefundId: providerRefundId,
+          stripeIdempotencyKey: requestIdempotencyKey,
+          refundNonce: requestNonce,
+        },
+      };
+    };
 
     const providerIntentId =
       typeof refundOrCharge.payment_intent === 'string'
@@ -560,6 +574,7 @@ export async function reconcileRefundActivity(input: {
           paymentIntentId: dbPi.id,
           provider: 'stripe',
           providerRefundId,
+          ...refundEvidence(providerRefundId),
           amountCents: refundDelta,
           currency: order.currency,
           reason: 'Stripe webhook',
@@ -644,6 +659,7 @@ export async function reconcileRefundActivity(input: {
         paymentIntentId: dbPi.id,
         provider: 'stripe',
         providerRefundId,
+        ...refundEvidence(providerRefundId),
         amountCents: refundAmount,
         currency: order.currency,
         reason: 'Stripe webhook',

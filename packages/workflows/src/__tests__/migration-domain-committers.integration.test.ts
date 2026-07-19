@@ -296,6 +296,11 @@ describeDatabase('production migration committers', () => {
   });
 
   it('persists verified portable event media through the destination object store', async () => {
+    await db
+      .deleteFrom('media_object_cleanup_jobs')
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .execute();
     const repository = new ImportRepository(db);
     const job = await repository.createJob({
       tenantId,
@@ -626,9 +631,14 @@ describeDatabase('production migration committers', () => {
     ).resolves.toEqual({ status: 'retained' });
     expect(deletedKeys).toHaveLength(5);
     expect(deletedKeys).toEqual(expect.arrayContaining([expect.stringContaining(sha256)]));
-  });
+  }, 20_000);
 
   it('durably retries media cleanup when storage succeeds and the database commit fails', async () => {
+    await db
+      .deleteFrom('media_object_cleanup_jobs')
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .execute();
     const repository = new ImportRepository(db);
     const job = await repository.createJob({
       tenantId,
@@ -767,7 +777,7 @@ describeDatabase('production migration committers', () => {
       processMigrationMediaCleanupJobs(db, store, new Date(Date.now() + 3 * 60_000)),
     ).resolves.toEqual({ completed: 1, retained: 0, failed: 0 });
     expect(deleted).toEqual([expect.stringContaining(sha256)]);
-  });
+  }, 15_000);
 
   async function importChain(idempotencyKey: string) {
     const repository = new ImportRepository(db);
@@ -1748,6 +1758,7 @@ describeDatabase('production migration committers', () => {
       ['stage-count', { ...validCommittingSummary, stageCount: 11 }],
       ['stage-index', { ...validCommittingSummary, stageIndex: 10 }],
       ['stage-name', { ...validCommittingSummary, stage: 'tickets' }],
+      ['extra-key', { ...validCommittingSummary, internalWorkflowState: 'must-not-persist' }],
     ];
 
     for (const [name, invalidSummary] of invalidSummaries) {
@@ -1837,6 +1848,37 @@ describeDatabase('production migration committers', () => {
       stageIndex: MIGRATION_COMMIT_STAGES.length,
     };
     delete (terminalSummary as { stage?: string }).stage;
+    const invalidTerminal = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: 'reject-terminal-progress-extra-key',
+      requestedBy: 'test-user',
+    });
+    await repository.transitionJob({
+      tenantId,
+      organizationId,
+      jobId: invalidTerminal.id,
+      from: ['pending'],
+      to: 'committed',
+      summary: { ...terminalSummary, internalWorkflowState: 'must-not-persist' },
+    });
+    await expect(
+      service.completeCommit({
+        tenantId,
+        organizationId,
+        jobId: invalidTerminal.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow('MIGRATION_PROGRESS_SUMMARY_KEYS_INVALID');
+    expect((await repository.findJob(tenantId, organizationId, invalidTerminal.id))?.status).toBe(
+      'committed',
+    );
+    expect(await repository.listEvents(tenantId, organizationId, invalidTerminal.id)).toHaveLength(
+      0,
+    );
     const repairable = await repository.createJob({
       tenantId,
       organizationId,

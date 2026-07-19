@@ -1,4 +1,4 @@
-import type { Database } from '@tixkit/db';
+import { sql, type Database } from '@tixkit/db';
 import {
   EmailJobRepository,
   OrderRepository,
@@ -36,19 +36,46 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function serializedJsonValue(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 type RefundRow = {
   id: string;
   order_id: string;
+  provider: string;
   provider_refund_id: string;
   request_idempotency_key?: string | null;
   request_nonce?: string | null;
   amount_cents: number | string | bigint;
   currency: string;
   status: string;
+  reason?: string;
   metadata?: unknown;
 };
 
 type RefundActivityValue = { providerRefundId: string; status: string };
+
+type RefundLedgerMetadata = {
+  providerRefundId: string;
+  provider: string;
+  requestIdempotencyKey: string;
+  requestNonce: string;
+  refundReservationStatus: 'succeeded';
+  currency: string;
+  grossRefundCents: number;
+  taxRefundCents: number;
+  feeRefundCents: number;
+  refundCents: number;
+  netRevenueDeltaCents: number;
+  entries: Array<{
+    account: string;
+    direction: 'debit' | 'credit';
+    amountCents: number;
+  }>;
+  balanced: true;
+  normalizationVersion?: typeof REFUND_LEDGER_NORMALIZATION_VERSION;
+};
 
 type RefundReservation =
   | { action: 'return'; result: WorkflowActivityResult<RefundActivityValue> }
@@ -61,12 +88,252 @@ type RefundReservation =
         totalCents: number;
         currency: string;
       };
-      paymentIntent: { id: string; provider: string | null; providerIntentId: string | null };
+      paymentIntent: {
+        id: string;
+        provider: string | null;
+        providerIntentId: string | null;
+      };
       paymentAccountProvider?: string;
       pendingProviderRefundId: string;
     };
 
 const CAPACITY_REFUND_STATUSES = new Set(['pending', 'succeeded']);
+const REFUND_LEDGER_NORMALIZATION_VERSION = 'legacy-head-refund-ledger-v1';
+
+class RefundLedgerHistoryError extends Error {}
+
+function strictRecord(value: unknown): Record<string, unknown> | undefined {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : undefined;
+}
+
+function exactLegacyWebhookRefund(refund: RefundRow): boolean {
+  const metadata = strictRecord(refund.metadata);
+  const expectedKey = `provider:${refund.provider}:${refund.provider_refund_id}`;
+  if (!metadata) return false;
+  const metadataKeys = Object.keys(metadata).sort();
+  const allowedShapes = [
+    [],
+    ['voidedTicketIds'],
+    ['inventoryRestored', 'inventoryRestoredByType', 'inventoryRestoredCount'],
+    ['inventoryRestored', 'inventoryRestoredByTicketType', 'inventoryRestoredCount'],
+    ['inventoryRestored', 'inventoryRestoredByType', 'inventoryRestoredCount', 'voidedTicketIds'],
+    [
+      'inventoryRestored',
+      'inventoryRestoredByTicketType',
+      'inventoryRestoredCount',
+      'voidedTicketIds',
+    ],
+  ];
+  if (!allowedShapes.some((shape) => shape.join('|') === metadataKeys.join('|'))) return false;
+  if (metadata.voidedTicketIds !== undefined) {
+    if (
+      !Array.isArray(metadata.voidedTicketIds) ||
+      metadata.voidedTicketIds.some((id) => typeof id !== 'string' || id.length === 0) ||
+      new Set(metadata.voidedTicketIds).size !== metadata.voidedTicketIds.length
+    ) {
+      return false;
+    }
+  }
+  if (metadata.inventoryRestored !== undefined) {
+    const restoredByType = strictRecord(
+      metadata.inventoryRestoredByTicketType ?? metadata.inventoryRestoredByType,
+    );
+    if (
+      metadata.inventoryRestored !== true ||
+      !isSafeNonnegativeInteger(metadata.inventoryRestoredCount) ||
+      !restoredByType ||
+      Object.entries(restoredByType).some(
+        ([ticketTypeId, count]) => ticketTypeId.length === 0 || !isSafeNonnegativeInteger(count),
+      ) ||
+      Object.values(restoredByType).reduce<number>((sum, count) => sum + Number(count), 0) !==
+        metadata.inventoryRestoredCount
+    ) {
+      return false;
+    }
+  }
+  return (
+    refund.status === 'succeeded' &&
+    refund.provider === 'stripe' &&
+    refund.reason === 'Stripe webhook' &&
+    refund.request_nonce == null &&
+    refund.request_idempotency_key === expectedKey &&
+    metadata !== undefined
+  );
+}
+
+function normalizeLegacyWebhookRefund(refund: RefundRow): RefundRow {
+  const requestIdempotencyKey = `provider:${refund.provider}:${refund.provider_refund_id}`;
+  const requestNonce = `legacy-webhook-v1:${refund.id}`;
+  const legacyMetadata = strictRecord(refund.metadata) ?? {};
+  return {
+    ...refund,
+    request_idempotency_key: requestIdempotencyKey,
+    request_nonce: requestNonce,
+    metadata: JSON.stringify({
+      ...legacyMetadata,
+      refundReservationStatus: 'succeeded',
+      stripeRefundId: refund.provider_refund_id,
+      stripeIdempotencyKey: requestIdempotencyKey,
+      refundNonce: requestNonce,
+      ledgerNormalizationVersion: REFUND_LEDGER_NORMALIZATION_VERSION,
+    }),
+  };
+}
+
+function parseLegacyRefundLedgerMetadata(value: unknown): Record<string, unknown> | undefined {
+  const metadata = strictRecord(value);
+  if (!metadata) return undefined;
+  const expectedKeys = [
+    'balanced',
+    'currency',
+    'entries',
+    'feeRefundCents',
+    'grossRefundCents',
+    'netRevenueDeltaCents',
+    'providerRefundId',
+    'refundCents',
+    'taxRefundCents',
+  ];
+  if (Object.keys(metadata).sort().join('|') !== expectedKeys.join('|')) return undefined;
+  const validated = parseRefundLedgerMetadata({
+    ...metadata,
+    provider: 'legacy-validation',
+    requestIdempotencyKey: 'legacy-validation',
+    requestNonce: 'legacy-validation',
+    refundReservationStatus: 'succeeded',
+  });
+  return validated ? metadata : undefined;
+}
+
+function isSafeNonnegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function parseRefundLedgerMetadata(value: unknown): RefundLedgerMetadata | undefined {
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const metadata = parsed as Record<string, unknown>;
+  const requiredStrings = [
+    metadata.providerRefundId,
+    metadata.provider,
+    metadata.requestIdempotencyKey,
+    metadata.requestNonce,
+    metadata.currency,
+  ];
+  if (requiredStrings.some((item) => typeof item !== 'string' || item.length === 0)) {
+    return undefined;
+  }
+  if (metadata.refundReservationStatus !== 'succeeded' || metadata.balanced !== true) {
+    return undefined;
+  }
+  if (
+    metadata.normalizationVersion !== undefined &&
+    metadata.normalizationVersion !== REFUND_LEDGER_NORMALIZATION_VERSION
+  ) {
+    return undefined;
+  }
+  const allocations = [
+    metadata.grossRefundCents,
+    metadata.taxRefundCents,
+    metadata.feeRefundCents,
+    metadata.refundCents,
+  ];
+  if (allocations.some((amount) => !isSafeNonnegativeInteger(amount))) return undefined;
+  if (
+    !Number.isSafeInteger(metadata.netRevenueDeltaCents) ||
+    Number(metadata.netRevenueDeltaCents) > 0
+  ) {
+    return undefined;
+  }
+  if (!Array.isArray(metadata.entries) || metadata.entries.length !== 2) return undefined;
+  const entries = metadata.entries as unknown[];
+  const normalizedEntries: RefundLedgerMetadata['entries'] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return undefined;
+    const candidate = entry as Record<string, unknown>;
+    if (
+      typeof candidate.account !== 'string' ||
+      (candidate.direction !== 'debit' && candidate.direction !== 'credit') ||
+      !isSafeNonnegativeInteger(candidate.amountCents)
+    ) {
+      return undefined;
+    }
+    normalizedEntries.push({
+      account: candidate.account,
+      direction: candidate.direction,
+      amountCents: candidate.amountCents,
+    });
+  }
+  const refundCents = Number(metadata.refundCents);
+  const debitCents = normalizedEntries
+    .filter((entry) => entry.direction === 'debit')
+    .reduce((sum, entry) => sum + entry.amountCents, 0);
+  const creditCents = normalizedEntries
+    .filter((entry) => entry.direction === 'credit')
+    .reduce((sum, entry) => sum + entry.amountCents, 0);
+  if (
+    debitCents !== refundCents ||
+    creditCents !== refundCents ||
+    !normalizedEntries.some(
+      (entry) =>
+        entry.account === 'refunds' &&
+        entry.direction === 'debit' &&
+        entry.amountCents === refundCents,
+    ) ||
+    !normalizedEntries.some(
+      (entry) =>
+        entry.account === 'cash' &&
+        entry.direction === 'credit' &&
+        entry.amountCents === refundCents,
+    )
+  ) {
+    return undefined;
+  }
+  const taxRefundCents = Number(metadata.taxRefundCents);
+  const feeRefundCents = Number(metadata.feeRefundCents);
+  const grossRefundCents = Number(metadata.grossRefundCents);
+  if (
+    grossRefundCents + taxRefundCents + feeRefundCents !== refundCents ||
+    Number(metadata.netRevenueDeltaCents) !== -Math.max(0, refundCents - taxRefundCents)
+  ) {
+    return undefined;
+  }
+  return {
+    providerRefundId: String(metadata.providerRefundId),
+    provider: String(metadata.provider),
+    requestIdempotencyKey: String(metadata.requestIdempotencyKey),
+    requestNonce: String(metadata.requestNonce),
+    refundReservationStatus: 'succeeded',
+    currency: String(metadata.currency),
+    grossRefundCents,
+    taxRefundCents,
+    feeRefundCents,
+    refundCents,
+    netRevenueDeltaCents: Number(metadata.netRevenueDeltaCents),
+    entries: normalizedEntries,
+    balanced: true,
+    ...(metadata.normalizationVersion === REFUND_LEDGER_NORMALIZATION_VERSION
+      ? { normalizationVersion: REFUND_LEDGER_NORMALIZATION_VERSION }
+      : {}),
+  };
+}
 
 function updatedRowCount(result: unknown): number {
   if (!Array.isArray(result)) return 0;
@@ -154,7 +421,10 @@ export async function processRefundActivity(input: {
         .forUpdate()
         .executeTakeFirst();
       if (!order) {
-        return { action: 'return', result: errResult('ORDER_NOT_FOUND', 'Order not found', false) };
+        return {
+          action: 'return',
+          result: errResult('ORDER_NOT_FOUND', 'Order not found', false),
+        };
       }
 
       const dbPi = order.payment_intent_id ? await piRepo.findById(order.payment_intent_id) : null;
@@ -187,7 +457,10 @@ export async function processRefundActivity(input: {
           .where('order_id', '=', order.id)
           .execute();
 
-        return { action: 'return', result: okResult({ providerRefundId, status: 'succeeded' }) };
+        return {
+          action: 'return',
+          result: okResult({ providerRefundId, status: 'succeeded' }),
+        };
       };
 
       if (existingForKey) {
@@ -527,71 +800,324 @@ export async function updateLedgerActivity(input: {
 }): Promise<WorkflowActivityResult<{ balanced: boolean }>> {
   const db = getActivityDb();
   try {
-    const orderRepo = new OrderRepository(db);
-    const order = await orderRepo.findById(input.orderId);
-    if (!order) {
-      return errResult('ORDER_NOT_FOUND', 'Order not found', false);
-    }
-    const refunded = Number(order.refunded_cents);
-    const total = Number(order.total_cents);
-    if (refunded > total) {
-      return okResult({ balanced: false });
-    }
+    return await db.transaction().execute(async (trx) => {
+      const orderRepo = new OrderRepository(trx as Database);
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', input.orderId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!order) {
+        return errResult('ORDER_NOT_FOUND', 'Order not found', false);
+      }
 
-    const timeline = await orderRepo.getTimeline(input.orderId);
-    const existing = timeline.find((event) => {
-      if (event.type !== 'ledger.refund') return false;
-      const metadata = parseMetadata(event.metadata);
-      return metadata.providerRefundId === input.providerRefundId;
+      const orderRefunds = (await trx
+        .selectFrom('refunds')
+        .selectAll()
+        .where('order_id', '=', input.orderId)
+        .forUpdate()
+        .execute()) as RefundRow[];
+      const refundNormalizations = orderRefunds
+        .filter(exactLegacyWebhookRefund)
+        .map((legacyRefund) => ({
+          original: legacyRefund,
+          normalized: normalizeLegacyWebhookRefund(legacyRefund),
+        }));
+      const normalizedOrderRefunds = orderRefunds.map(
+        (candidate) =>
+          refundNormalizations.find((item) => item.original.id === candidate.id)?.normalized ??
+          candidate,
+      );
+      const matchingSucceededRefunds = normalizedOrderRefunds.filter(
+        (candidate) =>
+          candidate.provider_refund_id === input.providerRefundId &&
+          candidate.status === 'succeeded',
+      );
+      if (matchingSucceededRefunds.length !== 1) {
+        return errResult(
+          'REFUND_LEDGER_SOURCE_INVALID',
+          'Ledger entries require a persisted succeeded refund for the same order',
+          false,
+        );
+      }
+      const [refund] = matchingSucceededRefunds;
+      const refundMetadata = parseMetadata(refund.metadata);
+      if (
+        !refund.provider ||
+        !refund.provider_refund_id ||
+        !refund.request_idempotency_key ||
+        !refund.request_nonce ||
+        !refund.currency ||
+        refund.currency !== order.currency ||
+        refundMetadata.refundReservationStatus !== 'succeeded' ||
+        refundMetadata.stripeRefundId !== refund.provider_refund_id ||
+        refundMetadata.stripeIdempotencyKey !== refund.request_idempotency_key ||
+        refundMetadata.refundNonce !== refund.request_nonce ||
+        !isSafeNonnegativeInteger(Number(refund.amount_cents)) ||
+        Number(refund.amount_cents) === 0 ||
+        !isSafeNonnegativeInteger(input.refundAmountCents)
+      ) {
+        return errResult(
+          'REFUND_LEDGER_SOURCE_INVALID',
+          'Ledger entries require a persisted succeeded refund for the same order',
+          false,
+        );
+      }
+      if (Number(refund.amount_cents) !== input.refundAmountCents) {
+        return errResult(
+          'REFUND_LEDGER_AMOUNT_CONFLICT',
+          'Ledger refund amount does not match the persisted provider refund',
+          false,
+        );
+      }
+
+      const refunded = Number(order.refunded_cents);
+      const total = Number(order.total_cents);
+      const taxSnapshots = await trx
+        .selectFrom('order_tax_snapshots')
+        .select(['tax_cents'])
+        .where('order_id', '=', input.orderId)
+        .execute();
+      const taxSnapshotAmounts = taxSnapshots.map((snapshot) => Number(snapshot.tax_cents));
+      const persistedTaxCents = taxSnapshotAmounts.reduce((sum, amount) => sum + amount, 0);
+      const taxBasisCents = persistedTaxCents > 0 ? persistedTaxCents : Number(order.tax_cents);
+      const feeBasisCents = Number(order.fee_cents);
+      const timeline = await trx
+        .selectFrom('order_timeline_events')
+        .selectAll()
+        .where('order_id', '=', input.orderId)
+        .orderBy('created_at', 'asc')
+        .forUpdate()
+        .execute();
+      const ledgerEvents = timeline.filter((event) => event.type === 'ledger.refund');
+      const ledgerNormalizations: Array<{
+        id: string;
+        originalMetadata: unknown;
+        metadata: RefundLedgerMetadata;
+      }> = [];
+      const invalidHistory = () =>
+        errResult(
+          'REFUND_LEDGER_HISTORY_INVALID',
+          'Persisted refund ledger history is malformed or inconsistent',
+          false,
+        );
+      if (
+        !isSafeNonnegativeInteger(total) ||
+        !isSafeNonnegativeInteger(refunded) ||
+        !isSafeNonnegativeInteger(taxBasisCents) ||
+        !isSafeNonnegativeInteger(feeBasisCents) ||
+        taxSnapshotAmounts.some((amount) => !isSafeNonnegativeInteger(amount))
+      ) {
+        return invalidHistory();
+      }
+
+      const ledgerMetadata: RefundLedgerMetadata[] = [];
+      const boundProviderRefundIds = new Set<string>();
+      let validatedRefundCents = 0;
+      let validatedTaxRefundCents = 0;
+      let validatedFeeRefundCents = 0;
+      for (const event of ledgerEvents) {
+        let metadata = parseRefundLedgerMetadata(event.metadata);
+        if (!metadata) {
+          const legacyMetadata = parseLegacyRefundLedgerMetadata(event.metadata);
+          if (legacyMetadata) {
+            const legacyBindings = normalizedOrderRefunds.filter(
+              (candidate) =>
+                candidate.status === 'succeeded' &&
+                candidate.provider_refund_id === legacyMetadata.providerRefundId &&
+                Number(candidate.amount_cents) === legacyMetadata.refundCents &&
+                candidate.currency === legacyMetadata.currency,
+            );
+            if (legacyBindings.length !== 1 || typeof event.id !== 'string') {
+              return invalidHistory();
+            }
+            const [legacyBinding] = legacyBindings;
+            if (!legacyBinding.request_idempotency_key || !legacyBinding.request_nonce) {
+              return invalidHistory();
+            }
+            metadata = parseRefundLedgerMetadata({
+              ...legacyMetadata,
+              provider: legacyBinding.provider,
+              requestIdempotencyKey: legacyBinding.request_idempotency_key,
+              requestNonce: legacyBinding.request_nonce,
+              refundReservationStatus: 'succeeded',
+              normalizationVersion: REFUND_LEDGER_NORMALIZATION_VERSION,
+            });
+            if (metadata) {
+              ledgerNormalizations.push({
+                id: event.id,
+                originalMetadata: event.metadata,
+                metadata,
+              });
+            }
+          }
+        }
+        if (!metadata || boundProviderRefundIds.has(metadata.providerRefundId)) {
+          return invalidHistory();
+        }
+        const boundRefunds = normalizedOrderRefunds.filter(
+          (candidate) =>
+            candidate.status === 'succeeded' &&
+            candidate.provider_refund_id === metadata.providerRefundId &&
+            candidate.provider === metadata.provider,
+        );
+        if (boundRefunds.length !== 1) return invalidHistory();
+        const [boundRefund] = boundRefunds;
+        const boundRefundMetadata = parseMetadata(boundRefund.metadata);
+        if (
+          !boundRefund.request_idempotency_key ||
+          !boundRefund.request_nonce ||
+          Number(boundRefund.amount_cents) !== metadata.refundCents ||
+          boundRefund.currency !== metadata.currency ||
+          metadata.currency !== order.currency ||
+          boundRefund.request_idempotency_key !== metadata.requestIdempotencyKey ||
+          boundRefund.request_nonce !== metadata.requestNonce ||
+          boundRefundMetadata.refundReservationStatus !== 'succeeded' ||
+          boundRefundMetadata.stripeRefundId !== metadata.providerRefundId ||
+          boundRefundMetadata.stripeIdempotencyKey !== metadata.requestIdempotencyKey ||
+          boundRefundMetadata.refundNonce !== metadata.requestNonce
+        ) {
+          return invalidHistory();
+        }
+        validatedRefundCents += metadata.refundCents;
+        validatedTaxRefundCents += metadata.taxRefundCents;
+        validatedFeeRefundCents += metadata.feeRefundCents;
+        if (
+          !Number.isSafeInteger(validatedRefundCents) ||
+          !Number.isSafeInteger(validatedTaxRefundCents) ||
+          !Number.isSafeInteger(validatedFeeRefundCents) ||
+          validatedRefundCents > total ||
+          validatedTaxRefundCents > taxBasisCents ||
+          validatedFeeRefundCents > feeBasisCents
+        ) {
+          return invalidHistory();
+        }
+        boundProviderRefundIds.add(metadata.providerRefundId);
+        ledgerMetadata.push(metadata);
+      }
+
+      for (const normalization of refundNormalizations) {
+        const originalMetadata = serializedJsonValue(normalization.original.metadata);
+        let update = trx
+          .updateTable('refunds')
+          .set({
+            request_idempotency_key: normalization.normalized.request_idempotency_key ?? null,
+            request_nonce: normalization.normalized.request_nonce ?? null,
+            metadata: String(normalization.normalized.metadata),
+            updated_at: new Date(),
+          })
+          .where('id', '=', normalization.original.id)
+          .where('status', '=', 'succeeded')
+          .where('request_nonce', 'is', null)
+          .where(
+            'request_idempotency_key',
+            '=',
+            String(normalization.original.request_idempotency_key),
+          );
+        update =
+          process.env.DB_DRIVER === 'mysql'
+            ? update.where(sql<boolean>`metadata = cast(${originalMetadata} as json)`)
+            : update.where('metadata', '=', originalMetadata);
+        const result = await update.execute();
+        if (updatedRowCount(result) !== 1) throw new RefundLedgerHistoryError();
+      }
+      for (const normalization of ledgerNormalizations) {
+        const originalMetadata = serializedJsonValue(normalization.originalMetadata);
+        let update = trx
+          .updateTable('order_timeline_events')
+          .set({ metadata: JSON.stringify(normalization.metadata) })
+          .where('id', '=', normalization.id)
+          .where('order_id', '=', input.orderId)
+          .where('type', '=', 'ledger.refund');
+        update =
+          process.env.DB_DRIVER === 'mysql'
+            ? update.where(sql<boolean>`metadata = cast(${originalMetadata} as json)`)
+            : update.where('metadata', '=', originalMetadata);
+        const result = await update.execute();
+        if (updatedRowCount(result) !== 1) throw new RefundLedgerHistoryError();
+      }
+
+      if (refunded > total) {
+        return okResult({ balanced: false });
+      }
+      const existing = ledgerMetadata.find(
+        (metadata) => metadata.providerRefundId === input.providerRefundId,
+      );
+      if (existing) {
+        return Number(existing.refundCents) === input.refundAmountCents
+          ? okResult({ balanced: true })
+          : errResult(
+              'REFUND_LEDGER_AMOUNT_CONFLICT',
+              'Existing ledger entry does not match the persisted provider refund',
+              false,
+            );
+      }
+
+      const refundAmount = input.refundAmountCents;
+      const priorRefundCents = validatedRefundCents;
+      const priorTaxRefundCents = validatedTaxRefundCents;
+      const priorFeeRefundCents = validatedFeeRefundCents;
+      if (priorRefundCents + refundAmount > total) {
+        return okResult({ balanced: false });
+      }
+      const cumulativeRefundCents = priorRefundCents + refundAmount;
+      const cumulativeRatio = total > 0 ? cumulativeRefundCents / total : 0;
+      const cumulativeTaxTarget = Math.min(
+        taxBasisCents,
+        Math.round(taxBasisCents * cumulativeRatio),
+      );
+      const cumulativeFeeTarget = Math.min(
+        feeBasisCents,
+        Math.round(feeBasisCents * cumulativeRatio),
+      );
+      const taxRefundCents = Math.max(
+        0,
+        Math.min(taxBasisCents - priorTaxRefundCents, cumulativeTaxTarget - priorTaxRefundCents),
+      );
+      const feeRefundCents = Math.max(
+        0,
+        Math.min(feeBasisCents - priorFeeRefundCents, cumulativeFeeTarget - priorFeeRefundCents),
+      );
+      const grossRefundCents = Math.max(0, refundAmount - taxRefundCents - feeRefundCents);
+      const netRevenueDeltaCents = -Math.max(0, refundAmount - taxRefundCents);
+
+      const debitCents = refundAmount;
+      const creditCents = refundAmount;
+      await orderRepo.addTimelineEvent(
+        input.orderId,
+        'ledger.refund',
+        `Ledger refund entry for ${refundAmount} cents`,
+        {
+          providerRefundId: input.providerRefundId,
+          provider: refund.provider,
+          requestIdempotencyKey: refund.request_idempotency_key ?? null,
+          requestNonce: refund.request_nonce ?? null,
+          refundReservationStatus: refundMetadata.refundReservationStatus ?? null,
+          currency: order.currency,
+          grossRefundCents,
+          taxRefundCents,
+          feeRefundCents,
+          refundCents: refundAmount,
+          netRevenueDeltaCents,
+          entries: [
+            { account: 'refunds', direction: 'debit', amountCents: debitCents },
+            { account: 'cash', direction: 'credit', amountCents: creditCents },
+          ],
+          balanced: debitCents === creditCents,
+        },
+      );
+
+      return okResult({ balanced: debitCents === creditCents });
     });
-    if (existing) {
-      return okResult({ balanced: true });
-    }
-
-    const refundAmount = input.refundAmountCents;
-    const ratio = total > 0 ? refundAmount / total : 0;
-    const taxSnapshots = await db
-      .selectFrom('order_tax_snapshots')
-      .select(['tax_cents'])
-      .where('order_id', '=', input.orderId)
-      .execute();
-    const persistedTaxCents = taxSnapshots.reduce(
-      (sum, snapshot) => sum + Number(snapshot.tax_cents),
-      0,
-    );
-    const taxBasisCents = persistedTaxCents > 0 ? persistedTaxCents : Number(order.tax_cents);
-    const taxRefundCents = Math.min(taxBasisCents, Math.round(taxBasisCents * ratio));
-    const feeRefundCents = Math.min(
-      Number(order.fee_cents),
-      Math.round(Number(order.fee_cents) * ratio),
-    );
-    const grossRefundCents = Math.max(0, refundAmount - taxRefundCents - feeRefundCents);
-    const netRevenueDeltaCents = -Math.max(0, refundAmount - taxRefundCents);
-
-    const debitCents = refundAmount;
-    const creditCents = refundAmount;
-    await orderRepo.addTimelineEvent(
-      input.orderId,
-      'ledger.refund',
-      `Ledger refund entry for ${refundAmount} cents`,
-      {
-        providerRefundId: input.providerRefundId,
-        currency: order.currency,
-        grossRefundCents,
-        taxRefundCents,
-        feeRefundCents,
-        refundCents: refundAmount,
-        netRevenueDeltaCents,
-        entries: [
-          { account: 'refunds', direction: 'debit', amountCents: debitCents },
-          { account: 'cash', direction: 'credit', amountCents: creditCents },
-        ],
-        balanced: debitCents === creditCents,
-      },
-    );
-
-    return okResult({ balanced: debitCents === creditCents });
   } catch (err) {
+    if (err instanceof RefundLedgerHistoryError) {
+      return errResult(
+        'REFUND_LEDGER_HISTORY_INVALID',
+        'Persisted refund ledger history is malformed or inconsistent',
+        false,
+      );
+    }
     return errResult(
       'LEDGER_UPDATE_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
@@ -720,7 +1246,10 @@ export async function voidTicketsActivity(input: {
         await trx
           .updateTable('refunds')
           .set({
-            metadata: JSON.stringify({ ...refundMetadata, voidedTicketIds: wonTicketIds }),
+            metadata: JSON.stringify({
+              ...refundMetadata,
+              voidedTicketIds: wonTicketIds,
+            }),
             updated_at: now,
           })
           .where('id', '=', refund.id)
@@ -911,7 +1440,10 @@ export async function restoreInventoryActivity(input: {
               // eslint-disable-next-line no-await-in-loop -- partial refund restoration walks matching holds in order until the voided quantity is restored.
               await trx
                 .updateTable('inventory_pools')
-                .set((eb) => ({ sold_count: eb('sold_count', '-', restoreQty), updated_at: now }))
+                .set((eb) => ({
+                  sold_count: eb('sold_count', '-', restoreQty),
+                  updated_at: now,
+                }))
                 .where('id', '=', hold.inventory_pool_id)
                 .execute();
               count += restoreQty;
@@ -1028,7 +1560,12 @@ export async function notifyRefundActivity(input: {
             .executeTakeFirst()
         : Promise.resolve(undefined),
     ]);
-    const context = buildTransactionalMergeTagContext({ order, event, brand, refund: refundRow });
+    const context = buildTransactionalMergeTagContext({
+      order,
+      event,
+      brand,
+      refund: refundRow,
+    });
 
     const job = await new EmailJobRepository(db).create({
       tenantId: input.tenantId,

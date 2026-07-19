@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  MIGRATION_COMMIT_STAGES,
   MIGRATION_SIDE_EFFECT_POLICY,
   processMigrationStageActivity,
+  recordMigrationProgressActivity,
   registerMigrationActivityService,
   type MigrationActivityService,
 } from '../activities/migration.js';
@@ -151,6 +153,48 @@ describe('migration activities', () => {
         chunkSize: 100,
       }),
     ).rejects.toThrow('MIGRATION_ACTIVITY_SERVICE_UNAVAILABLE');
+  });
+
+  it('projects workflow state onto the declared progress contract', async () => {
+    const implementation = service();
+    unregisters.push(registerMigrationActivityService(implementation));
+
+    await recordMigrationProgressActivity({
+      tenantId: 'tenant_1',
+      organizationId: 'org_1',
+      jobId: 'import_1',
+      stage: 'venues',
+      stageIndex: 1,
+      stageCount: MIGRATION_COMMIT_STAGES.length,
+      processed: 5,
+      created: 2,
+      updated: 1,
+      skipped: 1,
+      conflicts: 1,
+      failed: 0,
+      status: 'committing',
+      cancellationRequested: false,
+    } as Parameters<typeof recordMigrationProgressActivity>[0]);
+
+    expect(implementation.recordProgress).toHaveBeenCalledWith(
+      {
+        tenantId: 'tenant_1',
+        organizationId: 'org_1',
+        jobId: 'import_1',
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      },
+      {
+        stage: 'venues',
+        stageIndex: 1,
+        stageCount: MIGRATION_COMMIT_STAGES.length,
+        processed: 5,
+        created: 2,
+        updated: 1,
+        skipped: 1,
+        conflicts: 1,
+        failed: 0,
+      },
+    );
   });
 
   it('rejects invalid chunk sizes before invoking commit code', async () => {

@@ -41,9 +41,10 @@ const dbState = vi.hoisted(() => ({
   existingJob: undefined as Record<string, unknown> | undefined,
   createdJobs: [] as Record<string, unknown>[],
   updatedJobs: [] as Array<{ id: string; input: Record<string, unknown> }>,
-  publishedTemplate: { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } } as
-    | { version: { id: string }; document: { id: string } }
-    | undefined,
+  publishedTemplate: {
+    version: { id: 'ntv_1' },
+    document: { id: 'cdoc_1' },
+  } as { version: { id: string }; document: { id: string } } | undefined,
   lineItems: [] as Record<string, unknown>[],
   tickets: [] as Record<string, unknown>[],
   checkoutHolds: [] as Record<string, unknown>[],
@@ -62,6 +63,7 @@ const dbState = vi.hoisted(() => ({
   stripeRefunds: [] as Record<string, unknown>[],
   transactionQueue: Promise.resolve() as Promise<void>,
   transactionDepth: 0,
+  beforeRefundNormalizationUpdate: undefined as (() => void) | undefined,
   destroy: vi.fn(),
 }));
 
@@ -210,6 +212,8 @@ vi.mock('@tixkit/db', () => {
       async execute() {
         if (table === 'tickets') return dbState.tickets.filter((row) => matches(row, filters));
         if (table === 'refunds') return dbState.refunds.filter((row) => matches(row, filters));
+        if (table === 'order_timeline_events')
+          return dbState.timeline.filter((row) => matches(row, filters));
         if (table === 'checkout_holds')
           return dbState.checkoutHolds.filter((row) => matches(row, filters));
         return [];
@@ -227,6 +231,7 @@ vi.mock('@tixkit/db', () => {
     if (table === 'checkout_holds') return dbState.checkoutHolds;
     if (table === 'inventory_pools') return dbState.inventoryPools;
     if (table === 'refunds') return dbState.refunds;
+    if (table === 'order_timeline_events') return dbState.timeline;
     return [];
   }
 
@@ -252,7 +257,11 @@ vi.mock('@tixkit/db', () => {
             'operator' in value &&
             'value' in value
           ) {
-            const expression = value as { column: string; operator: string; value: unknown };
+            const expression = value as {
+              column: string;
+              operator: string;
+              value: unknown;
+            };
             const current = Number(row[expression.column] ?? 0);
             const operand = Number(expression.value ?? 0);
             return [key, expression.operator === '-' ? current - operand : current + operand];
@@ -271,6 +280,11 @@ vi.mock('@tixkit/db', () => {
         return query;
       },
       async execute() {
+        if (table === 'refunds' && dbState.beforeRefundNormalizationUpdate) {
+          const interleave = dbState.beforeRefundNormalizationUpdate;
+          dbState.beforeRefundNormalizationUpdate = undefined;
+          interleave();
+        }
         const rows = rowsForTable(table).filter((row) => matches(row, filters));
         if (rows.length === 0) {
           const values =
@@ -388,12 +402,18 @@ function expectedLedgerAllocation(input: {
   const feeRefundCents = Math.min(input.fee, Math.round(input.fee * ratio));
   const grossRefundCents = Math.max(0, input.refund - taxRefundCents - feeRefundCents);
   const netRevenueDeltaCents = -Math.max(0, input.refund - taxRefundCents);
-  return { taxRefundCents, feeRefundCents, grossRefundCents, netRevenueDeltaCents };
+  return {
+    taxRefundCents,
+    feeRefundCents,
+    grossRefundCents,
+    netRevenueDeltaCents,
+  };
 }
 
 beforeEach(() => {
   dbState.transactionQueue = Promise.resolve();
   dbState.transactionDepth = 0;
+  dbState.beforeRefundNormalizationUpdate = undefined;
   dbState.checkoutHolds = [];
   dbState.inventoryPools = [];
   dbState.existingJob = undefined;
@@ -430,9 +450,24 @@ describe('voidTicketsActivity', () => {
 
   it('voids all valid tickets on full refund', async () => {
     dbState.tickets = [
-      { id: 'tkt_1', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
-      { id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
-      { id: 'tkt_3', order_id: 'ord_1', ticket_type_id: 'tt_2', status: 'valid' },
+      {
+        id: 'tkt_1',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
+      {
+        id: 'tkt_2',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
+      {
+        id: 'tkt_3',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_2',
+        status: 'valid',
+      },
     ];
     dbState.lineItems = [
       { ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 2 },
@@ -460,9 +495,24 @@ describe('voidTicketsActivity', () => {
     // Order: 2x $50 tickets (tt_1) + 1x $20 ticket (tt_2) = $120 total
     // Refund $50 → should void 1x $50 ticket (from tt_1, most expensive first)
     dbState.tickets = [
-      { id: 'tkt_1', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
-      { id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
-      { id: 'tkt_3', order_id: 'ord_1', ticket_type_id: 'tt_2', status: 'valid' },
+      {
+        id: 'tkt_1',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
+      {
+        id: 'tkt_2',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
+      {
+        id: 'tkt_3',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_2',
+        status: 'valid',
+      },
     ];
     dbState.lineItems = [
       { ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 2 },
@@ -484,8 +534,18 @@ describe('voidTicketsActivity', () => {
   it('voids from cheaper ticket type when refund amount matches it', async () => {
     // Refund $20 → should void 1x $20 ticket (from tt_2)
     dbState.tickets = [
-      { id: 'tkt_1', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
-      { id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_2', status: 'valid' },
+      {
+        id: 'tkt_1',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
+      {
+        id: 'tkt_2',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_2',
+        status: 'valid',
+      },
     ];
     dbState.lineItems = [
       { ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 1 },
@@ -507,8 +567,18 @@ describe('voidTicketsActivity', () => {
 
   it('does not void already-voided tickets', async () => {
     dbState.tickets = [
-      { id: 'tkt_1', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'void' },
-      { id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
+      {
+        id: 'tkt_1',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'void',
+      },
+      {
+        id: 'tkt_2',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
     ];
     dbState.lineItems = [{ ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 2 }];
 
@@ -526,8 +596,18 @@ describe('voidTicketsActivity', () => {
 
   it('voids distinct tickets for concurrent partial refund activities', async () => {
     dbState.tickets = [
-      { id: 'tkt_1', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
-      { id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
+      {
+        id: 'tkt_1',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
+      {
+        id: 'tkt_2',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'valid',
+      },
     ];
     dbState.lineItems = [{ ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 2 }];
     dbState.refunds = [
@@ -626,7 +706,14 @@ describe('restoreInventoryActivity', () => {
       },
     ];
     dbState.inventoryPools = [{ id: 'pool_1', sold_count: 2 }];
-    dbState.tickets = [{ id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'void' }];
+    dbState.tickets = [
+      {
+        id: 'tkt_2',
+        order_id: 'ord_1',
+        ticket_type_id: 'tt_1',
+        status: 'void',
+      },
+    ];
     dbState.updatedTickets = [];
   });
 
@@ -1244,7 +1331,10 @@ describe('processRefundActivity - Stripe Connect', () => {
       provider_intent_id: 'pi_stripe_1',
       payment_account_id: 'pa_1',
     };
-    dbState.paymentAccount = { provider: 'stripe_connect', provider_account_id: 'acct_connect_1' };
+    dbState.paymentAccount = {
+      provider: 'stripe_connect',
+      provider_account_id: 'acct_connect_1',
+    };
     process.env.STRIPE_SECRET_KEY = 'sk_test_1';
   });
 
@@ -1307,6 +1397,25 @@ describe('updateLedgerActivity', () => {
       payment_intent_id: 'pi_1',
     };
     dbState.timeline = [];
+    dbState.refunds = [
+      {
+        id: 'rfd_ledger_1',
+        order_id: 'ord_1',
+        provider: 'stripe_capture',
+        provider_refund_id: 're_stripe_1',
+        request_idempotency_key: 'refund-key:refund-nonce',
+        request_nonce: 'refund-nonce',
+        amount_cents: 5000,
+        currency: 'USD',
+        status: 'succeeded',
+        metadata: JSON.stringify({
+          stripeIdempotencyKey: 'refund-key:refund-nonce',
+          stripeRefundId: 're_stripe_1',
+          refundNonce: 'refund-nonce',
+          refundReservationStatus: 'succeeded',
+        }),
+      },
+    ];
   });
 
   it('writes a balanced refund ledger event with financial allocation', async () => {
@@ -1357,11 +1466,25 @@ describe('updateLedgerActivity', () => {
         refunded_cents: scenario.refund,
       };
       dbState.timeline = [];
+      const providerRefundId = `re_generated_${scenario.total}_${scenario.refund}`;
+      dbState.refunds = [
+        {
+          ...dbState.refunds[0],
+          provider_refund_id: providerRefundId,
+          amount_cents: scenario.refund,
+          metadata: JSON.stringify({
+            stripeIdempotencyKey: 'refund-key:refund-nonce',
+            stripeRefundId: providerRefundId,
+            refundNonce: 'refund-nonce',
+            refundReservationStatus: 'succeeded',
+          }),
+        },
+      ];
 
       const result = await updateLedgerActivity({
         orderId: 'ord_1',
         refundAmountCents: scenario.refund,
-        providerRefundId: `re_generated_${scenario.total}_${scenario.refund}`,
+        providerRefundId,
       });
 
       expect(result.ok).toBe(true);
@@ -1404,6 +1527,19 @@ describe('updateLedgerActivity', () => {
       refunded_cents: 10_001,
     };
     dbState.timeline = [];
+    dbState.refunds = [
+      {
+        ...dbState.refunds[0],
+        provider_refund_id: 're_over_refunded',
+        amount_cents: 1,
+        metadata: JSON.stringify({
+          stripeIdempotencyKey: 'refund-key:refund-nonce',
+          stripeRefundId: 're_over_refunded',
+          refundNonce: 'refund-nonce',
+          refundReservationStatus: 'succeeded',
+        }),
+      },
+    ];
 
     const result = await updateLedgerActivity({
       orderId: 'ord_1',
@@ -1413,6 +1549,574 @@ describe('updateLedgerActivity', () => {
 
     expect(result).toEqual({ ok: true, value: { balanced: false } });
     expect(dbState.timeline).toHaveLength(0);
+  });
+
+  it('atomically deduplicates simultaneous activity retries', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        updateLedgerActivity({
+          orderId: 'ord_1',
+          refundAmountCents: 5000,
+          providerRefundId: 're_stripe_1',
+        }),
+      ),
+    );
+
+    expect(results).toEqual(
+      Array.from({ length: 8 }, () => ({
+        ok: true,
+        value: { balanced: true },
+      })),
+    );
+    expect(dbState.timeline).toHaveLength(1);
+  });
+
+  it('caps cumulative allocations across partial refunds and preserves refund identity', async () => {
+    dbState.order = {
+      ...dbState.order,
+      total_cents: 100,
+      tax_cents: 7,
+      fee_cents: 3,
+      refunded_cents: 100,
+    };
+    dbState.refunds = [
+      {
+        ...dbState.refunds[0],
+        id: 'rfd_partial_1',
+        provider_refund_id: 're_partial_1',
+        request_idempotency_key: 'refund-key-1:nonce-1',
+        request_nonce: 'nonce-1',
+        amount_cents: 50,
+        metadata: JSON.stringify({
+          stripeIdempotencyKey: 'refund-key-1:nonce-1',
+          stripeRefundId: 're_partial_1',
+          refundNonce: 'nonce-1',
+          refundReservationStatus: 'succeeded',
+        }),
+      },
+      {
+        ...dbState.refunds[0],
+        id: 'rfd_partial_2',
+        provider_refund_id: 're_partial_2',
+        request_idempotency_key: 'refund-key-2:nonce-2',
+        request_nonce: 'nonce-2',
+        amount_cents: 50,
+        metadata: JSON.stringify({
+          stripeIdempotencyKey: 'refund-key-2:nonce-2',
+          stripeRefundId: 're_partial_2',
+          refundNonce: 'nonce-2',
+          refundReservationStatus: 'succeeded',
+        }),
+      },
+    ];
+
+    const results = await Promise.all([
+      updateLedgerActivity({
+        orderId: 'ord_1',
+        refundAmountCents: 50,
+        providerRefundId: 're_partial_1',
+      }),
+      updateLedgerActivity({
+        orderId: 'ord_1',
+        refundAmountCents: 50,
+        providerRefundId: 're_partial_2',
+      }),
+    ]);
+
+    expect(results).toEqual([
+      { ok: true, value: { balanced: true } },
+      { ok: true, value: { balanced: true } },
+    ]);
+    const metadata = dbState.timeline.map(
+      (event) => JSON.parse(String(event.metadata)) as Record<string, unknown>,
+    );
+    expect(metadata).toHaveLength(2);
+    expect(metadata.reduce((sum, entry) => sum + Number(entry.taxRefundCents), 0)).toBe(7);
+    expect(metadata.reduce((sum, entry) => sum + Number(entry.feeRefundCents), 0)).toBe(3);
+    expect(metadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerRefundId: 're_partial_1',
+          provider: 'stripe_capture',
+          requestIdempotencyKey: 'refund-key-1:nonce-1',
+          requestNonce: 'nonce-1',
+        }),
+        expect.objectContaining({
+          providerRefundId: 're_partial_2',
+          provider: 'stripe_capture',
+          requestIdempotencyKey: 'refund-key-2:nonce-2',
+          requestNonce: 'nonce-2',
+        }),
+      ]),
+    );
+  });
+
+  it('rejects missing, non-succeeded, cross-order, and amount-conflicting refund sources', async () => {
+    const baseRefund = dbState.refunds[0];
+    const cases = [
+      { refund: undefined, amount: 5000, providerRefundId: 're_missing' },
+      {
+        refund: { ...baseRefund, status: 'pending' },
+        amount: 5000,
+        providerRefundId: 're_stripe_1',
+      },
+      {
+        refund: { ...baseRefund, order_id: 'ord_other' },
+        amount: 5000,
+        providerRefundId: 're_stripe_1',
+      },
+    ];
+
+    for (const scenario of cases) {
+      dbState.refunds = scenario.refund ? [scenario.refund] : [];
+      const result = await updateLedgerActivity({
+        orderId: 'ord_1',
+        refundAmountCents: scenario.amount,
+        providerRefundId: scenario.providerRefundId,
+      });
+      expect(result).toEqual({
+        ok: false,
+        errorCode: 'REFUND_LEDGER_SOURCE_INVALID',
+        message: 'Ledger entries require a persisted succeeded refund for the same order',
+        retryable: false,
+      });
+    }
+
+    dbState.refunds = [{ ...baseRefund, amount_cents: 4999 }];
+    const conflict = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 5000,
+      providerRefundId: 're_stripe_1',
+    });
+    expect(conflict).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_AMOUNT_CONFLICT',
+      message: 'Ledger refund amount does not match the persisted provider refund',
+      retryable: false,
+    });
+    expect(dbState.timeline).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      name: 'malformed JSON',
+      mutate: () => '{',
+    },
+    {
+      name: 'NaN allocation',
+      mutate: (metadata: Record<string, unknown>) => ({ ...metadata, refundCents: Number.NaN }),
+    },
+    {
+      name: 'missing provider identity',
+      mutate: (metadata: Record<string, unknown>) => ({ ...metadata, provider: undefined }),
+    },
+    {
+      name: 'missing refund identity',
+      mutate: (metadata: Record<string, unknown>) => ({
+        ...metadata,
+        providerRefundId: undefined,
+      }),
+    },
+    {
+      name: 'missing request identity',
+      mutate: (metadata: Record<string, unknown>) => ({
+        ...metadata,
+        requestIdempotencyKey: undefined,
+      }),
+    },
+    {
+      name: 'negative allocation',
+      mutate: (metadata: Record<string, unknown>) => ({ ...metadata, taxRefundCents: -1 }),
+    },
+    {
+      name: 'unsafe allocation integer',
+      mutate: (metadata: Record<string, unknown>) => ({
+        ...metadata,
+        taxRefundCents: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    },
+    {
+      name: 'unbalanced marker',
+      mutate: (metadata: Record<string, unknown>) => ({ ...metadata, balanced: false }),
+    },
+    {
+      name: 'malformed journal entries',
+      mutate: (metadata: Record<string, unknown>) => ({
+        ...metadata,
+        entries: [{ account: 'refunds', direction: 'debit', amountCents: 5000 }],
+      }),
+    },
+  ])('fails closed on $name in prior ledger history', async ({ mutate }) => {
+    const first = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 5000,
+      providerRefundId: 're_stripe_1',
+    });
+    expect(first).toEqual({ ok: true, value: { balanced: true } });
+    const originalMetadata = JSON.parse(String(dbState.timeline[0].metadata)) as Record<
+      string,
+      unknown
+    >;
+    dbState.timeline[0].metadata = mutate(originalMetadata);
+    dbState.refunds.push({
+      ...dbState.refunds[0],
+      id: 'rfd_ledger_2',
+      provider_refund_id: 're_stripe_2',
+      request_idempotency_key: 'refund-key-2:refund-nonce-2',
+      request_nonce: 'refund-nonce-2',
+      amount_cents: 1000,
+      metadata: JSON.stringify({
+        stripeIdempotencyKey: 'refund-key-2:refund-nonce-2',
+        stripeRefundId: 're_stripe_2',
+        refundNonce: 'refund-nonce-2',
+        refundReservationStatus: 'succeeded',
+      }),
+    });
+
+    const result = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 1000,
+      providerRefundId: 're_stripe_2',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_HISTORY_INVALID',
+      message: 'Persisted refund ledger history is malformed or inconsistent',
+      retryable: false,
+    });
+    expect(dbState.timeline).toHaveLength(1);
+  });
+
+  it('fails closed when prior ledger identity no longer binds to its succeeded refund', async () => {
+    await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 5000,
+      providerRefundId: 're_stripe_1',
+    });
+    dbState.refunds[0].request_nonce = 'changed-nonce';
+    dbState.refunds.push({
+      ...dbState.refunds[0],
+      id: 'rfd_ledger_2',
+      provider_refund_id: 're_stripe_2',
+      request_idempotency_key: 'refund-key-2:refund-nonce-2',
+      request_nonce: 'refund-nonce-2',
+      amount_cents: 1000,
+      metadata: JSON.stringify({
+        stripeIdempotencyKey: 'refund-key-2:refund-nonce-2',
+        stripeRefundId: 're_stripe_2',
+        refundNonce: 'refund-nonce-2',
+        refundReservationStatus: 'succeeded',
+      }),
+    });
+
+    const result = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 1000,
+      providerRefundId: 're_stripe_2',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_HISTORY_INVALID',
+      message: 'Persisted refund ledger history is malformed or inconsistent',
+      retryable: false,
+    });
+    expect(dbState.timeline).toHaveLength(1);
+  });
+
+  it('fails closed when cumulative prior allocations exceed the order bases', async () => {
+    dbState.order = {
+      ...dbState.order,
+      total_cents: 15_000,
+      tax_cents: 800,
+      fee_cents: 300,
+      refunded_cents: 11_000,
+    };
+    const makeRefund = (
+      id: string,
+      providerRefundId: string,
+      requestNonce: string,
+      amount: number,
+    ) => ({
+      ...dbState.refunds[0],
+      id,
+      provider_refund_id: providerRefundId,
+      request_idempotency_key: `refund-key:${requestNonce}`,
+      request_nonce: requestNonce,
+      amount_cents: amount,
+      metadata: JSON.stringify({
+        stripeIdempotencyKey: `refund-key:${requestNonce}`,
+        stripeRefundId: providerRefundId,
+        refundNonce: requestNonce,
+        refundReservationStatus: 'succeeded',
+      }),
+    });
+    dbState.refunds = [
+      makeRefund('rfd_prior_1', 're_prior_1', 'nonce-prior-1', 5000),
+      makeRefund('rfd_prior_2', 're_prior_2', 'nonce-prior-2', 5000),
+      makeRefund('rfd_current', 're_current', 'nonce-current', 1000),
+    ];
+    const makeLedgerMetadata = (providerRefundId: string, requestNonce: string) =>
+      JSON.stringify({
+        providerRefundId,
+        provider: 'stripe_capture',
+        requestIdempotencyKey: `refund-key:${requestNonce}`,
+        requestNonce,
+        refundReservationStatus: 'succeeded',
+        currency: 'USD',
+        grossRefundCents: 4400,
+        taxRefundCents: 500,
+        feeRefundCents: 100,
+        refundCents: 5000,
+        netRevenueDeltaCents: -4500,
+        entries: [
+          { account: 'refunds', direction: 'debit', amountCents: 5000 },
+          { account: 'cash', direction: 'credit', amountCents: 5000 },
+        ],
+        balanced: true,
+      });
+    dbState.timeline = [
+      {
+        order_id: 'ord_1',
+        type: 'ledger.refund',
+        metadata: makeLedgerMetadata('re_prior_1', 'nonce-prior-1'),
+      },
+      {
+        order_id: 'ord_1',
+        type: 'ledger.refund',
+        metadata: makeLedgerMetadata('re_prior_2', 'nonce-prior-2'),
+      },
+    ];
+
+    const result = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 1000,
+      providerRefundId: 're_current',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_HISTORY_INVALID',
+      message: 'Persisted refund ledger history is malformed or inconsistent',
+      retryable: false,
+    });
+    expect(dbState.timeline).toHaveLength(2);
+  });
+
+  it('transactionally normalizes the exact legacy webhook refund and ledger shape', async () => {
+    dbState.refunds = [
+      {
+        ...dbState.refunds[0],
+        provider: 'stripe',
+        provider_refund_id: 're_legacy_head',
+        request_idempotency_key: 'provider:stripe:re_legacy_head',
+        request_nonce: null,
+        amount_cents: 5000,
+        reason: 'Stripe webhook',
+        metadata: JSON.stringify({
+          voidedTicketIds: ['tkt_legacy_1', 'tkt_legacy_2'],
+          inventoryRestored: true,
+          inventoryRestoredCount: 2,
+          inventoryRestoredByTicketType: { tt_legacy: 2 },
+        }),
+      },
+    ];
+    dbState.timeline = [
+      {
+        id: 'ote_legacy_head',
+        order_id: 'ord_1',
+        type: 'ledger.refund',
+        metadata: JSON.stringify({
+          providerRefundId: 're_legacy_head',
+          currency: 'USD',
+          grossRefundCents: 4500,
+          taxRefundCents: 400,
+          feeRefundCents: 100,
+          refundCents: 5000,
+          netRevenueDeltaCents: -4600,
+          entries: [
+            { account: 'refunds', direction: 'debit', amountCents: 5000 },
+            { account: 'cash', direction: 'credit', amountCents: 5000 },
+          ],
+          balanced: true,
+        }),
+      },
+    ];
+
+    const result = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 5000,
+      providerRefundId: 're_legacy_head',
+    });
+
+    expect(result).toEqual({ ok: true, value: { balanced: true } });
+    expect(dbState.timeline).toHaveLength(1);
+    expect(dbState.refunds[0]).toMatchObject({
+      request_idempotency_key: 'provider:stripe:re_legacy_head',
+      request_nonce: 'legacy-webhook-v1:rfd_ledger_1',
+    });
+    expect(JSON.parse(String(dbState.refunds[0].metadata))).toMatchObject({
+      voidedTicketIds: ['tkt_legacy_1', 'tkt_legacy_2'],
+      inventoryRestored: true,
+      inventoryRestoredCount: 2,
+      inventoryRestoredByTicketType: { tt_legacy: 2 },
+      refundReservationStatus: 'succeeded',
+      stripeRefundId: 're_legacy_head',
+      stripeIdempotencyKey: 'provider:stripe:re_legacy_head',
+      refundNonce: 'legacy-webhook-v1:rfd_ledger_1',
+      ledgerNormalizationVersion: 'legacy-head-refund-ledger-v1',
+    });
+    expect(JSON.parse(String(dbState.timeline[0].metadata))).toMatchObject({
+      providerRefundId: 're_legacy_head',
+      provider: 'stripe',
+      requestIdempotencyKey: 'provider:stripe:re_legacy_head',
+      requestNonce: 'legacy-webhook-v1:rfd_ledger_1',
+      normalizationVersion: 'legacy-head-refund-ledger-v1',
+      refundCents: 5000,
+      balanced: true,
+    });
+  });
+
+  it('aborts normalization when concurrent inventory evidence wins the metadata CAS', async () => {
+    const originalMetadata = JSON.stringify({ voidedTicketIds: ['tkt_legacy_1'] });
+    dbState.refunds = [
+      {
+        ...dbState.refunds[0],
+        provider: 'stripe',
+        provider_refund_id: 're_legacy_race',
+        request_idempotency_key: 'provider:stripe:re_legacy_race',
+        request_nonce: null,
+        reason: 'Stripe webhook',
+        metadata: originalMetadata,
+      },
+    ];
+    const legacyLedgerMetadata = JSON.stringify({
+      providerRefundId: 're_legacy_race',
+      currency: 'USD',
+      grossRefundCents: 4500,
+      taxRefundCents: 400,
+      feeRefundCents: 100,
+      refundCents: 5000,
+      netRevenueDeltaCents: -4600,
+      entries: [
+        { account: 'refunds', direction: 'debit', amountCents: 5000 },
+        { account: 'cash', direction: 'credit', amountCents: 5000 },
+      ],
+      balanced: true,
+    });
+    dbState.timeline = [
+      {
+        id: 'ote_legacy_race',
+        order_id: 'ord_1',
+        type: 'ledger.refund',
+        metadata: legacyLedgerMetadata,
+      },
+    ];
+    dbState.beforeRefundNormalizationUpdate = () => {
+      dbState.refunds[0].metadata = JSON.stringify({
+        voidedTicketIds: ['tkt_legacy_1'],
+        inventoryRestored: true,
+        inventoryRestoredCount: 1,
+        inventoryRestoredByTicketType: { tt_legacy: 1 },
+      });
+    };
+
+    const result = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 5000,
+      providerRefundId: 're_legacy_race',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_HISTORY_INVALID',
+      message: 'Persisted refund ledger history is malformed or inconsistent',
+      retryable: false,
+    });
+    expect(JSON.parse(String(dbState.refunds[0].metadata))).toMatchObject({
+      inventoryRestored: true,
+      inventoryRestoredCount: 1,
+      inventoryRestoredByTicketType: { tt_legacy: 1 },
+    });
+    expect(dbState.refunds[0].request_nonce).toBeNull();
+    expect(dbState.timeline[0].metadata).toBe(legacyLedgerMetadata);
+  });
+
+  it('quarantines ambiguous legacy refund bindings without persisting normalization', async () => {
+    const legacyRefund = {
+      ...dbState.refunds[0],
+      provider: 'stripe',
+      provider_refund_id: 're_ambiguous',
+      request_idempotency_key: 'provider:stripe:re_ambiguous',
+      request_nonce: null,
+      reason: 'Stripe webhook',
+      metadata: '{}',
+    };
+    dbState.refunds = [
+      legacyRefund,
+      {
+        ...dbState.refunds[0],
+        id: 'rfd_ambiguous_2',
+        provider: 'stripe_capture',
+        provider_refund_id: 're_ambiguous',
+        metadata: JSON.stringify({
+          stripeIdempotencyKey: 'refund-key:refund-nonce',
+          stripeRefundId: 're_ambiguous',
+          refundNonce: 'refund-nonce',
+          refundReservationStatus: 'succeeded',
+        }),
+      },
+      {
+        ...dbState.refunds[0],
+        id: 'rfd_current',
+        provider_refund_id: 're_current',
+        amount_cents: 1000,
+        metadata: JSON.stringify({
+          stripeIdempotencyKey: 'refund-key:refund-nonce',
+          stripeRefundId: 're_current',
+          refundNonce: 'refund-nonce',
+          refundReservationStatus: 'succeeded',
+        }),
+      },
+    ];
+    const legacyMetadata = JSON.stringify({
+      providerRefundId: 're_ambiguous',
+      currency: 'USD',
+      grossRefundCents: 4500,
+      taxRefundCents: 400,
+      feeRefundCents: 100,
+      refundCents: 5000,
+      netRevenueDeltaCents: -4600,
+      entries: [
+        { account: 'refunds', direction: 'debit', amountCents: 5000 },
+        { account: 'cash', direction: 'credit', amountCents: 5000 },
+      ],
+      balanced: true,
+    });
+    dbState.timeline = [
+      {
+        id: 'ote_ambiguous',
+        order_id: 'ord_1',
+        type: 'ledger.refund',
+        metadata: legacyMetadata,
+      },
+    ];
+
+    const result = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 1000,
+      providerRefundId: 're_current',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_HISTORY_INVALID',
+      message: 'Persisted refund ledger history is malformed or inconsistent',
+      retryable: false,
+    });
+    expect(dbState.refunds[0]).toMatchObject({ request_nonce: null, metadata: '{}' });
+    expect(dbState.timeline[0].metadata).toBe(legacyMetadata);
   });
 });
 
@@ -1443,7 +2147,10 @@ describe('notifyRefundActivity - idempotency key includes providerRefundId', () 
         created_at: new Date('2027-01-15T10:00:00.000Z'),
       },
     ];
-    dbState.publishedTemplate = { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } };
+    dbState.publishedTemplate = {
+      version: { id: 'ntv_1' },
+      document: { id: 'cdoc_1' },
+    };
     dbState.createdJobs = [];
     dbState.updatedJobs = [];
     dbState.existingJob = undefined;
@@ -1511,7 +2218,10 @@ describe('notifyRefundActivity - idempotency key includes providerRefundId', () 
       template_version_id: 'ntv_1',
       to_email: 'buyer@test.com',
       to_name: null,
-      variables: JSON.stringify({ notificationType: 'transactional', orderId: 'ord_1' }),
+      variables: JSON.stringify({
+        notificationType: 'transactional',
+        orderId: 'ord_1',
+      }),
       provider_route_id: 'epr_1',
       status: 'queued',
       workflow_id: null,
@@ -1526,7 +2236,10 @@ describe('notifyRefundActivity - idempotency key includes providerRefundId', () 
       providerRefundId: 're_stripe_abc',
     });
 
-    expect(result).toEqual({ ok: true, value: { notified: true, jobId: 'emj_existing' } });
+    expect(result).toEqual({
+      ok: true,
+      value: { notified: true, jobId: 'emj_existing' },
+    });
     expect(dbState.createdJobs).toHaveLength(0);
     expect(temporalState.workflowStart).toHaveBeenCalledWith(
       expect.any(Function),

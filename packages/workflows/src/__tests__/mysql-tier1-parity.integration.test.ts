@@ -7,7 +7,11 @@ import {
   reconcilePaymentActivity,
   reconcileRefundActivity,
 } from '../activities/payment-reconciliation.js';
-import { processRefundActivity, updateLedgerActivity } from '../activities/refund.js';
+import {
+  processRefundActivity,
+  restoreInventoryActivity,
+  updateLedgerActivity,
+} from '../activities/refund.js';
 
 type IntegrationDriver = 'postgres' | 'mysql';
 
@@ -55,7 +59,11 @@ function parseMetadata(value: unknown): Record<string, unknown> {
 
 async function seedPaidOrder(
   db: Database,
-  input: { status?: string; totalCents?: number } = {},
+  input: {
+    status?: string;
+    totalCents?: number;
+    paymentProvider?: string;
+  } = {},
 ): Promise<SeedIds> {
   const ids = seedIds();
   const now = new Date();
@@ -192,7 +200,7 @@ async function seedPaidOrder(
         buyer_last_name: 'Parity',
         buyer_phone: null,
         payment_intent_id: null,
-        payment_provider: 'stripe',
+        payment_provider: input.paymentProvider ?? 'stripe',
         paid_at: orderStatus === 'paid' ? now : null,
         refunded_at: null,
         cancelled_at: null,
@@ -205,7 +213,7 @@ async function seedPaidOrder(
   const paymentIntent = await new PaymentIntentRepository(db).create({
     tenantId: ids.tenantId,
     checkoutSessionId: ids.checkoutSessionId,
-    provider: 'stripe',
+    provider: input.paymentProvider ?? 'stripe',
     providerIntentId: ids.providerIntentId,
     amountCents: totalCents,
     currency: 'USD',
@@ -256,10 +264,12 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
   const seededTenantIds = new Set<string>();
   const previousDriver = process.env.DB_DRIVER;
   const previousStripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const previousRuntimeMode = process.env.TIXKIT_RUNTIME_MODE;
 
   beforeAll(async () => {
     process.env.DB_DRIVER = driver;
     delete process.env.STRIPE_SECRET_KEY;
+    process.env.TIXKIT_RUNTIME_MODE = 'sandbox';
     await runMigrations(databaseUrl);
     db = createDb(databaseUrl);
   }, 120_000);
@@ -281,6 +291,11 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
     } else {
       process.env.STRIPE_SECRET_KEY = previousStripeSecretKey;
     }
+    if (previousRuntimeMode === undefined) {
+      delete process.env.TIXKIT_RUNTIME_MODE;
+    } else {
+      process.env.TIXKIT_RUNTIME_MODE = previousRuntimeMode;
+    }
   }, 60_000);
 
   it('reconciles a provider success event into a paid order exactly once', async () => {
@@ -300,11 +315,11 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
       data: { id: ids.providerIntentId, status: 'succeeded' },
     });
 
-    expect(firstResult).toMatchObject({
+    expect(firstResult, JSON.stringify(firstResult)).toMatchObject({
       ok: true,
       value: { orderId: ids.orderId, status: 'paid' },
     });
-    expect(replayResult).toMatchObject({
+    expect(replayResult, JSON.stringify(replayResult)).toMatchObject({
       ok: true,
       value: { orderId: ids.orderId, status: 'succeeded' },
     });
@@ -329,20 +344,28 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
       providerEventId: `evt_ref_${ids.suffix}`,
       provider: 'stripe',
       eventType: 'refund.created',
-      data: { id: providerRefundId, payment_intent: ids.providerIntentId, amount: 3_000 },
+      data: {
+        id: providerRefundId,
+        payment_intent: ids.providerIntentId,
+        amount: 3_000,
+      },
     });
     const replayResult = await reconcileRefundActivity({
       providerEventId: `evt_ref_replay_${ids.suffix}`,
       provider: 'stripe',
       eventType: 'refund.created',
-      data: { id: providerRefundId, payment_intent: ids.providerIntentId, amount: 3_000 },
+      data: {
+        id: providerRefundId,
+        payment_intent: ids.providerIntentId,
+        amount: 3_000,
+      },
     });
 
-    expect(firstResult).toMatchObject({
+    expect(firstResult, JSON.stringify(firstResult)).toMatchObject({
       ok: true,
       value: { orderId: ids.orderId, status: 'partially_refunded' },
     });
-    expect(replayResult).toMatchObject({
+    expect(replayResult, JSON.stringify(replayResult)).toMatchObject({
       ok: true,
       value: { orderId: ids.orderId, status: 'partially_refunded' },
     });
@@ -359,7 +382,9 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
   });
 
   it('keeps refund processing and ledger updates idempotent and balanced', async () => {
-    const ids = await seedPaidOrder(db);
+    const ids = await seedPaidOrder(db, {
+      paymentProvider: 'stripe_capture',
+    });
     seededTenantIds.add(ids.tenantId);
 
     const firstRefund = await processRefundActivity({
@@ -377,20 +402,25 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
       nonce: `nonce-${ids.suffix}`,
     });
 
-    expect(firstRefund).toMatchObject({ ok: true, value: { status: 'succeeded' } });
+    expect(firstRefund).toMatchObject({
+      ok: true,
+      value: { status: 'succeeded' },
+    });
     expect(replayRefund).toEqual(firstRefund);
 
     const providerRefundId = firstRefund.ok ? firstRefund.value.providerRefundId : '';
-    const firstLedger = await updateLedgerActivity({
-      orderId: ids.orderId,
-      refundAmountCents: 2_500,
-      providerRefundId,
-    });
-    const replayLedger = await updateLedgerActivity({
-      orderId: ids.orderId,
-      refundAmountCents: 2_500,
-      providerRefundId,
-    });
+    const [firstLedger, replayLedger] = await Promise.all([
+      updateLedgerActivity({
+        orderId: ids.orderId,
+        refundAmountCents: 2_500,
+        providerRefundId,
+      }),
+      updateLedgerActivity({
+        orderId: ids.orderId,
+        refundAmountCents: 2_500,
+        providerRefundId,
+      }),
+    ]);
 
     expect(firstLedger).toEqual({ ok: true, value: { balanced: true } });
     expect(replayLedger).toEqual({ ok: true, value: { balanced: true } });
@@ -402,11 +432,377 @@ describeWithDatabase(`workflow payment/refund Tier 1 parity (real ${driver})`, (
 
     expect(Number(order?.refunded_cents)).toBe(2_500);
     expect(refunds).toHaveLength(1);
+    expect(refunds[0]).toMatchObject({
+      provider: 'stripe_capture',
+      provider_refund_id: `local-refund:${ids.orderId}:nonce-${ids.suffix}`,
+      request_idempotency_key: `refund-key-${ids.suffix}:nonce-${ids.suffix}`,
+      request_nonce: `nonce-${ids.suffix}`,
+      status: 'succeeded',
+    });
     expect(ledgerEvents).toHaveLength(1);
     expect(parseMetadata(ledgerEvents[0].metadata)).toMatchObject({
       providerRefundId,
+      provider: 'stripe_capture',
+      requestIdempotencyKey: `refund-key-${ids.suffix}:nonce-${ids.suffix}`,
+      requestNonce: `nonce-${ids.suffix}`,
       balanced: true,
       refundCents: 2_500,
     });
+  });
+
+  it('fails closed on malformed persisted ledger history without appending an event', async () => {
+    const ids = await seedPaidOrder(db, { paymentProvider: 'stripe_capture' });
+    seededTenantIds.add(ids.tenantId);
+    const nonce = `malformed-${ids.suffix}`;
+    const requestKey = `refund-malformed-${ids.suffix}`;
+    const refund = await processRefundActivity({
+      orderId: ids.orderId,
+      amountCents: 2_500,
+      reason: 'Malformed ledger parity proof',
+      idempotencyKey: requestKey,
+      nonce,
+    });
+    expect(refund).toEqual({
+      ok: true,
+      value: {
+        providerRefundId: `local-refund:${ids.orderId}:${nonce}`,
+        status: 'succeeded',
+      },
+    });
+    const providerRefundId = refund.ok ? refund.value.providerRefundId : '';
+    await db
+      .insertInto('order_timeline_events')
+      .values({
+        id: `ote_mp_${ids.suffix}`,
+        order_id: ids.orderId,
+        type: 'ledger.refund',
+        description: 'Malformed prior ledger parity fixture',
+        metadata: JSON.stringify({
+          providerRefundId,
+          provider: 'stripe_capture',
+          requestIdempotencyKey: `${requestKey}:${nonce}`,
+          requestNonce: nonce,
+          refundReservationStatus: 'succeeded',
+          currency: 'USD',
+          grossRefundCents: 2_325,
+          taxRefundCents: -1,
+          feeRefundCents: 75,
+          refundCents: 2_500,
+          netRevenueDeltaCents: -2_326,
+          entries: [
+            { account: 'refunds', direction: 'debit', amountCents: 2_500 },
+            { account: 'cash', direction: 'credit', amountCents: 2_500 },
+          ],
+          balanced: true,
+        }),
+        actor_id: null,
+        created_at: new Date(),
+      })
+      .execute();
+    const timelineBefore = await new OrderRepository(db).getTimeline(ids.orderId);
+
+    const result = await updateLedgerActivity({
+      orderId: ids.orderId,
+      refundAmountCents: 2_500,
+      providerRefundId,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_HISTORY_INVALID',
+      message: 'Persisted refund ledger history is malformed or inconsistent',
+      retryable: false,
+    });
+    const timelineAfter = await new OrderRepository(db).getTimeline(ids.orderId);
+    expect(timelineAfter).toEqual(timelineBefore);
+    expect(timelineAfter.filter((event) => event.type === 'ledger.refund')).toHaveLength(1);
+  });
+
+  it('upgrades exact legacy webhook refund and ledger evidence before another partial refund', async () => {
+    const ids = await seedPaidOrder(db, { paymentProvider: 'stripe_capture' });
+    seededTenantIds.add(ids.tenantId);
+    const legacyProviderRefundId = `re_legacy_${ids.suffix}`;
+    const legacyRefund = await new RefundRepository(db).create({
+      tenantId: ids.tenantId,
+      orderId: ids.orderId,
+      provider: 'stripe',
+      providerRefundId: legacyProviderRefundId,
+      amountCents: 4_000,
+      currency: 'USD',
+      reason: 'Stripe webhook',
+      status: 'succeeded',
+    });
+    await db
+      .updateTable('refunds')
+      .set({
+        metadata: JSON.stringify({
+          voidedTicketIds: [],
+          inventoryRestored: true,
+          inventoryRestoredCount: 0,
+          inventoryRestoredByTicketType: {},
+        }),
+      })
+      .where('id', '=', legacyRefund.id)
+      .execute();
+    await db
+      .updateTable('orders')
+      .set({ refunded_cents: 4_000, status: 'partially_refunded', refunded_at: new Date() })
+      .where('id', '=', ids.orderId)
+      .execute();
+    await db
+      .insertInto('order_timeline_events')
+      .values({
+        id: `ote_lg_${ids.suffix}`,
+        order_id: ids.orderId,
+        type: 'ledger.refund',
+        description: 'Legacy HEAD refund ledger',
+        metadata: JSON.stringify({
+          providerRefundId: legacyProviderRefundId,
+          currency: 'USD',
+          grossRefundCents: 3_600,
+          taxRefundCents: 280,
+          feeRefundCents: 120,
+          refundCents: 4_000,
+          netRevenueDeltaCents: -3_720,
+          entries: [
+            { account: 'refunds', direction: 'debit', amountCents: 4_000 },
+            { account: 'cash', direction: 'credit', amountCents: 4_000 },
+          ],
+          balanced: true,
+        }),
+        actor_id: null,
+        created_at: new Date(),
+      })
+      .execute();
+
+    const nonce = `upgrade-${ids.suffix}`;
+    const requestKey = `refund-upgrade-${ids.suffix}`;
+    const nextRefund = await processRefundActivity({
+      orderId: ids.orderId,
+      amountCents: 6_000,
+      reason: 'Post-upgrade partial',
+      idempotencyKey: requestKey,
+      nonce,
+    });
+    expect(nextRefund).toMatchObject({ ok: true, value: { status: 'succeeded' } });
+    const nextProviderRefundId = nextRefund.ok ? nextRefund.value.providerRefundId : '';
+    const firstLedger = await updateLedgerActivity({
+      orderId: ids.orderId,
+      refundAmountCents: 6_000,
+      providerRefundId: nextProviderRefundId,
+    });
+    const replayLedger = await updateLedgerActivity({
+      orderId: ids.orderId,
+      refundAmountCents: 6_000,
+      providerRefundId: nextProviderRefundId,
+    });
+    expect(firstLedger).toEqual({ ok: true, value: { balanced: true } });
+    expect(replayLedger).toEqual(firstLedger);
+
+    const persistedLegacyRefund = await db
+      .selectFrom('refunds')
+      .selectAll()
+      .where('id', '=', legacyRefund.id)
+      .executeTakeFirstOrThrow();
+    const timeline = await new OrderRepository(db).getTimeline(ids.orderId);
+    const ledgers = timeline
+      .filter((event) => event.type === 'ledger.refund')
+      .map((event) => parseMetadata(event.metadata));
+    expect(persistedLegacyRefund.request_idempotency_key).toBe(
+      `provider:stripe:${legacyProviderRefundId}`,
+    );
+    expect(persistedLegacyRefund.request_nonce).toBe(`legacy-webhook-v1:${legacyRefund.id}`);
+    expect(parseMetadata(persistedLegacyRefund.metadata)).toMatchObject({
+      voidedTicketIds: [],
+      inventoryRestored: true,
+      inventoryRestoredCount: 0,
+      inventoryRestoredByTicketType: {},
+      refundReservationStatus: 'succeeded',
+      stripeRefundId: legacyProviderRefundId,
+      stripeIdempotencyKey: `provider:stripe:${legacyProviderRefundId}`,
+      refundNonce: `legacy-webhook-v1:${legacyRefund.id}`,
+      ledgerNormalizationVersion: 'legacy-head-refund-ledger-v1',
+    });
+    const restored = await restoreInventoryActivity({
+      orderId: ids.orderId,
+      amountCents: 4_000,
+      isFullRefund: false,
+      providerRefundId: legacyProviderRefundId,
+      voidedTicketIds: [],
+    });
+    expect(restored).toEqual({ ok: true, value: { restored: 0 } });
+    const afterRestore = await db
+      .selectFrom('refunds')
+      .select(['metadata'])
+      .where('id', '=', legacyRefund.id)
+      .executeTakeFirstOrThrow();
+    expect(afterRestore.metadata).toEqual(persistedLegacyRefund.metadata);
+    expect(ledgers).toHaveLength(2);
+    expect(ledgers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerRefundId: legacyProviderRefundId,
+          provider: 'stripe',
+          requestNonce: `legacy-webhook-v1:${legacyRefund.id}`,
+          normalizationVersion: 'legacy-head-refund-ledger-v1',
+        }),
+        expect.objectContaining({ providerRefundId: nextProviderRefundId }),
+      ]),
+    );
+    expect(ledgers.reduce((sum, metadata) => sum + Number(metadata.refundCents), 0)).toBe(10_000);
+    expect(ledgers.reduce((sum, metadata) => sum + Number(metadata.taxRefundCents), 0)).toBe(700);
+    expect(ledgers.reduce((sum, metadata) => sum + Number(metadata.feeRefundCents), 0)).toBe(300);
+  });
+
+  it('serializes concurrent partial-refund ledgers and rejects conflicting sources', async () => {
+    const ids = await seedPaidOrder(db, {
+      paymentProvider: 'stripe_capture',
+    });
+    seededTenantIds.add(ids.tenantId);
+    const firstNonce = `partial-a-${ids.suffix}`;
+    const secondNonce = `partial-b-${ids.suffix}`;
+    const firstKey = `refund-a-${ids.suffix}`;
+    const secondKey = `refund-b-${ids.suffix}`;
+
+    const refunds = await Promise.all([
+      processRefundActivity({
+        orderId: ids.orderId,
+        amountCents: 5_001,
+        reason: 'First partial',
+        idempotencyKey: firstKey,
+        nonce: firstNonce,
+      }),
+      processRefundActivity({
+        orderId: ids.orderId,
+        amountCents: 4_999,
+        reason: 'Second partial',
+        idempotencyKey: secondKey,
+        nonce: secondNonce,
+      }),
+    ]);
+    expect(refunds).toEqual([
+      {
+        ok: true,
+        value: {
+          providerRefundId: `local-refund:${ids.orderId}:${firstNonce}`,
+          status: 'succeeded',
+        },
+      },
+      {
+        ok: true,
+        value: {
+          providerRefundId: `local-refund:${ids.orderId}:${secondNonce}`,
+          status: 'succeeded',
+        },
+      },
+    ]);
+
+    const firstProviderRefundId = refunds[0].ok ? refunds[0].value.providerRefundId : '';
+    const secondProviderRefundId = refunds[1].ok ? refunds[1].value.providerRefundId : '';
+    const ledgerResults = await Promise.all([
+      updateLedgerActivity({
+        orderId: ids.orderId,
+        refundAmountCents: 5_001,
+        providerRefundId: firstProviderRefundId,
+      }),
+      updateLedgerActivity({
+        orderId: ids.orderId,
+        refundAmountCents: 4_999,
+        providerRefundId: secondProviderRefundId,
+      }),
+      updateLedgerActivity({
+        orderId: ids.orderId,
+        refundAmountCents: 5_001,
+        providerRefundId: firstProviderRefundId,
+      }),
+    ]);
+    expect(ledgerResults).toEqual([
+      { ok: true, value: { balanced: true } },
+      { ok: true, value: { balanced: true } },
+      { ok: true, value: { balanced: true } },
+    ]);
+
+    const amountConflict = await updateLedgerActivity({
+      orderId: ids.orderId,
+      refundAmountCents: 5_000,
+      providerRefundId: firstProviderRefundId,
+    });
+    const sourceConflict = await updateLedgerActivity({
+      orderId: ids.orderId,
+      refundAmountCents: 1,
+      providerRefundId: `local-refund:another-order:${firstNonce}`,
+    });
+    expect(amountConflict).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_AMOUNT_CONFLICT',
+      message: 'Ledger refund amount does not match the persisted provider refund',
+      retryable: false,
+    });
+    expect(sourceConflict).toEqual({
+      ok: false,
+      errorCode: 'REFUND_LEDGER_SOURCE_INVALID',
+      message: 'Ledger entries require a persisted succeeded refund for the same order',
+      retryable: false,
+    });
+
+    const order = await new OrderRepository(db).findById(ids.orderId);
+    const persistedRefunds = await new RefundRepository(db).findByOrder(ids.orderId);
+    const timeline = await new OrderRepository(db).getTimeline(ids.orderId);
+    const ledgerMetadata = timeline
+      .filter((event) => event.type === 'ledger.refund')
+      .map((event) => parseMetadata(event.metadata));
+
+    expect(Number(order?.refunded_cents)).toBe(10_000);
+    expect(order?.status).toBe('refunded');
+    expect(persistedRefunds).toHaveLength(2);
+    expect(persistedRefunds).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'stripe_capture',
+          provider_refund_id: firstProviderRefundId,
+          request_idempotency_key: `${firstKey}:${firstNonce}`,
+          request_nonce: firstNonce,
+          status: 'succeeded',
+        }),
+        expect.objectContaining({
+          provider: 'stripe_capture',
+          provider_refund_id: secondProviderRefundId,
+          request_idempotency_key: `${secondKey}:${secondNonce}`,
+          request_nonce: secondNonce,
+          status: 'succeeded',
+        }),
+      ]),
+    );
+    expect(
+      persistedRefunds.map((refund) => Number(refund.amount_cents)).sort((a, b) => a - b),
+    ).toEqual([4_999, 5_001]);
+    expect(ledgerMetadata).toHaveLength(2);
+    expect(ledgerMetadata.reduce((sum, metadata) => sum + Number(metadata.refundCents), 0)).toBe(
+      10_000,
+    );
+    expect(ledgerMetadata.reduce((sum, metadata) => sum + Number(metadata.taxRefundCents), 0)).toBe(
+      700,
+    );
+    expect(ledgerMetadata.reduce((sum, metadata) => sum + Number(metadata.feeRefundCents), 0)).toBe(
+      300,
+    );
+    expect(ledgerMetadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerRefundId: firstProviderRefundId,
+          provider: 'stripe_capture',
+          requestIdempotencyKey: `${firstKey}:${firstNonce}`,
+          requestNonce: firstNonce,
+          balanced: true,
+        }),
+        expect.objectContaining({
+          providerRefundId: secondProviderRefundId,
+          provider: 'stripe_capture',
+          requestIdempotencyKey: `${secondKey}:${secondNonce}`,
+          requestNonce: secondNonce,
+          balanced: true,
+        }),
+      ]),
+    );
   });
 });

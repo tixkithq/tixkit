@@ -51,11 +51,17 @@ describeWithTemporal('agent memory retention on Temporal', () => {
         async recoverQueuedMessageHandoffsActivity() {
           return okResult({ recoveredEmailCount: 0, recoveredSmsCount: 0 });
         },
+        async recoverPendingPrivacyRequestHandoffsActivity() {
+          return okResult({ recoveredCount: 0, skippedUnauditedCount: 0 });
+        },
         async enforcePrivacyRetentionActivity() {
           return okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 });
         },
         async cleanupMigrationMediaObjectsActivity() {
           return okResult({ completed: 0, retained: 0, failed: 0 });
+        },
+        async processProviderAccountCleanupActivity() {
+          return okResult({ completed: 0, retried: 0, manualReview: 0 });
         },
         async eraseExpiredAgentMemoryActivity() {
           const attempt = Context.current().info.attempt;
@@ -82,14 +88,15 @@ describeWithTemporal('agent memory retention on Temporal', () => {
       },
     });
     let handle: WorkflowHandleWithStartDetails<typeof holdExpirationWorkflow> | undefined;
+    let testError: unknown;
     try {
       handle = await environment.client.workflow.start(holdExpirationWorkflow, {
         taskQueue,
         workflowId,
-        workflowExecutionTimeout: '30 seconds',
+        workflowExecutionTimeout: '20 seconds',
         args: [{ maxIterations: 1 }],
       });
-      await worker.runUntil(() => handle!.result(), { promiseCompletionTimeout: '30 seconds' });
+      await worker.runUntil(() => handle!.result(), { promiseCompletionTimeout: '15 seconds' });
       expect(attempts).toEqual([1, 2]);
       const history = await handle.fetchHistory();
       expect(capturedRequestIds).toEqual([exactProviderRequestId]);
@@ -97,7 +104,11 @@ describeWithTemporal('agent memory retention on Temporal', () => {
       await expect(
         Worker.runReplayHistory({ workflowsPath }, history, workflowId),
       ).resolves.toBeUndefined();
-    } finally {
+    } catch (error) {
+      testError = error;
+    }
+    let cleanupError: unknown;
+    try {
       await environment.connection.workflowService.deleteWorkflowExecution({
         namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
         workflowExecution: {
@@ -105,6 +116,10 @@ describeWithTemporal('agent memory retention on Temporal', () => {
           ...(handle ? { runId: handle.firstExecutionRunId } : {}),
         },
       });
+    } catch (error) {
+      cleanupError = error;
     }
-  });
+    if (testError !== undefined) throw testError;
+    if (cleanupError !== undefined) throw cleanupError;
+  }, 30_000);
 });

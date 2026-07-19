@@ -82,7 +82,9 @@ describeLiveDatabase('migration workflow with production database activities', (
   it('persists the exact generic zero-row migration lifecycle', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const tenantId = (
-      await new TenantRepository(db).create({ name: `Temporal database proof ${suffix}` })
+      await new TenantRepository(db).create({
+        name: `Temporal database proof ${suffix}`,
+      })
     ).id;
     const organizationId = (
       await new OrganizationRepository(db).create({
@@ -147,7 +149,15 @@ describeLiveDatabase('migration workflow with production database activities', (
         taskQueue,
         workflowId,
         workflowExecutionTimeout: '30 seconds',
-        args: [{ version: 1, tenantId, organizationId, jobId: job.id, chunkSize: 2 }],
+        args: [
+          {
+            version: 1,
+            tenantId,
+            organizationId,
+            jobId: job.id,
+            chunkSize: 2,
+          },
+        ],
       });
       workerRan = true;
       const result = await worker.runUntil(() => handle!.result(), {
@@ -155,18 +165,29 @@ describeLiveDatabase('migration workflow with production database activities', (
       });
       expect(result).toMatchObject({
         status: 'completed',
-        progress: { processed: 0, created: 0, updated: 0, skipped: 0, conflicts: 0, failed: 0 },
+        progress: {
+          processed: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          conflicts: 0,
+          failed: 0,
+        },
         reconciliation: { repaired: 0, unresolved: 0 },
       });
       const persistedJob = await repository.findJob(tenantId, organizationId, job.id);
       expect(persistedJob?.status).toBe('committed');
-      expect(JSON.parse(persistedJob!.summary!)).toMatchObject({
-        ...result.progress,
+      expect(JSON.parse(persistedJob!.summary!)).toEqual({
+        processed: result.progress.processed,
+        created: result.progress.created,
+        updated: result.progress.updated,
+        skipped: result.progress.skipped,
+        conflicts: result.progress.conflicts,
+        failed: result.progress.failed,
         status: 'completed',
         stageIndex: MIGRATION_COMMIT_STAGES.length,
         stageCount: MIGRATION_COMMIT_STAGES.length,
       });
-      expect(JSON.parse(persistedJob!.summary!)).not.toHaveProperty('stage');
       const events = await repository.listEvents(tenantId, organizationId, job.id);
       expect(events.map((event) => event.sequence)).toEqual(
         events.map((_event, index) => index + 1),
@@ -181,14 +202,25 @@ describeLiveDatabase('migration workflow with production database activities', (
         .filter((event) => event.type === 'commit.progress')
         .map(
           (event) =>
-            JSON.parse(event.data!) as { stage: string; stageIndex: number; stageCount: number },
+            JSON.parse(event.data!) as {
+              stage: string;
+              stageIndex: number;
+              stageCount: number;
+            },
         );
-      expect(progress.map((event) => event.stage)).toEqual(MIGRATION_COMMIT_STAGES);
-      expect(progress.map((event) => event.stageIndex)).toEqual(
-        MIGRATION_COMMIT_STAGES.map((_stage, index) => index),
-      );
-      expect(progress.every((event) => event.stageCount === MIGRATION_COMMIT_STAGES.length)).toBe(
-        true,
+      expect(progress).toEqual(
+        MIGRATION_COMMIT_STAGES.map((stage, stageIndex) => ({
+          status: 'committing',
+          stage,
+          stageIndex,
+          stageCount: MIGRATION_COMMIT_STAGES.length,
+          processed: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          conflicts: 0,
+          failed: 0,
+        })),
       );
       const sideEffectCountsAfter = await selectedSideEffectCounts();
       expect(sideEffectCountsAfter.map((row) => Number(row.count))).toEqual(

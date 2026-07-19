@@ -136,6 +136,10 @@ export type MigrationWorkflowProgress = {
   failed: number;
 };
 
+export type MigrationTerminalProgressSummary = Omit<MigrationWorkflowProgress, 'stage'> & {
+  status: 'completed';
+};
+
 let migrationService: MigrationActivityService | undefined;
 
 export function registerMigrationActivityService(
@@ -205,11 +209,31 @@ export async function recordMigrationProgressActivity(
     jobId: string;
   } & MigrationWorkflowProgress,
 ): Promise<void> {
-  const { tenantId, organizationId, jobId, ...progress } = input;
-  await getMigrationService().recordProgress(
-    context({ tenantId, organizationId, jobId }),
-    progress,
-  );
+  const {
+    tenantId,
+    organizationId,
+    jobId,
+    stage,
+    stageIndex,
+    stageCount,
+    processed,
+    created,
+    updated,
+    skipped,
+    conflicts,
+    failed,
+  } = input;
+  await getMigrationService().recordProgress(context({ tenantId, organizationId, jobId }), {
+    ...(stage === undefined ? {} : { stage }),
+    stageIndex,
+    stageCount,
+    processed,
+    created,
+    updated,
+    skipped,
+    conflicts,
+    failed,
+  });
 }
 
 export async function setMigrationPausedActivity(input: {

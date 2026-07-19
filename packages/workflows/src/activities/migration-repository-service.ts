@@ -27,6 +27,7 @@ import type {
   MigrationRollbackAssessment,
   MigrationStageResult,
   MigrationWorkflowProgress,
+  MigrationTerminalProgressSummary,
 } from './migration.js';
 import { MIGRATION_COMMIT_STAGES } from './migration.js';
 import { resolvePortableCanonicalAdoption } from './migration-domain-committers.js';
@@ -119,8 +120,18 @@ function parseEntity(serialized: string | null): NormalizedMigrationEntity {
   return parsed;
 }
 
-function summary(progress: MigrationWorkflowProgress): MigrationWorkflowProgress {
-  return { ...progress };
+function progressSummary(progress: MigrationWorkflowProgress): MigrationWorkflowProgress {
+  return {
+    ...(progress.stage === undefined ? {} : { stage: progress.stage }),
+    stageIndex: progress.stageIndex,
+    stageCount: progress.stageCount,
+    processed: progress.processed,
+    created: progress.created,
+    updated: progress.updated,
+    skipped: progress.skipped,
+    conflicts: progress.conflicts,
+    failed: progress.failed,
+  };
 }
 
 const MIGRATION_PROGRESS_COUNTERS = [
@@ -132,10 +143,46 @@ const MIGRATION_PROGRESS_COUNTERS = [
   'failed',
 ] as const;
 
+const MIGRATION_COMMITTING_SUMMARY_KEYS = [
+  'status',
+  'stage',
+  'stageIndex',
+  'stageCount',
+  ...MIGRATION_PROGRESS_COUNTERS,
+] as const;
+
+const MIGRATION_TERMINAL_SUMMARY_KEYS = [
+  'status',
+  'stageIndex',
+  'stageCount',
+  ...MIGRATION_PROGRESS_COUNTERS,
+] as const;
+
+type MigrationCommittingProgressSummary = MigrationWorkflowProgress & {
+  stage: MigrationCommitStage;
+  status: 'committing';
+};
+
+function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly string[]): boolean {
+  const actualKeys = Object.keys(value).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    [...expectedKeys].sort().every((key, index) => actualKeys[index] === key)
+  );
+}
+
+function parseCommitProgressSummary(
+  serialized: string | null,
+  expectedStatus: 'committing',
+): MigrationCommittingProgressSummary;
+function parseCommitProgressSummary(
+  serialized: string | null,
+  expectedStatus: 'completed',
+): MigrationTerminalProgressSummary;
 function parseCommitProgressSummary(
   serialized: string | null,
   expectedStatus: 'committing' | 'completed',
-): Record<string, unknown> {
+): MigrationCommittingProgressSummary | MigrationTerminalProgressSummary {
   let parsed: unknown;
   try {
     parsed = serialized ? JSON.parse(serialized) : undefined;
@@ -147,6 +194,12 @@ function parseCommitProgressSummary(
   const progress = parsed as Record<string, unknown>;
   if (progress.status !== expectedStatus)
     throw new Error('MIGRATION_PROGRESS_SUMMARY_STATUS_INVALID');
+  const expectedKeys =
+    expectedStatus === 'committing'
+      ? MIGRATION_COMMITTING_SUMMARY_KEYS
+      : MIGRATION_TERMINAL_SUMMARY_KEYS;
+  if (!hasExactKeys(progress, expectedKeys))
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_KEYS_INVALID');
   for (const field of MIGRATION_PROGRESS_COUNTERS) {
     if (!Number.isSafeInteger(progress[field]) || Number(progress[field]) < 0)
       throw new Error(`MIGRATION_PROGRESS_SUMMARY_COUNTER_INVALID:${field}`);
@@ -173,7 +226,7 @@ function parseCommitProgressSummary(
     (progress.stageIndex !== MIGRATION_COMMIT_STAGES.length || 'stage' in progress)
   )
     throw new Error('MIGRATION_PROGRESS_SUMMARY_TERMINAL_STAGE_INVALID');
-  return progress;
+  return progress as MigrationCommittingProgressSummary | MigrationTerminalProgressSummary;
 }
 
 function stageCheckpointKey(claimOwner: string): string {
@@ -450,7 +503,10 @@ export async function portableReconciliationReport(input: {
               externalId: row.external_id,
               entity,
             })
-          : { reconciled: false, reason: `Missing committer for ${entityType}` };
+          : {
+              reconciled: false,
+              reason: `Missing committer for ${entityType}`,
+            };
         return { row, assessment };
       }),
     );
@@ -1233,7 +1289,10 @@ export function createRepositoryMigrationActivityService(
     },
 
     async recordProgress(context, progress) {
-      const persistedProgress = { ...summary(progress), status: 'committing' as const };
+      const persistedProgress = {
+        ...progressSummary(progress),
+        status: 'committing' as const,
+      };
       await repository.transitionJob({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
@@ -1618,19 +1677,24 @@ export function createRepositoryMigrationActivityService(
           };
           if (job.status === 'committing') {
             const persistedProgress = parseCommitProgressSummary(job.summary, 'committing');
+            const terminalProgress: MigrationTerminalProgressSummary = {
+              status: 'completed',
+              stageIndex: MIGRATION_COMMIT_STAGES.length,
+              stageCount: MIGRATION_COMMIT_STAGES.length,
+              processed: persistedProgress.processed,
+              created: persistedProgress.created,
+              updated: persistedProgress.updated,
+              skipped: persistedProgress.skipped,
+              conflicts: persistedProgress.conflicts,
+              failed: persistedProgress.failed,
+            };
             const changed = await transactionRepository.transitionJob({
               tenantId: context.tenantId,
               organizationId: context.organizationId,
               jobId: context.jobId,
               from: ['committing'],
               to: 'committed',
-              summary: {
-                ...persistedProgress,
-                status: 'completed',
-                stageIndex: MIGRATION_COMMIT_STAGES.length,
-                stageCount: MIGRATION_COMMIT_STAGES.length,
-                stage: undefined,
-              },
+              summary: terminalProgress,
             });
             if (!changed) throw new Error('MIGRATION_COMPLETE_TRANSITION_REJECTED');
             await transactionRepository.appendIdempotentEventInCurrentTransaction(completionEvent);
