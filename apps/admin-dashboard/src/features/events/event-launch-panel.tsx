@@ -6,6 +6,7 @@ import type { AdminEventLaunchReadiness, AdminReadinessStep } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { usePermissions } from '@/context/permission-provider';
 
 const stepLabels: Record<string, string> = {
   basics_schedule: 'Event basics and schedule',
@@ -109,6 +110,10 @@ export function EventLaunchPanel({
   eventId: string;
   readiness: AdminEventLaunchReadiness;
 }) {
+  const { can, loading: permissionsLoading, error: permissionsError } = usePermissions();
+  const canRemediate = (step: AdminReadinessStep) =>
+    step.requiredPermission === null ||
+    (!permissionsLoading && !permissionsError && can(step.requiredPermission));
   const required = readiness.steps.filter(
     (step) => step.priority === 'required' && step.id !== 'publishability',
   );
@@ -122,10 +127,11 @@ export function EventLaunchPanel({
       step.id !== 'publication_status' &&
       step.status !== 'complete' &&
       step.status !== 'not_applicable' &&
-      step.actionId !== null,
+      step.actionId !== null &&
+      canRemediate(step),
   );
   return (
-    <Card className="border-primary/30 bg-primary/[0.03]">
+    <Card className="border-primary/30 bg-primary/[0.03]" aria-busy={permissionsLoading}>
       <CardHeader className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2">
@@ -171,6 +177,7 @@ export function EventLaunchPanel({
             .map((step) => {
               const done = step.status === 'complete' || step.status === 'not_applicable';
               const href = actionHref(eventId, step);
+              const remediationAllowed = canRemediate(step);
               return (
                 <li key={step.id} className="flex items-start gap-3 py-3">
                   {done ? (
@@ -183,7 +190,7 @@ export function EventLaunchPanel({
                       className="mt-0.5 size-5 shrink-0 text-destructive"
                       aria-hidden="true"
                     />
-                  ) : step.actionId === null ? (
+                  ) : step.actionId === null || !remediationAllowed ? (
                     <LockKeyhole
                       className="mt-0.5 size-5 shrink-0 text-muted-foreground"
                       aria-hidden="true"
@@ -205,18 +212,32 @@ export function EventLaunchPanel({
                       </span>
                     </div>
                     {!done ? (
-                      <p className="mt-1 text-sm text-foreground/80">
-                        {step.reasonCodes
-                          .map(
-                            (reason) =>
-                              eventReadinessReasonCopy[reason] ??
-                              'This launch check needs attention. Open its settings to review and correct the current configuration.',
-                          )
-                          .join(' ')}
-                      </p>
+                      <>
+                        <p className="mt-1 text-sm text-foreground/80">
+                          {step.reasonCodes
+                            .map(
+                              (reason) =>
+                                eventReadinessReasonCopy[reason] ??
+                                'This launch check needs attention. Open its settings to review and correct the current configuration.',
+                            )
+                            .join(' ')}
+                        </p>
+                        {href && !remediationAllowed ? (
+                          <p
+                            className="mt-1 text-sm font-medium text-foreground"
+                            role={permissionsLoading ? 'status' : permissionsError ? 'alert' : undefined}
+                          >
+                            {permissionsLoading
+                              ? 'Checking access for this action…'
+                              : permissionsError
+                                ? 'Access could not be verified for this action.'
+                                : 'A teammate with the required permission must complete this action.'}
+                          </p>
+                        ) : null}
+                      </>
                     ) : null}
                   </div>
-                  {!done && href ? (
+                  {!done && href && remediationAllowed ? (
                     <Link
                       className="text-sm font-medium text-primary hover:underline"
                       href={href}
