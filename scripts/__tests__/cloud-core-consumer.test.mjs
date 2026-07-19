@@ -28,6 +28,7 @@ import {
   publicImageViolations,
   publicReleaseContextViolations,
   publicReleaseManifestViolations,
+  stageAgentIntegrationSkillArtifacts,
   stagePublicContractArtifacts,
 } from '../build-public-release-manifest.mjs';
 import { buildCloudCoreCompatibility } from '../build-cloud-core-compatibility.mjs';
@@ -1297,6 +1298,43 @@ test('public packages are packed from the Git archive, excluding stale working o
       { published: ['@tixkit/example@1.0.0'], reused: [] },
     );
     assert.deepEqual(calls[1][1].slice(0, 2), ['publish', tarball]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('archive assembly omits only absent or explicitly empty agent skill inventories', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-empty-agent-skill-stage-'));
+  const output = resolve(directory, 'output');
+  try {
+    assert.deepEqual(stageAgentIntegrationSkillArtifacts({ release: {} }, output, directory), []);
+    assert.deepEqual(
+      stageAgentIntegrationSkillArtifacts(
+        { release: { agentIntegrationSkills: [] } },
+        output,
+        directory,
+      ),
+      [],
+    );
+    assert.throws(
+      () =>
+        stageAgentIntegrationSkillArtifacts(
+          {
+            release: {
+              agentIntegrationSkills: [
+                {
+                  apiVersion: '2026-08-21',
+                  path: 'artifacts/api-integration-skills/tixkit-api-2026-08-21',
+                  releaseManifestSha256: '0'.repeat(64),
+                },
+              ],
+            },
+          },
+          output,
+          directory,
+        ),
+      /agent integration skill validation failed/u,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

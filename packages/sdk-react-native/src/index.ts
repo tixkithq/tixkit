@@ -14,7 +14,7 @@ import {
   type TicketListing,
 } from '@tixkit/js';
 
-export const TIXKIT_API_VERSION = '2026-08-21';
+export const TIXKIT_API_VERSION = '2026-08-22';
 
 // NOTE: React Native does not provide Node.js `crypto` APIs by default.
 // The following is a pure-JS HMAC-SHA256 implementation so the SDK works

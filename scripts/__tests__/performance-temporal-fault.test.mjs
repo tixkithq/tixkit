@@ -729,13 +729,16 @@ test('caller abort after stop still restores the exact service', async () => {
   }
 });
 
-test('workload does not settle until SIGTERM-resistant descendant groups are dead', async () => {
-  if (process.platform === 'win32') return;
-  for (const mode of ['timeout', 'nonzero', 'abort']) {
-    const directory = mkdtempSync(join(tmpdir(), `tixkit-temporal-group-${mode}-`));
-    const descendantPath = join(directory, 'descendant.pid');
-    const controller = new AbortController();
-    const childScript = `
+test(
+  'workload does not settle until SIGTERM-resistant descendant groups are dead',
+  { timeout: 10_000 },
+  async () => {
+    if (process.platform === 'win32') return;
+    for (const mode of ['timeout', 'nonzero', 'abort']) {
+      const directory = mkdtempSync(join(tmpdir(), `tixkit-temporal-group-${mode}-`));
+      const descendantPath = join(directory, 'descendant.pid');
+      const controller = new AbortController();
+      const childScript = `
       const {spawn}=require('node:child_process');
       const fs=require('node:fs');
       const child=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{stdio:'ignore'});
@@ -743,36 +746,39 @@ test('workload does not settle until SIGTERM-resistant descendant groups are dea
       process.on('SIGTERM',()=>{});
       ${mode === 'nonzero' ? 'setTimeout(()=>process.exit(7),50)' : 'setInterval(()=>{},1000)'};
     `;
-    const paths = {
-      ready: join(directory, 'ready.json'),
-      start: join(directory, 'start.json'),
-      recovery: join(directory, 'recovery.json'),
-      raw: join(directory, 'raw.json'),
-      processGroup: join(directory, 'processGroup.json'),
-      nonce,
-    };
-    const execution = executeWorkload(
-      {
-        ...profile,
-        command: { executable: process.execPath, args: ['-e', childScript] },
-        workloadTimeoutSeconds: 0.2,
-      },
-      paths,
-      controller.signal,
-    );
-    try {
-      while (!readFileIfPresent(descendantPath)) await delay(5);
-      if (mode === 'abort') controller.abort();
-      await assert.rejects(execution, /timed out|interrupted|live descendants/);
-      const group = JSON.parse(readFileSync(paths.processGroup));
-      assert.throws(() => process.kill(-group.pid, 0), { code: 'ESRCH' });
-      const descendantPid = Number(readFileSync(descendantPath, 'utf8'));
-      assert.throws(() => process.kill(descendantPid, 0), { code: 'ESRCH' });
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
+      const paths = {
+        ready: join(directory, 'ready.json'),
+        start: join(directory, 'start.json'),
+        recovery: join(directory, 'recovery.json'),
+        raw: join(directory, 'raw.json'),
+        processGroup: join(directory, 'processGroup.json'),
+        nonce,
+      };
+      const execution = executeWorkload(
+        {
+          ...profile,
+          command: { executable: process.execPath, args: ['-e', childScript] },
+          workloadTimeoutSeconds: 0.2,
+        },
+        paths,
+        controller.signal,
+      );
+      try {
+        await waitForFile(descendantPath, 3_000);
+        if (mode === 'abort') controller.abort();
+        await assert.rejects(execution, /timed out|interrupted|live descendants/);
+        const group = JSON.parse(readFileSync(paths.processGroup));
+        assert.throws(() => process.kill(-group.pid, 0), { code: 'ESRCH' });
+        const descendantPid = Number(readFileSync(descendantPath, 'utf8'));
+        assert.throws(() => process.kill(descendantPid, 0), { code: 'ESRCH' });
+      } finally {
+        controller.abort();
+        await execution.catch(() => undefined);
+        rmSync(directory, { recursive: true, force: true });
+      }
     }
-  }
-});
+  },
+);
 
 test('process-marker initialization failure terminates resistant descendants before rejection', async () => {
   if (process.platform === 'win32') return;
@@ -837,6 +843,14 @@ function readFileIfPresent(file) {
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
+async function waitForFile(file, timeoutMilliseconds) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (!readFileIfPresent(file)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
+    await delay(5);
+  }
 }
 
 function serviceBlocks(workflow) {

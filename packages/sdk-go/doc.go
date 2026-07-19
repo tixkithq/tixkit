@@ -1,6 +1,6 @@
 // Package tixkit provides a typed Go client for the Tixkit API.
 //
-// The client sends X-Tixkit-Version with API version 2026-08-21 on every
+// The client sends X-Tixkit-Version with API version 2026-08-22 on every
 // request and exposes resources for checkout sessions, events, ticket types,
 // orders, refunds, attendees, check-in, questions, waitlist, reports, exports,
 // webhooks, and developer API keys. Write operations accept caller-provided

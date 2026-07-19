@@ -122,13 +122,19 @@ export function stageAgentIntegrationSkillArtifacts(
   artifactDirectory,
   sourceRoot = root,
 ) {
+  const declaredSkills = distribution.release.agentIntegrationSkills;
+  if (
+    declaredSkills === undefined ||
+    (Array.isArray(declaredSkills) && declaredSkills.length === 0)
+  )
+    return [];
   const violations = agentIntegrationSkillViolations(distribution, sourceRoot);
   if (violations.length > 0) {
     throw new Error(`agent integration skill validation failed:\n${violations.join('\n')}`);
   }
   mkdirSync(artifactDirectory, { recursive: true });
   const staged = [];
-  for (const entry of distribution.release.agentIntegrationSkills ?? []) {
+  for (const entry of declaredSkills) {
     const directory = resolve(sourceRoot, entry.path);
     const manifestBytes = readFileSync(resolve(directory, 'artifact-manifest.json'));
     const manifest = JSON.parse(manifestBytes.toString('utf8'));

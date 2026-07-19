@@ -43,7 +43,7 @@ adoption_paths:
 
 > **Experimental private beta:** the shared identity and delegation contract is public for evaluation. Hosted agent access, managed models, natural-language orchestration, managed prompts, evaluations and managed memory are not generally available. Use only an invited environment and its supplied support channel.
 
-A version-bound Tixkit API integration skill is generated locally from the checksummed API `2026-08-21` release. The generator rejects release, OpenAPI, example and webhook version drift; verifies artifact sizes and checksums; rejects secret-like examples; and labels the current output as local evaluation because the source release is not publishable. The package and skill are not published to a registry yet. This is an additional coding-agent onboarding path, not an application runtime, authorization mechanism, or replacement for supported SDK and contract-test evidence.
+A version-bound Tixkit API integration skill is generated locally from the checksummed API `2026-08-22` release. The generator rejects release, OpenAPI, example and webhook version drift; verifies artifact sizes and checksums; rejects secret-like examples; and labels the current output as local evaluation because the source release is not publishable. The package and skill are not published to a registry yet. This is an additional coding-agent onboarding path, not an application runtime, authorization mechanism, or replacement for supported SDK and contract-test evidence.
 
 Repository contributors can reproduce the local artifact with `ALLOW_LOCAL_API_SKILL_EVALUATION=1 bun run build:api-integration-skill` and validate its clean external pack/install with `bun run test:api-integration-skill-consumer`. Do not remove the explicit evaluation flag or claim hosted/public availability until immutable publication evidence exists.
 
@@ -51,7 +51,7 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-08-21`, action protocol `2026-07-22`, plan protocol `2026-07-27` and action-registry contract `2026-08-04` support these sponsor-controlled operations:
+API version `2026-08-22`, action protocol `2026-07-22`, plan protocol `2026-07-27` and action-registry contract `2026-08-04` support these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
@@ -210,7 +210,7 @@ npm install --save-dev @tixkit/contract-tests
 ```json
 {
   "baseUrl": "https://sandbox.example.test",
-  "apiVersion": "2026-08-21",
+  "apiVersion": "2026-08-22",
   "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
   "agentClientId": "tk_agent_example",
   "agentClientSecretEnv": "TIXKIT_CONFORMANCE_AGENT_SECRET",

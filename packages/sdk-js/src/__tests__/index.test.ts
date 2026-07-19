@@ -3975,7 +3975,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-21',
+        'X-Tixkit-Version': '2026-08-22',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
@@ -4076,7 +4076,7 @@ describe('TixkitClient new resource methods', () => {
       namespace,
       key: 'event_context',
       content,
-      retentionExpiresAt: '2026-08-21T00:00:00.000Z',
+      retentionExpiresAt: '2026-08-22T00:00:00.000Z',
       idempotencyKey: 'memory-create-000001',
     });
     await c.agentMemory.inspect(namespace, 'memory-inspect-00001');

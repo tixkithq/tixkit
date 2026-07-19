@@ -1,0 +1,29 @@
+---
+title: Migrate API 2026-08-21 to 2026-08-22
+description: Adopt strict mutation bodies and explicit operational response contracts.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-18
+prerequisites:
+  - An integration using API version 2026-08-21
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /operators/messaging
+---
+
+API `2026-08-22` closes previously open request objects for event code-format settings, marketing integrations, waitlist offers and question reordering. Remove undeclared fields before upgrading. Tixkit now rejects them instead of silently ignoring ambiguous input.
+
+Rotating code-format settings require `timeStepSeconds` and `toleranceWindows`; `digits`, `timeStepSeconds` and `toleranceWindows` must remain within the documented bounds. Read responses now return those settings explicitly, so clients should preserve them when editing an existing configuration.
+
+Marketing integration configuration is provider-specific. GA4 accepts only `measurementId`, Meta Pixel accepts only `pixelId`, and generic tags accept only a public HTTPS `pixelUrl` without credentials, query parameters or fragments. Public marketing-integration responses use the same typed variants. Do not forward an arbitrary provider configuration object.
+
+Resale policy `maxAbsoluteCents` is an integer-or-null value, and waitlist settings reject undeclared properties. Question reorder entries accept only `id` and `sortOrder`.
+
+Message campaign requests continue to derive the event from the URL path and reject a body `eventId`. The response status is one of `queued`, `failed` or `suppressed` and now always includes `startFailedEmailJobs` and `startFailedSmsJobs`. Treat these counters as accepted jobs that could not be started, not as successfully queued deliveries. Retry only through the documented idempotency contract; do not create a replacement campaign from the counters alone.
+
+Privacy export and erasure operations retain their existing request and response shapes. Their generated contract now explicitly declares the existing `settings.write` permission requirement.

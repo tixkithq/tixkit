@@ -250,6 +250,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-20 migration lifecycle commands',
         routeId: 'apiMigration20260819To20260820',
       },
+      {
+        label: 'Adopt 2026-08-22 strict mutation contracts',
+        routeId: 'apiMigration20260821To20260822',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

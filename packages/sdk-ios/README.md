@@ -10,7 +10,7 @@ iOS 15+ and macOS 12+ applications.
 
 ## Status
 
-Supported Swift package pinned to API version `2026-08-21`.
+Supported Swift package pinned to API version `2026-08-22`.
 
 Resale writes include the exact `2026-07-16` terms acceptance. Settlement helpers replace provider-delegated listing completion.
 
@@ -44,7 +44,7 @@ Never place scanner credentials in UserDefaults, URLs, logs, analytics, or scree
 
 ## Compatibility
 
-Swift package products/platforms and API version `2026-08-21` define compatibility.
+Swift package products/platforms and API version `2026-08-22` define compatibility.
 
 ## Related guides
 
