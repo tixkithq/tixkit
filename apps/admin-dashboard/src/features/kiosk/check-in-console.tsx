@@ -442,14 +442,17 @@ export function CheckInConsole({
           </summary>
           <div className="grid gap-4 border-t p-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Event</Label>
+              <Label id="check-in-event-label">Event</Label>
               {lockEvent ? (
-                <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm">
+                <div
+                  className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm"
+                  aria-labelledby="check-in-event-label"
+                >
                   {selectedEvent?.title ?? selectedEventId ?? 'Event'}
                 </div>
               ) : (
                 <Select value={selectedEventId} onValueChange={setSelectedEventId}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full" aria-labelledby="check-in-event-label">
                     <SelectValue placeholder="Select event" />
                   </SelectTrigger>
                   <SelectContent>
@@ -471,13 +474,13 @@ export function CheckInConsole({
             </div>
             {tab !== 'sales' ? (
               <div className="space-y-2">
-                <Label>Check-in list</Label>
+                <Label id="check-in-list-label">Check-in list</Label>
                 <Select
                   value={selectedCheckInListId}
                   onValueChange={setSelectedCheckInListId}
                   disabled={!selectedEventId || checkInListsLoading}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full" aria-labelledby="check-in-list-label">
                     <SelectValue
                       placeholder={
                         checkInListsLoading

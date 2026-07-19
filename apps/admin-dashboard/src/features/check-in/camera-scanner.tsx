@@ -26,6 +26,7 @@ type CameraStatus =
   | 'starting'
   | 'scanning'
   | 'paused'
+  | 'backgrounded'
   | 'denied'
   | 'unsupported'
   | 'error';
@@ -48,11 +49,19 @@ export function CameraScanner({
   const lastScanRef = React.useRef<{ payload: string; at: number } | null>(null);
   const disabledRef = React.useRef(disabled);
   const onScanRef = React.useRef(onScan);
+  const resumeEligibleRef = React.useRef(false);
+  const mountedRef = React.useRef(true);
+  const attemptGenerationRef = React.useRef(0);
+  const pendingAttemptRef = React.useRef<number | undefined>(undefined);
+  const pageActiveRef = React.useRef(
+    typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  );
 
   const [status, setStatus] = React.useState<CameraStatus>(() =>
     isCameraSupported() ? 'idle' : 'unsupported',
   );
   const [cameraEnabled, setCameraEnabled] = React.useState(false);
+  const [pageActive, setPageActive] = React.useState(pageActiveRef.current);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [retryNonce, setRetryNonce] = React.useState(0);
 
@@ -65,6 +74,39 @@ export function CameraScanner({
   }, [onScan]);
 
   React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const pauseForBackground = () => {
+      pageActiveRef.current = false;
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+      setPageActive(false);
+    };
+    const resumeFromBackground = () => {
+      const active = document.visibilityState !== 'hidden';
+      pageActiveRef.current = active;
+      setPageActive(active);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') pauseForBackground();
+      else resumeFromBackground();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', pauseForBackground);
+    window.addEventListener('pageshow', resumeFromBackground);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', pauseForBackground);
+      window.removeEventListener('pageshow', resumeFromBackground);
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (!isCameraSupported()) {
       setStatus('unsupported');
       return;
@@ -73,9 +115,17 @@ export function CameraScanner({
       setStatus('idle');
       return;
     }
+    if (!resumeEligibleRef.current) return;
+    if (!pageActive) {
+      setStatus('backgrounded');
+      return;
+    }
+    if (pendingAttemptRef.current !== undefined) return;
 
     let cancelled = false;
     let controls: IScannerControls | null = null;
+    const attemptGeneration = ++attemptGenerationRef.current;
+    pendingAttemptRef.current = attemptGeneration;
     setStatus('starting');
     setErrorMessage(null);
 
@@ -90,7 +140,7 @@ export function CameraScanner({
         },
         video ?? undefined,
         (result: Result | undefined) => {
-          if (cancelled || disabledRef.current || !result) return;
+          if (cancelled || !pageActiveRef.current || disabledRef.current || !result) return;
           const payload = result.getText();
           if (!payload.trim()) return;
           const now = Date.now();
@@ -99,13 +149,19 @@ export function CameraScanner({
           lastScanRef.current = { payload, at: now };
           setStatus('paused');
           void onScanRef.current(payload).finally(() => {
-            if (!cancelled) setStatus('scanning');
+            if (!cancelled && pageActiveRef.current) setStatus('scanning');
           });
         },
       )
       .then((resolvedControls) => {
+        if (pendingAttemptRef.current === attemptGeneration) {
+          pendingAttemptRef.current = undefined;
+        }
         if (cancelled) {
           resolvedControls.stop();
+          if (mountedRef.current && pageActiveRef.current && resumeEligibleRef.current) {
+            setRetryNonce((current) => current + 1);
+          }
           return;
         }
         controls = resolvedControls;
@@ -113,7 +169,12 @@ export function CameraScanner({
         setStatus('scanning');
       })
       .catch((error: unknown) => {
-        if (cancelled) return;
+        if (attemptGenerationRef.current !== attemptGeneration) return;
+        if (pendingAttemptRef.current === attemptGeneration) {
+          pendingAttemptRef.current = undefined;
+        }
+        if (!mountedRef.current) return;
+        resumeEligibleRef.current = false;
         classifyCameraError(error, { setStatus, setErrorMessage });
       });
 
@@ -123,14 +184,16 @@ export function CameraScanner({
       controlsRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraEnabled, cooldownMs, retryNonce]);
+  }, [cameraEnabled, cooldownMs, pageActive, retryNonce]);
 
   const handleEnable = React.useCallback(() => {
+    resumeEligibleRef.current = true;
     setStatus('starting');
     setCameraEnabled(true);
   }, []);
 
   const handleRetry = React.useCallback(() => {
+    resumeEligibleRef.current = true;
     setStatus('starting');
     setCameraEnabled(true);
     setRetryNonce((n) => n + 1);
@@ -180,7 +243,7 @@ export function CameraScanner({
     );
   }
 
-  const showOverlay = status === 'starting' || status === 'paused';
+  const showOverlay = status === 'starting' || status === 'paused' || status === 'backgrounded';
 
   return (
     <div
@@ -209,7 +272,9 @@ export function CameraScanner({
           ? 'Starting camera…'
           : status === 'paused'
             ? 'Processing…'
-            : 'Point at a QR code'}
+            : status === 'backgrounded'
+              ? 'Camera paused in background…'
+              : 'Point at a QR code'}
       </div>
       {showOverlay && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40">

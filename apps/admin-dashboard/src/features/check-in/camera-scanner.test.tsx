@@ -1,4 +1,4 @@
-import { render, screen, act, fireEvent } from '@testing-library/react';
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckInScanResult } from '@/lib/api';
@@ -226,6 +226,64 @@ describe('CameraScanner', () => {
     expect(mockStopFn).toHaveBeenCalled();
   });
 
+  it('releases the camera while backgrounded and reacquires it on visibility resume', async () => {
+    const onScan = vi.fn().mockResolvedValue(makeAcceptedResult());
+    render(<CameraScanner onScan={onScan} />);
+    const viewport = await enableCamera();
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(1));
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(mockStopFn).toHaveBeenCalled();
+    expect(viewport).toHaveAttribute('data-camera-status', 'backgrounded');
+    expect(screen.getByText('Camera paused in background…')).toBeVisible();
+    fireDecode('tkt_backgrounded');
+    expect(onScan).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(viewport).toHaveAttribute('data-camera-status', 'scanning'));
+  });
+
+  it('releases the camera on pagehide and restarts it on pageshow', async () => {
+    render(<CameraScanner onScan={vi.fn()} />);
+    await enableCamera();
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(1));
+
+    act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    expect(mockStopFn).toHaveBeenCalled();
+    act(() => window.dispatchEvent(new PageTransitionEvent('pageshow')));
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not reacquire on pageshow while the document remains hidden', async () => {
+    render(<CameraScanner onScan={vi.fn()} />);
+    await enableCamera();
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(1));
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+
+    act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    act(() => window.dispatchEvent(new PageTransitionEvent('pageshow')));
+    expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(2));
+  });
+
   it('shows the denied permission fallback when getUserMedia is blocked', async () => {
     mockDecodeFromConstraints = vi.fn(() =>
       Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),
@@ -234,6 +292,65 @@ describe('CameraScanner', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
     expect(await screen.findByText('Camera permission denied')).toBeInTheDocument();
     expect(screen.getByTestId('camera-fallback')).toBeInTheDocument();
+  });
+
+  it('keeps a denied camera terminal until the user explicitly retries', async () => {
+    mockDecodeFromConstraints = vi.fn(() =>
+      Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),
+    );
+    render(<CameraScanner onScan={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
+    expect(await screen.findByText('Camera permission denied')).toBeInTheDocument();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Camera permission denied')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry camera' }));
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps a deferred denial terminal when it arrives after background cancellation', async () => {
+    let rejectStartup!: (error: unknown) => void;
+    mockDecodeFromConstraints = vi.fn(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectStartup = reject;
+        }),
+    );
+    render(<CameraScanner onScan={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(1));
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await act(async () => {
+      rejectStartup(new DOMException('Permission denied', 'NotAllowedError'));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText('Camera permission denied')).toBeVisible();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Camera permission denied')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry camera' }));
+    await waitFor(() => expect(mockDecodeFromConstraints).toHaveBeenCalledTimes(2));
   });
 
   it('shows the unsupported fallback when no camera device is found', async () => {

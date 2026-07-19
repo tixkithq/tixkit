@@ -146,6 +146,9 @@ describe('CheckInConsole', () => {
     expect(screen.getByRole('button', { name: /new check-in list/i })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /open kiosk mode/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /open dashboard/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Event setup'));
+    expect(screen.getByRole('combobox', { name: 'Event' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Check-in list' })).toBeInTheDocument();
     await waitFor(() => expect(listCheckInLists).toHaveBeenCalledWith('evt_1'));
     expect(listTicketTypes).not.toHaveBeenCalled();
     expect(listEventOccurrences).not.toHaveBeenCalled();
