@@ -255,6 +255,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'resale-settlement-concurrency-db.integration.test.ts'),
   ],
   [
+    'attendee-list-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'attendee-list-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'attendee-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'attendee-route-authorization-db.integration.test.ts'),
   ],
@@ -548,6 +552,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['patchAttendeesByAttendeeId'], {
     source: 'attendee-route-authorization-db.integration.test.ts',
     persistenceSource: 'attendee-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getAttendees'], {
+    source: 'attendee-list-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['postCheckInsScan'], {
     source: 'checkin-scan-route-authorization-db.integration.test.ts',

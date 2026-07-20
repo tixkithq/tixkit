@@ -1,0 +1,30 @@
+{
+  "from": "2026-08-26",
+  "to": "2026-08-27",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 3
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /attendees",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.Attendee.properties.eventTitle",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.Attendee.properties.ticketTypeName",
+      "message": "An optional property was added."
+    }
+  ]
+}

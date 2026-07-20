@@ -1217,6 +1217,18 @@ export const ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 200 },
     denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['organization', 'brand'],
+    method: 'GET',
+    operationId: 'getAttendees',
+    path: '/attendees',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'attendee-list-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
     deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
     method: 'PATCH',
     operationId: 'patchAttendeesByAttendeeId',

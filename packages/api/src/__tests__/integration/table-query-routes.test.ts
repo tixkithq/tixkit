@@ -532,14 +532,14 @@ describe('attendees table query route', () => {
       total: 0,
       filterTotal: 0,
       facets: undefined,
-      applied: { sort: [], filters: { status: { type: 'select', values: ['active'] } } },
+      applied: { sort: [], filters: { status: { type: 'select', values: ['confirmed'] } } },
     });
 
     const app = await setupCheckinApp(makePrincipal(), db);
-    await app.inject({ method: 'GET', url: '/attendees?status=active' });
+    await app.inject({ method: 'GET', url: '/attendees?status=confirmed' });
 
     const [, , queryArg] = executeTableQueryMock.mock.calls[0];
-    expect(queryArg.filters?.status).toEqual({ type: 'select', values: ['active'] });
+    expect(queryArg.filters?.status).toEqual({ type: 'select', values: ['confirmed'] });
     await app.close();
   });
 

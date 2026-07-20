@@ -201,7 +201,13 @@ const pendingBulkSyncJobSchedules = new Set<string>();
 // Attendees table schema (server-owned, defines allowed filter/sort/sheet fields)
 // ---------------------------------------------------------------------------
 
-const ATTENDEE_STATUS_PRESETS = ['active', 'cancelled', 'refunded', 'transferred'] as const;
+const ATTENDEE_STATUS_PRESETS = [
+  'pending',
+  'confirmed',
+  'cancelled',
+  'refunded',
+  'checked_in',
+] as const;
 const CHECK_IN_STATUS_PRESETS = ['checked_in', 'not_checked_in', 'revoked'] as const;
 
 const attendeesTableSchema = defineTable('attendees', {
@@ -378,25 +384,28 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const rawQuery = request.query as Record<string, string | undefined>;
     const { organizationId, brandId } = rawQuery;
 
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
+        searchParams.set(key, value);
+      }
+    }
+    const tableQuery = parseStrictTableQuery(attendeesTableSchema, searchParams);
+
     if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
 
-    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return {
-        items: [],
-        nextCursor: undefined,
-        total: 0,
-        filterTotal: 0,
-      } as AdminTablePage<unknown>;
-    }
-
-    // Pre-query event IDs that match org/brand scope (attendees table has no org/brand columns)
+    // Scope attendees through an event subquery because attendees do not carry organization or
+    // brand columns. Keeping the scope in SQL avoids materializing an unbounded event ID list.
     let eventScopeQuery = db
       .selectFrom('events')
       .select('id')
       .where('tenant_id', '=', principal.tenantId);
     if (principal.type !== 'system') {
-      eventScopeQuery = eventScopeQuery.where('organization_id', 'in', principal.organizationIds);
+      eventScopeQuery =
+        principal.organizationIds.length > 0
+          ? eventScopeQuery.where('organization_id', 'in', principal.organizationIds)
+          : eventScopeQuery.where(sql<boolean>`false`);
     }
     if (principal.brandIds && principal.brandIds.length > 0) {
       eventScopeQuery = eventScopeQuery.where('brand_id', 'in', principal.brandIds);
@@ -410,31 +419,6 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     if (brandId) {
       eventScopeQuery = eventScopeQuery.where('brand_id', '=', brandId);
     }
-    const scopedEvents = await eventScopeQuery.execute();
-    const scopedEventIds = scopedEvents.map((e) => e.id);
-
-    if (scopedEventIds.length === 0) {
-      return {
-        items: [],
-        nextCursor: undefined,
-        total: 0,
-        filterTotal: 0,
-      } as AdminTablePage<unknown>;
-    }
-
-    const scope: Record<string, string | string[]> = {
-      event_id: scopedEventIds,
-    };
-
-    // Parse flat query params into AdminTableQuery using the server-owned schema
-    const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(rawQuery)) {
-      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
-        searchParams.set(key, value);
-      }
-    }
-    const tableQuery = parseStrictTableQuery(attendeesTableSchema, searchParams);
-
     // Execute the table query with custom checkInStatus filter and facet
     const result = await executeTableQuery(
       db,
@@ -442,7 +426,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         tableName: 'attendees',
         schema: attendeesTableSchema,
         tenantId: principal.tenantId,
-        scope,
+        applyScope: (query) => query.where('event_id', 'in', eventScopeQuery),
         serialize: serializeAttendee,
         selectFields: attendeeListColumns,
         strictValidation: true,
@@ -500,6 +484,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         .selectFrom('events')
         .select(['id', 'title'])
         .where('id', 'in', eventIds)
+        .where('tenant_id', '=', principal.tenantId)
         .execute();
       for (const event of events) eventTitles.set(event.id, event.title);
     }
@@ -515,6 +500,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         .selectFrom('ticket_types')
         .select(['id', 'name'])
         .where('id', 'in', ticketTypeIds)
+        .where('event_id', 'in', eventIds)
         .execute();
       for (const tt of ticketTypes) ticketTypeNames.set(tt.id, tt.name);
     }

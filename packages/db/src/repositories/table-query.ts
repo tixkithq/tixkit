@@ -39,6 +39,8 @@ export type TableQueryConfig<T> = {
   tenantId: string;
   /** Additional scope filters applied BEFORE everything else. */
   scope?: Record<string, string | boolean | string[] | undefined>;
+  /** Apply a subquery or correlated scope that cannot be represented as scalar filters. */
+  applyScope?: (query: any) => any;
   /** Serialize raw DB rows into the response type. */
   serialize: (row: Record<string, unknown>) => T;
   /** Explicit DB columns needed by the serializer. Defaults to schema columns. */
@@ -114,6 +116,7 @@ export async function executeTableQuery<T>(
     tableName,
     tenantId,
     scope = {},
+    applyScope,
     serialize,
     selectFields,
     customFilters,
@@ -144,6 +147,7 @@ export async function executeTableQuery<T>(
         q = q.where(field, '=', value);
       }
     }
+    if (applyScope) q = applyScope(q);
     return q;
   };
 

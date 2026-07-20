@@ -757,7 +757,7 @@ describe('third-party contract profiles', () => {
       headers: Record<string, string>;
     }> = [];
     const contractInput = {
-      apiVersion: '2026-08-24',
+      apiVersion: '2026-08-27',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: `tk_agent_${'e'.repeat(48)}`,
       agentClientSecret: 'secret_value',
