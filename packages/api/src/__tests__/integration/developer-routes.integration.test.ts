@@ -10,24 +10,63 @@ import { developerRoutes } from '../../routes/modules/developer.js';
 import { webhookRoutes } from '../../routes/modules/webhooks.js';
 
 function createApiKeyListDb(rows: Record<string, unknown>[]) {
+  const tables: Record<string, Record<string, unknown>[]> = {
+    api_keys: rows,
+    organization_members: [
+      {
+        id: 'mem_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        user_id: 'usr_1',
+        accepted_at: new Date('2026-06-01T00:00:00Z'),
+      },
+    ],
+    permission_grants: [
+      {
+        id: 'pg_1',
+        tenant_id: 'tnt_1',
+        principal_type: 'user',
+        principal_id: 'usr_1',
+        permission: 'developers.write',
+        scope_type: 'organization',
+        scope_id: 'org_1',
+      },
+    ],
+    brands: [],
+    events: [],
+  };
   return {
     selectFrom(table: string) {
-      expect(table).toBe('api_keys');
+      const predicates: Array<[string, string, unknown]> = [];
+      let rowLimit: number | undefined;
       const query = {
         select() {
           return query;
         },
-        where() {
+        where(column: string, operator: string, value: unknown) {
+          predicates.push([column, operator, value]);
           return query;
         },
         orderBy() {
           return query;
         },
-        limit() {
+        limit(limit: number) {
+          rowLimit = limit;
           return query;
         },
         execute() {
-          return Promise.resolve(rows);
+          const selected = (tables[table] ?? []).filter((candidate) =>
+            predicates.every(([column, operator, value]) =>
+              operator === 'in'
+                ? Array.isArray(value) && value.includes(candidate[column])
+                : operator === 'is not'
+                  ? candidate[column] !== value
+                  : operator === '>'
+                    ? String(candidate[column]) > String(value)
+                    : candidate[column] === value,
+            ),
+          );
+          return Promise.resolve(rowLimit === undefined ? selected : selected.slice(0, rowLimit));
         },
       };
       return query;
@@ -95,6 +134,8 @@ function matchesScannerLifecycleRow(
   return conditions.every(({ column, operator, value }) => {
     if (operator === '=') return row[column] === value;
     if (operator === 'is') return row[column] === value;
+    if (operator === 'is not') return row[column] !== value;
+    if (operator === 'in') return Array.isArray(value) && value.includes(row[column]);
     throw new Error(`Unsupported scanner lifecycle test operator: ${operator}`);
   });
 }
@@ -102,6 +143,27 @@ function matchesScannerLifecycleRow(
 function createScannerDeviceLifecycleDb() {
   const tables: Record<string, Record<string, unknown>[]> = {
     organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }],
+    organization_members: [
+      {
+        id: 'mem_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        user_id: 'usr_1',
+        accepted_at: new Date('2026-06-01T00:00:00Z'),
+      },
+    ],
+    permission_grants: ['developers.write', 'events.read'].map((permission, index) => ({
+      id: `pg_${index}`,
+      tenant_id: 'tnt_1',
+      principal_type: 'user',
+      principal_id: 'usr_1',
+      permission,
+      scope_type: 'organization',
+      scope_id: 'org_1',
+    })),
+    brands: [],
+    events: [],
+    idempotency_records: [],
     scanner_devices: [],
     audit_logs: [],
   };
@@ -144,6 +206,9 @@ function createScannerDeviceLifecycleDb() {
         selectAll() {
           return query;
         },
+        select() {
+          return query;
+        },
         forUpdate() {
           return query;
         },
@@ -153,6 +218,9 @@ function createScannerDeviceLifecycleDb() {
         },
         async executeTakeFirst() {
           return rowsFor(table).find((row) => matchesScannerLifecycleRow(row, conditions));
+        },
+        async execute() {
+          return rowsFor(table).filter((row) => matchesScannerLifecycleRow(row, conditions));
         },
       };
       return query;
@@ -179,6 +247,22 @@ function createScannerDeviceLifecycleDb() {
         },
       };
       return update;
+    },
+    deleteFrom(table: string) {
+      const conditions: QueryCondition[] = [];
+      const remove = {
+        where(column: string, operator: string, value: unknown) {
+          conditions.push({ column, operator, value });
+          return remove;
+        },
+        async execute() {
+          tables[table] = rowsFor(table).filter(
+            (row) => !matchesScannerLifecycleRow(row, conditions),
+          );
+          return [];
+        },
+      };
+      return remove;
     },
   };
   return { tables, db };
@@ -601,7 +685,8 @@ describe('developer routes integration', () => {
 
     expect(response.statusCode).toBe(200);
     expect(body.hasMore).toBe(true);
-    expect(body.nextCursor).toBe('ak_1');
+    expect(body.nextCursor).toMatch(/^aksc1\./u);
+    expect(body.nextCursor).not.toContain('ak_1');
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({
       id: 'ak_1',
@@ -631,6 +716,7 @@ describe('developer routes integration', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api-keys',
+      headers: { 'idempotency-key': 'api-key-developer-route-0001' },
       payload: {
         organizationId: 'org_1',
         name: 'Read-only events key',
@@ -673,7 +759,7 @@ describe('developer routes integration', () => {
     await app.close();
   });
 
-  it('bounds event-scoped API key listing before resource filtering', async () => {
+  it('rejects API-key-authenticated credential listing', async () => {
     const principal: Principal = {
       type: 'api_key',
       id: 'key_parent',
@@ -734,13 +820,8 @@ describe('developer routes integration', () => {
     const app = await setupDeveloperRouteApp(principal, db);
 
     const response = await app.inject({ method: 'GET', url: '/api-keys?limit=1' });
-    const body = response.json() as { items: Array<{ id: string }>; hasMore: boolean };
-
-    expect(response.statusCode).toBe(200);
-    expect(body.items).toEqual([expect.objectContaining({ id: 'ak_002_allowed' })]);
-    expect(body.hasMore).toBe(true);
-    expect(db.limitCalls.api_keys).toEqual([2, 2]);
-    expect(db.limitCalls.api_keys.every((limit) => limit <= 2)).toBe(true);
+    expect(response.statusCode).toBe(403);
+    expect(db.limitCalls.api_keys).toBeUndefined();
     await app.close();
   });
 
@@ -1288,7 +1369,7 @@ describe('developer routes integration', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json()).toMatchObject({
       code: 'FORBIDDEN',
-      message: 'Event-scoped principals must create event-scoped credentials',
+      message: 'API key lifecycle management requires a human user principal',
     });
 
     await app.close();

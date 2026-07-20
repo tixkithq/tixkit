@@ -15,6 +15,7 @@ type OpenApiOperation = {
   operationId?: string;
   security?: readonly Record<string, readonly string[]>[];
   'x-principal-type-restrictions'?: {
+    allowed?: readonly string[];
     byUploadPurpose?: Readonly<Record<string, readonly string[]>>;
   };
   'x-required-permissions'?:

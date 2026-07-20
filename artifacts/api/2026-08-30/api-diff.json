@@ -1,0 +1,54 @@
+{
+  "from": "2026-08-29",
+  "to": "2026-08-30",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 4,
+    "compatible": 3
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "security-changed",
+      "path": "GET /api-keys",
+      "message": "Authentication schemes or scopes changed."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /api-keys",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "security-changed",
+      "path": "POST /api-keys",
+      "message": "Authentication schemes or scopes changed."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /api-keys",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-parameter-added",
+      "path": "POST /api-keys.parameters.header:Idempotency-Key",
+      "message": "A required parameter was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "security-changed",
+      "path": "DELETE /api-keys/{keyId}",
+      "message": "Authentication schemes or scopes changed."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "DELETE /api-keys/{keyId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    }
+  ]
+}

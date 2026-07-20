@@ -262,6 +262,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-24 idempotent venue and webhook creation',
         routeId: 'apiMigration20260823To20260824',
       },
+      {
+        label: 'Adopt 2026-08-30 human-only API key lifecycle controls',
+        routeId: 'apiMigration20260829To20260830',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

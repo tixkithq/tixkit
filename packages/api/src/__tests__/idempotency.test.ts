@@ -386,6 +386,41 @@ describe('withIdempotency', () => {
     expect(records[0]?.response_status).toBe(201);
   });
 
+  it('returns a one-time secret without persisting or replaying it', async () => {
+    const { db, records } = createMockDb();
+    const requestHash = hashRequest({ organizationId: 'org_1', name: 'Automation' });
+    const handler = vi.fn(async ({ completeInTransaction }) => {
+      await completeInTransaction(db, {
+        status: 409,
+        body: { error: { code: 'SECRET_NOT_REPLAYABLE' }, resourceId: 'key_1' },
+      });
+      return { status: 201, body: { id: 'key_1', apiKey: 'tk_one_time_secret' } };
+    });
+    const input = {
+      key: 'api-key-create:user_1:request_1',
+      tenantId: 'tnt_1',
+      requestHash,
+      storedResponse: (response: { body: unknown; status: number }) => ({
+        status: 409,
+        body: {
+          error: { code: 'SECRET_NOT_REPLAYABLE' },
+          resourceId: (response.body as { id: string }).id,
+        },
+      }),
+    };
+
+    const first = await withIdempotency(db, input, handler);
+    const replay = await withIdempotency(db, input, handler);
+
+    expect(first).toEqual({ status: 201, body: { id: 'key_1', apiKey: 'tk_one_time_secret' } });
+    expect(replay).toEqual({
+      status: 409,
+      body: { error: { code: 'SECRET_NOT_REPLAYABLE' }, resourceId: 'key_1' },
+    });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(JSON.stringify(records)).not.toContain('tk_one_time_secret');
+  });
+
   it('retries completed response persistence after a transient update failure', async () => {
     const requestHash = hashRequest({ export: 'sales' });
     const { db, records } = createMockDb([], false, { failCount: 1 });

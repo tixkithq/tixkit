@@ -194,7 +194,7 @@ describe('API route access inventory (C-123)', () => {
       ),
     ).toBe(true);
     expect(coveredRoutes).toHaveLength(124);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(508);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(511);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))

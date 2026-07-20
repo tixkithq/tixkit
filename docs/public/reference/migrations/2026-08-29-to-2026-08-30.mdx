@@ -1,0 +1,26 @@
+---
+title: Migrate API 2026-08-29 to 2026-08-30
+description: Adopt human-only, live-grant-bound API key lifecycle controls.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-20
+prerequisites:
+  - /reference/api-versions
+related:
+  - /developers/api-fundamentals/idempotency
+  - /reference/api
+---
+
+API `2026-08-30` restricts `GET /api-keys`, `POST /api-keys`, and `DELETE /api-keys/{keyId}` to authenticated human user principals. API keys, agents, mobile devices, and internal system principals receive `403` and cannot recursively manage bearer credentials. Replace machine-driven credential rotation with an approved human operator flow before upgrading.
+
+`POST /api-keys` now requires an `Idempotency-Key` containing 16–255 visible ASCII characters with no surrounding whitespace. Reuse the same key only for an identical request. The first successful response returns the API key secret once and carries `Cache-Control: private, no-store`; do not log, cache, or persist that response outside an authorized credential store.
+
+An exact retry returns `409 API_KEY_SECRET_NOT_REPLAYABLE`. The inaccessible key identifier is available as `error.details.apiKeyId`; revoke that key and create a replacement with a new idempotency key if the original response was lost. Reusing the idempotency key with a changed request returns `409 IDEMPOTENCY_CONFLICT` without an API key identifier and never creates a second key.
+
+API key list cursors are now opaque, authenticated, short-lived values bound to the tenant, human principal, and optional `organizationId` selector. Treat them as indivisible strings. Do not parse them, persist them as resource identifiers, or reuse them with a different selector or principal.
+
+The JavaScript SDK requires `idempotencyKey` in `apiKeys.create(...)`, accepts `organizationId` in `apiKeys.list(...)`, and exposes replay recovery through `TixkitApiError.details.apiKeyId`. Regenerate other strongly typed clients from the `2026-08-30` OpenAPI contract before deployment.

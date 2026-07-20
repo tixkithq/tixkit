@@ -1,0 +1,21 @@
+{
+  "apiVersion": "2026-08-30",
+  "examples": {
+    "error": {
+      "error": {
+        "code": "NOT_FOUND",
+        "message": "Resource not found",
+        "requestId": "req_example"
+      }
+    },
+    "webhookTest": {
+      "type": "test.ping",
+      "test": true,
+      "apiVersion": "2026-08-30",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "data": {
+        "endpointId": "wh_example"
+      }
+    }
+  }
+}

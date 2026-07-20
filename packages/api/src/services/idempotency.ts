@@ -75,6 +75,7 @@ export async function withIdempotency(
     inProgressPollIntervalMs?: number;
     discardErrorCodes?: readonly string[];
     sanitizeStoredResponse?: (body: unknown) => unknown;
+    storedResponse?: (response: IdempotentResponse) => IdempotentResponse;
     completedRecordExpiry?: Readonly<{
       tombstone: IdempotentResponse;
     }>;
@@ -231,10 +232,11 @@ export async function withIdempotency(
   if (result.status >= 500) {
     await deleteRecord(db, recordId);
   } else {
+    const storedResult = input.storedResponse?.(result) ?? result;
     try {
       await completeRecordWithRetry(db, recordId, {
-        response_status: result.status,
-        response_body: JSON.stringify(result.body),
+        response_status: storedResult.status,
+        response_body: JSON.stringify(storedResult.body),
         status: 'completed',
       });
     } catch (completionError) {

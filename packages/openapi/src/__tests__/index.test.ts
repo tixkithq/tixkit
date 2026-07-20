@@ -165,7 +165,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-29');
+    expect(openApiSpec.info.version).toBe('2026-08-30');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1089,9 +1089,6 @@ describe('openApiSpec', () => {
 
   it('documents API-key authentication on scoped developer and audit automation routes', () => {
     const apiKeyCapableOperations = [
-      openApiSpec.paths['/api-keys'].get,
-      openApiSpec.paths['/api-keys'].post,
-      openApiSpec.paths['/api-keys/{keyId}'].delete,
       openApiSpec.paths['/scanner-devices'].get,
       openApiSpec.paths['/scanner-devices'].post,
       openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post,
@@ -1110,6 +1107,43 @@ describe('openApiSpec', () => {
     for (const operation of apiKeyCapableOperations) {
       expect(operation.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
     }
+  });
+
+  it('documents the human-only, idempotent API-key lifecycle contract', () => {
+    const list = openApiSpec.paths['/api-keys'].get;
+    const create = openApiSpec.paths['/api-keys'].post;
+    const revoke = openApiSpec.paths['/api-keys/{keyId}'].delete;
+
+    for (const operation of [list, create, revoke]) {
+      expect(operation['x-required-permissions']).toEqual(['developers.write']);
+      expect(operation['x-principal-type-restrictions']).toEqual({ allowed: ['user'] });
+      expect(operation.security).toEqual([{ BearerAuth: [] }]);
+    }
+    expect(list.parameters).toContainEqual({
+      name: 'organizationId',
+      in: 'query',
+      required: false,
+      schema: { type: 'string' },
+    });
+    expect(create.parameters).toContainEqual({
+      $ref: '#/components/parameters/ApiKeyCreationIdempotencyKey',
+    });
+    expect(openApiSpec.components.parameters.ApiKeyCreationIdempotencyKey.schema).toMatchObject({
+      minLength: 16,
+      maxLength: 255,
+      pattern: '^[!-~]+$',
+    });
+    expect(create.responses['409'].description).toContain('API_KEY_SECRET_NOT_REPLAYABLE');
+    expect(create.responses['409'].description).toContain('IDEMPOTENCY_CONFLICT');
+    expect(create.responses['409'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/ApiError',
+    });
+    expect(create.responses['201'].headers).toMatchObject({
+      'Cache-Control': { schema: { enum: ['private, no-store'] } },
+    });
+    expect(create.operationId).toBe('postApiKeys');
+    expect(list.operationId).toBe('getApiKeys');
+    expect(revoke.operationId).toBe('deleteApiKeysByKeyId');
   });
 
   it('documents webhook endpoint management permissions, selectors, and retained history scope', () => {
@@ -1308,7 +1342,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-29');
+    expect(openApiSpec.info.version).toBe('2026-08-30');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',

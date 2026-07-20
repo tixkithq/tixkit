@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-29';
+export const TIXKIT_API_VERSION = '2026-08-30';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -4994,12 +4994,13 @@ class CheckInResource {
 
 class ApiKeyResource {
   constructor(private client: TixkitClient) {}
-  async list(params?: PaginationParams): Promise<PageResult<ApiKey>> {
+  async list(params?: PaginationParams & { organizationId?: string }): Promise<PageResult<ApiKey>> {
     return this.client.request('GET', '/api-keys', {
       params: paginationParams(params),
     });
   }
   async create(input: {
+    idempotencyKey: string;
     organizationId: string;
     name: string;
     scopes: string[];
@@ -5007,7 +5008,8 @@ class ApiKeyResource {
     eventIds?: string[];
     expiresAt?: string;
   }): Promise<ApiKeyCreated> {
-    return this.client.request('POST', '/api-keys', { body: input });
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/api-keys', { body, idempotencyKey });
   }
   async revoke(keyId: string): Promise<void> {
     return this.client.request('DELETE', `/api-keys/${keyId}`);

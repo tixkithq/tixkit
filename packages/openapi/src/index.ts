@@ -644,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-29',
+    version: '2026-08-30',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -700,6 +700,19 @@ const rawOpenApiSpec = {
         required: true,
         schema: { type: 'string' },
         description: 'Required for idempotent mutations',
+      },
+      ApiKeyCreationIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          minLength: 16,
+          maxLength: 255,
+          pattern: '^[!-~]+$',
+        },
+        description:
+          'Required for API key creation. Use 16-255 visible ASCII characters without surrounding whitespace and reuse the key only for an identical request body.',
       },
       MessageCampaignIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -6071,7 +6084,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-29, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-30, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6118,7 +6131,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-29, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-30, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6225,7 +6238,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-29 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-30 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6262,7 +6275,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-29 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-30 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8548,7 +8561,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-29 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-30 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8605,7 +8618,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-29 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-30 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -14183,10 +14196,20 @@ const rawOpenApiSpec = {
     '/api-keys': {
       get: {
         summary: 'List API keys',
-        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        description:
+          'Requires a human bearer principal with a live `developers.write` grant associated with each returned organization, brand, or event scope.',
+        'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
+        security: [{ BearerAuth: [] }],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
+          {
+            name: 'organizationId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
@@ -14201,7 +14224,12 @@ const rawOpenApiSpec = {
       },
       post: {
         summary: 'Create API key',
-        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        description:
+          'Requires a human bearer principal and live, target-associated `developers.write` plus every permission delegated to the new key. The secret is returned once. Retrying the same Idempotency-Key returns 409 with the created key identifier because secrets are never persisted for replay.',
+        'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/ApiKeyCreationIdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
@@ -14224,9 +14252,24 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description: 'API key created (full key shown only once)',
+            headers: {
+              'Cache-Control': {
+                description: 'One-time credential responses must never be stored by caches',
+                schema: { type: 'string', enum: ['private, no-store'] },
+              },
+            },
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiKeyCreated' },
+              },
+            },
+          },
+          '409': {
+            description:
+              'Either the same request already created a key and its secret cannot be replayed (`API_KEY_SECRET_NOT_REPLAYABLE`, with `error.details.apiKeyId`), or the Idempotency-Key was reused with a different request (`IDEMPOTENCY_CONFLICT`, with no API key identifier).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },
@@ -14236,7 +14279,11 @@ const rawOpenApiSpec = {
     '/api-keys/{keyId}': {
       delete: {
         summary: 'Revoke API key',
-        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        description:
+          'Requires a human bearer principal with a live `developers.write` grant associated with the target key scope.',
+        'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
+        security: [{ BearerAuth: [] }],
         responses: { '204': { description: 'API key revoked' } },
       },
     },

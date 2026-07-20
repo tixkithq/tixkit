@@ -3279,12 +3279,13 @@ describe('TixkitClient new resource methods', () => {
       apiKey: 'tk_live_secret',
     });
     const c = new TixkitClient({
-      apiKey: '***********',
+      accessToken: 'human-bearer-token',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
 
     const created = await c.apiKeys.create({
+      idempotencyKey: 'api-key-create-sdk-0001',
       organizationId: 'org_1',
       name: 'Server key',
       scopes: ['events.read'],
@@ -3295,6 +3296,50 @@ describe('TixkitClient new resource methods', () => {
     expectTypeOf(created.apiKey).toEqualTypeOf<string>();
     expect(call.method).toBe('POST');
     expect(call.url).toBe('https://api.test/v1/api-keys');
+    expect(call.headers['Idempotency-Key']).toBe('api-key-create-sdk-0001');
+  });
+
+  it('apiKeys.list forwards the organization selector', async () => {
+    const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
+    const c = new TixkitClient({
+      accessToken: 'human-bearer-token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.apiKeys.list({ organizationId: 'org_1', limit: 25 });
+
+    expect(getCall(fm).url).toBe('https://api.test/v1/api-keys?limit=25&organizationId=org_1');
+  });
+
+  it('apiKeys.create preserves the inaccessible key identifier on a safe replay tombstone', async () => {
+    mockFetch(409, {
+      error: {
+        code: 'API_KEY_SECRET_NOT_REPLAYABLE',
+        message: 'The one-time secret cannot be replayed',
+        requestId: 'req_api_key_replay',
+        details: { apiKeyId: 'key_created_1' },
+      },
+    });
+    const c = new TixkitClient({
+      accessToken: 'human-bearer-token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    try {
+      await c.apiKeys.create({
+        idempotencyKey: 'api-key-create-sdk-replay-0001',
+        organizationId: 'org_1',
+        name: 'Server key',
+        scopes: ['events.read'],
+      });
+      throw new Error('Expected API key replay to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(TixkitApiError);
+      expect((error as TixkitApiError).code).toBe('API_KEY_SECRET_NOT_REPLAYABLE');
+      expect((error as TixkitApiError).details).toEqual({ apiKeyId: 'key_created_1' });
+    }
   });
 
   it('agentControl binds mutation intent to idempotency keys and server-owned fields', async () => {
@@ -4012,7 +4057,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-29',
+        'X-Tixkit-Version': '2026-08-30',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

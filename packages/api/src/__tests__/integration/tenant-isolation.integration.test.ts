@@ -649,6 +649,36 @@ async function setupApp(
   tables: Tables = {},
   contextOverrides: Record<string, unknown> = {},
 ) {
+  if (routes === developerRoutes && principal.type === 'user') {
+    tables.organization_members ??= principal.organizationIds.map((organizationId, index) => ({
+      id: `mem_developer_${index}`,
+      tenant_id: principal.tenantId,
+      organization_id: organizationId,
+      user_id: principal.id,
+      accepted_at: new Date('2026-06-01T00:00:00.000Z'),
+    }));
+    const scopeType = principal.eventIds?.length
+      ? 'event'
+      : principal.brandIds?.length
+        ? 'brand'
+        : 'organization';
+    const scopeIds = principal.eventIds?.length
+      ? principal.eventIds
+      : principal.brandIds?.length
+        ? principal.brandIds
+        : principal.organizationIds;
+    tables.permission_grants ??= principal.scopes.flatMap((permission, permissionIndex) =>
+      scopeIds.map((scopeId, scopeIndex) => ({
+        id: `pg_developer_${permissionIndex}_${scopeIndex}`,
+        tenant_id: principal.tenantId,
+        principal_type: 'user',
+        principal_id: principal.id,
+        permission,
+        scope_type: scopeType,
+        scope_id: scopeId,
+      })),
+    );
+  }
   const app = Fastify();
   const context = {
     db: createMockDb(tables) as unknown as Database,
@@ -2567,7 +2597,7 @@ describe('empty organization principal fail-closed lists', () => {
 });
 
 describe('developer credential resource scope containment', () => {
-  it('GET /api-keys exposes only same-event keys and DELETE hides other-event or org-wide keys from event-scoped principals', async () => {
+  it('API-key principals cannot recursively list or revoke API keys', async () => {
     const principal = makePrincipal({
       type: 'api_key',
       id: 'ak_parent',
@@ -2590,20 +2620,19 @@ describe('developer credential resource scope containment', () => {
     const app = await setupApp(developerRoutes, principal, tables);
 
     const listRes = await app.inject({ method: 'GET', url: '/api-keys' });
-    expect(listRes.statusCode).toBe(200);
-    expect(listRes.json().items.map((item: { id: string }) => item.id)).toEqual(['ak_evt_1']);
+    expect(listRes.statusCode).toBe(403);
 
     const otherEventRes = await app.inject({
       method: 'DELETE',
       url: '/api-keys/ak_evt_2',
     });
-    expect(otherEventRes.statusCode).toBe(404);
+    expect(otherEventRes.statusCode).toBe(403);
 
     const orgWideRes = await app.inject({
       method: 'DELETE',
       url: '/api-keys/ak_org',
     });
-    expect(orgWideRes.statusCode).toBe(404);
+    expect(orgWideRes.statusCode).toBe(403);
 
     await app.close();
   });

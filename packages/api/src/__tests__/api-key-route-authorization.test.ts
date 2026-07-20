@@ -45,7 +45,29 @@ function principal(overrides: Partial<Principal> = {}): Principal {
   };
 }
 
-function database(row: Record<string, unknown> = storedKey) {
+function database(activePrincipal: Principal, row: Record<string, unknown> = storedKey) {
+  const grantScopeType = activePrincipal.eventIds?.length
+    ? 'event'
+    : activePrincipal.brandIds?.length
+      ? 'brand'
+      : 'organization';
+  const grantScopeIds = activePrincipal.eventIds?.length
+    ? activePrincipal.eventIds
+    : activePrincipal.brandIds?.length
+      ? activePrincipal.brandIds
+      : activePrincipal.organizationIds;
+  const idempotencyRecords: Record<string, unknown>[] = [];
+  const matches = (
+    candidate: Record<string, unknown>,
+    predicates: Array<[string, string, unknown]>,
+  ) =>
+    predicates.every(([column, operator, value]) =>
+      operator === 'in'
+        ? Array.isArray(value) && value.includes(candidate[column])
+        : operator === 'is not'
+          ? candidate[column] !== value
+          : candidate[column] === value,
+    );
   const db = {
     transaction() {
       return { execute: <T>(operation: (database: typeof db) => Promise<T>) => operation(db) };
@@ -54,29 +76,65 @@ function database(row: Record<string, unknown> = storedKey) {
       const rows: Record<string, unknown>[] =
         table === 'api_keys'
           ? [row]
-          : table === 'organizations'
-            ? [{ id: organizationId, tenant_id: tenantId }]
-            : table === 'brands'
-              ? [
-                  {
-                    id: 'brand_other_01',
-                    tenant_id: tenantId,
-                    organization_id: organizationId,
-                  },
-                ]
-              : table === 'events'
-                ? [
-                    {
-                      id: 'event_other_01',
-                      tenant_id: tenantId,
-                      organization_id: organizationId,
-                      brand_id: 'brand_allowed_01',
-                    },
-                  ]
-                : [];
+          : table === 'idempotency_records'
+            ? idempotencyRecords
+            : table === 'organization_members'
+              ? activePrincipal.organizationIds.map((activeOrganizationId, index) => ({
+                  id: `member_${index}`,
+                  tenant_id: activePrincipal.tenantId,
+                  organization_id: activeOrganizationId,
+                  user_id: activePrincipal.id,
+                  accepted_at: new Date('2026-07-16T11:00:00.000Z'),
+                }))
+              : table === 'permission_grants'
+                ? activePrincipal.scopes.flatMap((permission) =>
+                    grantScopeIds.map((scopeId, index) => ({
+                      id: `grant_${permission}_${index}`,
+                      tenant_id: activePrincipal.tenantId,
+                      principal_type: 'user',
+                      principal_id: activePrincipal.id,
+                      permission,
+                      scope_type: grantScopeType,
+                      scope_id: scopeId,
+                    })),
+                  )
+                : table === 'organizations'
+                  ? [{ id: organizationId, tenant_id: tenantId }]
+                  : table === 'brands'
+                    ? [
+                        {
+                          id: 'brand_other_01',
+                          tenant_id: tenantId,
+                          organization_id: organizationId,
+                        },
+                        ...(activePrincipal.brandIds ?? []).map((id) => ({
+                          id,
+                          tenant_id: activePrincipal.tenantId,
+                          organization_id: activePrincipal.organizationIds[0],
+                        })),
+                      ]
+                    : table === 'events'
+                      ? [
+                          {
+                            id: 'event_other_01',
+                            tenant_id: tenantId,
+                            organization_id: organizationId,
+                            brand_id: 'brand_allowed_01',
+                          },
+                          ...(activePrincipal.eventIds ?? []).map((id) => ({
+                            id,
+                            tenant_id: activePrincipal.tenantId,
+                            organization_id: activePrincipal.organizationIds[0],
+                            brand_id: 'brand_allowed_01',
+                          })),
+                        ]
+                      : [];
       const predicates: Array<[string, string, unknown]> = [];
       const query = {
         selectAll() {
+          return query;
+        },
+        select() {
           return query;
         },
         where(column: string, operator: string, value: unknown) {
@@ -90,16 +148,67 @@ function database(row: Record<string, unknown> = storedKey) {
           return query;
         },
         async execute() {
-          return rows.filter((candidate) =>
-            predicates.every(([column, operator, value]) =>
-              operator === 'in'
-                ? Array.isArray(value) && value.includes(candidate[column])
-                : candidate[column] === value,
-            ),
-          );
+          return rows.filter((candidate) => matches(candidate, predicates));
         },
         async executeTakeFirst() {
           return (await query.execute())[0];
+        },
+      };
+      return query;
+    },
+    insertInto(table: string) {
+      let values: Record<string, unknown> = {};
+      return {
+        values(input: Record<string, unknown>) {
+          values = input;
+          return this;
+        },
+        async execute() {
+          if (table === 'idempotency_records') idempotencyRecords.push({ ...values });
+          return [];
+        },
+      };
+    },
+    updateTable(table: string) {
+      let values: Record<string, unknown> = {};
+      const predicates: Array<[string, string, unknown]> = [];
+      const query = {
+        set(input: Record<string, unknown>) {
+          values = input;
+          return query;
+        },
+        where(column: string, operator: string, value: unknown) {
+          predicates.push([column, operator, value]);
+          return query;
+        },
+        async execute() {
+          if (table === 'idempotency_records') {
+            for (const record of idempotencyRecords.filter((candidate) =>
+              matches(candidate, predicates),
+            )) {
+              Object.assign(record, values);
+            }
+          }
+          return [];
+        },
+      };
+      return query;
+    },
+    deleteFrom(table: string) {
+      const predicates: Array<[string, string, unknown]> = [];
+      const query = {
+        where(column: string, operator: string, value: unknown) {
+          predicates.push([column, operator, value]);
+          return query;
+        },
+        async execute() {
+          if (table === 'idempotency_records') {
+            const retained = idempotencyRecords.filter(
+              (candidate) => !matches(candidate, predicates),
+            );
+            idempotencyRecords.splice(0, idempotencyRecords.length, ...retained);
+          }
+          return [];
         },
       };
       return query;
@@ -110,7 +219,7 @@ function database(row: Record<string, unknown> = storedKey) {
 
 async function testApp(activePrincipal: Principal, row: Record<string, unknown> = storedKey) {
   const app = Fastify();
-  app.decorate('context', { db: database(row) } as never);
+  app.decorate('context', { db: database(activePrincipal, row) } as never);
   app.addHook('preHandler', async (request) => {
     request.principal = activePrincipal;
   });
@@ -138,6 +247,7 @@ describe('API key route authorization contract', () => {
         path: '/api-keys',
         deniedBoundaries: ['organization'],
         permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+        principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
       }),
       expect.objectContaining({
         method: 'POST',
@@ -145,6 +255,7 @@ describe('API key route authorization contract', () => {
         path: '/api-keys',
         deniedBoundaries: ['organization', 'brand', 'event'],
         permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+        principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
       }),
       expect.objectContaining({
         method: 'DELETE',
@@ -152,6 +263,7 @@ describe('API key route authorization contract', () => {
         path: '/api-keys/{keyId}',
         deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
         permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+        principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
       }),
     ]);
   });
@@ -184,6 +296,45 @@ describe('API key route authorization contract', () => {
     },
   );
 
+  it.each(['api_key', 'agent', 'mobile_device', 'system'] as const)(
+    'rejects %s principals across the API-key lifecycle',
+    async (type) => {
+      const requests = [
+        { method: 'GET' as const, url: '/api-keys' },
+        {
+          method: 'POST' as const,
+          url: '/api-keys',
+          headers: { 'idempotency-key': `api-key-${type}-denial-0001` },
+          payload: { organizationId, name: 'Recursive', scopes: ['events.read'] },
+        },
+        { method: 'DELETE' as const, url: `/api-keys/${keyId}` },
+      ];
+      const app = await testApp(principal({ type, id: `${type}_principal` }));
+      for (const request of requests) {
+        const response = await app.inject(request);
+        expect(response.statusCode).toBe(403);
+      }
+      expect(ApiKeyRepository.prototype.create).not.toHaveBeenCalled();
+      expect(ApiKeyRepository.prototype.revokeScoped).not.toHaveBeenCalled();
+      expect(writeAuditLog).not.toHaveBeenCalled();
+      await app.close();
+    },
+  );
+
+  it('requires retry identity before creating a credential', async () => {
+    const app = await testApp(principal());
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api-keys',
+      payload: { organizationId, name: 'Missing retry identity', scopes: ['events.read'] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(ApiKeyRepository.prototype.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('returns 404 for an out-of-scope create organization without mutation', async () => {
     const app = await testApp(principal({ organizationIds: ['org_unrelated_01'] }));
     const response = await app.inject({
@@ -208,6 +359,7 @@ describe('API key route authorization contract', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api-keys',
+        headers: { 'idempotency-key': `api-key-denial-${_boundary}-0001` },
         payload: {
           organizationId,
           name: 'Denied',
@@ -265,9 +417,11 @@ describe('API key route authorization contract', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api-keys',
+      headers: { 'idempotency-key': 'api-key-authorized-create-0001' },
       payload: { organizationId, name: 'Event reader', scopes: ['events.read'] },
     });
     expect(created.statusCode, created.body).toBe(201);
+    expect(created.headers['cache-control']).toBe('private, no-store');
     expect(created.json().apiKey).toBe(rawApiKey);
     expect(created.body).not.toContain(storedKey.hashed_key);
 
