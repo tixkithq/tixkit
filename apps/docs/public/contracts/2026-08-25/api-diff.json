@@ -1,0 +1,36 @@
+{
+  "from": "2026-08-24",
+  "to": "2026-08-25",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 4
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /venues",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /venues",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "PATCH /venues/{venueId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "DELETE /venues/{venueId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    }
+  ]
+}

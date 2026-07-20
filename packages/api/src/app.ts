@@ -96,6 +96,11 @@ export type AppContext = {
     stage: 'before_transaction';
     eventId: string;
   }) => void | Promise<void>;
+  savedVenueCheckpoint?: (input: {
+    stage: 'before_transaction' | 'before_audit';
+    operation: 'create' | 'update' | 'delete';
+    venueId?: string;
+  }) => void | Promise<void>;
   eventOccurrenceCheckpoint?: (input: {
     stage: 'before_transaction';
     operation: 'create' | 'update';
@@ -446,7 +451,9 @@ export async function registerApplicationRoutes(
       signedWebhooks.addHook('onRoute', options.onRoute['signed-webhook']);
     }
     if (rateLimitsEnabled) {
-      await registerIpRateLimit(signedWebhooks, { redis: options.rateLimitRedis });
+      await registerIpRateLimit(signedWebhooks, {
+        redis: options.rateLimitRedis,
+      });
     }
     registerJsonBodyParser(signedWebhooks, { captureRawBody: true });
     await registerRouteModules(signedWebhooks, signedWebhookRouteModules);
@@ -473,7 +480,9 @@ export async function registerApplicationRoutes(
       authenticated.addHook('onRoute', options.onRoute.authenticated);
     }
     if (rateLimitsEnabled) {
-      await registerTenantRateLimit(authenticated, { redis: options.rateLimitRedis });
+      await registerTenantRateLimit(authenticated, {
+        redis: options.rateLimitRedis,
+      });
     }
   });
 }

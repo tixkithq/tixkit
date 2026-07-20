@@ -125,6 +125,25 @@ function serializeVenue(row: Record<string, unknown>) {
     updatedAt: new Date(row.updated_at as Date | string).toISOString(),
   };
 }
+
+function savedVenueAuditSnapshot(row: Record<string, unknown>) {
+  let address: unknown = {};
+  try {
+    address = typeof row.address === 'string' ? JSON.parse(row.address) : (row.address ?? {});
+  } catch {
+    address = {};
+  }
+  const addressFields =
+    address && typeof address === 'object' && !Array.isArray(address)
+      ? Object.keys(address as Record<string, unknown>).sort()
+      : [];
+  return {
+    name: row.name,
+    timezone: row.timezone ?? null,
+    addressFields,
+    addressHash: hashRequest(address),
+  };
+}
 const setupSectionSchema = z
   .object({
     section: z.enum(['basics', 'schedule', 'sales', 'media', 'marketing-fields']),
@@ -529,13 +548,22 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'events.write');
     const body = parseBody(venueInputSchema, request.body);
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-    const idempotencyKey = requireVenueIdempotencyKey(request.headers);
+    const rawIdempotencyKey = requireVenueIdempotencyKey(request.headers);
+    const idempotencyKey = hashRequest({
+      operation: 'saved_venue.create',
+      principal: { type: principal.type, id: principal.id },
+      key: rawIdempotencyKey,
+    });
     const result = await withIdempotency(
       app.context.db,
       {
         key: idempotencyKey,
         tenantId: principal.tenantId,
-        requestHash: hashRequest({ organizationId: body.organizationId, body }),
+        requestHash: hashRequest({
+          operation: 'saved_venue.create',
+          principal: { type: principal.type, id: principal.id },
+          body,
+        }),
         discardErrorCodes: ['FORBIDDEN', 'NOT_FOUND'],
       },
       async ({ completeInTransaction }) => {
@@ -545,6 +573,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
             .selectFrom('organizations')
             .selectAll()
             .where('id', '=', body.organizationId)
+            .where('tenant_id', '=', principal.tenantId)
             .forUpdate()
             .executeTakeFirst();
           if (!organization) throw new NotFoundError('Organization', body.organizationId);
@@ -569,7 +598,28 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
           };
           await transaction.insertInto('venues').values(values).execute();
           responseBody = serializeVenue(values);
-          await completeInTransaction(transaction, { status: 201, body: responseBody });
+          await app.context.savedVenueCheckpoint?.({
+            stage: 'before_audit',
+            operation: 'create',
+            venueId: values.id,
+          });
+          await writeAuditLog(
+            new AuditLogRepository(transaction),
+            request,
+            principal,
+            {
+              action: 'saved_venue.created',
+              organizationId: body.organizationId,
+              resourceType: 'SavedVenue',
+              resourceId: values.id,
+              diffSummary: { after: savedVenueAuditSnapshot(values) },
+            },
+            { failClosed: true },
+          );
+          await completeInTransaction(transaction, {
+            status: 201,
+            body: responseBody,
+          });
         });
         if (!responseBody) throw new Error('Saved venue transaction did not produce a response');
         return { status: 201, body: responseBody };
@@ -583,28 +633,59 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'events.write');
     const { venueId } = request.params as { venueId: string };
     const body = parseBody(venueUpdateSchema, request.body);
-    const existing = await app.context.db
-      .selectFrom('venues')
-      .selectAll()
-      .where('id', '=', venueId)
-      .where('tenant_id', '=', principal.tenantId)
-      .executeTakeFirst();
-    if (!existing) throw new NotFoundError('Venue', venueId);
-    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
-    const updated = {
-      ...(body.name !== undefined ? { name: body.name } : {}),
-      ...(body.address !== undefined ? { address: JSON.stringify(body.address) } : {}),
-      ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
-      updated_at: new Date(),
-    };
-    await app.context.db
-      .updateTable('venues')
-      .set(updated)
-      .where('id', '=', venueId)
-      .where('tenant_id', '=', principal.tenantId)
-      .where('organization_id', '=', existing.organization_id)
-      .execute();
-    return serializeVenue({ ...existing, ...updated });
+    await app.context.savedVenueCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'update',
+      venueId,
+    });
+    return app.context.db.transaction().execute(async (transaction) => {
+      const existing = await transaction
+        .selectFrom('venues')
+        .selectAll()
+        .where('id', '=', venueId)
+        .where('tenant_id', '=', principal.tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!existing) throw new NotFoundError('Venue', venueId);
+      ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
+      const updated = {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.address !== undefined ? { address: JSON.stringify(body.address) } : {}),
+        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+        updated_at: new Date(),
+      };
+      await transaction
+        .updateTable('venues')
+        .set(updated)
+        .where('id', '=', venueId)
+        .where('tenant_id', '=', principal.tenantId)
+        .where('organization_id', '=', existing.organization_id)
+        .executeTakeFirstOrThrow();
+      const persisted = { ...existing, ...updated };
+      await app.context.savedVenueCheckpoint?.({
+        stage: 'before_audit',
+        operation: 'update',
+        venueId,
+      });
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'saved_venue.updated',
+          organizationId: existing.organization_id,
+          resourceType: 'SavedVenue',
+          resourceId: venueId,
+          diffSummary: {
+            changedFields: Object.keys(body).sort(),
+            before: savedVenueAuditSnapshot(existing as unknown as Record<string, unknown>),
+            after: savedVenueAuditSnapshot(persisted as unknown as Record<string, unknown>),
+          },
+        },
+        { failClosed: true },
+      );
+      return serializeVenue(persisted);
+    });
   });
 
   app.delete('/venues/:venueId', async (request, reply) => {
@@ -619,6 +700,11 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!venue) throw new NotFoundError('Venue', venueId);
     ClerkAuthService.requireOrganizationScope(principal, venue.organization_id);
+    await app.context.savedVenueCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'delete',
+      venueId,
+    });
     try {
       const deleted = await app.context.db.transaction().execute(async (trx) => {
         const organization = await trx
@@ -630,13 +716,15 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
           .executeTakeFirstOrThrow();
         const lockedVenue = await trx
           .selectFrom('venues')
-          .select('id')
+          .selectAll()
           .where('id', '=', venueId)
           .where('tenant_id', '=', principal.tenantId)
           .where('organization_id', '=', venue.organization_id)
           .forUpdate()
           .executeTakeFirst();
-        if (!lockedVenue) return false;
+        if (!lockedVenue) throw new NotFoundError('Venue', venueId);
+        ClerkAuthService.requireResourceTenant(principal, lockedVenue, 'Venue', venueId);
+        ClerkAuthService.requireOrganizationScope(principal, lockedVenue.organization_id);
         const [eventReference, occurrenceReference] = await Promise.all([
           trx.selectFrom('events').select('id').where('venue_id', '=', venueId).executeTakeFirst(),
           trx
@@ -652,6 +740,26 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
           defaultVenueId = undefined;
         }
         if (eventReference || occurrenceReference || defaultVenueId === venueId) return false;
+        await app.context.savedVenueCheckpoint?.({
+          stage: 'before_audit',
+          operation: 'delete',
+          venueId,
+        });
+        await writeAuditLog(
+          new AuditLogRepository(trx),
+          request,
+          principal,
+          {
+            action: 'saved_venue.deleted',
+            organizationId: lockedVenue.organization_id,
+            resourceType: 'SavedVenue',
+            resourceId: venueId,
+            diffSummary: {
+              before: savedVenueAuditSnapshot(lockedVenue as unknown as Record<string, unknown>),
+            },
+          },
+          { failClosed: true },
+        );
         await trx
           .deleteFrom('venues')
           .where('id', '=', venueId)
@@ -1229,7 +1337,10 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         eventId,
         patch: body,
       });
-      await app.context.eventUpdateCheckpoint?.({ stage: 'before_transaction', eventId });
+      await app.context.eventUpdateCheckpoint?.({
+        stage: 'before_transaction',
+        eventId,
+      });
       result = await db.transaction().execute(async (transaction) => {
         const applied = await service.applyResolvedPatchInTransaction(
           transaction,
@@ -1316,7 +1427,10 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
-    await app.context.eventFeePolicyCheckpoint?.({ stage: 'before_transaction', eventId });
+    await app.context.eventFeePolicyCheckpoint?.({
+      stage: 'before_transaction',
+      eventId,
+    });
     const transactionResult = await db.transaction().execute(async (trx) => {
       const transactionEventRepository = new EventRepository(trx as typeof db);
       const lockedEvent = await trx
@@ -2332,7 +2446,10 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
-    await app.context.eventCodeFormatCheckpoint?.({ stage: 'before_transaction', eventId });
+    await app.context.eventCodeFormatCheckpoint?.({
+      stage: 'before_transaction',
+      eventId,
+    });
     await db.transaction().execute(async (trx) => {
       const locked = await trx
         .selectFrom('events')

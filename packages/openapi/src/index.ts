@@ -630,7 +630,11 @@ function rumSampleSchema(metric: RumWebVital) {
       schemaVersion: { type: 'string', enum: [RUM_SCHEMA_VERSION] },
       surface: { type: 'string', enum: [...RUM_SURFACES] },
       metric: { type: 'string', enum: [metric] },
-      value: { type: 'number', minimum: 0, maximum: RUM_MAXIMUM_VALUES[metric] },
+      value: {
+        type: 'number',
+        minimum: 0,
+        maximum: RUM_MAXIMUM_VALUES[metric],
+      },
     },
     required: ['schemaVersion', 'surface', 'metric', 'value'],
   } as const;
@@ -640,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-24',
+    version: '2026-08-25',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -1410,7 +1414,10 @@ const rawOpenApiSpec = {
             enum: ['pause', 'resume', 'cancel', 'rollback'],
           },
           accepted: { const: true },
-          commandId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$' },
+          commandId: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$',
+          },
           lifecycleSequence: { type: 'integer', minimum: 1 },
         },
       },
@@ -2070,21 +2077,27 @@ const rawOpenApiSpec = {
           {
             properties: {
               provider: { const: 'ga4' },
-              config: { $ref: '#/components/schemas/Ga4MarketingIntegrationConfig' },
+              config: {
+                $ref: '#/components/schemas/Ga4MarketingIntegrationConfig',
+              },
             },
             required: ['provider', 'config'],
           },
           {
             properties: {
               provider: { const: 'meta_pixel' },
-              config: { $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig' },
+              config: {
+                $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig',
+              },
             },
             required: ['provider', 'config'],
           },
           {
             properties: {
               provider: { const: 'generic_tag' },
-              config: { $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig' },
+              config: {
+                $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig',
+              },
             },
             required: ['provider', 'config'],
           },
@@ -3126,7 +3139,10 @@ const rawOpenApiSpec = {
           accepted: { type: 'boolean', const: true },
           termsVersion: { type: 'string', const: '2026-07-16' },
           settlementModel: { type: 'string', const: 'organizer_managed' },
-          refundModel: { type: 'string', const: 'manual_coordinated_resolution' },
+          refundModel: {
+            type: 'string',
+            const: 'manual_coordinated_resolution',
+          },
         },
         required: ['accepted', 'termsVersion', 'settlementModel', 'refundModel'],
       },
@@ -3375,21 +3391,27 @@ const rawOpenApiSpec = {
           {
             properties: {
               provider: { const: 'ga4' },
-              config: { $ref: '#/components/schemas/Ga4MarketingIntegrationConfig' },
+              config: {
+                $ref: '#/components/schemas/Ga4MarketingIntegrationConfig',
+              },
             },
             required: ['provider', 'config'],
           },
           {
             properties: {
               provider: { const: 'meta_pixel' },
-              config: { $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig' },
+              config: {
+                $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig',
+              },
             },
             required: ['provider', 'config'],
           },
           {
             properties: {
               provider: { const: 'generic_tag' },
-              config: { $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig' },
+              config: {
+                $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig',
+              },
             },
             required: ['provider', 'config'],
           },
@@ -6047,7 +6069,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-24, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-25, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6094,7 +6116,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-24, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-25, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6201,7 +6223,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-24 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-25 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6238,7 +6260,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-24 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-25 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8524,7 +8546,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-24 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-25 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8581,7 +8603,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-24 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-25 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -9259,6 +9281,7 @@ const rawOpenApiSpec = {
         operationId: 'listSavedVenues',
         summary: 'List reusable organization venues',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['events.read'],
         parameters: [
           {
             name: 'organizationId',
@@ -9285,6 +9308,7 @@ const rawOpenApiSpec = {
         operationId: 'createSavedVenue',
         summary: 'Create a reusable organization venue',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['events.write'],
         parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,
@@ -9337,6 +9361,7 @@ const rawOpenApiSpec = {
         operationId: 'updateSavedVenue',
         summary: 'Update a reusable organization venue',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['events.write'],
         parameters: [
           {
             name: 'venueId',
@@ -9376,6 +9401,7 @@ const rawOpenApiSpec = {
         operationId: 'deleteSavedVenue',
         summary: 'Delete an unused reusable organization venue',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['events.write'],
         parameters: [
           {
             name: 'venueId',
@@ -10110,9 +10136,21 @@ const rawOpenApiSpec = {
                         rotating: {
                           type: 'object',
                           properties: {
-                            timeStepSeconds: { type: 'integer', minimum: 15, maximum: 300 },
-                            toleranceWindows: { type: 'integer', minimum: 0, maximum: 5 },
-                            digits: { type: 'integer', minimum: 6, maximum: 10 },
+                            timeStepSeconds: {
+                              type: 'integer',
+                              minimum: 15,
+                              maximum: 300,
+                            },
+                            toleranceWindows: {
+                              type: 'integer',
+                              minimum: 0,
+                              maximum: 5,
+                            },
+                            digits: {
+                              type: 'integer',
+                              minimum: 6,
+                              maximum: 10,
+                            },
                           },
                           required: ['timeStepSeconds', 'toleranceWindows'],
                           additionalProperties: false,
@@ -10182,8 +10220,16 @@ const rawOpenApiSpec = {
                   rotating: {
                     type: 'object',
                     properties: {
-                      timeStepSeconds: { type: 'integer', minimum: 15, maximum: 300 },
-                      toleranceWindows: { type: 'integer', minimum: 0, maximum: 5 },
+                      timeStepSeconds: {
+                        type: 'integer',
+                        minimum: 15,
+                        maximum: 300,
+                      },
+                      toleranceWindows: {
+                        type: 'integer',
+                        minimum: 0,
+                        maximum: 5,
+                      },
                       digits: { type: 'integer', minimum: 6, maximum: 10 },
                     },
                     required: ['timeStepSeconds', 'toleranceWindows'],
@@ -10391,9 +10437,15 @@ const rawOpenApiSpec = {
                 properties: {
                   config: {
                     oneOf: [
-                      { $ref: '#/components/schemas/Ga4MarketingIntegrationConfig' },
-                      { $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig' },
-                      { $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig' },
+                      {
+                        $ref: '#/components/schemas/Ga4MarketingIntegrationConfig',
+                      },
+                      {
+                        $ref: '#/components/schemas/MetaPixelMarketingIntegrationConfig',
+                      },
+                      {
+                        $ref: '#/components/schemas/GenericTagMarketingIntegrationConfig',
+                      },
                     ],
                     description: 'Configuration must match the provider path parameter.',
                   },
@@ -11454,19 +11506,25 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Invalid or privacy-unsafe sample',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '413': {
             description: 'Request body exceeds the bounded RUM payload limit',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '429': {
             description: 'Public RUM submission rate exceeded',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -13298,7 +13356,9 @@ const rawOpenApiSpec = {
           '404': {
             description: 'Listing or settlement not found in the authorized scope',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -13375,19 +13435,25 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Invalid payout evidence or missing idempotency key',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Listing or settlement not found in the authorized scope',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Settlement state, amount, version, or idempotency evidence conflicts',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -13458,19 +13524,25 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Invalid reversal evidence or missing idempotency key',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Listing or settlement not found in the authorized scope',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Settlement state, amount, version, or idempotency evidence conflicts',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -13578,8 +13650,18 @@ const rawOpenApiSpec = {
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         'x-required-permissions': ['checkins.read'],
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'checkInListId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkInListId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'version',
             in: 'query',
@@ -13613,7 +13695,12 @@ const rawOpenApiSpec = {
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         'x-required-permissions': ['checkins.read'],
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { $ref: '#/components/parameters/OptionalScannerDeviceSecret' },
         ],
         responses: {
@@ -13621,7 +13708,9 @@ const rawOpenApiSpec = {
             description: 'Offline manifest verification key set',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/OfflineManifestVerificationKeySet' },
+                schema: {
+                  $ref: '#/components/schemas/OfflineManifestVerificationKeySet',
+                },
               },
             },
           },
@@ -13800,7 +13889,9 @@ const rawOpenApiSpec = {
               },
             },
           },
-          '400': { description: 'Missing or invalid Idempotency-Key or scan payload' },
+          '400': {
+            description: 'Missing or invalid Idempotency-Key or scan payload',
+          },
         },
       },
     },
@@ -16911,7 +17002,12 @@ const rawOpenApiSpec = {
             name: 'Idempotency-Key',
             in: 'header',
             required: true,
-            schema: { type: 'string', minLength: 1, maxLength: 128, pattern: '.*\\S.*' },
+            schema: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              pattern: '.*\\S.*',
+            },
           },
         ],
         responses: {
@@ -16985,7 +17081,12 @@ const rawOpenApiSpec = {
             name: 'Idempotency-Key',
             in: 'header',
             required: true,
-            schema: { type: 'string', minLength: 1, maxLength: 128, pattern: '.*\\S.*' },
+            schema: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+              pattern: '.*\\S.*',
+            },
           },
         ],
         responses: {
@@ -21883,7 +21984,9 @@ const rawOpenApiSpec = {
               'Replay intent was persisted, but dispatch is unavailable; retry with the same Idempotency-Key',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/WebhookEndpointReplayUnavailable' },
+                schema: {
+                  $ref: '#/components/schemas/WebhookEndpointReplayUnavailable',
+                },
               },
             },
           },
@@ -21960,7 +22063,9 @@ const rawOpenApiSpec = {
               'Replay intent was persisted, but dispatch is unavailable; retry with the same Idempotency-Key',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/WebhookReplayUnavailable' },
+                schema: {
+                  $ref: '#/components/schemas/WebhookReplayUnavailable',
+                },
               },
             },
           },
@@ -22270,25 +22375,37 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Exact provider request ID revealed after the audit transaction commits',
             headers: {
-              'Cache-Control': { schema: { type: 'string', const: 'no-store' } },
+              'Cache-Control': {
+                schema: { type: 'string', const: 'no-store' },
+              },
             },
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   additionalProperties: false,
-                  properties: { requestId: { type: 'string', minLength: 1, maxLength: 255 } },
+                  properties: {
+                    requestId: { type: 'string', minLength: 1, maxLength: 255 },
+                  },
                   required: ['requestId'],
                 },
               },
             },
           },
-          '400': { description: 'Invalid evidence ID, organization, or audit reason' },
+          '400': {
+            description: 'Invalid evidence ID, organization, or audit reason',
+          },
           '401': { description: 'Authentication required' },
-          '403': { description: 'Human owner or administrator permission required' },
-          '404': { description: 'Evidence unavailable in this tenant and organization scope' },
+          '403': {
+            description: 'Human owner or administrator permission required',
+          },
+          '404': {
+            description: 'Evidence unavailable in this tenant and organization scope',
+          },
           '429': { description: 'Reveal rate limit exceeded' },
-          '503': { description: 'Incident evidence disabled or secure reveal failed closed' },
+          '503': {
+            description: 'Incident evidence disabled or secure reveal failed closed',
+          },
         },
       },
     },
@@ -22322,7 +22439,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Active evidence metadata in the exact tenant and organization scope',
             headers: {
-              'Cache-Control': { schema: { type: 'string', const: 'no-store' } },
+              'Cache-Control': {
+                schema: { type: 'string', const: 'no-store' },
+              },
             },
             content: {
               'application/json': {
@@ -22337,7 +22456,10 @@ const rawOpenApiSpec = {
                         type: 'object',
                         additionalProperties: false,
                         properties: {
-                          evidenceId: { type: 'string', pattern: '^pie_[A-Z0-9]{26}$' },
+                          evidenceId: {
+                            type: 'string',
+                            pattern: '^pie_[A-Z0-9]{26}$',
+                          },
                           provider: { type: 'string', maxLength: 64 },
                           operation: { type: 'string', maxLength: 96 },
                           correlationSha256: {
@@ -22378,9 +22500,13 @@ const rawOpenApiSpec = {
           },
           '400': { description: 'Invalid organization or correlation hash' },
           '401': { description: 'Authentication required' },
-          '403': { description: 'Human owner or administrator permission required' },
+          '403': {
+            description: 'Human owner or administrator permission required',
+          },
           '429': { description: 'Evidence lookup rate limit exceeded' },
-          '503': { description: 'Incident evidence disabled or secure lookup failed closed' },
+          '503': {
+            description: 'Incident evidence disabled or secure lookup failed closed',
+          },
         },
       },
     },

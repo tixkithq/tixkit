@@ -63,10 +63,18 @@ function denialContract(
     denialResponse: Object.freeze({ ...contract.denialResponse }),
     deniedBoundaries: Object.freeze([...contract.deniedBoundaries]),
     ...(contract.permissionDenialResponse
-      ? { permissionDenialResponse: Object.freeze({ ...contract.permissionDenialResponse }) }
+      ? {
+          permissionDenialResponse: Object.freeze({
+            ...contract.permissionDenialResponse,
+          }),
+        }
       : {}),
     ...(contract.principalTypeDenialResponse
-      ? { principalTypeDenialResponse: Object.freeze({ ...contract.principalTypeDenialResponse }) }
+      ? {
+          principalTypeDenialResponse: Object.freeze({
+            ...contract.principalTypeDenialResponse,
+          }),
+        }
       : {}),
     ...(contract.assertions
       ? {
@@ -81,13 +89,19 @@ function denialContract(
         }
       : {}),
     ...(contract.policyDenialResponse
-      ? { policyDenialResponse: Object.freeze({ ...contract.policyDenialResponse }) }
+      ? {
+          policyDenialResponse: Object.freeze({
+            ...contract.policyDenialResponse,
+          }),
+        }
       : {}),
     ...(contract.policyCondition
       ? { policyCondition: Object.freeze({ ...contract.policyCondition }) }
       : {}),
     ...(contract.policyDeniedBoundaries
-      ? { policyDeniedBoundaries: Object.freeze([...contract.policyDeniedBoundaries]) }
+      ? {
+          policyDeniedBoundaries: Object.freeze([...contract.policyDeniedBoundaries]),
+        }
       : {}),
     resourceParameters: Object.freeze([...contract.resourceParameters]),
     sideEffectAssertions: Object.freeze([...contract.sideEffectAssertions]),
@@ -525,11 +539,68 @@ export const TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     path: '/brands',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'no-event-scope',
+    },
     policyDeniedBoundaries: ['event'],
     resourceParameters: [],
     sideEffectAssertions: [],
     source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
+]);
+
+export const SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'GET',
+    operationId: 'listSavedVenues',
+    path: '/venues',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'saved-venue-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'POST',
+    operationId: 'createSavedVenue',
+    path: '/venues',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'saved-venue-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'saved-venue-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'PATCH',
+    operationId: 'updateSavedVenue',
+    path: '/venues/{venueId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'saved-venue-route-authorization-db.integration.test.ts',
+    resourceParameters: ['venueId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'saved-venue-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 204 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'DELETE',
+    operationId: 'deleteSavedVenue',
+    path: '/venues/{venueId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'saved-venue-route-authorization-db.integration.test.ts',
+    resourceParameters: ['venueId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'saved-venue-route-authorization-db.integration.test.ts',
   }),
 ]);
 
@@ -615,7 +686,10 @@ export const MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     path: '/migration-adapters',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     resourceParameters: [],
     sideEffectAssertions: [],
@@ -645,7 +719,10 @@ export const MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fr
       path,
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyCondition: {
+        discriminator: 'principal-scope',
+        value: 'organization-wide',
+      },
       policyDeniedBoundaries: ['brand', 'event'],
       resourceParameters: ['jobId'],
       sideEffectAssertions: [],
@@ -670,7 +747,10 @@ export const MIGRATION_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze
       path,
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyCondition: {
+        discriminator: 'principal-scope',
+        value: 'organization-wide',
+      },
       policyDeniedBoundaries: ['brand', 'event'],
       resourceParameters: [],
       sideEffectAssertions: [],
@@ -689,7 +769,10 @@ export const PORTABLE_REBINDING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fr
     path: '/migration-jobs/{jobId}/portable-rebindings',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     resourceParameters: ['jobId'],
     sideEffectAssertions: [],
@@ -707,7 +790,10 @@ export const MIGRATION_MAPPING_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Obje
     path: '/migration-mappings',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'migration-mapping-route-authorization-db.integration.test.ts',
     resourceParameters: [],
@@ -726,7 +812,10 @@ export const MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.f
     path: '/migration-jobs',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'migration-job-write-route-authorization-db.integration.test.ts',
     resourceParameters: [],
@@ -745,7 +834,10 @@ export const PORTABLE_MIGRATION_JOB_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS =
     path: '/portable-migration-jobs',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'migration-job-write-route-authorization-db.integration.test.ts',
     resourceParameters: [],
@@ -764,7 +856,10 @@ export const MIGRATION_FILE_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.
     path: '/migration-jobs/{jobId}/files',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'migration-file-route-authorization-db.integration.test.ts',
     resourceParameters: ['jobId'],
@@ -783,7 +878,10 @@ export const MIGRATION_PREPARE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     path: '/migration-jobs/{jobId}/prepare',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'migration-prepare-route-authorization-db.integration.test.ts',
     resourceParameters: ['jobId'],
@@ -802,7 +900,10 @@ export const MIGRATION_COMMIT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.free
     path: '/migration-jobs/{jobId}/commit',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'migration-commit-route-authorization-db.integration.test.ts',
     resourceParameters: ['jobId'],
@@ -829,7 +930,10 @@ export const MIGRATION_LIFECYCLE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.f
       path: `/migration-jobs/{jobId}/${action}`,
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyCondition: {
+        discriminator: 'principal-scope',
+        value: 'organization-wide',
+      },
       policyDeniedBoundaries: ['brand', 'event'],
       persistenceSource: 'migration-lifecycle-route-authorization-db.integration.test.ts',
       resourceParameters: ['jobId'],
@@ -849,7 +953,10 @@ export const MIGRATION_DRY_RUN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     path: '/migration-jobs/{jobId}/dry-run',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'migration-dry-run-route-authorization-db.integration.test.ts',
     resourceParameters: ['jobId'],
@@ -868,7 +975,10 @@ export const PORTABLE_MIGRATION_APPROVAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = 
     path: '/migration-jobs/{jobId}/portable-approval',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'portable-import-control.integration.test.ts',
     resourceParameters: ['jobId'],
@@ -888,7 +998,10 @@ export const PORTABLE_MIGRATION_APPROVAL_REVOCATION_ROUTE_AUTHORIZATION_DENIAL_C
       path: '/migration-jobs/{jobId}/portable-approvals/{approvalId}/revoke',
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyCondition: {
+        discriminator: 'principal-scope',
+        value: 'organization-wide',
+      },
       policyDeniedBoundaries: ['brand', 'event'],
       persistenceSource: 'portable-import-control.integration.test.ts',
       resourceParameters: ['jobId', 'approvalId'],
@@ -908,7 +1021,10 @@ export const PORTABLE_MIGRATION_REBINDING_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTR
       path: '/migration-jobs/{jobId}/portable-rebindings/{portableId}',
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyCondition: {
+        discriminator: 'principal-scope',
+        value: 'organization-wide',
+      },
       policyDeniedBoundaries: ['brand', 'event'],
       persistenceSource: 'portable-import-control.integration.test.ts',
       resourceParameters: ['jobId', 'portableId'],
@@ -927,7 +1043,10 @@ export const PORTABLE_MIGRATION_ACTIVATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS 
     path: '/migration-jobs/{jobId}/activate',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'portable-import-control.integration.test.ts',
     resourceParameters: ['jobId'],
@@ -1016,7 +1135,10 @@ export const OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     path: '/oauth-applications',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'oauth-application-route-authorization-db.integration.test.ts',
     resourceParameters: [],
@@ -1032,7 +1154,10 @@ export const OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     path: '/oauth-applications/{appId}',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'oauth-application-route-authorization-db.integration.test.ts',
     resourceParameters: ['appId'],
@@ -1347,7 +1472,10 @@ export const WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze
       path,
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-      policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+      policyCondition: {
+        discriminator: 'principal-scope',
+        value: 'organization-wide',
+      },
       policyDeniedBoundaries: ['brand', 'event'],
       persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
       resourceParameters,
@@ -1367,7 +1495,10 @@ export const WEBHOOK_ENDPOINT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.free
     path: '/webhook-endpoints',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     resourceParameters: [],
     sideEffectAssertions: [],
@@ -1382,7 +1513,10 @@ export const WEBHOOK_ENDPOINT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.free
     path: '/webhook-endpoints',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'webhook-endpoint-route-authorization-db.integration.test.ts',
     resourceParameters: [],
@@ -1398,7 +1532,10 @@ export const WEBHOOK_ENDPOINT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.free
     path: '/webhook-endpoints/{endpointId}',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'webhook-endpoint-route-authorization-db.integration.test.ts',
     resourceParameters: ['endpointId'],
@@ -1414,7 +1551,10 @@ export const WEBHOOK_ENDPOINT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.free
     path: '/webhook-endpoints/{endpointId}/events',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     resourceParameters: ['endpointId'],
     sideEffectAssertions: [],
@@ -1432,7 +1572,10 @@ export const WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     path: '/webhook-endpoints/{endpointId}/test',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
     policyDeniedBoundaries: ['brand', 'event'],
     persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
     resourceParameters: ['endpointId'],
@@ -1451,7 +1594,10 @@ export const PRIVACY_ERASURE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freez
     path: '/privacy/erasures',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'no-event-scope',
+    },
     policyDeniedBoundaries: ['event'],
     persistenceSource: 'privacy-erasure-route-authorization-db.integration.test.ts',
     resourceParameters: [],
@@ -1470,7 +1616,10 @@ export const PRIVACY_EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze
     path: '/privacy/data-exports',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'no-event-scope',
+    },
     policyDeniedBoundaries: ['event'],
     persistenceSource: 'privacy-erasure-route-authorization-db.integration.test.ts',
     resourceParameters: [],
@@ -1530,6 +1679,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

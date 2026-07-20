@@ -132,6 +132,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'tenant-list-route-authorization-db.integration.test.ts'),
   ],
   [
+    'saved-venue-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'saved-venue-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'migration-job-read-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'migration-job-read-route-authorization-db.integration.test.ts'),
   ],
@@ -336,6 +340,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getOrganizations', 'getBrands'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['listSavedVenues'], {
+    source: 'saved-venue-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['createSavedVenue', 'updateSavedVenue', 'deleteSavedVenue'], {
+    source: 'saved-venue-route-authorization-db.integration.test.ts',
+    persistenceSource: 'saved-venue-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['listMigrationAdapters'], {
     source: 'migration-credential-route-authorization.test.ts',
@@ -684,7 +695,10 @@ const delegatedPermissionContracts = new Map<
     (operationId) =>
       [
         operationId,
-        { guard: 'requireHumanAgentAdministrator', permissions: ['developers.write'] },
+        {
+          guard: 'requireHumanAgentAdministrator',
+          permissions: ['developers.write'],
+        },
       ] as const,
   ),
   [
@@ -701,20 +715,32 @@ const delegatedPermissionContracts = new Map<
     (operationId) =>
       [
         operationId,
-        { guard: 'requireMigrationPermission', permissions: ['migrations.commit'] },
+        {
+          guard: 'requireMigrationPermission',
+          permissions: ['migrations.commit'],
+        },
       ] as const,
   ),
   [
     'rollbackMigrationJob',
-    { guard: 'requireMigrationPermission', permissions: ['migrations.rollback'] },
+    {
+      guard: 'requireMigrationPermission',
+      permissions: ['migrations.rollback'],
+    },
   ],
   [
     'grantPortableHistoricalExportAuthorization',
-    { guard: 'requireHistoricalAuthorizationPrincipal', permissions: ['migrations.write'] },
+    {
+      guard: 'requireHistoricalAuthorizationPrincipal',
+      permissions: ['migrations.write'],
+    },
   ],
   [
     'revokePortableHistoricalExportAuthorization',
-    { guard: 'requireHistoricalAuthorizationPrincipal', permissions: ['migrations.write'] },
+    {
+      guard: 'requireHistoricalAuthorizationPrincipal',
+      permissions: ['migrations.write'],
+    },
   ],
   [
     'postExports',
@@ -851,7 +877,10 @@ function normalizedCallName(name: string): string {
   return name.replace(/^__vite_ssr_import_[0-9]+__\./u, '');
 }
 
-function analyzeHandlerSource(source: string): { callNames: string[]; permissions: Permission[] } {
+function analyzeHandlerSource(source: string): {
+  callNames: string[];
+  permissions: Permission[];
+} {
   const callNames: string[] = [];
   const permissions: string[] = [];
   const parsed = parseSync('route-handler.ts', `const __routeHandler = (${source});`);
