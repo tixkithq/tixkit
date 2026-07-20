@@ -476,10 +476,22 @@ test('resolves same-name receivers within their lexical function scopes', () => 
 });
 
 test('distinguishes optional typed storage reads from typed HTTP clients', () => {
+  const registeredPath = 'apps/admin-dashboard/src/features/check-in/browser-offline-checkin.ts';
   const safePath = 'packages/api/src/services/storage-reader.ts';
   const unsafePath = 'packages/api/src/services/http-reader.ts';
   const disguisedPath = 'packages/api/src/services/disguised-http-reader.ts';
-  const root = fixture({
+  const files = {
+    [registeredPath]: [
+      'interface OfflineCheckInObjectStore {',
+      '  get(key: IDBValidKey | IDBKeyRange): IDBRequest<unknown>;',
+      '  put(value: unknown): IDBRequest<IDBValidKey>;',
+      '  delete(key: IDBValidKey | IDBKeyRange): IDBRequest<undefined>;',
+      '}',
+      'function mutate(store: OfflineCheckInObjectStore, key: string) {',
+      '  store.get(key); store.put({ key }); store.delete(key);',
+      '}',
+      'void mutate;',
+    ].join('\n'),
     [safePath]: [
       'interface CheckoutStorage {',
       '  get(key: string): string | null | Promise<string | null>;',
@@ -512,13 +524,17 @@ test('distinguishes optional typed storage reads from typed HTTP clients', () =>
       '}',
       'void request;',
     ].join('\n'),
-  });
+  };
+  const root = fixture(files);
   try {
-    assert.deepEqual(providerClientBoundaryViolations(root), [
-      `${disguisedPath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
-      `${unsafePath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
-      `${safePath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
-    ]);
+    assert.deepEqual(
+      providerClientBoundaryViolations(root, { registry: registryWithFixtureDigests(files) }),
+      [
+        `${disguisedPath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+        `${unsafePath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+        `${safePath}: runtime-configured provider HTTP execution must use a registry-approved transport executor`,
+      ],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

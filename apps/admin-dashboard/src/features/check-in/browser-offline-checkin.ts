@@ -42,6 +42,13 @@ type OfflineCheckInState = {
   syncLease?: SyncLease;
 };
 
+interface OfflineCheckInObjectStore {
+  get(query: IDBValidKey | IDBKeyRange): IDBRequest<unknown>;
+  getAll(): IDBRequest<unknown[]>;
+  put(value: unknown): IDBRequest<IDBValidKey>;
+  delete(query: IDBValidKey | IDBKeyRange): IDBRequest<undefined>;
+}
+
 const DATABASE_NAME = 'tixkit-offline-checkin-v1';
 const STORE_NAME = 'contexts';
 const SYNC_LEASE_MS = 30_000;
@@ -99,6 +106,27 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+function readOfflineCheckInObjectStoreValue<T>(
+  store: OfflineCheckInObjectStore,
+  key: IDBValidKey | IDBKeyRange,
+): Promise<T> {
+  return requestResult(store.get(key) as IDBRequest<T>);
+}
+
+function writeOfflineCheckInObjectStoreValue(
+  store: OfflineCheckInObjectStore,
+  value: unknown,
+): void {
+  store.put(value);
+}
+
+function deleteOfflineCheckInObjectStoreValue(
+  store: OfflineCheckInObjectStore,
+  key: IDBValidKey | IDBKeyRange,
+): void {
+  store.delete(key);
+}
+
 function transactionComplete(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.addEventListener('complete', () => resolve(), { once: true });
@@ -129,8 +157,9 @@ async function openDatabase(): Promise<IDBDatabase> {
 async function readState(database: IDBDatabase, key: string): Promise<OfflineCheckInState | null> {
   const transaction = database.transaction(STORE_NAME, 'readonly');
   const completion = transactionComplete(transaction);
-  const state = await requestResult(
-    transaction.objectStore(STORE_NAME).get(key) as IDBRequest<OfflineCheckInState | undefined>,
+  const state = await readOfflineCheckInObjectStoreValue<OfflineCheckInState | undefined>(
+    transaction.objectStore(STORE_NAME),
+    key,
   );
   await completion;
   return state ?? null;
@@ -143,12 +172,13 @@ async function mutateState<T>(
 ): Promise<T> {
   const transaction = database.transaction(STORE_NAME, 'readwrite', { durability: 'strict' });
   const completion = transactionComplete(transaction);
-  const store = transaction.objectStore(STORE_NAME);
-  const current = await requestResult(
-    store.get(key) as IDBRequest<OfflineCheckInState | undefined>,
+  const store: OfflineCheckInObjectStore = transaction.objectStore(STORE_NAME);
+  const current = await readOfflineCheckInObjectStoreValue<OfflineCheckInState | undefined>(
+    store,
+    key,
   );
   const next = mutation(current ?? null);
-  store.put(next.state);
+  writeOfflineCheckInObjectStoreValue(store, next.state);
   await completion;
   return next.result;
 }
@@ -156,7 +186,7 @@ async function mutateState<T>(
 async function purgeExpiredStates(database: IDBDatabase, now: Date = new Date()): Promise<void> {
   const transaction = database.transaction(STORE_NAME, 'readwrite', { durability: 'strict' });
   const completion = transactionComplete(transaction);
-  const store = transaction.objectStore(STORE_NAME);
+  const store: OfflineCheckInObjectStore = transaction.objectStore(STORE_NAME);
   const states = await requestResult(store.getAll() as IDBRequest<OfflineCheckInState[]>);
   const nowMs = now.getTime();
   for (const state of states) {
@@ -165,12 +195,12 @@ async function purgeExpiredStates(database: IDBDatabase, now: Date = new Date())
       (scan) => Date.parse(scan.reconciledAt) > nowMs - RECONCILIATION_RETENTION_MS,
     );
     if (manifestExpired && state.pending.length === 0) {
-      store.delete(state.key);
+      deleteOfflineCheckInObjectStoreValue(store, state.key);
       continue;
     }
     const manifest = manifestExpired ? { ...state.manifest, tickets: [] } : state.manifest;
     if (manifest !== state.manifest || reconciled.length !== state.reconciled.length) {
-      store.put({ ...state, manifest, reconciled });
+      writeOfflineCheckInObjectStoreValue(store, { ...state, manifest, reconciled });
     }
   }
   await completion;

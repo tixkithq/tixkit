@@ -176,7 +176,7 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["delete", "get", "head", "options"] }
+          "items": { "enum": ["delete", "get", "head", "options", "put"] }
         },
         "runtimeEvidencePaths": {
           "type": "array",

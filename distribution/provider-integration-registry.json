@@ -104,7 +104,7 @@
         "type": "workspace-export",
         "path": "apps/admin-dashboard/src/lib/api.ts",
         "export": "issueAdminUploadCompletionUrl",
-        "sha256": "a1339a2944e2fbf4d159e9ac07e161d3260b9f70808aaed0e87d490a6ed8926b"
+        "sha256": "10acd4ccc03f775d88efd407b6bada54577cdccbbd7d3b6e60b1b909795bd683"
       },
       "allowedSinks": [
         {
@@ -122,7 +122,7 @@
         "type": "workspace-export",
         "path": "apps/admin-dashboard/src/lib/api.ts",
         "export": "issueAdminUploadUrl",
-        "sha256": "a1339a2944e2fbf4d159e9ac07e161d3260b9f70808aaed0e87d490a6ed8926b"
+        "sha256": "10acd4ccc03f775d88efd407b6bada54577cdccbbd7d3b6e60b1b909795bd683"
       },
       "allowedSinks": [
         {
@@ -429,7 +429,7 @@
         "type": "workspace-export",
         "path": "packages/sdk-js/src/index.ts",
         "export": "issueTixkitApiRequestUrl",
-        "sha256": "44a5ea73f40b73be5362bc0c7543c0f51b0d088d31717ef8f198532b387bc0f0"
+        "sha256": "7180655d40ce8cd3bd7e955485a00db91bbdc55d1aba3a2883db14086c1b3b7e"
       },
       "allowedSinks": [
         {
@@ -494,6 +494,16 @@
       "allowedMethods": ["delete"],
       "runtimeEvidencePaths": [
         "packages/workflows/src/__tests__/migration-domain-committers.integration.test.ts"
+      ]
+    },
+    {
+      "id": "offline-checkin-indexeddb-store",
+      "path": "apps/admin-dashboard/src/features/check-in/browser-offline-checkin.ts",
+      "typeName": "OfflineCheckInObjectStore",
+      "sha256": "2d1fbeaa4e3f1e3c198f298edc80c4030467ccbef0712a7c1da5befca12ad9bf",
+      "allowedMethods": ["delete", "get", "put"],
+      "runtimeEvidencePaths": [
+        "apps/admin-dashboard/src/features/check-in/browser-offline-checkin.test.ts"
       ]
     },
     {
