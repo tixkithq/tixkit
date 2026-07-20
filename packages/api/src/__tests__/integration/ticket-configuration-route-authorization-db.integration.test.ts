@@ -6,6 +6,7 @@ import {
   EventOccurrenceRepository,
   EventRepository,
   InventoryPoolRepository,
+  TicketTypeRepository,
   type Database,
 } from '@tixkit/db';
 import { ALL_PERMISSIONS, type Principal } from '@tixkit/domain';
@@ -40,6 +41,13 @@ function ticketConfigurationContract(operationId: string) {
 const poolContract = ticketConfigurationContract('postEventsByEventIdInventoryPools');
 const ticketContract = ticketConfigurationContract('postEventsByEventIdTicketTypes');
 const batchContract = ticketConfigurationContract('postEventsByEventIdTicketTypesBatch');
+const listAccessRulesContract = ticketConfigurationContract(
+  'getTicketTypesByTicketTypeIdAccessRules',
+);
+const createAccessRuleContract = ticketConfigurationContract(
+  'postTicketTypesByTicketTypeIdAccessRules',
+);
+const deleteAccessRuleContract = ticketConfigurationContract('deleteAccessRulesByAccessRuleId');
 
 const suffix = ulid().slice(-10).toLowerCase();
 const tenantA = `tnt_tcfg_auth_a_${suffix}`;
@@ -68,6 +76,9 @@ let poolAScoped: string;
 let poolB: string;
 
 type TicketConfigurationOperation =
+  | 'access_rule_create'
+  | 'access_rule_delete'
+  | 'access_rule_list'
   | 'inventory_pool_create'
   | 'ticket_type_create'
   | 'ticket_type_batch_create';
@@ -179,6 +190,32 @@ async function seedPool(eventId: string, name: string): Promise<string> {
     holdTtlSeconds: 480,
   });
   return pool.id;
+}
+
+async function seedAccessRuleFixture(
+  eventId: string,
+  inventoryPoolId: string,
+  eventOccurrenceId: string,
+  name: string,
+) {
+  const ticketType = await new TicketTypeRepository(db).create({
+    eventId,
+    name,
+    kind: 'paid',
+    currency: 'USD',
+    priceCents: 2500,
+    inventoryPoolId,
+    eventOccurrenceId,
+    visibility: 'locked',
+    requiresAccessCode: true,
+  });
+  const accessRule = await new AccessRuleRepository(db).create({
+    ticketTypeId: ticketType.id,
+    type: 'code',
+    value: `${name}-initial-code`,
+    maxUses: 20,
+  });
+  return { accessRule, ticketType };
 }
 
 function auditDiff(value: unknown): Record<string, unknown> {
@@ -389,6 +426,28 @@ function invokeBatchWithNewPool(targetEventId: string, eventOccurrenceId: string
   });
 }
 
+function invokeListAccessRules(ticketTypeId: string) {
+  return app.inject({
+    method: listAccessRulesContract.method,
+    url: listAccessRulesContract.path.replace('{ticketTypeId}', ticketTypeId),
+  });
+}
+
+function invokeCreateAccessRule(ticketTypeId: string, value = 'SECOND-ACCESS-CODE') {
+  return app.inject({
+    method: createAccessRuleContract.method,
+    url: createAccessRuleContract.path.replace('{ticketTypeId}', ticketTypeId),
+    payload: { type: 'code', value, maxUses: 12 },
+  });
+}
+
+function invokeDeleteAccessRule(accessRuleId: string) {
+  return app.inject({
+    method: deleteAccessRuleContract.method,
+    url: deleteAccessRuleContract.path.replace('{accessRuleId}', accessRuleId),
+  });
+}
+
 function eventFrom(snapshot: Awaited<ReturnType<typeof evidenceSnapshot>>, eventId: string) {
   return snapshot.events.find((event) => event.id === eventId)!;
 }
@@ -564,16 +623,124 @@ describeWithIntegrationDatabase('ticket configuration write route authorization 
     }
   });
 
-  it('binds all three immutable route contracts to this executable proof', () => {
-    for (const contract of [poolContract, ticketContract, batchContract]) {
+  it('binds all ticket-configuration route contracts to this executable proof', () => {
+    for (const contract of [
+      poolContract,
+      ticketContract,
+      batchContract,
+      listAccessRulesContract,
+      createAccessRuleContract,
+      deleteAccessRuleContract,
+    ]) {
       expect(contract).toMatchObject({
-        authorizedControl: { status: 201 },
         deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
         permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
         source: 'ticket-configuration-route-authorization-db.integration.test.ts',
       });
     }
   });
+
+  it('lists, creates, and deletes access rules through exact authorized persistence controls', async () => {
+    const fixture = await seedAccessRuleFixture(eventA, poolA, occurrenceA, 'Allowed access rule');
+    const before = await evidenceSnapshot();
+
+    const listed = await invokeListAccessRules(fixture.ticketType.id);
+    expect(listed.statusCode, listed.body).toBe(200);
+    expect(listed.json()).toEqual({
+      items: [serializeAccessRule(fixture.accessRule as Record<string, unknown>)],
+      nextCursor: null,
+      hasMore: false,
+    });
+
+    const created = await invokeCreateAccessRule(fixture.ticketType.id);
+    expect(created.statusCode, created.body).toBe(201);
+    expect(created.json()).toMatchObject({
+      ticketTypeId: fixture.ticketType.id,
+      type: 'code',
+      value: 'SECOND-ACCESS-CODE',
+      maxUses: 12,
+    });
+
+    const deleted = await invokeDeleteAccessRule(fixture.accessRule.id);
+    expect(deleted.statusCode, deleted.body).toBe(204);
+    const after = await evidenceSnapshot();
+    expect(after.accessRules.find((rule) => rule.id === fixture.accessRule.id)).toBeUndefined();
+    expect(after.accessRules.find((rule) => rule.id === created.json().id)).toBeDefined();
+    expect(after.ticketTypes).toEqual(before.ticketTypes);
+    expect(after.audits).toEqual(before.audits);
+  });
+
+  it('denies access-rule permission failures without changing persistent state', async () => {
+    const fixture = await seedAccessRuleFixture(eventA, poolA, occurrenceA, 'Denied access rule');
+    const before = await evidenceSnapshot();
+    activePrincipal = { ...basePrincipal, scopes: [] };
+
+    for (const response of [
+      await invokeListAccessRules(fixture.ticketType.id),
+      await invokeCreateAccessRule(fixture.ticketType.id, 'DENIED-SECOND-CODE'),
+      await invokeDeleteAccessRule(fixture.accessRule.id),
+    ]) {
+      expect(response.statusCode, response.body).toBe(403);
+      expect(response.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    }
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+  });
+
+  it.each([
+    ['tenant', () => basePrincipal, () => eventB, () => poolB, () => occurrenceB],
+    [
+      'organization',
+      () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+      () => eventAScoped,
+      () => poolAScoped,
+      () => occurrenceAScoped,
+    ],
+    [
+      'brand',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA],
+      }),
+      () => eventAScoped,
+      () => poolAScoped,
+      () => occurrenceAScoped,
+    ],
+    [
+      'event',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA, brandAScoped],
+        eventIds: [eventA],
+      }),
+      () => eventAScoped,
+      () => poolAScoped,
+      () => occurrenceAScoped,
+    ],
+  ] as const)(
+    'denies the %s boundary for access-rule list/create/delete with exact persistence snapshots',
+    async (_boundary, makePrincipal, targetEvent, targetPool, targetOccurrence) => {
+      const fixture = await seedAccessRuleFixture(
+        targetEvent(),
+        targetPool(),
+        targetOccurrence(),
+        `Forbidden ${_boundary} access rule`,
+      );
+      const before = await evidenceSnapshot();
+      activePrincipal = makePrincipal();
+
+      for (const response of [
+        await invokeListAccessRules(fixture.ticketType.id),
+        await invokeCreateAccessRule(fixture.ticketType.id, `DENIED-${_boundary}-CODE`),
+        await invokeDeleteAccessRule(fixture.accessRule.id),
+      ]) {
+        expect(response.statusCode, response.body).toBe(404);
+        expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+      }
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    },
+  );
 
   it('persists exact pool, single ticket, and both batch variants with atomic audit and revision evidence', async () => {
     const beforePool = await evidenceSnapshot();
@@ -752,6 +919,65 @@ describeWithIntegrationDatabase('ticket configuration write route authorization 
       const expectedMilestones = expectedAction === 'inventory_pool.created' ? 0 : 1;
       expect(onboardingEventsInc).toHaveBeenCalledTimes(expectedMilestones);
       expect(onboardingMilestoneDurationObserve).toHaveBeenCalledTimes(expectedMilestones);
+    },
+  );
+
+  it.each([
+    [
+      'list',
+      'access_rule_list',
+      async (fixture: Awaited<ReturnType<typeof seedAccessRuleFixture>>) =>
+        invokeListAccessRules(fixture.ticketType.id),
+    ],
+    [
+      'create',
+      'access_rule_create',
+      async (fixture: Awaited<ReturnType<typeof seedAccessRuleFixture>>) =>
+        invokeCreateAccessRule(fixture.ticketType.id, 'SCOPE-RACE-CREATE'),
+    ],
+    [
+      'delete',
+      'access_rule_delete',
+      async (fixture: Awaited<ReturnType<typeof seedAccessRuleFixture>>) =>
+        invokeDeleteAccessRule(fixture.accessRule.id),
+    ],
+  ] as const)(
+    'access-rule %s reauthorizes after a concurrent organization and brand scope swap',
+    async (_action, expectedOperation, invoke) => {
+      const fixture = await seedAccessRuleFixture(
+        eventA,
+        poolA,
+        occurrenceA,
+        `Scope-race access rule ${_action}`,
+      );
+      let checkpointSnapshot: Awaited<ReturnType<typeof evidenceSnapshot>> | undefined;
+      ticketConfigurationCheckpoint.mockImplementationOnce(async (input) => {
+        expect(input).toEqual({
+          stage: 'before_transaction',
+          operation: expectedOperation,
+          eventId: eventA,
+        });
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+          .where('id', '=', eventA)
+          .execute();
+        checkpointSnapshot = await evidenceSnapshot();
+      });
+
+      try {
+        const response = await invoke(fixture);
+        expect(response.statusCode, response.body).toBe(404);
+        expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+        expect(checkpointSnapshot).toBeDefined();
+        await expect(evidenceSnapshot()).resolves.toEqual(checkpointSnapshot);
+      } finally {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationA, brand_id: brandA })
+          .where('id', '=', eventA)
+          .execute();
+      }
     },
   );
 

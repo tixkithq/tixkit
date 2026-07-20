@@ -104,7 +104,13 @@ export type AppContext = {
   }) => void | Promise<void>;
   ticketConfigurationCheckpoint?: (input: {
     stage: 'before_transaction';
-    operation: 'inventory_pool_create' | 'ticket_type_create' | 'ticket_type_batch_create';
+    operation:
+      | 'access_rule_create'
+      | 'access_rule_delete'
+      | 'access_rule_list'
+      | 'inventory_pool_create'
+      | 'ticket_type_create'
+      | 'ticket_type_batch_create';
     eventId: string;
   }) => void | Promise<void>;
   productConfigurationCheckpoint?: (input: {

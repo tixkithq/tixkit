@@ -319,12 +319,17 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'postEventsByEventIdInventoryPools',
       'postEventsByEventIdTicketTypes',
       'postEventsByEventIdTicketTypesBatch',
+      'postTicketTypesByTicketTypeIdAccessRules',
+      'deleteAccessRulesByAccessRuleId',
     ],
     {
       source: 'ticket-configuration-route-authorization-db.integration.test.ts',
       persistenceSource: 'ticket-configuration-route-authorization-db.integration.test.ts',
     },
   ),
+  ...evidenceBindings(['getTicketTypesByTicketTypeIdAccessRules'], {
+    source: 'ticket-configuration-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['getOrganizations', 'getBrands'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
   }),
