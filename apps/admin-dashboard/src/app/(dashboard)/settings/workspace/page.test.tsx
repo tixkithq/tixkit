@@ -39,6 +39,16 @@ const testState = vi.hoisted(() => {
 const apiMock = vi.hoisted(() => ({
   updateOrganization: vi.fn(),
   listSavedVenues: vi.fn().mockResolvedValue({ ok: true, data: [] }),
+  createSavedVenue: vi.fn(),
+  updateSavedVenue: vi.fn(),
+  deleteSavedVenue: vi.fn(),
+}));
+
+const permissionState = vi.hoisted(() => ({
+  can: vi.fn<(permission: string) => boolean>(() => true),
+  loading: false,
+  error: null as Error | null,
+  retry: vi.fn(),
 }));
 
 const toastMock = vi.hoisted(() => ({
@@ -52,6 +62,10 @@ const guardMock = vi.hoisted(() => ({
 
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: () => testState.bootstrapState.value,
+}));
+
+vi.mock('@/context/permission-provider', () => ({
+  usePermissions: () => permissionState,
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -83,6 +97,11 @@ describe('WorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     guardMock.allowed = true;
+    permissionState.can.mockReset();
+    permissionState.can.mockReturnValue(true);
+    permissionState.loading = false;
+    permissionState.error = null;
+    permissionState.retry.mockReset();
     testState.organizationFixture.name = 'Tixkit';
     testState.organizationFixture.slug = 'tixkit';
     testState.organizationFixture.eventDefaults = {};
@@ -103,6 +122,20 @@ describe('WorkspacePage', () => {
     expect(screen.getByText('Access denied')).toBeInTheDocument();
     expect(screen.queryByLabelText('Workspace Name')).not.toBeInTheDocument();
     expect(apiMock.updateOrganization).not.toHaveBeenCalled();
+  });
+
+  it('does not request or expose saved venues without event viewing permission', async () => {
+    permissionState.can.mockImplementation((permission) => permission !== 'events.read');
+
+    render(<WorkspacePage />);
+
+    const defaultVenue = await screen.findByLabelText('Default saved venue');
+    expect(defaultVenue).toBeDisabled();
+    expect(apiMock.listSavedVenues).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('Event viewing permission is required to choose a default saved venue.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Add saved venue' })).toBeNull();
   });
 
   it('saves workspace identity and box-office policy together', async () => {
@@ -192,6 +225,36 @@ describe('WorkspacePage', () => {
     expect(screen.getByRole('option', { name: 'Civic Hall' })).toBeInTheDocument();
     expect(screen.getByLabelText('Timezone')).toHaveValue('America/Denver');
     expect(apiMock.listSavedVenues).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears only an unsaved default when that venue is deleted', async () => {
+    apiMock.listSavedVenues.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'ven_a',
+          organizationId: 'org_1',
+          name: 'Civic Hall',
+          address: { city: 'Austin', country: 'US' },
+          timezone: 'America/Chicago',
+          createdAt: '2026-07-20T00:00:00.000Z',
+          updatedAt: '2026-07-20T00:00:00.000Z',
+        },
+      ],
+    });
+    apiMock.deleteSavedVenue.mockResolvedValue({ ok: true, data: undefined });
+
+    render(<WorkspacePage />);
+
+    const defaultVenue = await screen.findByLabelText('Default saved venue');
+    fireEvent.change(defaultVenue, { target: { value: 'ven_a' } });
+    fireEvent.change(screen.getByLabelText('Timezone'), { target: { value: 'Europe/Paris' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Civic Hall' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete venue' }));
+
+    await waitFor(() => expect(defaultVenue).toHaveValue(''));
+    expect(screen.getByLabelText('Timezone')).toHaveValue('Europe/Paris');
+    expect(screen.queryByText('Civic Hall')).toBeNull();
   });
 
   it('preserves edited defaults and re-enables saving after an API failure result', async () => {

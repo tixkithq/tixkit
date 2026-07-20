@@ -811,11 +811,11 @@ describe('TixkitScannerClient', () => {
     }));
     expect(requests).toHaveLength(5);
     expect(requests.map((request) => request.headers['X-Tixkit-Version'])).toEqual([
-      '2026-08-23',
-      '2026-08-23',
-      '2026-08-23',
-      '2026-08-23',
-      '2026-08-23',
+      '2026-08-24',
+      '2026-08-24',
+      '2026-08-24',
+      '2026-08-24',
+      '2026-08-24',
     ]);
     expect(requests[0]).toMatchObject({ method: 'GET' });
     expect(requests[0]?.headers.Authorization).toBe('Bearer tk_test_123');

@@ -433,6 +433,43 @@ func TestOrderGetDecodesEnrichedDetail(t *testing.T) {
 	}
 }
 
+func TestWebhookCreateSendsRequiredIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/webhook-endpoints" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Idempotency-Key"); got != "webhook-create-stable-000001" {
+			t.Fatalf("Idempotency-Key = %q", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := body["idempotencyKey"]; exists {
+			t.Fatalf("idempotency key leaked into body: %#v", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(WebhookEndpoint{ID: "wh_1", Secret: "whsec_once"})
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	result, err := client.Webhooks.CreateEndpoint(context.Background(), CreateWebhookEndpointRequest{
+		OrganizationID: "org_1",
+		IdempotencyKey: "webhook-create-stable-000001",
+		URL:            "https://hooks.example.test/tixkit",
+		Events:         []string{"order.created"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ID != "wh_1" || result.Secret != "whsec_once" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestWebhookReplaySendsRequiredIdempotencyKeys(t *testing.T) {
 	t.Parallel()
 

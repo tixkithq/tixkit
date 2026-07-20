@@ -734,6 +734,7 @@ describe('AdminApi create methods pass explicit org/brand context', () => {
   it('createWebhookEndpoint accepts organizationId from bootstrap context', async () => {
     const result = await adminApi.createWebhookEndpoint({
       organizationId: 'org_demo',
+      idempotencyKey: 'webhook-bootstrap-000001',
       url: 'https://example.com/hooks/bootstrap',
       events: ['order.created'],
     });

@@ -44,7 +44,8 @@ function matchesWheres(
   wheres: Array<{ column: string; op: string; value: unknown }>,
 ): boolean {
   for (const w of wheres) {
-    const val = row[w.column];
+    const unqualifiedColumn = w.column.split('.').at(-1)!;
+    const val = Object.hasOwn(row, w.column) ? row[w.column] : row[unqualifiedColumn];
     if (w.op === '=') {
       if (val !== w.value) return false;
     } else if (w.op === 'in') {
@@ -2356,6 +2357,10 @@ describe('cross-organization denial (same tenant)', () => {
 
   it('GET /webhook-endpoints only returns endpoints in the principal organization', async () => {
     const tables: Tables = {
+      organizations: [
+        { id: 'org_A', tenant_id: 'tnt_1' },
+        { id: 'org_B', tenant_id: 'tnt_1' },
+      ],
       webhook_endpoints: [
         webhookEndpointRow({
           id: 'wh_A',
@@ -3928,6 +3933,10 @@ describe('organizationId/brandId query-param scope guards', () => {
   it('GET /webhook-endpoints?organizationId=org_A narrows to org_A endpoints for a multi-org principal', async () => {
     const principal = makePrincipal({ organizationIds: ['org_A', 'org_B'] });
     const app = await setupApp(webhookRoutes, principal, {
+      organizations: [
+        { id: 'org_A', tenant_id: 'tnt_1' },
+        { id: 'org_B', tenant_id: 'tnt_1' },
+      ],
       webhook_endpoints: [
         webhookEndpointRow({ id: 'wh_A', organization_id: 'org_A' }),
         webhookEndpointRow({ id: 'wh_B', organization_id: 'org_B' }),

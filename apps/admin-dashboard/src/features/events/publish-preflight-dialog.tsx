@@ -123,9 +123,7 @@ export function PublishPreflightDialog({
               {currentReadiness.recommendedWarnings.map((step) => (
                 <li key={step.id}>
                   {step.id.replaceAll('_', ' ')} —{' '}
-                  {step.reasonCodes
-                    .map((code) => eventReadinessReasonText(step, code))
-                    .join(' ')}
+                  {step.reasonCodes.map((code) => eventReadinessReasonText(step, code)).join(' ')}
                   {href(eventId, step.actionId) ? (
                     <Link
                       className="ml-2 font-medium text-primary"

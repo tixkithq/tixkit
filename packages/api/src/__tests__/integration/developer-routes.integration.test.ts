@@ -3,6 +3,7 @@ import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
+import { createHash } from 'node:crypto';
 import type { AppContext } from '../../app.js';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { developerRoutes } from '../../routes/modules/developer.js';
@@ -194,10 +195,13 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
   const resolveColumn = (row: Record<string, unknown>, column: string) => {
     const event = row['__event'] as Record<string, unknown> | undefined;
     const delivery = row['__delivery'] as Record<string, unknown> | undefined;
+    const organization = row['__organization'] as Record<string, unknown> | undefined;
     if (column.startsWith('webhook_events.'))
       return event?.[column.slice('webhook_events.'.length)];
     if (column.startsWith('webhook_deliveries.'))
       return delivery?.[column.slice('webhook_deliveries.'.length)];
+    if (column.startsWith('organizations.'))
+      return organization?.[column.slice('organizations.'.length)];
     return row[column];
   };
   // eslint-disable-next-line unicorn/consistent-function-scoping -- comparison semantics are specific to this mock DB.
@@ -250,7 +254,15 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
       const event = rowsFor('webhook_events').find(
         (candidate) => candidate.id === delivery.event_id,
       );
-      return event ? [{ __delivery: delivery, __event: event }] : [];
+      const organization = event
+        ? rowsFor('organizations').find(
+            (candidate) =>
+              candidate.id === event.organization_id && candidate.tenant_id === event.tenant_id,
+          )
+        : undefined;
+      return event && organization
+        ? [{ __delivery: delivery, __event: event, __organization: organization }]
+        : [];
     });
   };
 
@@ -297,6 +309,9 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
           return query;
         },
         innerJoin() {
+          return query;
+        },
+        forUpdate() {
           return query;
         },
         where(
@@ -426,6 +441,9 @@ function createWebhookEndpointListDb(rows: Record<string, unknown>[]) {
         },
         selectAll() {
           throw new Error('Webhook endpoint list must not select secret material');
+        },
+        innerJoin() {
+          return query;
         },
         where() {
           return query;
@@ -853,6 +871,7 @@ describe('developer routes integration', () => {
       scopes: ['developers.write'],
     };
     const tables: Record<string, Record<string, unknown>[]> = {
+      organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }],
       webhook_endpoints: [],
       audit_logs: [],
     };
@@ -861,6 +880,7 @@ describe('developer routes integration', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/webhook-endpoints',
+      headers: { 'idempotency-key': 'webhook-endpoint-create-audit-1' },
       payload: {
         organizationId: 'org_1',
         url: 'https://hooks.example.com/tixkit',
@@ -885,6 +905,7 @@ describe('developer routes integration', () => {
     expect(JSON.stringify(tables.audit_logs[0])).not.toContain(
       String(tables.webhook_endpoints[0].secret),
     );
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('https://hooks.example.com/tixkit');
 
     await app.close();
   });
@@ -899,6 +920,7 @@ describe('developer routes integration', () => {
     };
     const createdAt = new Date('2026-06-01T00:00:00Z');
     const tables: Record<string, Record<string, unknown>[]> = {
+      organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }],
       webhook_endpoints: [
         {
           id: 'wh_1',
@@ -944,6 +966,18 @@ describe('developer routes integration', () => {
     ]);
     expect(JSON.parse(tables.audit_logs[0].diff_summary as string)).toEqual({
       changedFields: ['url', 'events', 'status', 'description'],
+      before: {
+        urlSha256: createHash('sha256').update('https://old.example.com/webhooks').digest('hex'),
+        events: ['order.paid'],
+        status: 'active',
+        descriptionSha256: null,
+      },
+      after: {
+        urlSha256: createHash('sha256').update('https://new.example.com/webhooks').digest('hex'),
+        events: ['order.paid', 'order.refunded'],
+        status: 'disabled',
+        descriptionSha256: createHash('sha256').update('Disabled during rotation').digest('hex'),
+      },
     });
     expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret_1');
     expect(JSON.stringify(tables.audit_logs[0])).not.toContain('https://new.example.com/webhooks');
@@ -1541,6 +1575,7 @@ describe('developer routes integration', () => {
     const app = Fastify();
     app.decorate('context', {
       db: createWebhookDb({
+        organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }],
         webhook_events: [
           {
             id: 'whe_z_new',
@@ -1823,6 +1858,10 @@ describe('developer routes integration', () => {
     const app = Fastify();
     app.decorate('context', {
       db: createWebhookDb({
+        organizations: [
+          { id: 'org_1', tenant_id: 'tnt_1' },
+          { id: 'org_other', tenant_id: 'tnt_1' },
+        ],
         webhook_events: [
           {
             id: 'whe_missing_endpoint',
@@ -1973,7 +2012,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-08-23',
+        apiVersion: '2026-08-24',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'order.paid',
@@ -2394,7 +2433,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-08-23',
+        apiVersion: '2026-08-24',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'test.ping',
@@ -2402,7 +2441,7 @@ describe('developer routes integration', () => {
         payload: expect.objectContaining({
           type: 'test.ping',
           test: true,
-          apiVersion: '2026-08-23',
+          apiVersion: '2026-08-24',
           data: { endpointId: 'wh_1' },
         }),
         replayNonce: expect.any(String),

@@ -10,6 +10,7 @@ import {
   type UpdateWebhookEndpointInput,
   type WebhookEventType,
   adminApi,
+  adminIdempotencyKey,
 } from '@/lib/api';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { Button } from '@/components/ui/button';
@@ -70,6 +71,7 @@ export function WebhookFormDrawer({
   onSuccess,
 }: WebhookFormDrawerProps) {
   const [submitting, setSubmitting] = React.useState(false);
+  const createAttempt = React.useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
   const { organizationId } = useBootstrap();
 
   const form = useForm<WebhookFormValues>({
@@ -83,6 +85,7 @@ export function WebhookFormDrawer({
 
   React.useEffect(() => {
     if (open) {
+      createAttempt.current = null;
       form.reset({
         url: endpoint?.url ?? '',
         description: endpoint?.description ?? '',
@@ -107,17 +110,36 @@ export function WebhookFormDrawer({
       return;
     }
     setSubmitting(true);
-    const input: CreateWebhookEndpointInput = {
-      organizationId: organizationId,
+    const fingerprint = JSON.stringify({
+      organizationId,
+      url: values.url,
+      description: values.description || null,
+      events: [...values.events].sort(),
+    });
+    if (!endpoint && createAttempt.current?.fingerprint !== fingerprint) {
+      createAttempt.current = {
+        fingerprint,
+        idempotencyKey: adminIdempotencyKey('webhook_endpoint'),
+      };
+    }
+    const endpointInput: UpdateWebhookEndpointInput = {
       url: values.url,
       description: values.description || undefined,
       events: values.events,
     };
     const result = endpoint
-      ? await adminApi.updateWebhookEndpoint(endpoint.id, input as UpdateWebhookEndpointInput)
-      : await adminApi.createWebhookEndpoint(input);
+      ? await adminApi.updateWebhookEndpoint(endpoint.id, endpointInput)
+      : await adminApi.createWebhookEndpoint({
+          ...endpointInput,
+          organizationId,
+          idempotencyKey:
+            createAttempt.current?.idempotencyKey ?? adminIdempotencyKey('webhook_endpoint'),
+          url: values.url,
+          events: values.events,
+        } satisfies CreateWebhookEndpointInput);
     setSubmitting(false);
     if (result.ok) {
+      createAttempt.current = null;
       toast.success(endpoint ? 'Webhook updated' : 'Webhook created');
       onOpenChange(false);
       onSuccess?.();

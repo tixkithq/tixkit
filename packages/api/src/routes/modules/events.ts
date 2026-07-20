@@ -89,6 +89,25 @@ const venueInputSchema = z
   .strict();
 const venueUpdateSchema = venueInputSchema.omit({ organizationId: true }).partial().strict();
 
+function requireVenueIdempotencyKey(headers: Record<string, unknown>): string {
+  const value = headers['idempotency-key'];
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 128 ||
+    value.trim() !== value ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint <= 31 || codePoint === 127;
+    })
+  ) {
+    throw new ValidationError(
+      'Idempotency-Key header is required for saved venue creation and must contain 1-128 printable characters',
+    );
+  }
+  return value;
+}
+
 function serializeVenue(row: Record<string, unknown>) {
   let address: unknown = {};
   try {
@@ -510,19 +529,53 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'events.write');
     const body = parseBody(venueInputSchema, request.body);
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-    const now = new Date();
-    const values = {
-      id: `ven_${ulid()}`,
-      tenant_id: principal.tenantId,
-      organization_id: body.organizationId,
-      name: body.name,
-      address: JSON.stringify(body.address),
-      timezone: body.timezone ?? null,
-      created_at: now,
-      updated_at: now,
-    };
-    await app.context.db.insertInto('venues').values(values).execute();
-    return reply.status(201).send(serializeVenue(values));
+    const idempotencyKey = requireVenueIdempotencyKey(request.headers);
+    const result = await withIdempotency(
+      app.context.db,
+      {
+        key: idempotencyKey,
+        tenantId: principal.tenantId,
+        requestHash: hashRequest({ organizationId: body.organizationId, body }),
+        discardErrorCodes: ['FORBIDDEN', 'NOT_FOUND'],
+      },
+      async ({ completeInTransaction }) => {
+        let responseBody: ReturnType<typeof serializeVenue> | undefined;
+        await app.context.db.transaction().execute(async (transaction) => {
+          const organization = await transaction
+            .selectFrom('organizations')
+            .selectAll()
+            .where('id', '=', body.organizationId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!organization) throw new NotFoundError('Organization', body.organizationId);
+          ClerkAuthService.requireResourceTenant(
+            principal,
+            organization,
+            'Organization',
+            body.organizationId,
+          );
+          ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+
+          const now = new Date();
+          const values = {
+            id: `ven_${ulid()}`,
+            tenant_id: principal.tenantId,
+            organization_id: body.organizationId,
+            name: body.name,
+            address: JSON.stringify(body.address),
+            timezone: body.timezone ?? null,
+            created_at: now,
+            updated_at: now,
+          };
+          await transaction.insertInto('venues').values(values).execute();
+          responseBody = serializeVenue(values);
+          await completeInTransaction(transaction, { status: 201, body: responseBody });
+        });
+        if (!responseBody) throw new Error('Saved venue transaction did not produce a response');
+        return { status: 201, body: responseBody };
+      },
+    );
+    return reply.status(result.status).send(result.body);
   });
 
   app.patch('/venues/:venueId', async (request) => {

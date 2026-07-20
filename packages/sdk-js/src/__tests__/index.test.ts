@@ -4012,7 +4012,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-23',
+        'X-Tixkit-Version': '2026-08-24',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
@@ -4183,6 +4183,7 @@ describe('TixkitClient new resource methods', () => {
 
     const created = await c.webhookEndpoints.create({
       organizationId: 'org_1',
+      idempotencyKey: 'webhook-create-stable-000001',
       url: 'https://hooks.example.com/tixkit',
       events: ['order.paid'],
     });
@@ -4192,6 +4193,8 @@ describe('TixkitClient new resource methods', () => {
     expectTypeOf(created.secret).toEqualTypeOf<string>();
     expect(call.method).toBe('POST');
     expect(call.url).toBe('https://api.test/v1/webhook-endpoints');
+    expect(call.headers['Idempotency-Key']).toBe('webhook-create-stable-000001');
+    expect(JSON.parse(call.body)).not.toHaveProperty('idempotencyKey');
   });
 
   it('webhookEndpoints.listEvents sends GET', async () => {

@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-23',
+    version: '2026-08-24',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -6047,7 +6047,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-23, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-24, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6094,7 +6094,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-23, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-24, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6201,7 +6201,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-23 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-24 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6238,7 +6238,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-23 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-24 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8524,7 +8524,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-23 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-24 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8581,7 +8581,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-23 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-24 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -9285,6 +9285,7 @@ const rawOpenApiSpec = {
         operationId: 'createSavedVenue',
         summary: 'Create a reusable organization venue',
         security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
@@ -9309,6 +9310,22 @@ const rawOpenApiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/SavedVenue' },
+              },
+            },
+          },
+          '400': {
+            description: 'Missing or invalid Idempotency-Key',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description: 'Idempotency-Key was already used with a different venue request',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },
@@ -21480,9 +21497,16 @@ const rawOpenApiSpec = {
       get: {
         summary: 'List webhook endpoints',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
+          {
+            name: 'organizationId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
@@ -21497,7 +21521,11 @@ const rawOpenApiSpec = {
       },
       post: {
         summary: 'Create webhook endpoint',
+        description:
+          'Requires a bounded Idempotency-Key. Identical retries by the same principal replay the same endpoint and one-time signing secret for 24 hours; a different request under the same key is rejected. Successful responses are private and non-cacheable.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
@@ -21524,9 +21552,36 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description: 'Endpoint created with one-time signing secret',
+            headers: {
+              'Cache-Control': {
+                description: 'Prevents storage of the one-time signing secret.',
+                schema: { type: 'string', enum: ['private, no-store'] },
+              },
+              Pragma: {
+                description: 'Legacy cache prevention for the one-time signing secret.',
+                schema: { type: 'string', enum: ['no-cache'] },
+              },
+            },
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/WebhookEndpointCreated' },
+              },
+            },
+          },
+          '400': {
+            description: 'Missing or invalid Idempotency-Key',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description:
+              'Idempotency-Key was already used for a different request, or the 24-hour one-time secret replay window expired and endpoint creation or secret rotation is required',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },
@@ -21537,6 +21592,15 @@ const rawOpenApiSpec = {
       patch: {
         summary: 'Update webhook endpoint',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
+        parameters: [
+          {
+            name: 'endpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -21658,9 +21722,16 @@ const rawOpenApiSpec = {
       get: {
         summary: 'List webhook delivery events for an endpoint',
         description:
-          'Returns delivery events in newest-first delivery creation order. Use nextCursor opaquely as the next cursor value.',
+          'Returns delivery events in newest-first delivery creation order. Delivery history remains addressable by requestedEndpointId after an endpoint is deleted, while tenant and organization scope continue to derive from the retained event. Use nextCursor opaquely as the next cursor value.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
         parameters: [
+          {
+            name: 'endpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
         ],

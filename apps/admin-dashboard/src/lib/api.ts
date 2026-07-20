@@ -1926,12 +1926,16 @@ export type CreateApiKeyInput = {
 
 export type CreateWebhookEndpointInput = {
   organizationId?: string;
+  idempotencyKey: string;
   url: string;
   description?: string;
   events: WebhookEventType[];
 };
 
-export type UpdateWebhookEndpointInput = Partial<CreateWebhookEndpointInput> & {
+export type UpdateWebhookEndpointInput = {
+  url?: string;
+  description?: string;
+  events?: WebhookEventType[];
   status?: WebhookEndpointStatus;
 };
 
@@ -2273,7 +2277,9 @@ export type AdminApi = {
   createEvent(input: CreateEventInput): Promise<ApiResult<AdminEventDetail>>;
   listSavedVenues(organizationId: string): Promise<ApiResult<AdminSavedVenue[]>>;
   createSavedVenue(
-    input: Omit<AdminSavedVenue, 'id' | 'createdAt' | 'updatedAt'>,
+    input: Omit<AdminSavedVenue, 'id' | 'createdAt' | 'updatedAt'> & {
+      idempotencyKey?: string;
+    },
   ): Promise<ApiResult<AdminSavedVenue>>;
   updateSavedVenue(
     venueId: string,
@@ -4499,7 +4505,7 @@ function paginate<T>(items: T[], cursor?: string, limit?: number): PageResult<T>
   };
 }
 
-function adminIdempotencyKey(prefix: string): string {
+export function adminIdempotencyKey(prefix: string): string {
   return newIdempotencyKey(prefix);
 }
 
@@ -5679,11 +5685,13 @@ export const adminApi: AdminApi = {
   },
 
   async createSavedVenue(input) {
+    const { idempotencyKey = newIdempotencyKey('venue'), ...body } = input;
     return withFixture(
       () =>
         request<AdminSavedVenue>('/v1/venues', {
           method: 'POST',
-          body: JSON.stringify(input),
+          headers: { 'Idempotency-Key': idempotencyKey },
+          body: JSON.stringify(body),
         }),
       () => err(apiError('fixture_unavailable', 'Saved venues require the live API', 400)),
     );
@@ -8203,9 +8211,10 @@ export const adminApi: AdminApi = {
             ),
           );
         }
-        const organizationId = input.organizationId;
+        const { idempotencyKey, organizationId } = input;
         return request<AdminWebhookEndpoint>('/v1/webhook-endpoints', {
           method: 'POST',
+          headers: { 'Idempotency-Key': idempotencyKey },
           body: JSON.stringify({
             organizationId,
             url: input.url,

@@ -165,7 +165,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-23');
+    expect(openApiSpec.info.version).toBe('2026-08-24');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1112,6 +1112,54 @@ describe('openApiSpec', () => {
     }
   });
 
+  it('documents webhook endpoint management permissions, selectors, and retained history scope', () => {
+    const list = openApiSpec.paths['/webhook-endpoints'].get;
+    const create = openApiSpec.paths['/webhook-endpoints'].post;
+    const update = openApiSpec.paths['/webhook-endpoints/{endpointId}'].patch;
+    const history = openApiSpec.paths['/webhook-endpoints/{endpointId}/events'].get;
+
+    for (const operation of [list, create, update, history]) {
+      expect(operation['x-required-permissions']).toEqual(['developers.write']);
+    }
+    expect(list.parameters).toContainEqual({
+      name: 'organizationId',
+      in: 'query',
+      required: false,
+      schema: { type: 'string' },
+    });
+    for (const operation of [update, history]) {
+      expect(operation.parameters).toContainEqual({
+        name: 'endpointId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' },
+      });
+    }
+    expect(history.description).toContain('after an endpoint is deleted');
+    expect(history.description).toContain('tenant and organization scope');
+    expect(create.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(create.description).toContain('replay the same endpoint and one-time signing secret');
+    expect(create.responses['201'].headers).toMatchObject({
+      'Cache-Control': { schema: { enum: ['private, no-store'] } },
+      Pragma: { schema: { enum: ['no-cache'] } },
+    });
+    expect(create.responses['400'].description).toContain('Idempotency-Key');
+    expect(create.responses['409'].description).toContain('different request');
+    expect(create.responses['409'].description).toContain('secret replay window expired');
+    expect(create.responses['409'].description).toContain('rotation is required');
+  });
+
+  it('requires an idempotency key when creating a saved venue', () => {
+    const operation = openApiSpec.paths['/venues'].post;
+    expect(operation.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(operation.responses['400'].description).toContain('Idempotency-Key');
+    expect(operation.responses['409'].description).toContain('different venue request');
+  });
+
   it('documents stable credential metadata returned by API serializers', () => {
     expect(openApiSpec.components.schemas.ApiKey.properties).toMatchObject({
       tenantId: { type: 'string' },
@@ -1260,7 +1308,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-23');
+    expect(openApiSpec.info.version).toBe('2026-08-24');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',

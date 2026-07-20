@@ -16,7 +16,14 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { EmptyState } from '@/components/empty-state';
 import { PermissionGuard } from '@/components/permission-guard';
-import { adminApi, type AdminBoxOfficeSettings, type AdminOrganization } from '@/lib/api';
+import { usePermissions } from '@/context/permission-provider';
+import { SavedVenueManager } from '@/features/settings/saved-venue-manager';
+import {
+  adminApi,
+  type AdminBoxOfficeSettings,
+  type AdminOrganization,
+  type AdminSavedVenue,
+} from '@/lib/api';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBootstrap } from '@/context/bootstrap-provider';
@@ -61,6 +68,12 @@ function WorkspacePageContent() {
     loading: bootstrapLoading,
     error: bootstrapError,
   } = useBootstrap();
+  const {
+    can,
+    loading: permissionsLoading,
+    error: permissionsError,
+    retry: retryPermissions,
+  } = usePermissions();
   const [organization, setOrganization] = React.useState<AdminOrganization | null>(null);
   const [name, setName] = React.useState('');
   const [slug, setSlug] = React.useState('');
@@ -69,7 +82,7 @@ function WorkspacePageContent() {
   const [eventDefaults, setEventDefaults] = React.useState<
     NonNullable<AdminOrganization['eventDefaults']>
   >({});
-  const [savedVenues, setSavedVenues] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [savedVenues, setSavedVenues] = React.useState<AdminSavedVenue[]>([]);
   const [savedVenuesLoading, setSavedVenuesLoading] = React.useState(false);
   const [savedVenuesError, setSavedVenuesError] = React.useState<string | null>(null);
   const [savedVenuesLoadVersion, setSavedVenuesLoadVersion] = React.useState(0);
@@ -117,7 +130,8 @@ function WorkspacePageContent() {
   }, [bootstrapError, bootstrapLoading, organizationId, organizations]);
 
   React.useEffect(() => {
-    if (!organizationId) {
+    const canReadVenues = !permissionsLoading && !permissionsError && can('events.read');
+    if (!organizationId || !canReadVenues) {
       setSavedVenues([]);
       setSavedVenuesError(null);
       setSavedVenuesLoading(false);
@@ -150,7 +164,7 @@ function WorkspacePageContent() {
     return () => {
       active = false;
     };
-  }, [organizationId, savedVenuesLoadVersion]);
+  }, [can, organizationId, permissionsError, permissionsLoading, savedVenuesLoadVersion]);
 
   const updateBoxOfficeSettings = (changes: Partial<AdminBoxOfficeSettings>) => {
     setSaveError(null);
@@ -442,13 +456,21 @@ function WorkspacePageContent() {
                     id="event-default-venue"
                     className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
                     value={eventDefaults.defaultVenueId ?? ''}
-                    disabled={savedVenuesLoading || savedVenuesError !== null}
+                    disabled={
+                      permissionsLoading ||
+                      permissionsError !== null ||
+                      !can('events.read') ||
+                      savedVenuesLoading ||
+                      savedVenuesError !== null
+                    }
                     aria-describedby={
-                      savedVenuesError
-                        ? 'event-default-venue-error'
-                        : savedVenuesLoading
-                          ? 'event-default-venue-status'
-                          : undefined
+                      permissionsLoading || permissionsError || !can('events.read')
+                        ? 'event-default-venue-access'
+                        : savedVenuesError
+                          ? 'event-default-venue-error'
+                          : savedVenuesLoading
+                            ? 'event-default-venue-status'
+                            : undefined
                     }
                     onChange={(change) => {
                       setSaveError(null);
@@ -479,6 +501,29 @@ function WorkspacePageContent() {
                     >
                       Loading saved venues…
                     </output>
+                  ) : null}
+                  {permissionsLoading ? (
+                    <output
+                      id="event-default-venue-access"
+                      className="text-sm text-muted-foreground"
+                    >
+                      Checking saved venue access…
+                    </output>
+                  ) : permissionsError ? (
+                    <div
+                      id="event-default-venue-access"
+                      role="alert"
+                      className="flex flex-wrap items-center gap-2 text-sm text-destructive"
+                    >
+                      <span>Saved venue access could not be verified.</span>
+                      <Button type="button" variant="outline" size="sm" onClick={retryPermissions}>
+                        Retry access check
+                      </Button>
+                    </div>
+                  ) : !can('events.read') ? (
+                    <p id="event-default-venue-access" className="text-sm text-muted-foreground">
+                      Event viewing permission is required to choose a default saved venue.
+                    </p>
                   ) : null}
                   {savedVenuesError ? (
                     <div
@@ -515,6 +560,21 @@ function WorkspacePageContent() {
                   />
                 </div>
               </div>
+
+              <SavedVenueManager
+                organizationId={organization.id}
+                venues={savedVenues}
+                loading={savedVenuesLoading}
+                loadError={savedVenuesError}
+                onVenuesChange={setSavedVenues}
+                onVenueDeleted={(venueId) => {
+                  setEventDefaults((current) =>
+                    current.defaultVenueId === venueId
+                      ? { ...current, defaultVenueId: undefined }
+                      : current,
+                  );
+                }}
+              />
 
               {saving ? (
                 <output id="workspace-save-status" className="text-sm text-muted-foreground">

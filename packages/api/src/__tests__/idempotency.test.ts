@@ -548,6 +548,94 @@ describe('withIdempotency', () => {
     expect(JSON.parse(records[0]?.response_body as string)).toEqual({ id: 'stale' });
   });
 
+  it('optionally scrubs an expired completed credential response into a permanent tombstone', async () => {
+    const requestHash = hashRequest({ credential: 'same-request' });
+    const secret = 'credential-secret-that-must-be-scrubbed';
+    const { db, records } = createMockDb([
+      {
+        id: 'idm_expired_credential',
+        key: 'idem-expired-credential',
+        tenant_id: 'tnt_1',
+        request_hash: requestHash,
+        response_status: 201,
+        response_body: JSON.stringify({ secret }),
+        status: 'completed',
+        expires_at: new Date(Date.now() - 1_000),
+      },
+    ]);
+    const handler = vi.fn(async () => ({ status: 201, body: { secret: 'new-secret' } }));
+    const tombstone = {
+      status: 409,
+      body: { error: { code: 'CREDENTIAL_REPLAY_EXPIRED', message: 'Rotate credential' } },
+    };
+
+    const replay = await withIdempotency(
+      db,
+      {
+        key: 'idem-expired-credential',
+        tenantId: 'tnt_1',
+        requestHash,
+        completedRecordExpiry: { tombstone },
+      },
+      handler,
+    );
+
+    expect(replay).toEqual(tombstone);
+    expect(handler).not.toHaveBeenCalled();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      id: 'idm_expired_credential',
+      request_hash: requestHash,
+      status: 'completed',
+      response_status: 409,
+    });
+    expect(new Date(records[0]!.expires_at as Date).getTime()).toBeLessThan(Date.now());
+    expect(records[0]?.response_body).not.toContain(secret);
+  });
+
+  it('returns only the tombstone to concurrent expired credential replays', async () => {
+    const requestHash = hashRequest({ credential: 'concurrent-request' });
+    const secret = 'concurrent-old-secret';
+    const { db, records } = createMockDb([
+      {
+        id: 'idm_expired_credential_race',
+        key: 'idem-expired-credential-race',
+        tenant_id: 'tnt_1',
+        request_hash: requestHash,
+        response_status: 201,
+        response_body: JSON.stringify({ secret }),
+        status: 'completed',
+        expires_at: new Date(Date.now() - 1_000),
+      },
+    ]);
+    const tombstone = {
+      status: 409,
+      body: { error: { code: 'CREDENTIAL_REPLAY_EXPIRED', message: 'Rotate credential' } },
+    };
+    const handler = vi.fn(async () => ({ status: 201, body: { secret: 'new-secret' } }));
+
+    const replays = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        withIdempotency(
+          db,
+          {
+            key: 'idem-expired-credential-race',
+            tenantId: 'tnt_1',
+            requestHash,
+            completedRecordExpiry: { tombstone },
+          },
+          handler,
+        ),
+      ),
+    );
+
+    expect(replays).toEqual([tombstone, tombstone, tombstone, tombstone]);
+    expect(handler).not.toHaveBeenCalled();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.response_body).not.toContain(secret);
+    expect(new Date(records[0]!.expires_at as Date).getTime()).toBeLessThan(Date.now());
+  });
+
   it('throws conflict for changed payloads even when the completed record is expired', async () => {
     const { db, records } = createMockDb([
       {

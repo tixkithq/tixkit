@@ -242,10 +242,27 @@ function compareContent(
       });
 }
 
-function parameters(value: Json | undefined): Map<string, Record<string, Json>> {
+function resolveLocalReference(document: Record<string, Json>, value: Json): Json {
+  const reference = object(value).$ref;
+  if (typeof reference !== 'string' || !reference.startsWith('#/')) return value;
+  let resolved: Json = document;
+  for (const segment of reference
+    .slice(2)
+    .split('/')
+    .map((part) => part.replaceAll('~1', '/').replaceAll('~0', '~'))) {
+    resolved = object(resolved)[segment];
+    if (resolved === undefined) return value;
+  }
+  return resolved;
+}
+
+function parameters(
+  value: Json | undefined,
+  document: Record<string, Json>,
+): Map<string, Record<string, Json>> {
   return new Map(
     array(value).map((item) => {
-      const parameter = object(item);
+      const parameter = object(resolveLocalReference(document, item));
       return [`${parameter.in}:${parameter.name}`, parameter];
     }),
   );
@@ -356,12 +373,12 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
         });
       }
       const beforeParameters = new Map([
-        ...parameters(previousItem.parameters),
-        ...parameters(previousOperation.parameters),
+        ...parameters(previousItem.parameters, before),
+        ...parameters(previousOperation.parameters, before),
       ]);
       const afterParameters = new Map([
-        ...parameters(currentItem.parameters),
-        ...parameters(currentOperation.parameters),
+        ...parameters(currentItem.parameters, after),
+        ...parameters(currentOperation.parameters, after),
       ]);
       for (const [key, parameter] of afterParameters) {
         const old = beforeParameters.get(key);

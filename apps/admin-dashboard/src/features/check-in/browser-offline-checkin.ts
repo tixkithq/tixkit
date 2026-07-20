@@ -260,7 +260,11 @@ export class BrowserOfflineCheckInSession {
       };
     });
     if (localDisposition === 'queued') {
-      return result('accepted', 'Check-in accepted offline and queued for synchronization.', scannedAt);
+      return result(
+        'accepted',
+        'Check-in accepted offline and queued for synchronization.',
+        scannedAt,
+      );
     }
     return localDisposition === 'pending'
       ? result('duplicate', 'Ticket is already queued on this browser.', scannedAt)
@@ -324,7 +328,9 @@ export class BrowserOfflineCheckInSession {
         state: {
           ...current,
           pending: current.pending.filter(
-            (scan) => !snapshot.some((submitted) => submitted.qrHash === scan.qrHash) || !outcomes.has(scan.qrHash),
+            (scan) =>
+              !snapshot.some((submitted) => submitted.qrHash === scan.qrHash) ||
+              !outcomes.has(scan.qrHash),
           ),
           reconciled: [...current.reconciled, ...terminal].slice(-MAX_RECONCILIATIONS),
           syncLease: undefined,

@@ -9,6 +9,7 @@ import {
   WebhookEndpointRepository,
   WebhookEventRepository,
   WebhookReplayRequestRepository,
+  type Database,
 } from '@tixkit/db';
 import {
   ForbiddenError,
@@ -34,9 +35,20 @@ import {
   WEBHOOK_TEST_API_VERSION,
   WEBHOOK_TEST_EVENT_TYPE,
 } from '../../services/webhook-test.js';
+import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
 const scopedWebhookEndpointManagementMessage =
   'Scoped principals cannot manage organization-wide webhook endpoints';
+const expiredWebhookEndpointSecretReplay = Object.freeze({
+  status: 409,
+  body: Object.freeze({
+    error: Object.freeze({
+      code: 'WEBHOOK_ENDPOINT_SECRET_REPLAY_EXPIRED',
+      message:
+        'The one-time webhook signing secret replay window expired. Create or rotate the endpoint to recover a secret.',
+    }),
+  }),
+});
 
 function requireOrganizationWideWebhookEndpointPrincipal(principal: Principal) {
   if (principal.brandIds?.length || principal.eventIds?.length) {
@@ -44,7 +56,7 @@ function requireOrganizationWideWebhookEndpointPrincipal(principal: Principal) {
   }
 }
 
-function requireReplayIdempotencyKey(headers: Record<string, unknown>): string {
+function requireWebhookIdempotencyKey(headers: Record<string, unknown>): string {
   const value = headers['idempotency-key'];
   if (
     typeof value !== 'string' ||
@@ -61,8 +73,40 @@ function requireReplayIdempotencyKey(headers: Record<string, unknown>): string {
   return value;
 }
 
+async function loadWebhookOrganization(
+  db: Database,
+  principal: Principal,
+  organizationId: string,
+  lock = false,
+) {
+  let query = db.selectFrom('organizations').selectAll().where('id', '=', organizationId);
+  if (lock) query = query.forUpdate();
+  const organization = await query.executeTakeFirst();
+  if (!organization) throw new NotFoundError('Organization', organizationId);
+  ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
+  ClerkAuthService.requireOrganizationScope(principal, organizationId);
+  return organization;
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function webhookEndpointAuditSnapshot(endpoint: {
+  description?: string | null;
+  events: unknown;
+  status: string;
+  url: string;
+}) {
+  return {
+    urlSha256: sha256(endpoint.url),
+    events: parseWebhookEndpointEvents(endpoint.events),
+    status: endpoint.status,
+    descriptionSha256:
+      endpoint.description === null || endpoint.description === undefined
+        ? null
+        : sha256(endpoint.description),
+  };
 }
 
 function parseReplayEndpointIds(value: string): string[] {
@@ -84,30 +128,65 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     const body = parseBody(createWebhookEndpointSchema, request.body);
 
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-
-    const repo = new WebhookEndpointRepository(db);
-    const endpoint = await repo.create({
-      tenantId: principal.tenantId,
-      organizationId: body.organizationId,
-      url: body.url,
-      events: body.events,
-      description: body.description,
+    await loadWebhookOrganization(db, principal, body.organizationId);
+    const rawIdempotencyKey = requireWebhookIdempotencyKey(request.headers);
+    const idempotencyKey = hashRequest({
+      operation: 'webhook_endpoint.create',
+      principal: { type: principal.type, id: principal.id },
+      key: rawIdempotencyKey,
     });
 
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'webhook_endpoint.created',
-      organizationId: body.organizationId,
-      resourceType: 'WebhookEndpoint',
-      resourceId: endpoint.id as string,
-      diffSummary: {
-        url: body.url,
-        events: body.events,
-        descriptionPresent: body.description !== undefined,
+    const result = await withIdempotency(
+      db,
+      {
+        key: idempotencyKey,
+        tenantId: principal.tenantId,
+        requestHash: hashRequest({
+          operation: 'webhook_endpoint.create',
+          principal: { type: principal.type, id: principal.id },
+          body,
+        }),
+        ttlSeconds: 86_400,
+        discardErrorCodes: ['FORBIDDEN', 'NOT_FOUND'],
+        completedRecordExpiry: { tombstone: expiredWebhookEndpointSecretReplay },
       },
-    });
+      async ({ completeInTransaction }) => {
+        let responseBody: ReturnType<typeof serializeWebhookEndpoint> | undefined;
+        await db.transaction().execute(async (transaction) => {
+          await loadWebhookOrganization(transaction, principal, body.organizationId, true);
+          const created = await new WebhookEndpointRepository(transaction).create({
+            tenantId: principal.tenantId,
+            organizationId: body.organizationId,
+            url: body.url,
+            events: body.events,
+            description: body.description,
+          });
+          responseBody = serializeWebhookEndpoint(created, true);
+          await writeAuditLog(
+            new AuditLogRepository(transaction),
+            request,
+            principal,
+            {
+              action: 'webhook_endpoint.created',
+              organizationId: body.organizationId,
+              resourceType: 'WebhookEndpoint',
+              resourceId: created.id as string,
+              diffSummary: { after: webhookEndpointAuditSnapshot(created) },
+            },
+            { failClosed: true },
+          );
+          await completeInTransaction(transaction, { status: 201, body: responseBody });
+        });
+        if (!responseBody) throw new Error('Webhook endpoint transaction produced no response');
+        return { status: 201, body: responseBody };
+      },
+    );
 
-    // Return with secret (only shown once)
-    return reply.status(201).send(serializeWebhookEndpoint(endpoint, true));
+    return reply
+      .header('cache-control', 'private, no-store')
+      .header('pragma', 'no-cache')
+      .status(result.status)
+      .send(result.body);
   });
 
   app.patch('/webhook-endpoints/:endpointId', async (request) => {
@@ -122,21 +201,53 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     if (!existing) throw new NotFoundError('WebhookEndpoint', endpointId);
     ClerkAuthService.requireResourceTenant(principal, existing, 'WebhookEndpoint', endpointId);
     ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
+    await app.context.webhookEndpointCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'update',
+      endpointId,
+    });
 
     const updateData: Record<string, unknown> = {};
     if (body.url) updateData.url = body.url;
     if (body.events) updateData.events = JSON.stringify(body.events);
     if (body.status) updateData.status = body.status;
     if (body.description !== undefined) updateData.description = body.description;
-    const endpoint = await repo.update(endpointId, updateData);
-    await writeAuditLog(new AuditLogRepository(db), request, principal, {
-      action: 'webhook_endpoint.updated',
-      organizationId: existing.organization_id,
-      resourceType: 'WebhookEndpoint',
-      resourceId: endpointId,
-      diffSummary: {
-        changedFields: Object.keys(updateData).filter((field) => field !== 'updated_at'),
-      },
+    const endpoint = await db.transaction().execute(async (transaction) => {
+      const transactionRepo = new WebhookEndpointRepository(transaction);
+      const current = await transactionRepo.findByIdForUpdate(endpointId);
+      if (!current) throw new NotFoundError('WebhookEndpoint', endpointId);
+      ClerkAuthService.requireResourceTenant(principal, current, 'WebhookEndpoint', endpointId);
+      ClerkAuthService.requireOrganizationScope(principal, current.organization_id);
+      const organization = await loadWebhookOrganization(
+        transaction,
+        principal,
+        current.organization_id,
+        true,
+      );
+      if (organization.tenant_id !== current.tenant_id) {
+        throw new NotFoundError('WebhookEndpoint', endpointId);
+      }
+
+      const before = webhookEndpointAuditSnapshot(current);
+      const updated = await transactionRepo.update(endpointId, updateData);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'webhook_endpoint.updated',
+          organizationId: current.organization_id,
+          resourceType: 'WebhookEndpoint',
+          resourceId: endpointId,
+          diffSummary: {
+            changedFields: Object.keys(updateData),
+            before,
+            after: webhookEndpointAuditSnapshot(updated),
+          },
+        },
+        { failClosed: true },
+      );
+      return updated;
     });
     return serializeWebhookEndpoint(endpoint);
   });
@@ -149,35 +260,42 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     const { organizationId } = request.query as { organizationId?: string };
     if (organizationId) {
       ClerkAuthService.requireOrganizationScope(principal, organizationId);
+      await loadWebhookOrganization(db, principal, organizationId);
     }
     // Query across all principal.organizationIds, not just the first.
     let query = db
       .selectFrom('webhook_endpoints')
+      .innerJoin('organizations', (join) =>
+        join
+          .onRef('organizations.id', '=', 'webhook_endpoints.organization_id')
+          .onRef('organizations.tenant_id', '=', 'webhook_endpoints.tenant_id'),
+      )
       .select([
-        'id',
-        'tenant_id',
-        'organization_id',
-        'url',
-        'events',
-        'status',
-        'description',
-        'created_at',
-        'updated_at',
+        'webhook_endpoints.id as id',
+        'webhook_endpoints.tenant_id as tenant_id',
+        'webhook_endpoints.organization_id as organization_id',
+        'webhook_endpoints.url as url',
+        'webhook_endpoints.events as events',
+        'webhook_endpoints.status as status',
+        'webhook_endpoints.description as description',
+        'webhook_endpoints.created_at as created_at',
+        'webhook_endpoints.updated_at as updated_at',
       ])
-      .where('tenant_id', '=', principal.tenantId)
-      .orderBy('id', 'asc')
+      .where('webhook_endpoints.tenant_id', '=', principal.tenantId)
+      .where('organizations.tenant_id', '=', principal.tenantId)
+      .orderBy('webhook_endpoints.id', 'asc')
       .limit(pagination.limit + 1);
-    if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
+    if (pagination.cursor) query = query.where('webhook_endpoints.id', '>', pagination.cursor);
     if (principal.type !== 'system') {
       if (principal.organizationIds.length > 0) {
-        query = query.where('organization_id', 'in', principal.organizationIds);
+        query = query.where('webhook_endpoints.organization_id', 'in', principal.organizationIds);
       } else {
         // Fail-closed: no orgs means no endpoints visible.
-        query = query.where('organization_id', 'in', ['__none__']);
+        query = query.where('webhook_endpoints.organization_id', 'in', ['__none__']);
       }
     }
     if (organizationId) {
-      query = query.where('organization_id', '=', organizationId);
+      query = query.where('webhook_endpoints.organization_id', '=', organizationId);
     }
     const rows = await query.execute();
     return pageEnvelope(
@@ -198,6 +316,10 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     if (endpoint) {
       ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
       ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
+      const organization = await loadWebhookOrganization(db, principal, endpoint.organization_id);
+      if (organization.tenant_id !== endpoint.tenant_id) {
+        throw new NotFoundError('WebhookEndpoint', endpointId);
+      }
     }
     const cursor = pagination.cursor
       ? parseWebhookDeliveryEventCursor(pagination.cursor)
@@ -206,6 +328,11 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     let query = db
       .selectFrom('webhook_deliveries')
       .innerJoin('webhook_events', 'webhook_events.id', 'webhook_deliveries.event_id')
+      .innerJoin('organizations', (join) =>
+        join
+          .onRef('organizations.id', '=', 'webhook_events.organization_id')
+          .onRef('organizations.tenant_id', '=', 'webhook_events.tenant_id'),
+      )
       .select([
         'webhook_events.id as id',
         'webhook_deliveries.id as delivery_id',
@@ -220,6 +347,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         'webhook_deliveries.created_at as created_at',
       ])
       .where('webhook_events.tenant_id', '=', principal.tenantId)
+      .where('organizations.tenant_id', '=', principal.tenantId)
       .where('webhook_deliveries.requested_endpoint_id', '=', endpointId)
       .orderBy('webhook_deliveries.created_at', 'desc')
       .orderBy('webhook_deliveries.id', 'desc')
@@ -337,7 +465,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     if (!event) throw new NotFoundError('WebhookEvent', eventId);
     ClerkAuthService.requireResourceTenant(principal, event, 'WebhookEvent', eventId);
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
-    const idempotencyKey = requireReplayIdempotencyKey(request.headers);
+    const idempotencyKey = requireWebhookIdempotencyKey(request.headers);
     const idempotencyKeySha256 = sha256(idempotencyKey);
     const requestSha256 = sha256(JSON.stringify({ scope: 'organization', eventId }));
 
@@ -451,7 +579,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     if (!event) throw new NotFoundError('WebhookEvent', eventId);
     ClerkAuthService.requireResourceTenant(principal, event, 'WebhookEvent', eventId);
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
-    const idempotencyKey = requireReplayIdempotencyKey(request.headers);
+    const idempotencyKey = requireWebhookIdempotencyKey(request.headers);
     const idempotencyKeySha256 = sha256(idempotencyKey);
     const requestSha256 = sha256(JSON.stringify({ scope: 'endpoint', endpointId, eventId }));
     const replayRepo = new WebhookReplayRequestRepository(db);

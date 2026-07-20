@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-23';
+export const TIXKIT_API_VERSION = '2026-08-24';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -5948,13 +5948,16 @@ class WebhookEndpointResource {
       params: paginationParams(params),
     });
   }
-  async create(input: {
-    organizationId: string;
-    url: string;
-    events: WebhookEventType[];
-    description?: string;
-  }): Promise<WebhookEndpointCreated> {
-    return this.client.request('POST', '/webhook-endpoints', { body: input });
+  async create(
+    input: {
+      organizationId: string;
+      url: string;
+      events: WebhookEventType[];
+      description?: string;
+    } & IdempotencyOptions,
+  ): Promise<WebhookEndpointCreated> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/webhook-endpoints', { body, idempotencyKey });
   }
   async update(
     endpointId: string,

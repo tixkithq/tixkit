@@ -196,6 +196,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'provider-incident-route-authorization-db.integration.test.ts'),
   ],
   [
+    'webhook-endpoint-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'webhook-endpoint-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'migration-credential-route-authorization.test.ts',
     resolve(import.meta.dirname, '../migration-credential-route-authorization.test.ts'),
   ],
@@ -575,6 +579,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['postWebhookEndpointsByEndpointIdTest'], {
     source: 'webhook-replay-route-authorization-db.integration.test.ts',
     persistenceSource: 'webhook-replay-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getWebhookEndpoints', 'getWebhookEndpointsByEndpointIdEvents'], {
+    source: 'webhook-endpoint-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postWebhookEndpoints', 'patchWebhookEndpointsByEndpointId'], {
+    source: 'webhook-endpoint-route-authorization-db.integration.test.ts',
+    persistenceSource: 'webhook-endpoint-route-authorization-db.integration.test.ts',
   }),
 ]);
 

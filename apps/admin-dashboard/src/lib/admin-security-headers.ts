@@ -8,12 +8,13 @@ export const ADMIN_SECURITY_HEADER_NAMES = [
   'X-Frame-Options',
 ] as const;
 
-// Sonner creates an empty <style> element before appending its bundled, static
-// stylesheet. Keep these hashes pinned to that exact behavior instead of
-// allowing arbitrary inline styles in production.
+// Sonner and react-remove-scroll create bundled, static <style> elements at
+// runtime. Keep these hashes pinned to those exact styles instead of allowing
+// arbitrary inline styles in production.
 const RUNTIME_STYLE_HASHES = [
   "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
   "'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY='",
+  "'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='",
 ] as const;
 
 export function adminContentSecurityPolicy(

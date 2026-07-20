@@ -231,10 +231,8 @@ export function loadOfflineManifestSigningRegistry(
   const activeKey = keys.find((key) => key.keyId === activeKeyId)!;
   if (
     options.requireActiveManifestLifetime !== false &&
-    (
-    Date.parse(activeKey.notBefore) > now.getTime() ||
-    Date.parse(activeKey.notAfter) < now.getTime() + 24 * 60 * 60 * 1000
-    )
+    (Date.parse(activeKey.notBefore) > now.getTime() ||
+      Date.parse(activeKey.notAfter) < now.getTime() + 24 * 60 * 60 * 1000)
   ) {
     throw new Error(
       'OFFLINE_MANIFEST_ACTIVE_KEY_ID must be valid now and for the complete 24-hour manifest lifetime',

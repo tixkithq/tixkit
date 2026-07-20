@@ -1,0 +1,48 @@
+{
+  "from": "2026-08-23",
+  "to": "2026-08-24",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 2,
+    "compatible": 4
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "required-parameter-added",
+      "path": "POST /venues.parameters.header:Idempotency-Key",
+      "message": "A required parameter was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /webhook-endpoints",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /webhook-endpoints",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-parameter-added",
+      "path": "POST /webhook-endpoints.parameters.header:Idempotency-Key",
+      "message": "A required parameter was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "PATCH /webhook-endpoints/{endpointId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /webhook-endpoints/{endpointId}/events",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    }
+  ]
+}

@@ -44,6 +44,31 @@ const base = {
 };
 
 describe('OpenAPI compatibility', () => {
+  it('resolves component parameter references before classifying required additions', () => {
+    const previous = structuredClone(base);
+    const current = structuredClone(base) as typeof base & {
+      components: typeof base.components & { parameters: Record<string, unknown> };
+    };
+    current.components.parameters = {
+      IdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: { type: 'string' },
+      },
+    };
+    current.paths['/things'].post.parameters.push({
+      $ref: '#/components/parameters/IdempotencyKey',
+    } as never);
+
+    expect(compareOpenApi(previous as never, current as never)).toContainEqual({
+      severity: 'breaking',
+      category: 'required-parameter-added',
+      path: 'POST /things.parameters.header:Idempotency-Key',
+      message: 'A required parameter was added.',
+    });
+  });
+
   it('accepts additive anyOf response alternatives while preserving every prior branch', () => {
     const previous = {
       ...base,

@@ -998,24 +998,44 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
   });
 
   it('creates, edits, lists, and associates a tenant-scoped reusable venue', async () => {
+    const createHeaders = { 'Idempotency-Key': `saved-venue-${suffix}` };
+    const createPayload = {
+      organizationId,
+      name: 'Saved Hall',
+      address: {
+        address: '100 Main St',
+        city: 'Austin',
+        region: 'TX',
+        postalCode: '78701',
+        country: 'US',
+      },
+      timezone: 'America/Chicago',
+    };
     const created = await app.inject({
       method: 'POST',
       url: '/venues',
-      payload: {
-        organizationId,
-        name: 'Saved Hall',
-        address: {
-          address: '100 Main St',
-          city: 'Austin',
-          region: 'TX',
-          postalCode: '78701',
-          country: 'US',
-        },
-        timezone: 'America/Chicago',
-      },
+      headers: createHeaders,
+      payload: createPayload,
     });
     expect(created.statusCode).toBe(201);
     const venueId = (created.json() as { id: string }).id;
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/venues',
+      headers: createHeaders,
+      payload: createPayload,
+    });
+    expect(replay.statusCode).toBe(201);
+    expect((replay.json() as { id: string }).id).toBe(venueId);
+    expect(
+      await db
+        .selectFrom('venues')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('organization_id', '=', organizationId)
+        .where('name', '=', 'Saved Hall')
+        .execute(),
+    ).toHaveLength(1);
     const edited = await app.inject({
       method: 'PATCH',
       url: `/venues/${venueId}`,
@@ -1061,6 +1081,7 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
     const disposable = await app.inject({
       method: 'POST',
       url: '/venues',
+      headers: { 'Idempotency-Key': `disposable-venue-${suffix}` },
       payload: { organizationId, name: 'Disposable venue', address: {}, timezone: 'UTC' },
     });
     const disposableVenueId = (disposable.json() as { id: string }).id;

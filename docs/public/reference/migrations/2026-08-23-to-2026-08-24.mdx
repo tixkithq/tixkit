@@ -1,0 +1,25 @@
+---
+title: Migrate API 2026-08-23 to 2026-08-24
+description: Adopt replay-safe saved-venue and webhook-endpoint creation.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-20
+prerequisites:
+  - /reference/api-versions
+related:
+  - /developers/api-fundamentals/idempotency
+  - /developers/webhooks/setup
+  - /reference/api
+---
+
+API `2026-08-24` requires an `Idempotency-Key` header on `POST /venues` and `POST /webhook-endpoints`. The trimmed key must contain 1–128 printable characters. Reuse a key only for an identical logical mutation; reusing it with a different request returns `409`.
+
+Saved-venue creation commits the venue and replay record atomically. An exact retry returns the original venue and does not create a duplicate. Regenerate strongly typed clients and pass a stable key across transport retries.
+
+Webhook-endpoint creation commits the endpoint, audit record, and replay record atomically. An exact retry within 24 hours returns the same endpoint and one-time secret. Treat the response as sensitive: honor `Cache-Control: private, no-store` and `Pragma: no-cache`, and never log, persist, or cache the secret.
+
+After 24 hours, retrying that webhook creation key returns `409` with code `WEBHOOK_ENDPOINT_SECRET_REPLAY_EXPIRED` and no secret. The key remains consumed. Create a replacement endpoint with a fresh key, deploy and test its signing secret, then disable the old endpoint instead of resubmitting the expired mutation.

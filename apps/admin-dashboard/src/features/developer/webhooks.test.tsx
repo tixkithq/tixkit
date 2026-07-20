@@ -14,6 +14,7 @@ describe('Webhook create/update', () => {
 
   it('createWebhookEndpoint returns a new endpoint with active status', async () => {
     const result = await adminApi.createWebhookEndpoint({
+      idempotencyKey: 'webhook-create-000001',
       url: 'https://example.com/new-webhook',
       description: 'Test endpoint',
       events: ['order.created', 'order.paid'],
@@ -30,6 +31,7 @@ describe('Webhook create/update', () => {
   it('updateWebhookEndpoint updates fields', async () => {
     // Create a webhook first
     const createResult = await adminApi.createWebhookEndpoint({
+      idempotencyKey: 'webhook-update-setup-000001',
       url: 'https://example.com/update-test',
       events: ['order.created'],
     });
@@ -92,6 +94,80 @@ describe('Webhook create/update', () => {
         '/v1/webhook-endpoints/wh_001/events/whe_001/replay',
         { method: 'POST' },
       );
+    } finally {
+      vi.doUnmock('@/lib/api-http');
+      vi.resetModules();
+    }
+  });
+
+  it('createWebhookEndpoint sends the caller-owned idempotency key only as a header', async () => {
+    vi.resetModules();
+    const requestMock = vi.fn(async () => ({
+      ok: true as const,
+      data: { id: 'wh_002', secret: 'whsec_once' },
+    }));
+    vi.doMock('@/lib/api-http', () => ({
+      getAdminApiBaseUrl: vi.fn(() => 'https://api.test'),
+      getAdminApiAuthHeaders: vi.fn(async () => ({})),
+      request: requestMock,
+      withFixture: async (call: () => Promise<unknown>) => call(),
+    }));
+
+    try {
+      const { adminApi: isolatedAdminApi } = await import('@/lib/api');
+      const result = await isolatedAdminApi.createWebhookEndpoint({
+        organizationId: 'org_1',
+        idempotencyKey: 'webhook-create-stable-000001',
+        url: 'https://hooks.example.test/tixkit',
+        events: ['order.created'],
+      });
+
+      expect(result.ok).toBe(true);
+      expect(requestMock).toHaveBeenCalledWith('/v1/webhook-endpoints', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'webhook-create-stable-000001' },
+        body: JSON.stringify({
+          organizationId: 'org_1',
+          url: 'https://hooks.example.test/tixkit',
+          events: ['order.created'],
+        }),
+      });
+    } finally {
+      vi.doUnmock('@/lib/api-http');
+      vi.resetModules();
+    }
+  });
+
+  it('updateWebhookEndpoint sends only strict update fields', async () => {
+    vi.resetModules();
+    const requestMock = vi.fn(async () => ({
+      ok: true as const,
+      data: { id: 'wh_002', status: 'active' as const },
+    }));
+    vi.doMock('@/lib/api-http', () => ({
+      getAdminApiBaseUrl: vi.fn(() => 'https://api.test'),
+      getAdminApiAuthHeaders: vi.fn(async () => ({})),
+      request: requestMock,
+      withFixture: async (call: () => Promise<unknown>) => call(),
+    }));
+
+    try {
+      const { adminApi: isolatedAdminApi } = await import('@/lib/api');
+      const result = await isolatedAdminApi.updateWebhookEndpoint('wh_002', {
+        url: 'https://hooks.example.test/updated',
+        description: 'Updated endpoint',
+        events: ['order.paid'],
+      });
+
+      expect(result.ok).toBe(true);
+      expect(requestMock).toHaveBeenCalledWith('/v1/webhook-endpoints/wh_002', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          url: 'https://hooks.example.test/updated',
+          description: 'Updated endpoint',
+          events: ['order.paid'],
+        }),
+      });
     } finally {
       vi.doUnmock('@/lib/api-http');
       vi.resetModules();

@@ -1,6 +1,6 @@
 //! Async Rust SDK for Tixkit.
 //!
-//! The client is pinned to API version `2026-08-23` by default and sends the
+//! The client is pinned to API version `2026-08-24` by default and sends the
 //! `X-Tixkit-Version` header on every request.
 
 use futures_util::{Stream, stream};
@@ -15,7 +15,7 @@ use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
-pub const TIXKIT_API_VERSION: &str = "2026-08-23";
+pub const TIXKIT_API_VERSION: &str = "2026-08-24";
 
 type HmacSha256 = Hmac<Sha256>;
 type BoxStreamResult<T> = Pin<Box<dyn Stream<Item = Result<T, TixkitError>> + Send>>;
@@ -1364,8 +1364,57 @@ json_resource!(AttendeeResource, "/attendees");
 json_resource!(QuestionResource, "/questions");
 json_resource!(WaitlistResource, "/waitlist");
 json_resource!(ExportResource, "/exports");
-json_resource!(WebhookEndpointResource, "/webhook-endpoints");
 json_resource!(ApiKeyResource, "/api-keys");
+
+pub struct WebhookEndpointResource<'a> {
+    client: &'a TixkitClient,
+}
+
+impl WebhookEndpointResource<'_> {
+    pub async fn list(&self, params: PageParams) -> Result<Page<Value>, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                "/webhook-endpoints",
+                RequestOptions::<()>::query(params.to_query()),
+            )
+            .await
+    }
+
+    pub async fn get(&self, id: &str) -> Result<Value, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::GET,
+                &format!("/webhook-endpoints/{id}"),
+                RequestOptions::<()>::default(),
+            )
+            .await
+    }
+
+    pub async fn create(
+        &self,
+        input: Value,
+        idempotency_key: impl Into<String>,
+    ) -> Result<Value, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::POST,
+                "/webhook-endpoints",
+                RequestOptions::body(input).idempotency_key(Some(idempotency_key.into())),
+            )
+            .await
+    }
+
+    pub async fn update(&self, id: &str, input: Value) -> Result<Value, TixkitError> {
+        self.client
+            .request(
+                reqwest::Method::PATCH,
+                &format!("/webhook-endpoints/{id}"),
+                RequestOptions::body(input),
+            )
+            .await
+    }
+}
 
 pub struct OrderResource<'a> {
     client: &'a TixkitClient,
@@ -1662,6 +1711,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn builds_webhook_create_request_with_idempotency_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/webhook-endpoints"))
+            .and(header("idempotency-key", "webhook-create-stable-000001"))
+            .and(body_json(json!({
+                "organizationId": "org_1",
+                "url": "https://hooks.example.test/tixkit",
+                "events": ["order.created"]
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "wh_1",
+                "secret": "whsec_once"
+            })))
+            .mount(&server)
+            .await;
+
+        let result = client(&server)
+            .await
+            .webhook_endpoints()
+            .create(
+                json!({
+                    "organizationId": "org_1",
+                    "url": "https://hooks.example.test/tixkit",
+                    "events": ["order.created"]
+                }),
+                "webhook-create-stable-000001",
+            )
+            .await
+            .expect("webhook endpoint");
+
+        assert_eq!(result["id"], "wh_1");
+        assert_eq!(result["secret"], "whsec_once");
+    }
+
+    #[tokio::test]
     async fn builds_resale_checkout_request() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -1669,7 +1754,13 @@ mod tests {
             .and(header("idempotency-key", "idem_resale_1"))
             .and(body_json(json!({
                 "eventId": "evt_1",
-                "items": [{"resaleListingId": "lst_1", "quantity": 1}]
+                "items": [{"resaleListingId": "lst_1", "quantity": 1}],
+                "resaleTermsAcceptance": {
+                    "accepted": true,
+                    "termsVersion": "2026-07-16",
+                    "settlementModel": "organizer_managed",
+                    "refundModel": "manual_coordinated_resolution"
+                }
             })))
             .respond_with(ResponseTemplate::new(201).set_body_json(json!({
                 "id": "cs_resale",

@@ -8,9 +8,9 @@ const snapshot = [
 
 describe('offline reconciliation response validation', () => {
   it('accepts a unique terminal subset of the submitted snapshot', () => {
-    expect(
-      [...validatedOfflineSyncOutcomes(snapshot, [{ qrHash: 'hash_a', outcome: 'accepted' }])],
-    ).toEqual([['hash_a', 'accepted']]);
+    expect([
+      ...validatedOfflineSyncOutcomes(snapshot, [{ qrHash: 'hash_a', outcome: 'accepted' }]),
+    ]).toEqual([['hash_a', 'accepted']]);
   });
 
   it.each([

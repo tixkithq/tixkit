@@ -258,6 +258,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-23 offline manifest v2',
         routeId: 'apiMigration20260822To20260823',
       },
+      {
+        label: 'Adopt 2026-08-24 idempotent venue and webhook creation',
+        routeId: 'apiMigration20260823To20260824',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

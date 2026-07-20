@@ -156,6 +156,11 @@ export type AppContext = {
     documentId: string;
     versionId: string;
   }) => void | Promise<void>;
+  webhookEndpointCheckpoint?: (input: {
+    stage: 'before_transaction';
+    operation: 'update';
+    endpointId: string;
+  }) => void | Promise<void>;
 };
 
 class ApiCaptureSmsTransport implements SmsTransport {

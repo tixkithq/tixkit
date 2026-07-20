@@ -1010,6 +1010,7 @@ type WebhookEndpoint struct {
 
 type CreateWebhookEndpointRequest struct {
 	OrganizationID string   `json:"organizationId"`
+	IdempotencyKey string   `json:"-"`
 	URL            string   `json:"url"`
 	Events         []string `json:"events"`
 	Description    string   `json:"description,omitempty"`

@@ -265,7 +265,9 @@ export function EventLaunchPanel({
                         {href && !remediationAllowed ? (
                           <p
                             className="mt-1 text-sm font-medium text-foreground"
-                            role={permissionsLoading ? 'status' : permissionsError ? 'alert' : undefined}
+                            role={
+                              permissionsLoading ? 'status' : permissionsError ? 'alert' : undefined
+                            }
                           >
                             {permissionsLoading
                               ? 'Checking access for this action…'

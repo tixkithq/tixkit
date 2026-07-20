@@ -133,8 +133,8 @@ export function PublishedEventNextActions({
         <CardContent className="space-y-4">
           {signalState === 'checking' ? (
             <output className="block rounded-md border border-blue-300 bg-blue-50 p-3 text-sm text-blue-950 dark:bg-blue-950/20 dark:text-blue-100">
-              Checking inventory, messaging, launch, webhook, and export health. Action priority
-              may change.
+              Checking inventory, messaging, launch, webhook, and export health. Action priority may
+              change.
             </output>
           ) : null}
           {signalState === 'incomplete' ? (

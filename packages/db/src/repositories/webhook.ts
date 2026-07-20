@@ -168,6 +168,15 @@ export class WebhookEndpointRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async findByIdForUpdate(id: string) {
+    return this.db
+      .selectFrom('webhook_endpoints')
+      .selectAll()
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
   async findByOrganization(orgId: string) {
     return this.db
       .selectFrom('webhook_endpoints')

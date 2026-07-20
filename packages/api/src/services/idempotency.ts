@@ -75,6 +75,9 @@ export async function withIdempotency(
     inProgressPollIntervalMs?: number;
     discardErrorCodes?: readonly string[];
     sanitizeStoredResponse?: (body: unknown) => unknown;
+    completedRecordExpiry?: Readonly<{
+      tombstone: IdempotentResponse;
+    }>;
   },
   handler: (context: IdempotencyHandlerContext) => Promise<IdempotentResponse>,
 ): Promise<IdempotentResponse> {
@@ -92,6 +95,21 @@ export async function withIdempotency(
       if (status === 'completed') {
         if (existing.request_hash !== input.requestHash) {
           throw new IdempotencyConflictError(input.key);
+        }
+        if (input.completedRecordExpiry && isExpired(existing)) {
+          await scrubExpiredCompletedRecord(db, existing, input.completedRecordExpiry.tombstone);
+          const scrubbed = await findRecord(db, input.key, input.tenantId);
+          if (
+            !scrubbed ||
+            scrubbed.status !== 'completed' ||
+            scrubbed.request_hash !== input.requestHash
+          ) {
+            throw new Error('Expired idempotency response tombstone could not be verified');
+          }
+          return {
+            status: scrubbed.response_status,
+            body: JSON.parse(scrubbed.response_body),
+          };
         }
         const storedBody = JSON.parse(existing.response_body);
         const body = input.sanitizeStoredResponse?.(storedBody) ?? storedBody;
@@ -235,6 +253,21 @@ export async function withIdempotency(
   }
 
   return result;
+}
+
+async function scrubExpiredCompletedRecord(
+  db: Database,
+  record: IdempotencyRecord,
+  tombstone: IdempotentResponse,
+): Promise<void> {
+  await db
+    .updateTable('idempotency_records')
+    .set({
+      response_status: tombstone.status,
+      response_body: JSON.stringify(tombstone.body),
+    })
+    .where('id', '=', record.id)
+    .execute();
 }
 
 async function findRecord(

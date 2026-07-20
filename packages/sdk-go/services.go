@@ -555,7 +555,7 @@ func (s *WebhooksService) ListEndpoints(ctx context.Context, params *PaginationP
 
 func (s *WebhooksService) CreateEndpoint(ctx context.Context, input CreateWebhookEndpointRequest) (*WebhookEndpoint, error) {
 	var out WebhookEndpoint
-	err := s.client.request(ctx, http.MethodPost, "/webhook-endpoints", input, &out)
+	err := s.client.request(ctx, http.MethodPost, "/webhook-endpoints", input, &out, withIdempotencyKey(input.IdempotencyKey))
 	return &out, err
 }
 

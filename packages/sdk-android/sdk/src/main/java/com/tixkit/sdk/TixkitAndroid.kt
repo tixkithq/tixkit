@@ -701,7 +701,7 @@ class TixkitScannerStatusView @JvmOverloads constructor(
 }
 
 object TixkitAndroid {
-    const val API_VERSION = "2026-08-23"
+    const val API_VERSION = "2026-08-24"
 
   fun checkoutUrl(options: TixkitCheckoutOptions): String {
     val base = options.checkoutBaseUrl.trimEnd('/')
