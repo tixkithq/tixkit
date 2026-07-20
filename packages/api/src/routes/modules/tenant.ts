@@ -94,6 +94,14 @@ function requireAnyPermission(principal: Principal, permissions: Permission[]): 
   }
 }
 
+function requireBootstrapEventScope(principal: Principal): void {
+  // Door-only event staff need the exact event-derived organization and brand
+  // to render their shell. Other dashboard principals remain brand-wide.
+  if (!isDoorOnlyPermissionSet(principal.scopes)) {
+    ClerkAuthService.requireNoEventScope(principal, 'brand-wide dashboard context');
+  }
+}
+
 function requireOrganizationCreationPrincipal(principal: Principal): void {
   if (principal.brandIds?.length || principal.eventIds?.length) {
     throw new ForbiddenError('Scoped principals cannot create tenant organizations');
@@ -162,6 +170,13 @@ const dashboardContextPermissions: Permission[] = [
   'developers.write',
   'billing.write',
 ];
+
+type BootstrapScope = Readonly<{
+  brands: Array<Record<string, unknown>>;
+  organizations: Array<Record<string, unknown>>;
+  settingsBrandIds: ReadonlySet<string>;
+  settingsOrganizationIds: ReadonlySet<string>;
+}>;
 
 function adminDashboardOrigin(): string {
   return (
@@ -441,6 +456,163 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     );
   }
 
+  async function bootstrapScopeFor(principal: Principal): Promise<BootstrapScope> {
+    const [organizations, brands] = await Promise.all([
+      new OrganizationRepository(db).findByTenant(principal.tenantId),
+      new BrandRepository(db).findByTenant(principal.tenantId),
+    ]);
+    const organizationById = new Map(
+      organizations.map((organization) => [String(organization.id), organization]),
+    );
+    const brandById = new Map(brands.map((brand) => [String(brand.id), brand]));
+    const allOrganizationIds = new Set(organizationById.keys());
+    const allBrandIds = new Set(brandById.keys());
+    const hasSettings = ClerkAuthService.hasPermission(principal, 'settings.write');
+
+    if (principal.type === 'system') {
+      return {
+        organizations,
+        brands,
+        settingsOrganizationIds: hasSettings ? allOrganizationIds : new Set<string>(),
+        settingsBrandIds: hasSettings ? allBrandIds : new Set<string>(),
+      };
+    }
+
+    const principalOrganizationIds = new Set(
+      principal.organizationIds.filter((id) => organizationById.has(id)),
+    );
+
+    if (principal.type === 'api_key') {
+      const explicitBrandIds = new Set(
+        (principal.brandIds ?? []).filter((id) => brandById.has(id)),
+      );
+      const eventIds = principal.eventIds ?? [];
+      if (eventIds.length > 0) {
+        const eventRows = await db
+          .selectFrom('events')
+          .select(['brand_id'])
+          .where('tenant_id', '=', principal.tenantId)
+          .where('id', 'in', eventIds)
+          .execute();
+        for (const event of eventRows) {
+          if (typeof event.brand_id === 'string' && brandById.has(event.brand_id)) {
+            explicitBrandIds.add(event.brand_id);
+          }
+        }
+      }
+      const isResourceRestricted = (principal.brandIds?.length ?? 0) > 0 || eventIds.length > 0;
+      const visibleBrands = brands.filter(
+        (brand) =>
+          principalOrganizationIds.has(String(brand.organization_id)) &&
+          (!isResourceRestricted || explicitBrandIds.has(String(brand.id))),
+      );
+      const visibleOrganizationIds = new Set(
+        visibleBrands.map((brand) => String(brand.organization_id)),
+      );
+      if (!isResourceRestricted) {
+        for (const id of principalOrganizationIds) visibleOrganizationIds.add(id);
+      }
+      const settingsBrandIds = new Set<string>();
+      const settingsOrganizationIds = new Set<string>();
+      if (hasSettings && !isResourceRestricted) {
+        for (const id of visibleOrganizationIds) settingsOrganizationIds.add(id);
+        for (const brand of visibleBrands) settingsBrandIds.add(String(brand.id));
+      } else if (hasSettings && (principal.brandIds?.length ?? 0) > 0) {
+        const visibleBrandIds = new Set(visibleBrands.map((brand) => String(brand.id)));
+        for (const id of principal.brandIds ?? []) {
+          if (explicitBrandIds.has(id) && visibleBrandIds.has(id)) settingsBrandIds.add(id);
+        }
+      }
+      return {
+        organizations: organizations.filter((organization) =>
+          visibleOrganizationIds.has(String(organization.id)),
+        ),
+        brands: visibleBrands,
+        settingsOrganizationIds,
+        settingsBrandIds,
+      };
+    }
+
+    const grants = (
+      await new PermissionGrantRepository(db).findByPrincipal(
+        principal.tenantId,
+        principal.type,
+        principal.id,
+      )
+    ).filter(
+      (grant) =>
+        dashboardContextPermissions.includes(grant.permission as Permission) &&
+        principal.scopes.includes(grant.permission as Permission),
+    );
+    const eventGrantIds = grants
+      .filter((grant) => grant.scope_type === 'event' && typeof grant.scope_id === 'string')
+      .map((grant) => grant.scope_id as string);
+    const eventRows =
+      eventGrantIds.length > 0
+        ? await db
+            .selectFrom('events')
+            .select(['id', 'organization_id', 'brand_id'])
+            .where('tenant_id', '=', principal.tenantId)
+            .where('id', 'in', eventGrantIds)
+            .execute()
+        : [];
+    const eventById = new Map(eventRows.map((event) => [String(event.id), event]));
+    const visibleOrganizationIds = new Set<string>();
+    const visibleBrandIds = new Set<string>();
+    const settingsOrganizationIds = new Set<string>();
+    const settingsBrandIds = new Set<string>();
+
+    const includeOrganization = (organizationId: string): boolean => {
+      if (!principalOrganizationIds.has(organizationId)) return false;
+      visibleOrganizationIds.add(organizationId);
+      return true;
+    };
+    const includeBrand = (brandId: string): boolean => {
+      const brand = brandById.get(brandId);
+      if (!brand || !includeOrganization(String(brand.organization_id))) return false;
+      visibleBrandIds.add(brandId);
+      return true;
+    };
+
+    for (const grant of grants) {
+      const scopeId = typeof grant.scope_id === 'string' ? grant.scope_id : null;
+      const isSettingsGrant = grant.permission === 'settings.write';
+      if (grant.scope_type === 'tenant') {
+        for (const organizationId of principalOrganizationIds) {
+          includeOrganization(organizationId);
+          if (isSettingsGrant) settingsOrganizationIds.add(organizationId);
+        }
+        for (const brand of brands) {
+          const brandId = String(brand.id);
+          if (includeBrand(brandId) && isSettingsGrant) settingsBrandIds.add(brandId);
+        }
+      } else if (grant.scope_type === 'organization' && scopeId) {
+        if (!includeOrganization(scopeId)) continue;
+        if (isSettingsGrant) settingsOrganizationIds.add(scopeId);
+        for (const brand of brands) {
+          if (String(brand.organization_id) !== scopeId) continue;
+          const brandId = String(brand.id);
+          visibleBrandIds.add(brandId);
+          if (isSettingsGrant) settingsBrandIds.add(brandId);
+        }
+      } else if (grant.scope_type === 'brand' && scopeId) {
+        if (includeBrand(scopeId) && isSettingsGrant) settingsBrandIds.add(scopeId);
+      } else if (grant.scope_type === 'event' && scopeId) {
+        const event = eventById.get(scopeId);
+        if (event && typeof event.brand_id === 'string') includeBrand(event.brand_id);
+      }
+    }
+
+    return {
+      organizations: organizations.filter((organization) =>
+        visibleOrganizationIds.has(String(organization.id)),
+      ),
+      brands: brands.filter((brand) => visibleBrandIds.has(String(brand.id))),
+      settingsOrganizationIds,
+      settingsBrandIds,
+    };
+  }
+
   app.post('/organizations', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
@@ -479,19 +651,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get('/bootstrap-context', async (request) => {
-    const principal = request.principal!;
+    const principal = request.principal;
+    // Authentication owns the response when credentials are rejected. Avoid
+    // continuing into asynchronous scope resolution after that reply is sent.
+    if (!principal) return;
     requireAnyPermission(principal, dashboardContextPermissions);
-    // Door-only / event-scoped staff still need org+brand context for the door shell.
-    // Full dashboard surfaces continue to reject event-scoped principals.
-    if (!isDoorOnlyPermissionSet(principal.scopes)) {
-      ClerkAuthService.requireNoEventScope(principal, 'brand-wide dashboard context');
-    }
-    const includeSettings = ClerkAuthService.hasPermission(principal, 'settings.write');
-    const [organizations, brands] = await Promise.all([
-      scopedOrganizationsFor(principal),
-      scopedBrandsFor(principal),
-    ]);
-    const brandIds = includeSettings ? brands.map((brand) => String(brand.id)) : [];
+    requireBootstrapEventScope(principal);
+    const scope = await bootstrapScopeFor(principal);
+    const brandIds = [...scope.settingsBrandIds];
     const domains =
       brandIds.length > 0
         ? await db
@@ -509,12 +676,16 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return {
-      organizations: organizations.map((organization) =>
-        serializeBootstrapOrganization(organization, includeSettings),
+      organizations: scope.organizations.map((organization) =>
+        serializeBootstrapOrganization(
+          organization,
+          scope.settingsOrganizationIds.has(String(organization.id)),
+        ),
       ),
-      brands: brands.map((brand) => {
-        const serialized = serializeBootstrapBrand(brand, includeSettings);
-        return includeSettings
+      brands: scope.brands.map((brand) => {
+        const includeBrandSettings = scope.settingsBrandIds.has(String(brand.id));
+        const serialized = serializeBootstrapBrand(brand, includeBrandSettings);
+        return includeBrandSettings
           ? Object.assign(serialized, {
               domains: (domainsByBrandId.get(String(brand.id)) ?? []).map(serializeBrandDomain),
             })
@@ -837,7 +1008,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
           organizationId,
           resourceType: 'Organization',
           resourceId: organizationId,
-          diffSummary: { email, role, brandIds, eventIds, permissions, emailJobId: emailJob.id },
+          diffSummary: {
+            email,
+            role,
+            brandIds,
+            eventIds,
+            permissions,
+            emailJobId: emailJob.id,
+          },
         });
 
         return {

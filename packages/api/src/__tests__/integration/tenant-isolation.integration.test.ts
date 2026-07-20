@@ -38,6 +38,7 @@ import { hashRequest } from '../../services/idempotency.js';
 
 type Row = Record<string, unknown>;
 type Tables = Record<string, Row[]>;
+type MockSubquery = Readonly<{ __mockValues?: () => unknown[] }>;
 
 function matchesWheres(
   row: Row,
@@ -49,7 +50,10 @@ function matchesWheres(
     if (w.op === '=') {
       if (val !== w.value) return false;
     } else if (w.op === 'in') {
-      if (!Array.isArray(w.value) || !w.value.includes(val)) return false;
+      const values = Array.isArray(w.value)
+        ? w.value
+        : (w.value as MockSubquery | null)?.__mockValues?.();
+      if (!values?.includes(val)) return false;
     } else if (w.op === '>') {
       if (val == null || !(String(val) > String(w.value))) return false;
     } else if (w.op === 'is') {
@@ -82,6 +86,8 @@ function createMockDb(tables: Tables = {}): unknown {
   function createQuery(table: string) {
     const wheres: Array<{ column: string; op: string; value: unknown }> = [];
     let countAlias: string | null = null;
+    let selectedColumn: string | null = null;
+    let alwaysFalse = false;
     const q = {
       select(selection?: unknown) {
         if (typeof selection === 'function') {
@@ -95,6 +101,11 @@ function createMockDb(tables: Tables = {}): unknown {
               }),
             },
           });
+        } else if (typeof selection === 'string') {
+          selectedColumn = selection;
+        } else if (Array.isArray(selection)) {
+          selectedColumn =
+            selection.find((column): column is string => typeof column === 'string') ?? null;
         }
         return q;
       },
@@ -104,8 +115,14 @@ function createMockDb(tables: Tables = {}): unknown {
       innerJoin() {
         return q;
       },
-      where(column: string, op: string, value: unknown) {
-        wheres.push({ column, op, value });
+      where(column: unknown, op?: string, value?: unknown) {
+        if (typeof column !== 'string') {
+          // The scoped list routes use a single raw `sql<boolean>\`false\``
+          // expression to fail closed before issuing an unbounded query.
+          alwaysFalse = true;
+          return q;
+        }
+        wheres.push({ column, op: op ?? '=', value });
         return q;
       },
       orderBy() {
@@ -121,11 +138,24 @@ function createMockDb(tables: Tables = {}): unknown {
         sum: () => 'sum',
         countAll: () => 'count',
       },
+      __mockValues() {
+        const rows = alwaysFalse
+          ? []
+          : (tables[table] ?? []).filter((row) => matchesWheres(row, wheres));
+        if (!selectedColumn) return rows;
+        const unqualifiedColumn = selectedColumn.split('.').at(-1)!;
+        return rows.map((row) =>
+          Object.hasOwn(row, selectedColumn!) ? row[selectedColumn!] : row[unqualifiedColumn],
+        );
+      },
       async executeTakeFirst() {
         if (countAlias)
           return {
-            [countAlias]: (tables[table] ?? []).filter((r) => matchesWheres(r, wheres)).length,
+            [countAlias]: alwaysFalse
+              ? 0
+              : (tables[table] ?? []).filter((r) => matchesWheres(r, wheres)).length,
           };
+        if (alwaysFalse) return undefined;
         return (tables[table] ?? []).find((row) => matchesWheres(row, wheres));
       },
       async executeTakeFirstOrThrow() {
@@ -134,6 +164,7 @@ function createMockDb(tables: Tables = {}): unknown {
         return row;
       },
       async execute() {
+        if (alwaysFalse) return [];
         return (tables[table] ?? []).filter((r) => matchesWheres(r, wheres));
       },
     };
@@ -691,6 +722,16 @@ describe('tenant settings list permission gates', () => {
       tenantRoutes,
       makePrincipal({ organizationIds: ['org_1'], scopes: ['events.write'] }),
       {
+        permission_grants: [
+          {
+            tenant_id: 'tnt_1',
+            principal_type: 'user',
+            principal_id: 'usr_1',
+            permission: 'events.write',
+            scope_type: 'organization',
+            scope_id: 'org_1',
+          },
+        ],
         organizations: [
           organizationRow({
             id: 'org_1',
@@ -1006,6 +1047,16 @@ describe('tenant settings list permission gates', () => {
       tenantRoutes,
       makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
       {
+        permission_grants: [
+          {
+            tenant_id: 'tnt_1',
+            principal_type: 'user',
+            principal_id: 'usr_1',
+            permission: 'settings.write',
+            scope_type: 'organization',
+            scope_id: 'org_1',
+          },
+        ],
         organizations: [
           organizationRow({
             id: 'org_1',

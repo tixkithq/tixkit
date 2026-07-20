@@ -644,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-28',
+    version: '2026-08-29',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -6071,7 +6071,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-28, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-29, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6118,7 +6118,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-28, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-29, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6225,7 +6225,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-28 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-29 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6262,7 +6262,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-28 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-29 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8548,7 +8548,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-28 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-29 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8605,7 +8605,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-28 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-29 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8990,10 +8990,31 @@ const rawOpenApiSpec = {
     },
     '/bootstrap-context': {
       get: {
+        operationId: 'getBootstrapContext',
         summary: 'Get scoped admin bootstrap context',
         description:
-          'Returns the organizations and brands visible to the current principal for dashboard scope selection. Principals with settings.write receive settings details; other dashboard operators receive minimal scoped identity only.',
+          'Returns the organizations and brands authorized by live resource-scoped grants for dashboard scope selection. Settings details are included only for each organization or brand covered by settings.write; other visible resources receive minimal identity only.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': {
+          anyOf: [
+            'events.read',
+            'events.write',
+            'tickets.write',
+            'orders.read',
+            'orders.write',
+            'refunds.write',
+            'attendees.read',
+            'attendees.write',
+            'checkins.read',
+            'checkins.write',
+            'box_office.write',
+            'messages.write',
+            'reports.read',
+            'settings.write',
+            'developers.write',
+            'billing.write',
+          ],
+        },
         responses: {
           '200': {
             description: 'Scoped dashboard bootstrap context',

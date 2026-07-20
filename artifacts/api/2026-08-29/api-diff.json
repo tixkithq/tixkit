@@ -1,0 +1,18 @@
+{
+  "from": "2026-08-28",
+  "to": "2026-08-29",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /bootstrap-context",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    }
+  ]
+}

@@ -69,7 +69,7 @@ export type NegativeAuthorizationEvidence = {
   condition:
     | Readonly<{
         discriminator: 'principal-scope';
-        value: 'no-event-scope' | 'organization-wide';
+        value: 'no-event-scope' | 'non-door-event-scope' | 'organization-wide';
       }>
     | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>
     | null;
@@ -134,6 +134,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
     'tenant-list-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'tenant-list-route-authorization-db.integration.test.ts'),
+  ],
+  [
+    'bootstrap-context-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'bootstrap-context-route-authorization-db.integration.test.ts'),
   ],
   [
     'audit-log-route-authorization-db.integration.test.ts',
@@ -352,6 +356,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getOrganizations', 'getBrands'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getBootstrapContext'], {
+    source: 'bootstrap-context-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['getAuditLogs'], {
     source: 'audit-log-route-authorization-db.integration.test.ts',
@@ -624,6 +631,8 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
 const credentialOnlyOperations = new Set(['getAgentSession', 'getMe']);
 const delegatedAuthorizationGuards = new Set([
+  'requireAnyPermission',
+  'requireBootstrapEventScope',
   'loadAuthorizedEventForUpdate',
   'withCredentialCreationResources',
   'assertEventIds',
@@ -661,6 +670,7 @@ const delegatedAuthorizationGuards = new Set([
   'scopedJob',
 ]);
 const eventScopeGuards = new Set([
+  'requireBootstrapEventScope',
   'loadAuthorizedEventForUpdate',
   'withCredentialCreationResources',
   'assertEventIds',
@@ -696,10 +706,35 @@ const scopedJobAuthorizationOperations = new Set([
   'listMigrationJobFiles',
   'listMigrationJobRows',
 ]);
+const bootstrapContextPermissions: readonly Permission[] = [
+  'events.read',
+  'events.write',
+  'tickets.write',
+  'orders.read',
+  'orders.write',
+  'refunds.write',
+  'attendees.read',
+  'attendees.write',
+  'checkins.read',
+  'checkins.write',
+  'box_office.write',
+  'messages.write',
+  'reports.read',
+  'settings.write',
+  'developers.write',
+  'billing.write',
+];
 const delegatedPermissionContracts = new Map<
   string,
   Readonly<{ guard: string; permissions: readonly Permission[] }>
 >([
+  [
+    'getBootstrapContext',
+    {
+      guard: 'requireAnyPermission',
+      permissions: bootstrapContextPermissions,
+    },
+  ],
   ...['postPrivacyDataExports', 'postPrivacyErasures'].map(
     (operationId) =>
       [operationId, { guard: 'createPrivacyRequest', permissions: ['settings.write'] }] as const,
@@ -1337,6 +1372,13 @@ export function negativeAuthorizationEvidenceForRoutes(
           !route.boundaries.includes('event')
         ) {
           throw contractError(contract, 'no-event-scope policy is not enforced by runtime');
+        }
+      } else if (contract.policyCondition.value === 'non-door-event-scope') {
+        if (
+          !route.guardEvidence.includes('requireBootstrapEventScope') ||
+          !route.boundaries.includes('event')
+        ) {
+          throw contractError(contract, 'non-door event-scope policy is not enforced by runtime');
         }
       } else {
         throw contractError(contract, 'unsupported policy condition');

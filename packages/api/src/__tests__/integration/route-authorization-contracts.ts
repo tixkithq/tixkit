@@ -12,7 +12,7 @@ export type AuthorizationSideEffectKind = 'persistence' | 'workflow';
 export type AuthorizationPolicyCondition =
   | Readonly<{
       discriminator: 'principal-scope';
-      value: 'no-event-scope' | 'organization-wide';
+      value: 'no-event-scope' | 'non-door-event-scope' | 'organization-wide';
     }>
   | Readonly<{ discriminator: 'purpose'; value: 'user_avatar' }>;
 
@@ -565,6 +565,27 @@ export const TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'GET',
+    operationId: 'getBootstrapContext',
+    path: '/bootstrap-context',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'non-door-event-scope',
+    },
+    policyDeniedBoundaries: ['event'],
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'bootstrap-context-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 200 },
@@ -575,7 +596,10 @@ export const AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     path: '/audit-logs',
     permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
     policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
-    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'no-event-scope',
+    },
     policyDeniedBoundaries: ['event'],
     resourceParameters: [],
     sideEffectAssertions: [],
@@ -1725,6 +1749,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

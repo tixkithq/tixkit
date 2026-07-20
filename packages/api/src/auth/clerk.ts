@@ -1,4 +1,4 @@
-import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { createClerkClient, verifyToken } from '@clerk/backend';
 import type { AuthProvider } from '@tixkit/shared';
 import type { Principal, Permission, Ulid } from '@tixkit/domain';
@@ -1048,10 +1048,10 @@ type AuthMiddlewareProvider =
     });
 
 export function createAuthMiddleware(authService: AuthMiddlewareProvider) {
-  return async (request: FastifyRequest, reply: FastifyReply) => {
+  return (request: FastifyRequest, reply: FastifyReply, done: (error?: Error) => void) => {
     const authHeader = request.headers.authorization;
 
-    try {
+    const authenticate = async (): Promise<void> => {
       if (request.headers['x-device-id']) {
         const result = await authService.authenticateScannerDevice(request);
         request.principal = result.principal;
@@ -1083,18 +1083,28 @@ export function createAuthMiddleware(authService: AuthMiddlewareProvider) {
       } else {
         throw new UnauthorizedError();
       }
-    } catch (err) {
-      const error = err as Error;
-      const code = err instanceof UnauthorizedError ? 'UNAUTHORIZED' : 'FORBIDDEN';
-      const statusCode = err instanceof UnauthorizedError ? 401 : 403;
-      return reply.status(statusCode).send({
-        error: {
-          code,
-          message: error.message,
-          requestId: request.id,
-        },
-      });
-    }
+    };
+
+    void authenticate().then(
+      () => done(),
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Authentication failed';
+        const isUnauthorized = err instanceof UnauthorizedError;
+        const authError =
+          err instanceof UnauthorizedError || err instanceof ForbiddenError
+            ? err
+            : new ForbiddenError(message);
+        void reply.status(isUnauthorized ? 401 : 403).send({
+          error: {
+            code: isUnauthorized ? 'UNAUTHORIZED' : 'FORBIDDEN',
+            message: authError.message,
+            requestId: request.id,
+          },
+        });
+        // Deliberately do not call done after sending: callback-style hooks stop
+        // the lifecycle here, so no protected handler can run after auth denial.
+      },
+    );
   };
 }
 

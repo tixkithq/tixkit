@@ -9,6 +9,7 @@ import {
 import { buildAuthenticatedRouteTestApp, buildRouteManifest } from './route-manifest.js';
 import {
   AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -90,7 +91,10 @@ function invalidCredentialHeaders(scheme: string): Record<string, string> {
   if (scheme === 'BearerAuth') return { authorization: 'Bearer invalid-user-token' };
   if (scheme === 'MetricsBearer') return { authorization: 'Bearer invalid-metrics-token' };
   if (scheme === 'ScannerDeviceAuth') {
-    return { 'x-device-id': 'invalid-device', 'x-device-secret': 'invalid-secret' };
+    return {
+      'x-device-id': 'invalid-device',
+      'x-device-secret': 'invalid-secret',
+    };
   }
   if (scheme === 'SvixSignature') {
     return {
@@ -125,6 +129,7 @@ describe('API route access inventory (C-123)', () => {
     expect(EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
+    expect(BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(4);
     expect(MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
@@ -163,7 +168,7 @@ describe('API route access inventory (C-123)', () => {
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(123);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(124);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -188,8 +193,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(123);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(506);
+    expect(coveredRoutes).toHaveLength(124);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(508);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
@@ -200,7 +205,7 @@ describe('API route access inventory (C-123)', () => {
       .flatMap((route) => route.negativeAuthorizationEvidence)
       .filter((evidence) => evidence.denialKind === 'policy')
       .map((evidence) => JSON.stringify(evidence.condition));
-    expect(policyConditions).toHaveLength(79);
+    expect(policyConditions).toHaveLength(80);
     expect(
       policyConditions.filter(
         (condition) =>
@@ -211,14 +216,20 @@ describe('API route access inventory (C-123)', () => {
       policyConditions.filter(
         (condition) =>
           condition ===
-          JSON.stringify({ discriminator: 'principal-scope', value: 'organization-wide' }),
+          JSON.stringify({
+            discriminator: 'principal-scope',
+            value: 'organization-wide',
+          }),
       ),
     ).toHaveLength(72);
     expect(
       policyConditions.filter(
         (condition) =>
           condition ===
-          JSON.stringify({ discriminator: 'principal-scope', value: 'no-event-scope' }),
+          JSON.stringify({
+            discriminator: 'principal-scope',
+            value: 'no-event-scope',
+          }),
       ),
     ).toHaveLength(4);
     expect(
@@ -565,7 +576,12 @@ describe('API route access inventory (C-123)', () => {
         routes: [conditionalPolicyRoute],
       },
       {
-        contracts: [{ ...deleteMutation, authorizedControl: { required: true, status: 201 } }],
+        contracts: [
+          {
+            ...deleteMutation,
+            authorizedControl: { required: true, status: 201 },
+          },
+        ],
         message: /DELETE authorized control must be 204/,
         routes: [deleteMutationRoute],
       },
@@ -691,12 +707,22 @@ describe('API route access inventory (C-123)', () => {
         routes: [mutationRoute],
       },
       {
-        contracts: [{ ...base, source: 'order-route-authorization-db.integration.test.ts' }],
+        contracts: [
+          {
+            ...base,
+            source: 'order-route-authorization-db.integration.test.ts',
+          },
+        ],
         message: /source is not bound to this operationId/,
         routes: [route],
       },
       {
-        contracts: [{ ...mutation, persistenceSource: 'import-platform.integration.test.ts' }],
+        contracts: [
+          {
+            ...mutation,
+            persistenceSource: 'import-platform.integration.test.ts',
+          },
+        ],
         message: /persistence source is not bound to this operationId/,
         routes: [mutationRoute],
       },
@@ -822,7 +848,10 @@ describe('API route access inventory (C-123)', () => {
       for (const route of routes) {
         if (route.access !== 'authenticated' || route.method === 'HEAD') continue;
         const url = route.url.replace(/:([A-Za-z0-9_]+)/g, 'inventory-test-$1');
-        const response = await app.inject({ method: route.method as 'GET', url });
+        const response = await app.inject({
+          method: route.method as 'GET',
+          url,
+        });
         if (response.statusCode !== 401) {
           failures.push(`${route.method} ${route.url}: returned ${response.statusCode}`);
         }

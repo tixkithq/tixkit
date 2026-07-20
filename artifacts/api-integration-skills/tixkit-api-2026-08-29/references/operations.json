@@ -1,0 +1,5209 @@
+{
+  "apiVersion": "2026-08-29",
+  "operationCount": 287,
+  "operations": [
+    {
+      "method": "DELETE",
+      "path": "/access-rules/{accessRuleId}",
+      "operationId": "deleteAccessRulesByAccessRuleId",
+      "summary": "Delete access rule",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-delegations",
+      "operationId": "postAgentDelegations",
+      "summary": "Grant an agent delegation",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-delegations/{id}/revoke",
+      "operationId": "postAgentDelegationsByIdRevoke",
+      "summary": "Revoke an agent delegation",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-memory",
+      "operationId": "postAgentMemory",
+      "summary": "Create organizer-controlled agent memory",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/agent-memory/{id}",
+      "operationId": "patchAgentMemoryById",
+      "summary": "Correct organizer-controlled agent memory",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-memory/{id}/delete",
+      "operationId": "postAgentMemoryByIdDelete",
+      "summary": "Delete organizer-controlled agent memory",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-memory/export",
+      "operationId": "postAgentMemoryExport",
+      "summary": "Export organizer-controlled agent memory",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-memory/inspect",
+      "operationId": "postAgentMemoryInspect",
+      "summary": "Inspect organizer-controlled agent memory",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-principals",
+      "operationId": "postAgentPrincipals",
+      "summary": "Register an agent principal",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent-principals/{id}",
+      "operationId": "getAgentPrincipalsById",
+      "summary": "Get a sponsored agent principal",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-principals/{id}/oauth-clients",
+      "operationId": "postAgentPrincipalsByIdOauthClients",
+      "summary": "Create an agent OAuth client",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-principals/{id}/oauth-clients/{clientId}/revoke",
+      "operationId": "postAgentPrincipalsByIdOauthClientsByClientIdRevoke",
+      "summary": "Revoke an agent OAuth client",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent-principals/{id}/revoke",
+      "operationId": "postAgentPrincipalsByIdRevoke",
+      "summary": "Revoke an agent principal",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/actions",
+      "operationId": "postAgentActions",
+      "summary": "Prepare and dry-run a typed agent action",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/actions/{actionId}",
+      "operationId": "getAgentActionsByActionId",
+      "summary": "Get an immutable prepared action",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/actions/{actionId}/approvals",
+      "operationId": "postAgentActionsByActionIdApprovals",
+      "summary": "Approve one immutable agent action",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/actions/{actionId}/approvals/{approvalId}/revoke",
+      "operationId": "postAgentActionsByActionIdApprovalsByApprovalIdRevoke",
+      "summary": "Revoke one agent action approval",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/actions/{actionId}/executions",
+      "operationId": "postAgentActionsByActionIdExecutions",
+      "summary": "Execute one approved immutable agent action",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/actions/{actionId}/executions/{executionId}",
+      "operationId": "getAgentActionsByActionIdExecutionsByExecutionId",
+      "summary": "Inspect durable agent execution and audit evidence",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/campaign-preparations",
+      "operationId": "postAgentCampaignPreparations",
+      "summary": "Prepare a consent and suppression aware campaign without sending it",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/campaign-preparations/{actionId}",
+      "operationId": "getAgentCampaignPreparationsByActionId",
+      "summary": "Get a direct campaign preparation result",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/content-preparations",
+      "operationId": "postAgentContentPreparations",
+      "summary": "Prepare canonical event-page content without mutating product state",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/content-preparations/{actionId}",
+      "operationId": "getAgentContentPreparationsByActionId",
+      "summary": "Get a direct event-page content preparation result",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/event-preparations",
+      "operationId": "postAgentEventPreparations",
+      "summary": "Prepare a normalized event update without mutating the event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/event-preparations/{actionId}",
+      "operationId": "getAgentEventPreparationsByActionId",
+      "summary": "Get a direct event-preparation result",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/event-updates",
+      "operationId": "postAgentEventUpdates",
+      "summary": "Prepare a consequential event update for fresh human approval",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/event-updates/{actionId}",
+      "operationId": "getAgentEventUpdatesByActionId",
+      "summary": "Get a consequential event-update approval preview",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/event-updates/{actionId}/approvals",
+      "operationId": "postAgentEventUpdatesByActionIdApprovals",
+      "summary": "Approve one immutable event update",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/event-updates/{actionId}/approvals/{approvalId}/revoke",
+      "operationId": "postAgentEventUpdatesByActionIdApprovalsByApprovalIdRevoke",
+      "summary": "Revoke one event-update approval",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/event-updates/{actionId}/executions",
+      "operationId": "postAgentEventUpdatesByActionIdExecutions",
+      "summary": "Execute one approved immutable event update",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/event-updates/{actionId}/executions/{executionId}",
+      "operationId": "getAgentEventUpdatesByActionIdExecutionsByExecutionId",
+      "summary": "Inspect durable event-update execution and audit evidence",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/events",
+      "operationId": "postAgentEvents",
+      "summary": "Read a version-bound event projection through a direct agent action",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/events/{actionId}",
+      "operationId": "getAgentEventsByActionId",
+      "summary": "Get a direct event-read result",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/plans",
+      "operationId": "postAgentPlans",
+      "summary": "Persist an immutable agent plan",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/plans/{planId}",
+      "operationId": "getAgentPlansByPlanId",
+      "summary": "Inspect an agent plan and current state",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/plans/{planId}/transitions",
+      "operationId": "postAgentPlansByPlanIdTransitions",
+      "summary": "Advance an agent plan using authoritative evidence",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/readiness",
+      "operationId": "postAgentReadiness",
+      "summary": "Read event readiness through a direct agent action",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/readiness/{actionId}",
+      "operationId": "getAgentReadinessByActionId",
+      "summary": "Get a direct readiness result",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/agent/reports",
+      "operationId": "postAgentReports",
+      "summary": "Read an aggregate event sales report through a direct agent action",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/reports/{actionId}",
+      "operationId": "getAgentReportsByActionId",
+      "summary": "Get a direct event sales report result",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/agent/session",
+      "operationId": "getAgentSession",
+      "summary": "Inspect the authenticated agent session",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "AgentOAuth": [
+            "agent.invoke"
+          ]
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/api-keys",
+      "operationId": "getApiKeys",
+      "summary": "List API keys",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/api-keys",
+      "operationId": "postApiKeys",
+      "summary": "Create API key",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api-keys/{keyId}",
+      "operationId": "deleteApiKeysByKeyId",
+      "summary": "Revoke API key",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/attendees",
+      "operationId": "getAttendees",
+      "summary": "List all attendees across the tenant (cross-event)",
+      "permissions": [
+        "attendees.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/attendees/{attendeeId}",
+      "operationId": "patchAttendeesByAttendeeId",
+      "summary": "Update attendee",
+      "permissions": [
+        "attendees.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/audit-logs",
+      "operationId": "getAuditLogs",
+      "summary": "List scoped admin audit log entries",
+      "permissions": [
+        "settings.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/bootstrap-context",
+      "operationId": "getBootstrapContext",
+      "summary": "Get scoped admin bootstrap context",
+      "permissions": [],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": false,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/brands",
+      "operationId": "getBrands",
+      "summary": "List brands",
+      "permissions": [
+        "settings.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/brands",
+      "operationId": "postBrands",
+      "summary": "Create brand",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/brands/{brandId}",
+      "operationId": "patchBrandsByBrandId",
+      "summary": "Update brand",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/brands/{brandId}/domains",
+      "operationId": "postBrandsByBrandIdDomains",
+      "summary": "Add brand domain",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/brands/{brandId}/email-sender-identities",
+      "operationId": "getBrandsByBrandIdEmailSenderIdentities",
+      "summary": "List brand email sender identities",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/check-ins/bulk-sync-jobs",
+      "operationId": "postCheckInsBulkSyncJobs",
+      "summary": "Create an async bulk offline check-in sync job",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/check-ins/bulk-sync-jobs/{jobId}",
+      "operationId": "getCheckInsBulkSyncJobsByJobId",
+      "summary": "Get async bulk sync job status",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/check-ins/bulk-sync-jobs/{jobId}/chunks",
+      "operationId": "getCheckInsBulkSyncJobsByJobIdChunks",
+      "summary": "List async bulk sync chunk summaries",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/check-ins/bulk-sync-jobs/{jobId}/chunks/{sequence}",
+      "operationId": "putCheckInsBulkSyncJobsByJobIdChunksBySequence",
+      "summary": "Upload a bounded async bulk sync chunk",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/check-ins/scan",
+      "operationId": "postCheckInsScan",
+      "summary": "Scan ticket (scanner device auth)",
+      "permissions": [
+        "checkins.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/check-ins/sync",
+      "operationId": "postCheckInsSync",
+      "summary": "Sync offline scans (scanner device auth)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/sessions",
+      "operationId": "postCheckoutSessions",
+      "summary": "Create checkout session (public, Idempotency-Key required)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/checkout/sessions/{sessionId}",
+      "operationId": "getCheckoutSessionsBySessionId",
+      "summary": "Get checkout session",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/checkout/sessions/{sessionId}",
+      "operationId": "patchCheckoutSessionsBySessionId",
+      "summary": "Update checkout session",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/sessions/{sessionId}/confirm",
+      "operationId": "postCheckoutSessionsBySessionIdConfirm",
+      "summary": "Confirm checkout (public, Idempotency-Key required)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/sessions/{sessionId}/handoff",
+      "operationId": "postCheckoutSessionsBySessionIdHandoff",
+      "summary": "Create a short-lived hosted checkout handoff",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/sessions/{sessionId}/handoff/exchange",
+      "operationId": "postCheckoutSessionsBySessionIdHandoffExchange",
+      "summary": "Exchange a hosted checkout handoff capability",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing",
+      "operationId": "postCheckoutSessionsBySessionIdTicketsByTicketIdResaleListing",
+      "summary": "Create a buyer-owned resale listing for a completed checkout ticket",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/checkout/sessions/{sessionId}/wallet-passes",
+      "operationId": "getCheckoutSessionsBySessionIdWalletPasses",
+      "summary": "List active wallet pass links for a checkout session",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/content-documents",
+      "operationId": "getContentDocuments",
+      "summary": "List scoped content documents",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents",
+      "operationId": "postContentDocuments",
+      "summary": "Create a content document",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/content-documents/{documentId}",
+      "operationId": "getContentDocumentsByDocumentId",
+      "summary": "Get a content document",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/content-documents/{documentId}",
+      "operationId": "patchContentDocumentsByDocumentId",
+      "summary": "Rename a content document",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents/{documentId}/archive",
+      "operationId": "postContentDocumentsByDocumentIdArchive",
+      "summary": "Archive a content document",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents/{documentId}/duplicate",
+      "operationId": "postContentDocumentsByDocumentIdDuplicate",
+      "summary": "Duplicate a content document as an unpublished draft copy",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents/{documentId}/preview",
+      "operationId": "postContentDocumentsByDocumentIdPreview",
+      "summary": "Render a content document preview",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents/{documentId}/test-sends",
+      "operationId": "postContentDocumentsByDocumentIdTestSends",
+      "summary": "Capture a content test send through the shared renderer",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/content-documents/{documentId}/versions",
+      "operationId": "getContentDocumentsByDocumentIdVersions",
+      "summary": "List content document versions",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents/{documentId}/versions",
+      "operationId": "postContentDocumentsByDocumentIdVersions",
+      "summary": "Save a content document draft version",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents/{documentId}/versions/{versionId}/publish",
+      "operationId": "postContentDocumentsByDocumentIdVersionsByVersionIdPublish",
+      "summary": "Publish a content document version",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/content-documents/migrate-event-page-puck",
+      "operationId": "postContentDocumentsMigrateEventPagePuck",
+      "summary": "Migrate legacy event-page versions to the canonical Puck document",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events",
+      "operationId": "getEvents",
+      "summary": "List events",
+      "permissions": [
+        "events.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events",
+      "operationId": "postEvents",
+      "summary": "Create event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}",
+      "operationId": "getEventsByEventId",
+      "summary": "Get event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/events/{eventId}",
+      "operationId": "patchEventsByEventId",
+      "summary": "Update event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/archive",
+      "operationId": "postEventsByEventIdArchive",
+      "summary": "Archive event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/attendees",
+      "operationId": "getEventsByEventIdAttendees",
+      "summary": "List attendees for an event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/availability",
+      "operationId": "getEventsByEventIdAvailability",
+      "summary": "Get availability",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/box-office/orders",
+      "operationId": "postEventsByEventIdBoxOfficeOrders",
+      "summary": "Create a box-office order (admin, Idempotency-Key required)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/check-in-lists",
+      "operationId": "getEventsByEventIdCheckInLists",
+      "summary": "List check-in lists",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/check-in-lists",
+      "operationId": "postEventsByEventIdCheckInLists",
+      "summary": "Create a check-in list",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/check-in-lists/{checkInListId}/activity",
+      "operationId": "getEventsByEventIdCheckInListsByCheckInListIdActivity",
+      "summary": "List durable check-in activity for a check-in list",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/check-in-lists/{checkInListId}/activity/stream",
+      "operationId": "getEventsByEventIdCheckInListsByCheckInListIdActivityStream",
+      "summary": "Stream live check-in activity",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/check-in-lists/{checkInListId}/manifest",
+      "operationId": "getEventsByEventIdCheckInListsByCheckInListIdManifest",
+      "summary": "Download offline check-in manifest",
+      "permissions": [
+        "checkins.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/check-in-manifest-keys",
+      "operationId": "getEventsByEventIdCheckInManifestKeys",
+      "summary": "Discover offline manifest verification keys",
+      "permissions": [
+        "checkins.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "ScannerDeviceAuth": []
+        },
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/code-format",
+      "operationId": "getEventsByEventIdCodeFormat",
+      "summary": "Get the scanning-code format config and scanner contract version (C-079)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/events/{eventId}/code-format",
+      "operationId": "putEventsByEventIdCodeFormat",
+      "summary": "Set the scanning-code format config for an event (C-079)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/duplicate",
+      "operationId": "postEventsByEventIdDuplicate",
+      "summary": "Transactionally duplicate selected safe event configuration into a new draft",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/fee-policy",
+      "operationId": "getEventsByEventIdFeePolicy",
+      "summary": "Get event fee pass-through policy",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/events/{eventId}/fee-policy",
+      "operationId": "putEventsByEventIdFeePolicy",
+      "summary": "Update event fee pass-through policy",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/inventory-pools",
+      "operationId": "getEventsByEventIdInventoryPools",
+      "summary": "List inventory pools",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/inventory-pools",
+      "operationId": "postEventsByEventIdInventoryPools",
+      "summary": "Create inventory pool",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/launch-readiness",
+      "operationId": "getEventsByEventIdLaunchReadiness",
+      "summary": "Get authoritative event launch readiness",
+      "permissions": [
+        "events.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/marketing-integrations",
+      "operationId": "getEventsByEventIdMarketingIntegrations",
+      "summary": "List event marketing integrations",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/events/{eventId}/marketing-integrations/{provider}",
+      "operationId": "putEventsByEventIdMarketingIntegrationsByProvider",
+      "summary": "Create or update an event marketing integration",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/media",
+      "operationId": "getEventsByEventIdMedia",
+      "summary": "List scoped event media assets and optimized renditions",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/events/{eventId}/media/{role}",
+      "operationId": "deleteEventsByEventIdMediaByRole",
+      "summary": "Remove one scoped event media role and schedule rendition cleanup",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/events/{eventId}/media/{role}",
+      "operationId": "putEventsByEventIdMediaByRole",
+      "summary": "Attach an owned original and generate optimized event media renditions",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/media/renditions/{renditionId}",
+      "operationId": "getEventsByEventIdMediaRenditionsByRenditionId",
+      "summary": "Stream an immutable event media rendition within organizer scope",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages",
+      "operationId": "getEventsByEventIdMessages",
+      "summary": "List message campaigns for an event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/messages",
+      "operationId": "postEventsByEventIdMessages",
+      "summary": "Queue event message campaign",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages/{campaignId}",
+      "operationId": "getEventsByEventIdMessagesByCampaignId",
+      "summary": "Get message campaign detail",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages/{campaignId}/delivery-logs",
+      "operationId": "getEventsByEventIdMessagesByCampaignIdDeliveryLogs",
+      "summary": "List delivery logs for a campaign",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages/{campaignId}/delivery-logs/{channel}/{deliveryId}",
+      "operationId": "getEventsByEventIdMessagesByCampaignIdDeliveryLogsByChannelByDeliveryId",
+      "summary": "Get a single delivery log",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages/{campaignId}/jobs",
+      "operationId": "getEventsByEventIdMessagesByCampaignIdJobs",
+      "summary": "List message jobs for a campaign",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages/{campaignId}/jobs/{channel}/{jobId}",
+      "operationId": "getEventsByEventIdMessagesByCampaignIdJobsByChannelByJobId",
+      "summary": "Get a single message job",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages/{campaignId}/provider-events",
+      "operationId": "getEventsByEventIdMessagesByCampaignIdProviderEvents",
+      "summary": "List provider events for a campaign",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/messages/{campaignId}/provider-events/{providerEventId}",
+      "operationId": "getEventsByEventIdMessagesByCampaignIdProviderEventsByProviderEventId",
+      "summary": "Get a single provider event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/messages/preview",
+      "operationId": "postEventsByEventIdMessagesPreview",
+      "summary": "Preview eligible message recipients",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/messages/render-preview",
+      "operationId": "postEventsByEventIdMessagesRenderPreview",
+      "summary": "Render a message template with a sample merge-tag context (admin live preview)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/occurrences",
+      "operationId": "getEventsByEventIdOccurrences",
+      "summary": "List event occurrences",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/occurrences",
+      "operationId": "postEventsByEventIdOccurrences",
+      "summary": "Create event occurrence",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/events/{eventId}/occurrences/{occurrenceId}",
+      "operationId": "patchEventsByEventIdOccurrencesByOccurrenceId",
+      "summary": "Update event occurrence",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/operational-health",
+      "operationId": "getEventsByEventIdOperationalHealth",
+      "summary": "Get scoped event operational health",
+      "permissions": [
+        "events.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/pause",
+      "operationId": "postEventsByEventIdPause",
+      "summary": "Pause event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/product-categories",
+      "operationId": "getEventsByEventIdProductCategories",
+      "summary": "List product categories",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/product-categories",
+      "operationId": "postEventsByEventIdProductCategories",
+      "summary": "Create product category",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/products",
+      "operationId": "getEventsByEventIdProducts",
+      "summary": "List products",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/products",
+      "operationId": "postEventsByEventIdProducts",
+      "summary": "Create product",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/publish",
+      "operationId": "postEventsByEventIdPublish",
+      "summary": "Publish event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/questions",
+      "operationId": "getEventsByEventIdQuestions",
+      "summary": "List custom questions for an event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/questions",
+      "operationId": "postEventsByEventIdQuestions",
+      "summary": "Create a custom question",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/questions/reorder",
+      "operationId": "postEventsByEventIdQuestionsReorder",
+      "summary": "Atomically reorder custom questions for an event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/events/{eventId}/readiness-acknowledgements/{stepId}",
+      "operationId": "deleteEventsByEventIdReadinessAcknowledgementsByStepId",
+      "summary": "Remove a human-review readiness acknowledgement",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/readiness-acknowledgements/{stepId}",
+      "operationId": "postEventsByEventIdReadinessAcknowledgementsByStepId",
+      "summary": "Acknowledge a human-review readiness step",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/reports/attendance",
+      "operationId": "getEventsByEventIdReportsAttendance",
+      "summary": "Get attendance report",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/reports/conversion",
+      "operationId": "getEventsByEventIdReportsConversion",
+      "summary": "Get conversion report",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/reports/promo",
+      "operationId": "getEventsByEventIdReportsPromo",
+      "summary": "Get promo code report",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/reports/sales",
+      "operationId": "getEventsByEventIdReportsSales",
+      "summary": "Get sales report",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/reports/tax",
+      "operationId": "getEventsByEventIdReportsTax",
+      "summary": "Get tax report",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/resale-listings",
+      "operationId": "getEventsByEventIdResaleListings",
+      "summary": "List event resale listings",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/resale-policy",
+      "operationId": "getEventsByEventIdResalePolicy",
+      "summary": "Get event resale policy",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/events/{eventId}/resale-policy",
+      "operationId": "putEventsByEventIdResalePolicy",
+      "summary": "Update event resale policy",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/events/{eventId}/setup-section",
+      "operationId": "putEventsByEventIdSetupSection",
+      "summary": "Persist the last visited event setup section",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/ticket-types",
+      "operationId": "getEventsByEventIdTicketTypes",
+      "summary": "List ticket types",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/ticket-types",
+      "operationId": "postEventsByEventIdTicketTypes",
+      "summary": "Create ticket type",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/ticket-types/batch",
+      "operationId": "postEventsByEventIdTicketTypesBatch",
+      "summary": "Create ticket type with inventory pool and access rules atomically",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/events/{eventId}/waitlist",
+      "operationId": "getEventsByEventIdWaitlist",
+      "summary": "List waitlist entries for an event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/events/{eventId}/waitlist/{entryId}/offer",
+      "operationId": "postEventsByEventIdWaitlistByEntryIdOffer",
+      "summary": "Create a time-bounded waitlist offer",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/events/{eventId}/waitlist/settings",
+      "operationId": "patchEventsByEventIdWaitlistSettings",
+      "summary": "Update event waitlist auto-offer settings",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/exports",
+      "operationId": "postExports",
+      "summary": "Queue export (Idempotency-Key required)",
+      "permissions": [],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": false,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/exports/{exportId}",
+      "operationId": "getExportsByExportId",
+      "summary": "Get export job status",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/exports/{exportId}/download",
+      "operationId": "getExportsByExportIdDownload",
+      "summary": "Download a completed export file",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/exports/{exportId}/events",
+      "operationId": "getExportsByExportIdEvents",
+      "summary": "Stream export job events (Server-Sent Events)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "operationId": "getHealth",
+      "summary": "Health check",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/me",
+      "operationId": "getMe",
+      "summary": "Get the authenticated principal (identity introspection)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-adapters",
+      "operationId": "listMigrationAdapters",
+      "summary": "List supported migration adapters and compatibility metadata",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-credentials",
+      "operationId": "createMigrationCredential",
+      "summary": "Register a scoped migration secret-manager reference",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/migration-credentials/{credentialId}",
+      "operationId": "revokeMigrationCredential",
+      "summary": "Revoke a migration credential reference",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs",
+      "operationId": "listMigrationJobs",
+      "summary": "List migration jobs",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs",
+      "operationId": "createMigrationJob",
+      "summary": "Create an idempotent migration job",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}",
+      "operationId": "getMigrationJob",
+      "summary": "Get a migration job",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/activate",
+      "operationId": "activatePortableMigrationJob",
+      "summary": "Activate a committed portable import after zero-drift reconciliation",
+      "permissions": [
+        "migrations.commit"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/cancel",
+      "operationId": "cancelMigrationJob",
+      "summary": "Cancel migration job",
+      "permissions": [
+        "migrations.commit"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/commit",
+      "operationId": "commitMigrationJob",
+      "summary": "Start durable migration commit",
+      "permissions": [
+        "migrations.commit"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/conflicts",
+      "operationId": "listMigrationJobConflicts",
+      "summary": "List migration conflicts",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/dry-run",
+      "operationId": "runMigrationDryRun",
+      "summary": "Run migration validation without domain writes",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/events",
+      "operationId": "listMigrationJobEvents",
+      "summary": "List migration progress events",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/files",
+      "operationId": "listMigrationJobFiles",
+      "summary": "List migration job files",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/files",
+      "operationId": "registerMigrationJobFile",
+      "summary": "Register migration file metadata",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/pause",
+      "operationId": "pauseMigrationJob",
+      "summary": "Pause migration commit",
+      "permissions": [
+        "migrations.commit"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/portable-approval",
+      "operationId": "approvePortableMigrationJob",
+      "summary": "Approve the exact immutable portable dry-run receipt for commit",
+      "permissions": [
+        "migrations.commit"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/portable-approvals/{approvalId}/revoke",
+      "operationId": "revokePortableMigrationApproval",
+      "summary": "Irreversibly revoke a portable import approval",
+      "permissions": [
+        "migrations.commit"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/portable-rebindings",
+      "operationId": "getPortableMigrationRebindings",
+      "summary": "List required and completed portable destination rebindings",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PUT",
+      "path": "/migration-jobs/{jobId}/portable-rebindings/{portableId}",
+      "operationId": "bindPortableMigrationDestination",
+      "summary": "Bind a required portable source reference to an existing destination resource",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/prepare",
+      "operationId": "prepareMigrationJob",
+      "summary": "Start durable migration source acquisition and normalization",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/report",
+      "operationId": "getMigrationReport",
+      "summary": "Get migration report",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/report/download",
+      "operationId": "downloadMigrationReport",
+      "summary": "Download migration report",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/resume",
+      "operationId": "resumeMigrationJob",
+      "summary": "Resume migration commit",
+      "permissions": [
+        "migrations.commit"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-jobs/{jobId}/rollback",
+      "operationId": "rollbackMigrationJob",
+      "summary": "Request eligible migration rollback",
+      "permissions": [
+        "migrations.rollback"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/rollback-assessment",
+      "operationId": "assessMigrationRollback",
+      "summary": "Assess fail-closed rollback eligibility",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-jobs/{jobId}/rows",
+      "operationId": "listMigrationJobRows",
+      "summary": "List normalized migration rows",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/migration-mappings",
+      "operationId": "listMigrationMappings",
+      "summary": "List saved migration mappings",
+      "permissions": [
+        "migrations.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/migration-mappings",
+      "operationId": "createMigrationMapping",
+      "summary": "Create a migration mapping",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/oauth-applications",
+      "operationId": "getOauthApplications",
+      "summary": "List OAuth applications",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/oauth-applications",
+      "operationId": "postOauthApplications",
+      "summary": "Create OAuth application",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/oauth-applications/{appId}",
+      "operationId": "deleteOauthApplicationsByAppId",
+      "summary": "Delete OAuth application",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/oauth/authorize",
+      "operationId": "getOauthAuthorize",
+      "summary": "Authorize OAuth application and redirect with authorization code",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/revoke",
+      "operationId": "postOauthRevoke",
+      "summary": "Revoke OAuth access or refresh token",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/token",
+      "operationId": "postOauthToken",
+      "summary": "Issue a resource-owner or explicit agent OAuth access token",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/onboarding-events",
+      "operationId": "reportOnboardingEvent",
+      "summary": "Report a privacy-safe onboarding milestone",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/orders",
+      "operationId": "getOrders",
+      "summary": "List orders",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/orders/{orderId}",
+      "operationId": "getOrdersByOrderId",
+      "summary": "Get order",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/orders/{orderId}/cancel",
+      "operationId": "postOrdersByOrderIdCancel",
+      "summary": "Cancel order",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/orders/{orderId}/invoice",
+      "operationId": "getOrdersByOrderIdInvoice",
+      "summary": "Get invoice document",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/orders/{orderId}/invoice/download",
+      "operationId": "getOrdersByOrderIdInvoiceDownload",
+      "summary": "Download invoice JSON document",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/orders/{orderId}/refunds",
+      "operationId": "postOrdersByOrderIdRefunds",
+      "summary": "Create refund",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/organizations",
+      "operationId": "getOrganizations",
+      "summary": "List organizations",
+      "permissions": [
+        "settings.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/organizations",
+      "operationId": "postOrganizations",
+      "summary": "Create organization",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/organizations/{organizationId}",
+      "operationId": "patchOrganizationsByOrganizationId",
+      "summary": "Update organization",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/organizations/{organizationId}/billing",
+      "operationId": "getOrganizationsByOrganizationIdBilling",
+      "summary": "Get billing overview for an organization",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/organizations/{organizationId}/dashboard-actions",
+      "operationId": "getOrganizationsByOrganizationIdDashboardActions",
+      "summary": "Get a stable page of unresolved organizer dashboard actions",
+      "permissions": [
+        "events.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/organizations/{organizationId}/members",
+      "operationId": "getOrganizationsByOrganizationIdMembers",
+      "summary": "List organization members",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/organizations/{organizationId}/members/{memberId}",
+      "operationId": "patchOrganizationsByOrganizationIdMembersByMemberId",
+      "summary": "Update an organization member role and permission grants",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/organizations/{organizationId}/members/invitations",
+      "operationId": "postOrganizationsByOrganizationIdMembersInvitations",
+      "summary": "Invite a member to the organization",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/organizations/{organizationId}/payment-accounts",
+      "operationId": "getOrganizationsByOrganizationIdPaymentAccounts",
+      "summary": "List payment accounts for an organization",
+      "permissions": [
+        "billing.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh",
+      "operationId": "postOrganizationsByOrganizationIdPaymentAccountsByPaymentAccountIdStripeConnectRefresh",
+      "summary": "Refresh Stripe Connect payment account status and return a fresh account link",
+      "permissions": [
+        "billing.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "POST",
+      "path": "/organizations/{organizationId}/payment-accounts/stripe-connect",
+      "operationId": "postOrganizationsByOrganizationIdPaymentAccountsStripeConnect",
+      "summary": "Create or return the Stripe Connect payment account for an organization",
+      "permissions": [
+        "billing.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "GET",
+      "path": "/organizations/{organizationId}/readiness",
+      "operationId": "getOrganizationsByOrganizationIdReadiness",
+      "summary": "Get authoritative workspace readiness for a selected brand",
+      "permissions": [
+        "events.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/organizations/{organizationId}/reports/affiliate",
+      "operationId": "getOrganizationsByOrganizationIdReportsAffiliate",
+      "summary": "Get affiliate attribution report",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/payment-compensations",
+      "operationId": "getPaymentCompensations",
+      "summary": "List orphan payment compensations",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/portable-delta-exports",
+      "operationId": "createPortableDeltaExport",
+      "summary": "Create or replay an exact-parent portable delta export",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "POST",
+      "path": "/portable-export-authorizations",
+      "operationId": "grantPortableHistoricalExportAuthorization",
+      "summary": "Grant a single-use historical export authorization",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/portable-export-authorizations/{authorizationId}/revoke",
+      "operationId": "revokePortableHistoricalExportAuthorization",
+      "summary": "Revoke an unused historical export authorization",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/portable-exports",
+      "operationId": "createPortableExport",
+      "summary": "Create or replay a signed Tixkit portable export",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "POST",
+      "path": "/portable-migration-jobs",
+      "operationId": "createPortableMigrationJob",
+      "summary": "Create an idempotent signed Tixkit portability import job",
+      "permissions": [
+        "migrations.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "POST",
+      "path": "/privacy/data-exports",
+      "operationId": "postPrivacyDataExports",
+      "summary": "Queue GDPR data export request (Idempotency-Key required)",
+      "permissions": [
+        "settings.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/privacy/erasures",
+      "operationId": "postPrivacyErasures",
+      "summary": "Queue GDPR erasure request (Idempotency-Key required)",
+      "permissions": [
+        "settings.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/privacy/requests",
+      "operationId": "getPrivacyRequests",
+      "summary": "List GDPR data export and erasure requests",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/privacy/requests/{requestId}",
+      "operationId": "getPrivacyRequestsByRequestId",
+      "summary": "Get GDPR request status and result",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/products/{productId}",
+      "operationId": "patchProductsByProductId",
+      "summary": "Update product",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/provider-incidents",
+      "operationId": "getProviderIncidents",
+      "summary": "Find active provider incident evidence by hash-only correlation",
+      "permissions": [
+        "provider_incidents.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/provider-incidents/{evidenceId}/reveal",
+      "operationId": "postProviderIncidentsByEvidenceIdReveal",
+      "summary": "Reveal an exact provider request ID for an authorized incident",
+      "permissions": [
+        "provider_incidents.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/brand-logos/{artifactId}",
+      "operationId": "getPublicBrandLogosByArtifactId",
+      "summary": "Download a brand logo (public, durable, cacheable)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/brands/{brandId}",
+      "operationId": "getPublicBrandsByBrandId",
+      "summary": "Get public brand details (no auth)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/content-email-images/{artifactId}",
+      "operationId": "getPublicContentEmailImagesByArtifactId",
+      "summary": "Download a content email image (public, durable, cacheable)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/content-event-page-images/{artifactId}",
+      "operationId": "getPublicContentEventPageImagesByArtifactId",
+      "summary": "Download a content event-page image (public, durable, cacheable)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/event-media/renditions/{renditionId}",
+      "operationId": "getPublicEventMediaRenditionsByRenditionId",
+      "summary": "Stream an immutable rendition for a public event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}",
+      "operationId": "getPublicEventsByEventId",
+      "summary": "Get public event details (no auth)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/public/events/{eventId}/access-code",
+      "operationId": "postPublicEventsByEventIdAccessCode",
+      "summary": "Validate an access code or buyer email for locked ticket types (no auth)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/availability",
+      "operationId": "getPublicEventsByEventIdAvailability",
+      "summary": "Get public availability (no auth, public tickets and active products)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/bootstrap",
+      "operationId": "getPublicEventsByEventIdBootstrap",
+      "summary": "Get public checkout bootstrap data",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/content-page",
+      "operationId": "getPublicEventsByEventIdContentPage",
+      "summary": "Compatibility alias for the published content-studio event page",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/discovery-card",
+      "operationId": "getPublicEventsByEventIdDiscoveryCard",
+      "summary": "Get structured discovery metadata for a published event page",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/marketing-integrations",
+      "operationId": "getPublicEventsByEventIdMarketingIntegrations",
+      "summary": "List active public marketing integrations",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/occurrences",
+      "operationId": "getPublicEventsByEventIdOccurrences",
+      "summary": "List public event occurrences",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/page",
+      "operationId": "getPublicEventsByEventIdPage",
+      "summary": "Get the published content-studio event page for an event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/page-bootstrap",
+      "operationId": "getPublicEventsByEventIdPageBootstrap",
+      "summary": "Get public hosted event-page bootstrap data",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/questions",
+      "operationId": "getPublicEventsByEventIdQuestions",
+      "summary": "Get public custom questions (no auth)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/resale-listings",
+      "operationId": "getPublicEventsByEventIdResaleListings",
+      "summary": "List public resale listings (no auth, buyer-safe fields only)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/{eventId}/revision",
+      "operationId": "getPublicEventsByEventIdRevision",
+      "summary": "Get the latest public checkout revision for an event",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/public/events/{eventId}/upload-artifacts",
+      "operationId": "postPublicEventsByEventIdUploadArtifacts",
+      "summary": "Create a public checkout upload artifact ticket",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/public/events/{eventId}/waitlist",
+      "operationId": "postPublicEventsByEventIdWaitlist",
+      "summary": "Join a sold-out ticket waitlist",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/public/events/{eventId}/widget-impressions",
+      "operationId": "postPublicEventsByEventIdWidgetImpressions",
+      "summary": "Record a deduped widget impression for conversion reporting",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/by-slug/{slug}",
+      "operationId": "getPublicEventsBySlugBySlug",
+      "summary": "Get public event details by slug for a verified custom domain (no auth)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/by-slug/{slug}/page",
+      "operationId": "getPublicEventsBySlugBySlugPage",
+      "summary": "Get the published content-studio event page for a verified custom-domain slug",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/events/by-slug/{slug}/page-bootstrap",
+      "operationId": "getPublicEventsBySlugBySlugPageBootstrap",
+      "summary": "Get public hosted event-page bootstrap data by custom-domain slug",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/public/rum",
+      "operationId": "submitRumWebVital",
+      "summary": "Submit a privacy-minimized buyer Web Vital sample",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/public/upload-artifacts/{artifactId}/complete",
+      "operationId": "postPublicUploadArtifactsByArtifactIdComplete",
+      "summary": "Complete and scan a public checkout upload artifact",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/public/waitlist/claims/{token}",
+      "operationId": "getPublicWaitlistClaimsByToken",
+      "summary": "Resolve a waitlist claim token",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/questions/{questionId}",
+      "operationId": "deleteQuestionsByQuestionId",
+      "summary": "Delete a custom question",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/questions/{questionId}",
+      "operationId": "patchQuestionsByQuestionId",
+      "summary": "Update a custom question",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/s/{slug}",
+      "operationId": "getSBySlug",
+      "summary": "Resolve a short link and redirect (C-078)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/scanner-devices",
+      "operationId": "getScannerDevices",
+      "summary": "List scanner devices",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/scanner-devices",
+      "operationId": "postScannerDevices",
+      "summary": "Create scanner device",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/scanner-devices/{deviceId}/revoke",
+      "operationId": "postScannerDevicesByDeviceIdRevoke",
+      "summary": "Revoke scanner device",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/short-links",
+      "operationId": "getShortLinks",
+      "summary": "List short links for the tenant (C-078)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/short-links",
+      "operationId": "postShortLinks",
+      "summary": "Create a short link (C-078)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/short-links/{id}/clicks",
+      "operationId": "getShortLinksByIdClicks",
+      "summary": "Get privacy-safe click aggregates for a short link (C-078)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/ticket-listings/{listingId}/complete",
+      "operationId": "postTicketListingsByListingIdComplete",
+      "summary": "Retired provider-delegated resale completion tombstone",
+      "permissions": [
+        "tickets.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/ticket-listings/{listingId}/delist",
+      "operationId": "postTicketListingsByListingIdDelist",
+      "summary": "Delist a resale listing",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/ticket-listings/{listingId}/settlement",
+      "operationId": "getTicketListingsByListingIdSettlement",
+      "summary": "Get the organizer-managed settlement ledger for a resale listing",
+      "permissions": [
+        "orders.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/ticket-listings/{listingId}/settlement/payouts",
+      "operationId": "postTicketListingsByListingIdSettlementPayouts",
+      "summary": "Record an externally executed resale seller payout",
+      "permissions": [
+        "billing.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "POST",
+      "path": "/ticket-listings/{listingId}/settlement/reversals",
+      "operationId": "postTicketListingsByListingIdSettlementReversals",
+      "summary": "Record a coordinated resale payable reversal or recovery requirement",
+      "permissions": [
+        "billing.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": true
+    },
+    {
+      "method": "PATCH",
+      "path": "/ticket-types/{ticketTypeId}",
+      "operationId": "patchTicketTypesByTicketTypeId",
+      "summary": "Update ticket type",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/ticket-types/{ticketTypeId}/access-rules",
+      "operationId": "getTicketTypesByTicketTypeIdAccessRules",
+      "summary": "List access rules for a ticket type",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/ticket-types/{ticketTypeId}/access-rules",
+      "operationId": "postTicketTypesByTicketTypeIdAccessRules",
+      "summary": "Create access rule for a ticket type",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/ticket-types/{ticketTypeId}/batch",
+      "operationId": "patchTicketTypesByTicketTypeIdBatch",
+      "summary": "Update ticket type and append access rules atomically",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/tickets/{ticketId}/resale-listings",
+      "operationId": "postTicketsByTicketIdResaleListings",
+      "summary": "Create resale listing for a ticket",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/tickets/{ticketId}/transfer",
+      "operationId": "postTicketsByTicketIdTransfer",
+      "summary": "Transfer ticket",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/upload-artifacts",
+      "operationId": "postUploadArtifacts",
+      "summary": "Create a signed upload artifact ticket",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/upload-artifacts/{artifactId}/complete",
+      "operationId": "postUploadArtifactsByArtifactIdComplete",
+      "summary": "Complete and scan an upload artifact",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/upload-artifacts/{artifactId}/download",
+      "operationId": "getUploadArtifactsByArtifactIdDownload",
+      "summary": "Get a signed download URL for a completed upload artifact",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/venues",
+      "operationId": "listSavedVenues",
+      "summary": "List reusable organization venues",
+      "permissions": [
+        "events.read"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/venues",
+      "operationId": "createSavedVenue",
+      "summary": "Create a reusable organization venue",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/venues/{venueId}",
+      "operationId": "deleteSavedVenue",
+      "summary": "Delete an unused reusable organization venue",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/venues/{venueId}",
+      "operationId": "updateSavedVenue",
+      "summary": "Update a reusable organization venue",
+      "permissions": [
+        "events.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/wallet-passes/{passId}/apple.pkpass",
+      "operationId": "getWalletPassesByPassIdApplePkpass",
+      "summary": "Download an Apple Wallet pass package",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "public",
+      "security": [],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/webhook-endpoints",
+      "operationId": "getWebhookEndpoints",
+      "summary": "List webhook endpoints",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhook-endpoints",
+      "operationId": "postWebhookEndpoints",
+      "summary": "Create webhook endpoint",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/webhook-endpoints/{endpointId}",
+      "operationId": "patchWebhookEndpointsByEndpointId",
+      "summary": "Update webhook endpoint",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "GET",
+      "path": "/webhook-endpoints/{endpointId}/events",
+      "operationId": "getWebhookEndpointsByEndpointIdEvents",
+      "summary": "List webhook delivery events for an endpoint",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhook-endpoints/{endpointId}/events/{eventId}/replay",
+      "operationId": "postWebhookEndpointsByEndpointIdEventsByEventIdReplay",
+      "summary": "Replay webhook event to one endpoint",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhook-endpoints/{endpointId}/test",
+      "operationId": "postWebhookEndpointsByEndpointIdTest",
+      "summary": "Queue a signed synthetic test webhook delivery",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhook-events/{eventId}/replay",
+      "operationId": "postWebhookEventsByEventIdReplay",
+      "summary": "Replay webhook event",
+      "permissions": [
+        "developers.write"
+      ],
+      "permissionsDeclared": true,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "permissioned",
+      "security": [
+        {
+          "BearerAuth": []
+        },
+        {
+          "ApiKey": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/clerk",
+      "operationId": "postWebhooksClerk",
+      "summary": "Clerk webhook (Svix headers verified)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "SvixSignature": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/email/{provider}",
+      "operationId": "postWebhooksEmailByProvider",
+      "summary": "Email provider feedback webhook (HMAC SHA-256 signature verified)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "EmailProviderSignature": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/stripe",
+      "operationId": "postWebhooksStripe",
+      "summary": "Stripe webhook (Stripe-Signature header verified)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "StripeSignature": []
+        }
+      ],
+      "idempotencyRequired": false
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/telnyx/sms",
+      "operationId": "postWebhooksTelnyxSms",
+      "summary": "Telnyx SMS webhook (Ed25519 signature verified when configured)",
+      "permissions": [],
+      "permissionsDeclared": false,
+      "permissionsMetadataValid": true,
+      "securityMetadataValid": true,
+      "authorizationClassification": "unknown",
+      "security": [
+        {
+          "TelnyxSignature": []
+        }
+      ],
+      "idempotencyRequired": false
+    }
+  ]
+}

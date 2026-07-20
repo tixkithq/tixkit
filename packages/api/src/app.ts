@@ -467,10 +467,12 @@ export async function registerApplicationRoutes(
       await registerIpRateLimit(publicGroup, { redis: options.rateLimitRedis });
     }
     const authenticateTestCheckout = createAuthMiddleware(options.authService);
-    publicGroup.addHook('onRequest', async (request, reply) => {
+    publicGroup.addHook('onRequest', (request, reply, done) => {
       if (request.headers['x-tixkit-test-order'] === '1') {
-        await authenticateTestCheckout(request, reply);
+        authenticateTestCheckout(request, reply, done);
+        return;
       }
+      done();
     });
     await registerRouteModules(publicGroup, publicRouteModules);
   });
