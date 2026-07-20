@@ -10,7 +10,7 @@ Tokio-based server applications integrating Tixkit.
 
 ## Status
 
-Supported crate version 0.1.0 pinned to API version `2026-08-25`.
+Supported crate version 0.1.0 pinned to API version `2026-08-26`.
 
 Resale writes require `ResaleTermsAcceptance` with the exact `2026-07-16` contract. Settlement methods replace provider-delegated listing completion.
 
@@ -44,7 +44,7 @@ Keep credentials server-side, verify webhooks from raw bodies, and redact author
 
 ## Compatibility
 
-Cargo semantic versions track API version `2026-08-25`; public Rust types and behavior are the compatibility boundary.
+Cargo semantic versions track API version `2026-08-26`; public Rust types and behavior are the compatibility boundary.
 
 ## Related guides
 

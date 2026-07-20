@@ -10,7 +10,7 @@ SvelteKit endpoints, server loads/actions, and Svelte 5 pages.
 
 ## Status
 
-Public SDK at version 0.1.0 and API version `2026-08-25`; pre-1.0 exports may evolve with release notes.
+Public SDK at version 0.1.0 and API version `2026-08-26`; pre-1.0 exports may evolve with release notes.
 
 Resale writes require the exact `2026-07-16` terms acceptance. Settlement helpers replace provider-delegated listing completion.
 
@@ -44,7 +44,7 @@ bun run --filter @tixkit/sveltekit typecheck && bun run --filter @tixkit/sveltek
 
 ## Compatibility
 
-Tracks API version `2026-08-25`; framework peer versions and subpath exports are the compatibility boundary.
+Tracks API version `2026-08-26`; framework peer versions and subpath exports are the compatibility boundary.
 
 ## Related guides
 

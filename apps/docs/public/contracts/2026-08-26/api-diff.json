@@ -1,0 +1,18 @@
+{
+  "from": "2026-08-25",
+  "to": "2026-08-26",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /audit-logs",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    }
+  ]
+}

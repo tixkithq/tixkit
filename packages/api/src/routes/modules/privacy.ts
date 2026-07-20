@@ -290,6 +290,7 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     const rawQuery = request.query as Record<string, string | undefined>;
     const { organizationId, brandId } = rawQuery;
 
+    ClerkAuthService.requireNoEventScope(principal, 'privacy and audit lists');
     if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
     const brandScope = scopedBrandIdsForPrivacyList(principal, brandId);
 
@@ -327,6 +328,7 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
         scope,
         serialize: serializeAuditLog,
         selectFields: auditLogListColumns,
+        strictValidation: true,
       },
       tableQuery,
     );

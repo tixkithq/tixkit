@@ -550,6 +550,24 @@ export const TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['organization', 'brand'],
+    method: 'GET',
+    operationId: 'getAuditLogs',
+    path: '/audit-logs',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyDeniedBoundaries: ['event'],
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'audit-log-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 200 },
@@ -1679,6 +1697,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

@@ -132,6 +132,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'tenant-list-route-authorization-db.integration.test.ts'),
   ],
   [
+    'audit-log-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'audit-log-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'saved-venue-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'saved-venue-route-authorization-db.integration.test.ts'),
   ],
@@ -340,6 +344,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getOrganizations', 'getBrands'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getAuditLogs'], {
+    source: 'audit-log-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['listSavedVenues'], {
     source: 'saved-venue-route-authorization-db.integration.test.ts',
