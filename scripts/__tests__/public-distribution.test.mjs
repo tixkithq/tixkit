@@ -57,6 +57,8 @@ test('validates the authoritative public distribution and every SDK release path
   assert.ok(manifest.source.packages.includes('packages/sdk-rust'));
   assert.ok(manifest.release.packages.some((entry) => entry.path === 'packages/sdk-go'));
   assert.ok(manifest.release.packages.some((entry) => entry.path === 'packages/sdk-rust'));
+  assert.ok(manifest.release.contracts.includes('distribution/hosted-trust-keyring.schema.json'));
+  assert.ok(manifest.release.contracts.includes('distribution/hosted-trust-receipt.schema.json'));
   assert.deepEqual(publicDependencyBoundaryViolations(manifest, root), []);
 });
 

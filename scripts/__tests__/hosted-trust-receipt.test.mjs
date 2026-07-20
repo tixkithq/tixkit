@@ -30,6 +30,9 @@ const cli = resolve(repositoryRoot, 'scripts/validate-hosted-trust-receipt.mjs')
 const receiptSchema = JSON.parse(
   readFileSync(resolve(repositoryRoot, 'distribution/hosted-trust-receipt.schema.json'), 'utf8'),
 );
+const keyringSchema = JSON.parse(
+  readFileSync(resolve(repositoryRoot, 'distribution/hosted-trust-keyring.schema.json'), 'utf8'),
+);
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const keyId = 'epyc-trust-2026-07';
 const artifactBytes = Buffer.from(
@@ -106,6 +109,31 @@ test('strict draft 2020-12 schema accepts only the closed v1 receipt', () => {
   const candidate = signedReceipt();
   candidate.privateTopology = 'internal.example';
   assert.equal(validate(candidate), false);
+});
+
+test('strict draft 2020-12 keyring schema accepts only public Ed25519 trust material', () => {
+  const validate = new Ajv2020({ allErrors: true, strict: true }).compile(keyringSchema);
+  assert.equal(validate(keyring), true, JSON.stringify(validate.errors));
+
+  for (const mutate of [
+    (candidate) => (candidate.unreviewedTrust = true),
+    (candidate) => (candidate.keys = {}),
+    (candidate) =>
+      (candidate.keys = Object.fromEntries(
+        Array.from({ length: 17 }, (_, index) => [`key-${index}`, candidate.keys[keyId]]),
+      )),
+    (candidate) => (candidate.keys[keyId].algorithm = 'RSA'),
+    (candidate) => (candidate.keys[keyId].privateKeyPem = 'forbidden'),
+    (candidate) =>
+      (candidate.keys[keyId].publicKeyPem = privateKey
+        .export({ type: 'pkcs8', format: 'pem' })
+        .toString()),
+    (candidate) => (candidate.keys['invalid key id'] = candidate.keys[keyId]),
+  ]) {
+    const candidate = structuredClone(keyring);
+    mutate(candidate);
+    assert.equal(validate(candidate), false);
+  }
 });
 
 test('verifies a signed receipt without mutating trust or evidence inputs', () => {
@@ -235,6 +263,13 @@ test('rejects unsupported, unknown, private, and non-Ed25519 trust keys', () => 
     .export({ type: 'spki', format: 'pem' })
     .toString();
   assert.match(violations(signedReceipt(), artifactBytes, wrongType), /must contain an Ed25519/u);
+
+  const trailingMaterial = structuredClone(keyring);
+  trailingMaterial.keys[keyId].publicKeyPem += 'secret=private-topology\n';
+  assert.match(
+    violations(signedReceipt(), artifactBytes, trailingMaterial),
+    /canonical SPKI PEM only/u,
+  );
 });
 
 test('rejects inherited receipt fields and prototype-provided trust keys', () => {

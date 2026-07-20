@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { jsonSchemaViolations } from './public-distribution.mjs';
 
@@ -278,6 +278,8 @@ const SURFACE_REQUIRED_DISCLOSURES = Object.freeze({
   'docs/public/reference/trust.mdx': [
     'it does not mean a hosted production run occurred',
     'are not generally available',
+    'A keyring supplied by the same untrusted party as the receipt does not establish trust.',
+    'does not execute the named semantic evidence validator',
   ],
   'docs/public/self-hosting/backups-and-restore.mdx': [
     'This is real local provider proof, not production-like Kubernetes',
@@ -760,7 +762,7 @@ export async function executeLocalTrustEvidence(program, root, options = {}) {
       } catch (error) {
         const reason =
           error instanceof Error ? error.message : 'local trust evidence command failed';
-        throw new Error(`${record.id}: ${reason}`);
+        throw new Error(`${record.id}: ${reason}`, { cause: error });
       }
       executed += 1;
     }

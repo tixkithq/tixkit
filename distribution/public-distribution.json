@@ -351,6 +351,8 @@
       "artifacts/api/2026-01-01",
       "distribution/capability-registry.json",
       "distribution/capability-registry.schema.json",
+      "distribution/hosted-trust-keyring.schema.json",
+      "distribution/hosted-trust-receipt.schema.json",
       "distribution/trust-program.json",
       "distribution/trust-program.schema.json",
       "distribution/cloud-core-compatibility.schema.json",

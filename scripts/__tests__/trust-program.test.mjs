@@ -377,6 +377,19 @@ test('rejects pending-state escalation and future verification across mapped pub
       Date.UTC(2026, 6, 16),
     ).some((violation) => /must not be in the future/u.test(violation)),
   );
+
+  const trust = readFileSync(resolve(root, 'docs/public/reference/trust.mdx'), 'utf8');
+  for (const disclosure of [
+    'A keyring supplied by the same untrusted party as the receipt does not establish trust.',
+    'does not execute the named semantic evidence validator',
+  ]) {
+    assert.ok(
+      trustSurfaceContentViolations(
+        'docs/public/reference/trust.mdx',
+        trust.replace(disclosure, ''),
+      ).some((violation) => /required trust disclosure is missing/u.test(violation)),
+    );
+  }
 });
 
 test('rejects validation command path escape and non-allowlisted execution', () => {

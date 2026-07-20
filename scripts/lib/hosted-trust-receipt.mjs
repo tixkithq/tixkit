@@ -2,6 +2,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
 import { jsonSchemaViolations } from './public-distribution.mjs';
 
 export const HOSTED_TRUST_RECEIPT_SCHEMA =
@@ -18,6 +19,26 @@ const schema = JSON.parse(
     'utf8',
   ),
 );
+
+const keyringSchema = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL('../../distribution/hosted-trust-keyring.schema.json', import.meta.url)),
+    'utf8',
+  ),
+);
+const validateKeyringSchema = new Ajv2020({
+  allErrors: true,
+  ownProperties: true,
+  strict: true,
+}).compile(keyringSchema);
+
+function keyringSchemaViolations(keyring) {
+  if (validateKeyringSchema(keyring)) return [];
+  return (validateKeyringSchema.errors ?? []).map(
+    (error) =>
+      `trusted keyring schema ${error.instancePath || '$'} ${error.message ?? 'is invalid'}`,
+  );
+}
 
 const contracts = Object.freeze({
   'performance-capacity': Object.freeze({
@@ -330,6 +351,8 @@ function keyringViolations(keyring) {
       const key = createPublicKey(candidate.publicKeyPem);
       if (key.asymmetricKeyType !== 'ed25519') {
         violations.push(`trusted keyring entry must contain an Ed25519 public key: ${keyId}`);
+      } else if (String(key.export({ type: 'spki', format: 'pem' })) !== candidate.publicKeyPem) {
+        violations.push(`trusted keyring entry must be canonical SPKI PEM only: ${keyId}`);
       }
     } catch {
       violations.push(`trusted keyring entry public key is invalid: ${keyId}`);
@@ -367,6 +390,7 @@ export function hostedTrustReceiptViolations(
   if (inputViolations.length > 0) return [...new Set(inputViolations)].sort();
   const violations = jsonSchemaViolations(receipt, schema);
   if (violations.length > 0) return violations;
+  violations.push(...keyringSchemaViolations(keyring));
   if (!Buffer.isBuffer(artifactBytes)) violations.push('hosted trust artifact must be bytes');
   if (!Number.isSafeInteger(now)) violations.push('verification clock must be a safe integer');
   if (!Number.isSafeInteger(maxAgeMs) || maxAgeMs < 1 || maxAgeMs > HOSTED_TRUST_MAX_AGE_MS) {

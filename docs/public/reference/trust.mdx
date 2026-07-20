@@ -52,6 +52,21 @@ This page is generated from the public trust inventory. A published policy is no
 
 Self-Hosted operators choose their infrastructure location, incident communication, vendors and support arrangements. That control does not establish a managed Cloud residency promise, subprocessor list, status history or SLA. Do not infer certifications, uptime targets, recovery objectives, regions or assessment results from planned workflows.
 
+## Verify hosted DR or performance evidence
+
+No hosted DR or performance receipt and no trusted public keyring are currently published. When those external artifacts exist, obtain the keyring through an authenticated public Tixkit release or repository channel and verify its expected checksum independently from the receipt and evidence artifact. A keyring supplied by the same untrusted party as the receipt does not establish trust.
+
+From an authoritative public checkout at the source revision named by the receipt, run:
+
+```bash
+node scripts/validate-hosted-trust-receipt.mjs \
+  --receipt /absolute/path/to/receipt.json \
+  --artifact /absolute/path/to/evidence-artifact \
+  --trusted-keyring /absolute/path/to/authenticated-keyring.json
+```
+
+The verifier checks the closed receipt and keyring contracts, canonical encodings, Ed25519 signature, artifact bytes, exact public source and workflow bindings, observation freshness, and the declared validator tuple. It does not promote the trust-program state and does not execute the named semantic evidence validator. A published evidence claim must also pass that exact validator; for supported-profile capacity, use the combined eligibility verification that validates both the capacity evidence and its hosted receipt. Retain the artifact, receipt, authenticated keyring version, and command result together for review.
+
 ## Verify release material
 
 For an approved API release, follow the exact checksum, GitHub attestation, registry-integrity and clean consumer-install procedure in [the API release train](/reference/api-release-train). Public artifact workflows also require SPDX SBOMs and provenance attestations, but those workflow contracts are not a public release receipt until the protected hosted run succeeds.
