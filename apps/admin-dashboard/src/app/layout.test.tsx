@@ -49,10 +49,21 @@ describe('admin RootLayout CSP nonce integration', () => {
     const tree = await RootLayout({ children: <main>content</main> });
     const clerk = findElement(tree, (element) => element.type === clerkProviderMock);
     const theme = findElement(tree, (element) => element.type === ThemeProvider);
+    const zodConfig = findElement(
+      tree,
+      (element) => element.type === 'script' && element.props.id === 'zod-jitless-config',
+    );
 
     expect(headersMock).toHaveBeenCalledTimes(1);
     expect(clerk?.props).toMatchObject({ dynamic: true, publishableKey: 'pk_live_example' });
     expect(theme?.props).toMatchObject({ nonce: 'request-nonce' });
+    expect(zodConfig?.props).toMatchObject({
+      nonce: 'request-nonce',
+      dangerouslySetInnerHTML: {
+        __html:
+          'globalThis.__zod_globalConfig={...(globalThis.__zod_globalConfig||{}),jitless:true}',
+      },
+    });
   });
 
   it('nonces the bounded development injector script', async () => {

@@ -250,6 +250,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     'checkin-scan-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'checkin-scan-route-authorization-db.integration.test.ts'),
   ],
+  [
+    'offline-manifest-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'offline-manifest-route-authorization-db.integration.test.ts'),
+  ],
   ['box-office-routes.test.ts', resolve(import.meta.dirname, 'box-office-routes.test.ts')],
   [
     'box-office-orders-db.integration.test.ts',
@@ -522,6 +526,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'checkin-scan-route-authorization-db.integration.test.ts',
     persistenceSource: 'checkin-scan-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    [
+      'getEventsByEventIdCheckInListsByCheckInListIdManifest',
+      'getEventsByEventIdCheckInManifestKeys',
+    ],
+    { source: 'offline-manifest-route-authorization-db.integration.test.ts' },
+  ),
   ...evidenceBindings(['postEventsByEventIdBoxOfficeOrders'], {
     source: 'box-office-routes.test.ts',
     persistenceSource: 'box-office-orders-db.integration.test.ts',

@@ -22,6 +22,7 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/offline-manifest-key: {{ printf "%s\n%s\n%s\n%s" .Values.secrets.offlineManifestSigningKey .Values.secrets.offlineManifestKeyId .Values.secrets.offlineManifestActiveKeyId .Values.secrets.offlineManifestSigningPrivateKeysJson | sha256sum }}
       labels:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
@@ -45,6 +46,26 @@ spec:
               value: {{ .Values.uploads.malwareScanner.host | quote }}
             - name: CLAMAV_PORT
               value: {{ .Values.uploads.malwareScanner.port | quote }}
+            - name: OFFLINE_MANIFEST_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tixkit.offlineManifestSecretName" . }}
+                  key: OFFLINE_MANIFEST_SIGNING_KEY
+            - name: OFFLINE_MANIFEST_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tixkit.offlineManifestSecretName" . }}
+                  key: OFFLINE_MANIFEST_KEY_ID
+            - name: OFFLINE_MANIFEST_ACTIVE_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tixkit.offlineManifestSecretName" . }}
+                  key: OFFLINE_MANIFEST_ACTIVE_KEY_ID
+            - name: OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tixkit.offlineManifestSecretName" . }}
+                  key: OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON
           envFrom:
             - configMapRef:
                 name: {{ include "tixkit.fullname" . }}-config

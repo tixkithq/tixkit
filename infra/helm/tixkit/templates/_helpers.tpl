@@ -69,6 +69,18 @@
 {{- end -}}
 {{- end -}}
 {{- if eq .Values.deploymentProfile "production" -}}
+{{- if and (eq .Values.secrets.mode "create") (empty .Values.secrets.offlineManifestSigningKey) -}}
+{{- fail "production profile requires secrets.offlineManifestSigningKey in create mode" -}}
+{{- end -}}
+{{- if and (eq .Values.secrets.mode "create") (empty .Values.secrets.offlineManifestKeyId) -}}
+{{- fail "production profile requires secrets.offlineManifestKeyId in create mode" -}}
+{{- end -}}
+{{- if and (eq .Values.secrets.mode "create") (empty .Values.secrets.offlineManifestActiveKeyId) -}}
+{{- fail "production profile requires secrets.offlineManifestActiveKeyId in create mode" -}}
+{{- end -}}
+{{- if and (eq .Values.secrets.mode "create") (empty .Values.secrets.offlineManifestSigningPrivateKeysJson) -}}
+{{- fail "production profile requires secrets.offlineManifestSigningPrivateKeysJson in create mode" -}}
+{{- end -}}
 {{- if ne .Values.uploads.malwareScanner.mode "clamav" -}}
 {{- fail "production profile requires uploads.malwareScanner.mode=clamav" -}}
 {{- end -}}
@@ -270,7 +282,7 @@
 {{- $_ := set $provided .secretKey true -}}
 {{- end -}}
 {{- $databaseKey := ternary "DATABASE_URL_MYSQL" "DATABASE_URL" (eq .Values.database.driver "mysql") -}}
-{{- $required := list $databaseKey "REDIS_URL" "TEMPORAL_ADDRESS" "STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET" "STRIPE_PUBLISHABLE_KEY" "METRICS_BEARER_TOKEN" "DASHBOARD_CURSOR_SIGNING_KEY" -}}
+{{- $required := list $databaseKey "REDIS_URL" "TEMPORAL_ADDRESS" "STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET" "STRIPE_PUBLISHABLE_KEY" "METRICS_BEARER_TOKEN" "DASHBOARD_CURSOR_SIGNING_KEY" "OFFLINE_MANIFEST_SIGNING_KEY" "OFFLINE_MANIFEST_KEY_ID" "OFFLINE_MANIFEST_ACTIVE_KEY_ID" "OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON" -}}
 {{- if .Values.observability.enabled -}}
 {{- $required = concat $required (list "OTEL_EXPORTER_OTLP_ENDPOINT" "PROMETHEUS_PUSHGATEWAY_URL") -}}
 {{- end -}}
@@ -337,6 +349,10 @@ topologySpreadConstraints:
 {{- else -}}
 {{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
+{{- end -}}
+
+{{- define "tixkit.offlineManifestSecretName" -}}
+{{- printf "%s-manifest" ((include "tixkit.fullname" .) | trunc 54 | trimSuffix "-") -}}
 {{- end -}}
 
 {{- define "tixkit.labels" -}}

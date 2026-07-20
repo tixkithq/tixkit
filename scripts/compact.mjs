@@ -44,6 +44,26 @@ function portabilityKey(prefix, deploymentSuffix) {
   };
 }
 
+function offlineManifestSigningKey(deploymentSuffix) {
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const now = new Date();
+  const notBefore = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+  const notAfter = new Date(now.getTime());
+  notAfter.setUTCFullYear(notAfter.getUTCFullYear() + 10);
+  const keyId = `compact-manifest-${deploymentSuffix}`;
+  return {
+    keyId,
+    registryJson: JSON.stringify([
+      {
+        keyId,
+        privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+        notBefore,
+        notAfter: notAfter.toISOString(),
+      },
+    ]),
+  };
+}
+
 function parseEd25519PrivateKey(name, encoded) {
   try {
     const bytes = Buffer.from(encoded, 'base64');
@@ -121,6 +141,7 @@ export function initializeCompactEnvironment({
   const payloadKey = portabilityKey('compact_payload', deploymentSuffix);
   const dryRunKey = portabilityKey('compact_dry_run', deploymentSuffix);
   const cutoverKey = portabilityKey('compact_cutover', deploymentSuffix);
+  const manifestKey = offlineManifestSigningKey(deploymentSuffix);
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName))
     throw new Error(
       'Compact Compose project name must use 1-63 lowercase letters, digits, hyphens, or underscores.',
@@ -154,6 +175,8 @@ export function initializeCompactEnvironment({
     `MINIO_ROOT_PASSWORD=${secret()}`,
     `QR_SIGNING_SECRET=${secret(48)}`,
     `OFFLINE_MANIFEST_SIGNING_KEY=${secret(48)}`,
+    `OFFLINE_MANIFEST_ACTIVE_KEY_ID=${manifestKey.keyId}`,
+    `OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=${manifestKey.registryJson}`,
     `WIDGET_IMPRESSION_HASH_SECRET=${secret(48)}`,
     `DASHBOARD_CURSOR_SIGNING_KEY=${secret(48)}`,
     `TIXKIT_MIGRATION_CURSOR_KEY=${secret(32)}`,
@@ -188,7 +211,26 @@ export function upgradeCompactEnvironment({ environmentPath = envFile } = {}) {
   if (!existsSync(environmentPath))
     throw new Error('Compact is not initialized. Run `bun run compact:init`.');
   const environment = compactEnvironment(environmentPath);
-  if (environment.DASHBOARD_CURSOR_SIGNING_KEY !== undefined) {
+  const additions = [];
+  if (environment.DASHBOARD_CURSOR_SIGNING_KEY === undefined) {
+    additions.push(`DASHBOARD_CURSOR_SIGNING_KEY=${secret(48)}`);
+  }
+  const hasManifestActiveKeyId = environment.OFFLINE_MANIFEST_ACTIVE_KEY_ID !== undefined;
+  const hasManifestRegistry = environment.OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON !== undefined;
+  if (hasManifestActiveKeyId !== hasManifestRegistry) {
+    throw new Error(
+      'Compact offline manifest V2 active key ID and private-key registry must both be present; refusing a destructive partial upgrade.',
+    );
+  }
+  if (!hasManifestActiveKeyId) {
+    const deploymentSuffix = (environment.TIXKIT_DEPLOYMENT_ID ?? '').replace(/^compact_/u, '');
+    const manifestKey = offlineManifestSigningKey(
+      deploymentSuffix || randomUUID().replaceAll('-', ''),
+    );
+    additions.push(`OFFLINE_MANIFEST_ACTIVE_KEY_ID=${manifestKey.keyId}`);
+    additions.push(`OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=${manifestKey.registryJson}`);
+  }
+  if (additions.length === 0) {
     validateCompactEnvironment({ environmentPath });
     return false;
   }
@@ -197,7 +239,7 @@ export function upgradeCompactEnvironment({ environmentPath = envFile } = {}) {
     throw new Error(`Compact environment must have mode 0600; found ${mode.toString(8)}.`);
   const original = readFileSync(environmentPath, 'utf8');
   const separator = original.endsWith('\n') ? '' : '\n';
-  const upgraded = `${original}${separator}DASHBOARD_CURSOR_SIGNING_KEY=${secret(48)}\n`;
+  const upgraded = `${original}${separator}${additions.join('\n')}\n`;
   const temporaryPath = `${environmentPath}.upgrade-${randomUUID()}`;
   try {
     writeFileSync(temporaryPath, upgraded, { flag: 'wx', mode: 0o600 });
@@ -291,6 +333,42 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
     const value = environment[key] ?? '';
     if (value.length < 32 || /replace|placeholder|password|secret/i.test(value))
       throw new Error(`Compact environment contains an unsafe value for ${key}.`);
+  }
+  const activeManifestKeyId = environment.OFFLINE_MANIFEST_ACTIVE_KEY_ID ?? '';
+  try {
+    const manifestKeys = JSON.parse(environment.OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON ?? '');
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(activeManifestKeyId) ||
+      !Array.isArray(manifestKeys) ||
+      manifestKeys.length === 0 ||
+      !manifestKeys.some((entry) => entry?.keyId === activeManifestKeyId)
+    ) {
+      throw new Error('invalid registry');
+    }
+    const keyIds = new Set();
+    const now = Date.now();
+    for (const entry of manifestKeys) {
+      const notBefore = Date.parse(entry?.notBefore ?? '');
+      const notAfter = Date.parse(entry?.notAfter ?? '');
+      if (
+        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(entry?.keyId ?? '') ||
+        keyIds.has(entry.keyId) ||
+        typeof entry?.privateKeyPem !== 'string' ||
+        createPrivateKey(entry.privateKeyPem).asymmetricKeyDetails?.namedCurve !== 'prime256v1' ||
+        !Number.isFinite(notBefore) ||
+        !Number.isFinite(notAfter) ||
+        new Date(notBefore).toISOString() !== entry.notBefore ||
+        new Date(notAfter).toISOString() !== entry.notAfter ||
+        notAfter <= notBefore ||
+        (entry.keyId === activeManifestKeyId &&
+          (notBefore > now || notAfter < now + 24 * 60 * 60 * 1000))
+      ) {
+        throw new Error('invalid key');
+      }
+      keyIds.add(entry.keyId);
+    }
+  } catch {
+    throw new Error('Compact environment contains an invalid offline manifest V2 key registry.');
   }
   if (
     (environment.MINIO_ROOT_USER ?? '').length < 16 ||

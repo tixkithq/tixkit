@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 
 import type { FastifyServerOptions } from 'fastify';
+import { loadOfflineManifestSigningRegistry } from '../services/offline-manifest-signing.js';
 
 export type TrustProxyConfig = NonNullable<FastifyServerOptions['trustProxy']>;
 
@@ -174,6 +175,8 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
     'REDIS_URL',
     'METRICS_BEARER_TOKEN',
     'DASHBOARD_CURSOR_SIGNING_KEY',
+    'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+    'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
     'API_BASE_URL',
     'ADMIN_DASHBOARD_URL',
     'CORS_ALLOWED_ORIGINS',
@@ -203,6 +206,8 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
     );
   }
   requireExactHttpsOrigin('ADMIN_DASHBOARD_URL', process.env.ADMIN_DASHBOARD_URL);
+  requireExactHttpsOrigin('API_BASE_URL', process.env.API_BASE_URL);
+  loadOfflineManifestSigningRegistry(process.env);
 
   const localEndpoints = [
     [requiredDatabaseVariable, databaseUrl()],

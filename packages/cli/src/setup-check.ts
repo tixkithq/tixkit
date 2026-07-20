@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { createPrivateKey } from 'node:crypto';
 import { parseEnvFile, isPlaceholderValue } from './env.js';
 
 export type ValidationMode = 'local' | 'provider' | 'production';
@@ -148,6 +149,18 @@ export const ENV_RULES: EnvRule[] = [
     variable: 'OFFLINE_MANIFEST_KEY_ID',
     requiredFor: ['production'],
     message: 'Offline manifest key ID is required in production.',
+  },
+  {
+    variable: 'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+    requiredFor: ['production'],
+    message: 'An active ES256 offline manifest key ID is required in production.',
+    guide: GUIDES.deploy,
+  },
+  {
+    variable: 'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+    requiredFor: ['production'],
+    message: 'A versioned P-256 offline manifest private-key registry is required in production.',
+    guide: GUIDES.deploy,
   },
   {
     variable: 'WIDGET_IMPRESSION_HASH_SECRET',
@@ -404,8 +417,78 @@ export async function validateEnvFile(
     }
   }
 
+  const manifestRegistryRaw = parsed.entries.get('OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON');
+  const manifestActiveKeyId = parsed.entries.get('OFFLINE_MANIFEST_ACTIVE_KEY_ID') ?? '';
+  if (manifestRegistryRaw && !isPlaceholderValue(manifestRegistryRaw)) {
+    try {
+      const registry = JSON.parse(manifestRegistryRaw) as unknown;
+      if (
+        !Array.isArray(registry) ||
+        registry.length === 0 ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(manifestActiveKeyId) ||
+        !registry.some(
+          (entry) =>
+            entry !== null &&
+            typeof entry === 'object' &&
+            (entry as Record<string, unknown>).keyId === manifestActiveKeyId,
+        )
+      ) {
+        throw new Error('invalid registry');
+      }
+      const keyIds = new Set<string>();
+      for (const rawEntry of registry) {
+        if (rawEntry === null || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) {
+          throw new Error('invalid key');
+        }
+        const entry = rawEntry as Record<string, unknown>;
+        if (
+          typeof entry.keyId !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(entry.keyId) ||
+          keyIds.has(entry.keyId) ||
+          typeof entry.privateKeyPem !== 'string' ||
+          typeof entry.notBefore !== 'string' ||
+          typeof entry.notAfter !== 'string'
+        ) {
+          throw new Error('invalid key fields');
+        }
+        keyIds.add(entry.keyId);
+        const notBefore = Date.parse(entry.notBefore);
+        const notAfter = Date.parse(entry.notAfter);
+        if (
+          !Number.isFinite(notBefore) ||
+          !Number.isFinite(notAfter) ||
+          new Date(notBefore).toISOString() !== entry.notBefore ||
+          new Date(notAfter).toISOString() !== entry.notAfter ||
+          notAfter <= notBefore ||
+          createPrivateKey(entry.privateKeyPem).asymmetricKeyDetails?.namedCurve !== 'prime256v1'
+        ) {
+          throw new Error('invalid key material');
+        }
+        if (
+          entry.keyId === manifestActiveKeyId &&
+          (notBefore > Date.now() || notAfter < Date.now() + 24 * 60 * 60 * 1000)
+        ) {
+          throw new Error('active key window');
+        }
+      }
+    } catch {
+      issues.push({
+        variable: 'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+        severity: 'error',
+        mode: detectedMode,
+        message:
+          'Offline manifest V2 keys must be unique P-256 private keys with canonical validity windows, including an active key valid for at least 24 hours.',
+        guide: GUIDES.deploy,
+      });
+    }
+  }
+
   // Warn when signing secrets are present but look like placeholders in non-production modes.
-  for (const secretVar of ['QR_SIGNING_SECRET', 'OFFLINE_MANIFEST_SIGNING_KEY']) {
+  for (const secretVar of [
+    'QR_SIGNING_SECRET',
+    'OFFLINE_MANIFEST_SIGNING_KEY',
+    'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+  ]) {
     const value = parsed.entries.get(secretVar);
     if (value !== undefined && isPlaceholderValue(value)) {
       issues.push({

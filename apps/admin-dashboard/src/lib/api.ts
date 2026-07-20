@@ -33,6 +33,10 @@ import {
   readinessStatuses,
   workspaceReadinessStepIds,
 } from '@tixkit/domain';
+import type {
+  OfflineManifestV2,
+  OfflineManifestVerificationKeySet,
+} from '@tixkit/domain/offline-checkin';
 import { queryToParams } from '@tixkit/admin-table-core';
 import {
   ordersTableSchema,
@@ -1055,6 +1059,23 @@ export type LiveCheckInScanResponse = {
   outcome: CheckInScanResult['status'] | 'not_found';
   ticketId?: string;
   message?: string;
+};
+
+export type OfflineSyncResult = {
+  accepted: number;
+  duplicates: number;
+  invalid: number;
+  results: Array<{
+    qrHash: string;
+    outcome:
+      | 'accepted'
+      | 'duplicate'
+      | 'invalid'
+      | 'not_found'
+      | 'revoked'
+      | 'wrong_event'
+      | 'wrong_list';
+  }>;
 };
 
 export type MessageChannel = 'email' | 'sms' | 'both';
@@ -2467,6 +2488,19 @@ export type AdminApi = {
     input?: { since?: string; afterId?: string; limit?: number },
   ): Promise<ApiResult<CheckInActivityPage>>;
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>;
+  getOfflineManifestV2(
+    eventId: string,
+    checkInListId: string,
+  ): Promise<ApiResult<OfflineManifestV2>>;
+  getOfflineManifestVerificationKeys(
+    eventId: string,
+    options?: { bypassCache?: boolean },
+  ): Promise<ApiResult<OfflineManifestVerificationKeySet>>;
+  syncOfflineScans(
+    checkInListId: string,
+    scans: Array<{ qrHash: string; scannedAt: string; offline: true }>,
+    idempotencyKey: string,
+  ): Promise<ApiResult<OfflineSyncResult>>;
 
   listContentDocuments(input?: {
     limit?: number;
@@ -7285,6 +7319,28 @@ export const adminApi: AdminApi = {
         });
       },
     );
+  },
+
+  async getOfflineManifestV2(eventId, checkInListId) {
+    return request<OfflineManifestV2>(
+      `/v1/events/${eventId}/check-in-lists/${checkInListId}/manifest?version=2`,
+      { method: 'GET', cache: 'no-store' },
+    );
+  },
+
+  async getOfflineManifestVerificationKeys(eventId, options) {
+    return request<OfflineManifestVerificationKeySet>(
+      `/v1/events/${eventId}/check-in-manifest-keys`,
+      { method: 'GET', cache: options?.bypassCache ? 'reload' : 'default' },
+    );
+  },
+
+  async syncOfflineScans(checkInListId, scans, idempotencyKey) {
+    return request<OfflineSyncResult>('/v1/check-ins/sync', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ checkInListId, scans }),
+    });
   },
 
   // ---- Content documents ----

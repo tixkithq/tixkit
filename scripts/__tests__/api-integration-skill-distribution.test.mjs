@@ -26,13 +26,13 @@ test('validates and stages the API integration skill independently from API cont
   const output = mkdtempSync(resolve(tmpdir(), 'tixkit-agent-skill-stage-'));
   try {
     const staged = stageAgentIntegrationSkillArtifacts(distribution, output, root);
-    assert.equal(staged.length, 3);
+    assert.equal(staged.length, 4);
     assert.equal(
-      staged.some((name) => /^contract-agent-skill-2026-08-22-[a-f0-9]{64}\.json$/u.test(name)),
+      staged.some((name) => /^contract-agent-skill-2026-08-23-[a-f0-9]{64}\.json$/u.test(name)),
       true,
     );
     const envelope = JSON.parse(readFileSync(resolve(output, staged[0]), 'utf8'));
-    assert.match(envelope.apiVersion, /^2026-08-(?:20|21|22)$/u);
+    assert.match(envelope.apiVersion, /^2026-08-(?:20|21|22|23)$/u);
     assert.equal(
       envelope.files.some(({ name }) => name === 'SKILL.md'),
       true,

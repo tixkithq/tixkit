@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "generator": "@tixkit/api-integration-skill:local-evaluation:v1",
+  "apiVersion": "2026-08-23",
+  "generationMode": "local-evaluation",
+  "sourceReleaseManifestSha256": "29c09c7c75525912f557b33ebc75710152c0fdf61bc4731205b8e5c6950a922e",
+  "artifacts": [
+    {
+      "name": "agents/openai.yaml",
+      "sha256": "c2c9551123b98cf5fe609eeac9b7bebe1f5774139732b800581f15238b7f062a",
+      "size": 210
+    },
+    {
+      "name": "references/contract.json",
+      "sha256": "213e9e587feb7c3a5441ce2d3352ca8c204f0c693332322153f6ce8a54227ee1",
+      "size": 2959
+    },
+    {
+      "name": "references/examples.json",
+      "sha256": "c58bc20981ad6e6ae2c21f37dc40182f5dee91231b1b4bf62d176276a270a704",
+      "size": 420
+    },
+    {
+      "name": "references/openapi.json",
+      "sha256": "49d6abe3f4c7675475d90d5f705d9ddb0136464964ec3b84c5e685f9ee8de172",
+      "size": 1392145
+    },
+    {
+      "name": "references/operations.json",
+      "sha256": "7ee8f510d1c48947dd026c5a029618f0b75d9e60ac30564864becd8ff90d3f4f",
+      "size": 148110
+    },
+    {
+      "name": "references/webhook-events.json",
+      "sha256": "0c8c4a0a7a2d67fd5f01861c38e6b796a195bc7054efe427708624a7d0daf688",
+      "size": 13246
+    },
+    {
+      "name": "SKILL.md",
+      "sha256": "f2213dccc1661520df1c0f08ef10c5ab9f6f674784c78a2e0d244845f1d6d662",
+      "size": 2491
+    }
+  ]
+}

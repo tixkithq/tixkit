@@ -19,6 +19,7 @@ import {
   type EventPageDocumentV2,
   type Event,
   type OfflineManifest,
+  type OfflineManifestV2,
   type OAuthApplication,
   type Order,
   type OrderDetail,
@@ -2220,6 +2221,42 @@ describe('TixkitClient new resource methods', () => {
     expect(call.headers['X-Device-Secret']).toBe('scanner-secret');
   });
 
+  it('checkInLists explicitly negotiates V2 and discovers authenticated public keys', async () => {
+    const manifest: OfflineManifestV2 = {
+      version: 2,
+      algorithm: 'ES256',
+      issuer: 'https://api.test',
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      checkInListId: 'cil_1',
+      generatedAt: '2026-07-18T12:00:00.000Z',
+      expiresAt: '2026-07-19T12:00:00.000Z',
+      keyId: 'manifest-2026-07',
+      signature: 'a'.repeat(86),
+      tickets: [],
+    };
+    const fetchMock = mockFetch(200, manifest);
+    const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const headers = { 'X-Device-Id': 'sd_1', 'X-Device-Secret': 'secret' };
+
+    await expect(client.checkInLists.getManifest('evt_1', 'cil_1', headers, 2)).resolves.toEqual(
+      manifest,
+    );
+    expect(getCall(fetchMock).url).toBe(
+      'https://api.test/v1/events/evt_1/check-in-lists/cil_1/manifest?version=2',
+    );
+
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ version: 1, issuer: 'https://api.test', keys: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await client.checkInLists.getManifestVerificationKeys('evt_1', headers);
+    expect(getCall(fetchMock).url).toBe('https://api.test/v1/events/evt_1/check-in-manifest-keys');
+  });
+
   it('checkInLists exposes durable activity history and resumable SSE', async () => {
     const fm = mockFetch(200, {
       items: [],
@@ -3975,7 +4012,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-22',
+        'X-Tixkit-Version': '2026-08-23',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
@@ -4076,7 +4113,7 @@ describe('TixkitClient new resource methods', () => {
       namespace,
       key: 'event_context',
       content,
-      retentionExpiresAt: '2026-08-22T00:00:00.000Z',
+      retentionExpiresAt: '2026-08-23T00:00:00.000Z',
       idempotencyKey: 'memory-create-000001',
     });
     await c.agentMemory.inspect(namespace, 'memory-inspect-00001');

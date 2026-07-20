@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { PassThrough } from 'node:stream';
 import { ClerkAuthService } from '../../auth/clerk.js';
@@ -65,6 +65,15 @@ import {
 } from '../../services/check-in-activity-events.js';
 import { writeSseEvent } from '../../services/sse.js';
 import { redactErrorFields } from '@tixkit/shared';
+import {
+  buildOfflineManifestV1,
+  buildOfflineManifestV2,
+  offlineManifestVerificationKeySet,
+  verifyOfflineManifestV1,
+} from '../../services/offline-manifest-signing.js';
+
+export const buildOfflineManifest = buildOfflineManifestV1;
+export const verifyOfflineManifestSignature = verifyOfflineManifestV1;
 
 type Principal = NonNullable<FastifyRequest['principal']>;
 type CheckInListRow = NonNullable<Awaited<ReturnType<CheckInListRepository['findById']>>>;
@@ -779,13 +788,17 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send(serializeCheckInList(list));
   });
 
-  app.get('/events/:eventId/check-in-lists/:checkInListId/manifest', async (request) => {
+  app.get('/events/:eventId/check-in-lists/:checkInListId/manifest', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'checkins.read');
     const { eventId, checkInListId } = request.params as {
       eventId: string;
       checkInListId: string;
     };
+    const { version } = request.query as { version?: string };
+    if (version !== undefined && version !== '1' && version !== '2') {
+      throw new ValidationError('Offline manifest version must be 1 or 2');
+    }
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
 
@@ -825,7 +838,26 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         { maxTickets: MAX_OFFLINE_MANIFEST_TICKETS },
       );
     }
-    return buildOfflineManifest({ eventId, checkInListId, rows });
+    reply.header('Cache-Control', 'no-store');
+    return version === '2'
+      ? buildOfflineManifestV2({
+          tenantId: principal.tenantId,
+          eventId,
+          checkInListId,
+          rows,
+        })
+      : buildOfflineManifestV1({ eventId, checkInListId, rows });
+  });
+
+  app.get('/events/:eventId/check-in-manifest-keys', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'checkins.read');
+    const { eventId } = request.params as { eventId: string };
+    const event = await loadEvent(eventId);
+    requireEventAccess(principal, event, eventId);
+    reply.header('Cache-Control', 'private, max-age=300, must-revalidate');
+    reply.header('Vary', 'Authorization');
+    return offlineManifestVerificationKeySet();
   });
 
   app.get('/events/:eventId/check-in-lists/:checkInListId/activity', async (request) => {
@@ -2613,117 +2645,6 @@ export async function processScan(input: {
     };
   }
   return { outcome: 'duplicate', ticketId: ticket.id, qrHash: input.qrHash };
-}
-
-type OfflineManifestTicketRow = {
-  ticket_id: string;
-  ticket_type_id: string;
-  event_occurrence_id?: string | null;
-  qr_hash: string;
-  status: string;
-  first_name: string | null;
-  last_name: string | null;
-  email: string;
-};
-
-type SignedOfflineManifest = {
-  eventId: string;
-  checkInListId: string;
-  generatedAt: string;
-  expiresAt: string;
-  keyId: string;
-  signature: string;
-  tickets: {
-    ticketId: string;
-    ticketTypeId: string;
-    eventOccurrenceId?: string;
-    attendeeName: string;
-    qrHash: string;
-    status: string;
-  }[];
-};
-
-function getManifestSigningKey(): string {
-  const configuredKey = process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? process.env.QR_SIGNING_SECRET;
-  if (!configuredKey && process.env.NODE_ENV === 'production') {
-    throw new Error('OFFLINE_MANIFEST_SIGNING_KEY or QR_SIGNING_SECRET is required in production');
-  }
-  return configuredKey ?? 'tixkit-manifest-secret-dev-only';
-}
-
-function getManifestKeyId(): string {
-  return process.env.OFFLINE_MANIFEST_KEY_ID ?? 'manifest:v1';
-}
-
-export function buildOfflineManifest(input: {
-  eventId: string;
-  checkInListId: string;
-  rows: OfflineManifestTicketRow[];
-  generatedAt?: Date;
-  ttlMs?: number;
-}): SignedOfflineManifest {
-  const generatedAt = input.generatedAt ?? new Date();
-  const expiresAt = new Date(generatedAt.getTime() + (input.ttlMs ?? 24 * 60 * 60 * 1000));
-  const keyId = getManifestKeyId();
-  const signingKey = getManifestSigningKey();
-
-  const tickets = input.rows.map((row) => {
-    // Drop plaintext email; use only attendeeName (first + last name, no email fallback)
-    // to minimize PII exposure in offline manifests.
-    const attendeeName = [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '';
-    return {
-      ticketId: row.ticket_id,
-      ticketTypeId: row.ticket_type_id,
-      eventOccurrenceId: row.event_occurrence_id ?? undefined,
-      attendeeName,
-      qrHash: row.qr_hash,
-      status: row.status,
-    };
-  });
-
-  // Build the manifest payload for signing (excluding the signature field itself).
-  const manifestPayload = {
-    eventId: input.eventId,
-    checkInListId: input.checkInListId,
-    generatedAt: generatedAt.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    keyId,
-    tickets,
-  };
-
-  const signature = createHmac('sha256', signingKey)
-    .update(JSON.stringify(manifestPayload))
-    .digest('hex');
-
-  return {
-    ...manifestPayload,
-    signature,
-  };
-}
-
-/**
- * Verifies the HMAC signature on a signed offline manifest.
- * Returns true if the signature is valid.
- */
-export function verifyOfflineManifestSignature(manifest: {
-  eventId: string;
-  checkInListId: string;
-  generatedAt: string;
-  expiresAt: string;
-  keyId: string;
-  signature: string;
-  tickets: unknown[];
-}): boolean {
-  const signingKey = getManifestSigningKey();
-  const { signature, ...payload } = manifest;
-  if (!/^[0-9a-f]{64}$/i.test(signature)) {
-    return false;
-  }
-  const expectedSignature = createHmac('sha256', signingKey)
-    .update(JSON.stringify(payload))
-    .digest('hex');
-
-  return timingSafeEqual(Buffer.from(expectedSignature, 'hex'), Buffer.from(signature, 'hex'));
 }
 
 type CheckInActivityItem = {

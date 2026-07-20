@@ -60,7 +60,7 @@ const clerkPublishableKey = useLiveClerk
   ? (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY ?? '')
   : '';
 const clerkWebhookSecret = useLiveClerk ? (process.env.CLERK_WEBHOOK_SECRET ?? '') : '';
-const useAdminDevServer = !useLiveClerk;
+const useAdminDevServer = !useLiveClerk && process.env.E2E_ADMIN_DEV_SERVER !== '0';
 const walletPassEnv = useWalletPasses ? createWalletPassEnv(apiUrl) : {};
 const s3Env = {
   S3_ENDPOINT: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
@@ -74,6 +74,7 @@ const s3Env = {
 };
 const localApiEnv = {
   NODE_ENV: 'development',
+  API_BASE_URL: apiUrl,
   E2E_MEDIA_REPLACEMENT_BARRIER: '1',
   PORT: apiPort,
   DATABASE_URL: databaseUrl,
@@ -94,6 +95,18 @@ const localApiEnv = {
   OFFLINE_MANIFEST_SIGNING_KEY:
     process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? 'ci-offline-manifest-signing-key',
   OFFLINE_MANIFEST_KEY_ID: process.env.OFFLINE_MANIFEST_KEY_ID ?? 'manifest:ci',
+  OFFLINE_MANIFEST_ACTIVE_KEY_ID: process.env.OFFLINE_MANIFEST_ACTIVE_KEY_ID ?? 'manifest-v2-ci',
+  OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON:
+    process.env.OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON ??
+    JSON.stringify([
+      {
+        keyId: 'manifest-v2-ci',
+        privateKeyPem:
+          '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQguuqSuoL6HAyrMjU7\nQqbeBD0vTTJjUyVvjYCenHz2YnahRANCAATBXJgyEdtghsSJWFjGH55lEfbPnMZk\nI3FQVU+ihGu0ZWb3laTbq8k9W2H2B3BIZ+BLtbL6QRIsfcYecnFXq+W4\n-----END PRIVATE KEY-----',
+        notBefore: '2020-01-01T00:00:00.000Z',
+        notAfter: '2100-01-01T00:00:00.000Z',
+      },
+    ]),
   TIXKIT_PREVIEW_TOKEN_SECRET: process.env.TIXKIT_PREVIEW_TOKEN_SECRET ?? 'ci-preview-token-secret',
   TIXKIT_MIGRATION_CURSOR_ACTIVE_KEY_ID: migrationCursorKeyId,
   TIXKIT_MIGRATION_CURSOR_KEYS: migrationCursorKeys,
@@ -152,6 +165,16 @@ const checkoutPublicEnv = {
 };
 const adminPublicEnv = {
   NODE_ENV: useAdminDevServer ? 'development' : 'production',
+  TIXKIT_DEPLOYMENT_PROFILE: useLiveClerk
+    ? 'production'
+    : useAdminDevServer
+      ? 'development'
+      : 'test',
+  API_BASE_URL: apiUrl,
+  INTERNAL_API_BASE_URL: apiUrl,
+  TIXKIT_CHECKOUT_URL: checkoutUrl,
+  S3_PUBLIC_ENDPOINT: s3Env.S3_ENDPOINT,
+  TIXKIT_BUILD_REVISION: `e2e-${playwrightRunId}`,
   NEXT_PUBLIC_DISABLE_REACT_DEVTOOLS: '1',
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: `${apiUrl}/v1`,
   NEXT_PUBLIC_ADMIN_API_BASE_URL: apiUrl,
@@ -159,7 +182,7 @@ const adminPublicEnv = {
   PUBLIC_CHECKOUT_URL: checkoutUrl,
   NEXT_PUBLIC_CHECKOUT_URL: checkoutUrl,
   ...(useAdminDevServer ? { NEXT_DIST_DIR: adminNextDistDir } : {}),
-  ...(useAdminDevServer ? { AUTH_PROVIDER: 'dev', NEXT_PUBLIC_AUTH_PROVIDER: 'dev' } : {}),
+  ...(!useLiveClerk ? { AUTH_PROVIDER: 'dev', NEXT_PUBLIC_AUTH_PROVIDER: 'dev' } : {}),
   ...(useLiveClerk && clerkPublishableKey ? { NEXT_PUBLIC_AUTH_PROVIDER: 'clerk' } : {}),
 };
 

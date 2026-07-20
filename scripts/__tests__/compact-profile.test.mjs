@@ -622,6 +622,42 @@ test('Compact rejects weak, placeholder, and permissive existing environments', 
   }
 });
 
+test('Compact rejects every offline manifest registry that the API runtime rejects', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-compact-manifest-validation-'));
+  const environmentPath = resolve(directory, '.env');
+  try {
+    initializeCompactEnvironment({ environmentPath });
+    const validEnvironment = readFileSync(environmentPath, 'utf8');
+    const registryLine = /^OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=(.+)$/mu.exec(
+      validEnvironment,
+    );
+    assert.ok(registryLine);
+    const [key] = JSON.parse(registryLine[1]);
+    const registries = [
+      [key, { ...key }],
+      [{ ...key, notBefore: '2020-01-01T00:00:00Z' }],
+      [{ ...key, notBefore: new Date(Date.now() + 60_000).toISOString() }],
+      [{ ...key, notAfter: new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString() }],
+    ];
+    for (const registry of registries) {
+      writeFileSync(
+        environmentPath,
+        validEnvironment.replace(
+          /^OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=.*$/mu,
+          `OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=${JSON.stringify(registry)}`,
+        ),
+        { mode: 0o600 },
+      );
+      assert.throws(
+        () => validateCompactEnvironment({ environmentPath }),
+        /invalid offline manifest V2 key registry/u,
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('Compact retains historical default image behavior without rewriting its environment', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-compact-legacy-images-'));
   const environmentPath = resolve(directory, '.env');
@@ -772,6 +808,50 @@ test('Compact upgrades an existing environment with a unique dashboard cursor ke
   }
 });
 
+test('Compact upgrades legacy V2 manifest keys atomically and rejects partial key state', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-compact-manifest-key-upgrade-'));
+  const legacy = resolve(directory, '.env-legacy');
+  const missingActive = resolve(directory, '.env-missing-active');
+  const missingRegistry = resolve(directory, '.env-missing-registry');
+  try {
+    initializeCompactEnvironment({ environmentPath: legacy });
+    const complete = readFileSync(legacy, 'utf8');
+    const withoutActive = complete.replace(/^OFFLINE_MANIFEST_ACTIVE_KEY_ID=.*\n/mu, '');
+    const withoutRegistry = complete.replace(
+      /^OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=.*\n/mu,
+      '',
+    );
+    writeFileSync(
+      legacy,
+      withoutActive.replace(/^OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=.*\n/mu, ''),
+      { mode: 0o600 },
+    );
+    writeFileSync(missingActive, withoutActive, { mode: 0o600 });
+    writeFileSync(missingRegistry, withoutRegistry, { mode: 0o600 });
+
+    assert.equal(upgradeCompactEnvironment({ environmentPath: legacy }), true);
+    const upgraded = readFileSync(legacy, 'utf8');
+    assert.equal((upgraded.match(/^OFFLINE_MANIFEST_ACTIVE_KEY_ID=/gmu) ?? []).length, 1);
+    assert.equal(
+      (upgraded.match(/^OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON=/gmu) ?? []).length,
+      1,
+    );
+    assert.doesNotThrow(() => validateCompactEnvironment({ environmentPath: legacy }));
+    assert.equal(upgradeCompactEnvironment({ environmentPath: legacy }), false);
+
+    for (const environmentPath of [missingActive, missingRegistry]) {
+      const before = readFileSync(environmentPath, 'utf8');
+      assert.throws(
+        () => upgradeCompactEnvironment({ environmentPath }),
+        /refusing a destructive partial upgrade/u,
+      );
+      assert.equal(readFileSync(environmentPath, 'utf8'), before);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('Compact-generated portability environment satisfies runtime parsers and Compose isolation', (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-compact-portability-'));
   const environmentPath = resolve(directory, '.env');
@@ -906,6 +986,17 @@ portableCutoverTrustFromEnvironment(environment);`,
       ),
     );
     assert.equal(rendered.services.api.environment.TIXKIT_OPERATING_MODEL, 'self-hosted');
+    for (const variable of [
+      'OFFLINE_MANIFEST_SIGNING_KEY',
+      'OFFLINE_MANIFEST_KEY_ID',
+      'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+      'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+    ]) {
+      assert.ok(rendered.services.api.environment[variable]);
+      for (const service of ['storage-init', 'migrate', 'seed', 'worker', 'checkout', 'admin']) {
+        assert.equal(rendered.services[service].environment[variable], undefined, service);
+      }
+    }
     assert.match(
       rendered.services.api.environment.PORTABILITY_BUNDLE_SIGNING_PRIVATE_KEY_BASE64,
       /^[A-Za-z0-9+/]+=*$/u,

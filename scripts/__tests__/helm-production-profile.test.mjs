@@ -37,6 +37,10 @@ const externalSecretKeys = [
   'STRIPE_PUBLISHABLE_KEY',
   'METRICS_BEARER_TOKEN',
   'DASHBOARD_CURSOR_SIGNING_KEY',
+  'OFFLINE_MANIFEST_SIGNING_KEY',
+  'OFFLINE_MANIFEST_KEY_ID',
+  'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+  'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
   'CLERK_SECRET_KEY',
   'CLERK_PUBLISHABLE_KEY',
   'CLERK_WEBHOOK_SECRET',
@@ -154,7 +158,51 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     { name: 'UPLOAD_MALWARE_SCANNER', value: 'clamav' },
     { name: 'CLAMAV_HOST', value: 'clamav.internal.example' },
     { name: 'CLAMAV_PORT', value: '3310' },
+    {
+      name: 'OFFLINE_MANIFEST_SIGNING_KEY',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_SIGNING_KEY',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
+    {
+      name: 'OFFLINE_MANIFEST_KEY_ID',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_KEY_ID',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
+    {
+      name: 'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
+    {
+      name: 'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
   ]);
+  for (const deployment of deployments.filter((candidate) => candidate !== api)) {
+    assert.equal(
+      deployment.spec.template.spec.containers[0].env.some((entry) =>
+        entry.name.startsWith('OFFLINE_MANIFEST_'),
+      ),
+      false,
+    );
+  }
   assert.equal(checkout.spec.template.spec.containers[0].readinessProbe.httpGet.path, '/ready');
   assert.equal(checkout.spec.template.spec.containers[0].livenessProbe.httpGet.path, '/health');
   const checkoutContainer = checkout.spec.template.spec.containers[0];
@@ -553,7 +601,82 @@ test('Evaluation render declares its runtime profile and MinIO-compatible encryp
     { name: 'UPLOAD_MALWARE_SCANNER', value: '' },
     { name: 'CLAMAV_HOST', value: '' },
     { name: 'CLAMAV_PORT', value: '3310' },
+    {
+      name: 'OFFLINE_MANIFEST_SIGNING_KEY',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_SIGNING_KEY',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
+    {
+      name: 'OFFLINE_MANIFEST_KEY_ID',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_KEY_ID',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
+    {
+      name: 'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
+    {
+      name: 'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+      valueFrom: {
+        secretKeyRef: {
+          key: 'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+          name: 'tixkit-tixkit-manifest',
+        },
+      },
+    },
   ]);
+  const manifestSecret = rendered.find(
+    (resource) => resource.kind === 'Secret' && resource.metadata.name.endsWith('-manifest'),
+  );
+  assert.equal(manifestSecret.stringData.OFFLINE_MANIFEST_ACTIVE_KEY_ID, 'manifest-v2-evaluation');
+  assert.equal(
+    manifestSecret.stringData.OFFLINE_MANIFEST_SIGNING_KEY,
+    'evaluation-v1-offline-manifest-key-not-for-production',
+  );
+  assert.equal(manifestSecret.stringData.OFFLINE_MANIFEST_KEY_ID, 'manifest-v1-evaluation');
+  const commonSecret = rendered.find(
+    (resource) => resource.kind === 'Secret' && !resource.metadata.name.endsWith('-manifest'),
+  );
+  assert.equal(commonSecret.stringData.OFFLINE_MANIFEST_ACTIVE_KEY_ID, undefined);
+  assert.equal(commonSecret.stringData.OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON, undefined);
+  assert.equal(commonSecret.stringData.OFFLINE_MANIFEST_SIGNING_KEY, undefined);
+  assert.equal(commonSecret.stringData.OFFLINE_MANIFEST_KEY_ID, undefined);
+  assert.doesNotThrow(() =>
+    execFileSync(
+      'bun',
+      [
+        '--eval',
+        "import { buildOfflineManifestV1, loadOfflineManifestSigningRegistry, verifyOfflineManifestV1 } from './packages/api/src/services/offline-manifest-signing.ts'; loadOfflineManifestSigningRegistry(process.env); const manifest=buildOfflineManifestV1({eventId:'evt_eval',checkInListId:'cil_eval',rows:[]}); if(!verifyOfflineManifestV1(manifest)) throw new Error('evaluation V1 manifest verification failed');",
+      ],
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          NODE_ENV: 'production',
+          API_BASE_URL: 'https://api.evaluation.example.test',
+          OFFLINE_MANIFEST_SIGNING_KEY: manifestSecret.stringData.OFFLINE_MANIFEST_SIGNING_KEY,
+          OFFLINE_MANIFEST_KEY_ID: manifestSecret.stringData.OFFLINE_MANIFEST_KEY_ID,
+          OFFLINE_MANIFEST_ACTIVE_KEY_ID: manifestSecret.stringData.OFFLINE_MANIFEST_ACTIVE_KEY_ID,
+          OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON:
+            manifestSecret.stringData.OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON,
+        },
+        stdio: 'pipe',
+      },
+    ),
+  );
   assert.equal(
     rendered.some(
       (resource) =>
@@ -562,6 +685,42 @@ test('Evaluation render declares its runtime profile and MinIO-compatible encryp
     ),
     false,
   );
+});
+
+test('Create-mode offline key rotation rolls only the API workload', () => {
+  const baseline = resources(render(evaluation));
+  const rotated = resources(
+    render(evaluation, ['secrets.offlineManifestActiveKeyId=manifest-v2-evaluation-rotated']),
+  );
+  const annotationByComponent = (rendered) =>
+    Object.fromEntries(
+      rendered
+        .filter((resource) => resource.kind === 'Deployment')
+        .map((resource) => [
+          resource.metadata.labels['app.kubernetes.io/component'],
+          resource.spec.template.metadata.annotations,
+        ]),
+    );
+  const before = annotationByComponent(baseline);
+  const after = annotationByComponent(rotated);
+  assert.notEqual(
+    before.api['checksum/offline-manifest-key'],
+    after.api['checksum/offline-manifest-key'],
+  );
+  for (const component of ['worker', 'checkout', 'admin']) {
+    assert.deepEqual(after[component], before[component]);
+    assert.equal(after[component]['checksum/offline-manifest-key'], undefined);
+  }
+});
+
+test('Offline manifest Secret retains its operational suffix at the Kubernetes name boundary', () => {
+  const override = 'a'.repeat(63);
+  const rendered = resources(render(evaluation, [`fullnameOverride=${override}`]));
+  const manifestSecret = rendered.find(
+    (resource) => resource.kind === 'Secret' && resource.metadata.name.endsWith('-manifest'),
+  );
+  assert.equal(manifestSecret.metadata.name, `${'a'.repeat(54)}-manifest`);
+  assert.equal(manifestSecret.metadata.name.length, 63);
 });
 
 test('Evaluation networking keeps core policies while its scanner remains disabled', () => {
@@ -788,6 +947,10 @@ test('External Secret inventory follows MySQL, workload identity, and Temporal C
     'STRIPE_PUBLISHABLE_KEY',
     'METRICS_BEARER_TOKEN',
     'DASHBOARD_CURSOR_SIGNING_KEY',
+    'OFFLINE_MANIFEST_SIGNING_KEY',
+    'OFFLINE_MANIFEST_KEY_ID',
+    'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+    'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
     'CLERK_SECRET_KEY',
     'CLERK_PUBLISHABLE_KEY',
     'CLERK_WEBHOOK_SECRET',
@@ -808,10 +971,29 @@ test('External Secret inventory follows MySQL, workload identity, and Temporal C
       ...externalSecretDataOverrides(keys),
     ]),
   );
-  const mappedKeys = rendered
-    .find((resource) => resource.kind === 'ExternalSecret')
-    .spec.data.map((entry) => entry.secretKey);
-  assert.deepEqual(mappedKeys, keys);
+  const externalSecrets = rendered.filter((resource) => resource.kind === 'ExternalSecret');
+  assert.equal(externalSecrets.length, 2);
+  const manifestKeys = [
+    'OFFLINE_MANIFEST_SIGNING_KEY',
+    'OFFLINE_MANIFEST_KEY_ID',
+    'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+    'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+  ];
+  const commonKeys = keys.filter((key) => !manifestKeys.includes(key));
+  const commonSecret = externalSecrets.find(
+    (resource) => resource.spec.target.name === 'tixkit-production-secrets',
+  );
+  const manifestSecret = externalSecrets.find(
+    (resource) => resource.spec.target.name === 'tixkit-tixkit-manifest',
+  );
+  assert.deepEqual(
+    commonSecret.spec.data.map((entry) => entry.secretKey),
+    commonKeys,
+  );
+  assert.deepEqual(
+    manifestSecret.spec.data.map((entry) => entry.secretKey),
+    manifestKeys,
+  );
 });
 
 test('Helm rejects OIDC until the admin dashboard has an OIDC browser client', () => {

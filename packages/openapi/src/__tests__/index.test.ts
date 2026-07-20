@@ -165,7 +165,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-22');
+    expect(openApiSpec.info.version).toBe('2026-08-23');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1260,7 +1260,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-22');
+    expect(openApiSpec.info.version).toBe('2026-08-23');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',
@@ -1484,17 +1484,54 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/activity/stream'].get
         .responses['200'].content,
     ).toHaveProperty('text/event-stream');
-    expect(openApiSpec.components.schemas.OfflineManifest.required).toContain('tickets');
-    expect(openApiSpec.components.schemas.OfflineManifest.properties.tickets.maxItems).toBe(50_000);
-    expect(openApiSpec.components.schemas.OfflineManifest.properties.tickets.description).toContain(
-      '50,000 tickets',
+    expect(openApiSpec.components.schemas.OfflineManifest.oneOf).toEqual([
+      { $ref: '#/components/schemas/OfflineManifestV1' },
+      { $ref: '#/components/schemas/OfflineManifestV2' },
+    ]);
+    expect(openApiSpec.components.schemas.OfflineManifestV1.required).toContain('tickets');
+    expect(openApiSpec.components.schemas.OfflineManifestV1.properties.tickets.maxItems).toBe(
+      50_000,
     );
     expect(
-      openApiSpec.components.schemas.OfflineManifest.properties.tickets.items.properties,
-    ).toHaveProperty('eventOccurrenceId');
+      openApiSpec.components.schemas.OfflineManifestV1.properties.tickets.description,
+    ).toContain('50,000 tickets');
+    expect(openApiSpec.components.schemas.OfflineManifestTicket.properties).toHaveProperty(
+      'eventOccurrenceId',
+    );
+    expect(openApiSpec.components.schemas.OfflineManifestTicket.required).not.toContain(
+      'eventOccurrenceId',
+    );
+    expect(openApiSpec.components.schemas.OfflineManifestV2.required).toEqual(
+      expect.arrayContaining(['version', 'algorithm', 'issuer', 'tenantId', 'signature']),
+    );
+    expect(openApiSpec.components.schemas.OfflineManifestV2.properties.tickets.items).toEqual({
+      $ref: '#/components/schemas/OfflineManifestTicketV2',
+    });
     expect(
-      openApiSpec.components.schemas.OfflineManifest.properties.tickets.items.required,
-    ).not.toContain('eventOccurrenceId');
+      openApiSpec.components.schemas.OfflineManifestTicketV2.allOf[1].properties.status.enum,
+    ).toEqual(['valid', 'checked_in', 'void', 'refunded', 'transferred']);
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/manifest'].get.parameters,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'eventId', in: 'path', required: true }),
+        expect.objectContaining({ name: 'checkInListId', in: 'path', required: true }),
+        expect.objectContaining({ name: 'version', in: 'query' }),
+      ]),
+    );
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/manifest'].get[
+        'x-required-permissions'
+      ],
+    ).toEqual(['checkins.read']);
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-manifest-keys'].get['x-required-permissions'],
+    ).toEqual(['checkins.read']);
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-manifest-keys'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/OfflineManifestVerificationKeySet' });
     expect(openApiSpec.paths['/check-ins/sync'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });

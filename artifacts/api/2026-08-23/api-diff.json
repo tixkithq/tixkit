@@ -1,0 +1,108 @@
+{
+  "from": "2026-08-22",
+  "to": "2026-08-23",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 8,
+    "compatible": 8
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /onboarding-events.requestBody.content.application/json.schema.properties.stage",
+      "message": "Enum value preset_creation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /events/{eventId}/check-in-lists/{checkInListId}/manifest",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /events/{eventId}/check-in-manifest-keys",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-oneOf-changed",
+      "path": "components.schemas.OfflineManifest",
+      "message": "oneOf changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.OfflineManifest.properties.eventId",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.OfflineManifest.properties.checkInListId",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.OfflineManifest.properties.generatedAt",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.OfflineManifest.properties.expiresAt",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.OfflineManifest.properties.keyId",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.OfflineManifest.properties.signature",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "components.schemas.OfflineManifest.properties.tickets",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.OfflineManifestTicket",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.OfflineManifestTicketV2",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.OfflineManifestV1",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.OfflineManifestV2",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.OfflineManifestVerificationKeySet",
+      "message": "A named schema was added."
+    }
+  ]
+}

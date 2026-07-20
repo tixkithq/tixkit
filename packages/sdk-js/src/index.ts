@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-22';
+export const TIXKIT_API_VERSION = '2026-08-23';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -2522,20 +2522,54 @@ export type CheckInActivityPage = {
   nextCursor?: string;
 };
 
-export type OfflineManifest = {
+export type OfflineManifestTicket = {
+  ticketId: string;
+  ticketTypeId: string;
+  eventOccurrenceId?: string;
+  attendeeName: string;
+  qrHash: string;
+  status: string;
+};
+
+export type OfflineManifestV2Ticket = Omit<OfflineManifestTicket, 'status'> & {
+  status: 'valid' | 'checked_in' | 'void' | 'refunded' | 'transferred';
+};
+
+export type OfflineManifestV1 = {
   eventId: string;
   checkInListId: string;
   generatedAt: string;
   expiresAt: string;
   keyId: string;
   signature: string;
-  tickets: {
-    ticketId: string;
-    ticketTypeId: string;
-    eventOccurrenceId?: string;
-    attendeeName: string;
-    qrHash: string;
-    status: string;
+  tickets: OfflineManifestTicket[];
+};
+
+export type OfflineManifestV2 = {
+  version: 2;
+  algorithm: 'ES256';
+  issuer: string;
+  tenantId: string;
+  eventId: string;
+  checkInListId: string;
+  generatedAt: string;
+  expiresAt: string;
+  keyId: string;
+  signature: string;
+  tickets: OfflineManifestV2Ticket[];
+};
+
+export type OfflineManifest = OfflineManifestV1 | OfflineManifestV2;
+
+export type OfflineManifestVerificationKeySet = {
+  version: 1;
+  issuer: string;
+  keys: {
+    keyId: string;
+    algorithm: 'ES256';
+    publicKey: { kty: 'EC'; crv: 'P-256'; x: string; y: string };
+    notBefore: string;
+    notAfter: string;
   }[];
 };
 
@@ -4727,12 +4761,19 @@ class CheckInListResource {
     eventId: string,
     checkInListId: string,
     headers: Record<string, string>,
+    version?: 1 | 2,
   ): Promise<OfflineManifest> {
     return this.client.request(
       'GET',
       `/events/${eventId}/check-in-lists/${checkInListId}/manifest`,
-      { headers },
+      { headers, params: version === undefined ? undefined : { version: String(version) } },
     );
+  }
+  async getManifestVerificationKeys(
+    eventId: string,
+    headers: Record<string, string>,
+  ): Promise<OfflineManifestVerificationKeySet> {
+    return this.client.request('GET', `/events/${eventId}/check-in-manifest-keys`, { headers });
   }
   async listActivity(
     eventId: string,

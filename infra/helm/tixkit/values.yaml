@@ -71,6 +71,8 @@ secrets:
   qrSigningSecret: ''
   offlineManifestSigningKey: ''
   offlineManifestKeyId: manifest:production
+  offlineManifestActiveKeyId: ''
+  offlineManifestSigningPrivateKeysJson: ''
   s3Endpoint: http://tixkit-minio:9000
   s3Bucket: tixkit
   s3AccessKeyId: minioadmin

@@ -10,7 +10,7 @@ Go services integrating Tixkit from trusted server environments.
 
 ## Status
 
-Supported module pinned to API version `2026-08-22`.
+Supported module pinned to API version `2026-08-23`.
 
 Resale writes require `ResaleTermsAcceptance` with the exact `2026-07-16` contract. Settlement methods replace provider-delegated listing completion.
 
@@ -44,7 +44,7 @@ Keep keys server-side, verify webhook signatures against raw bodies, and avoid l
 
 ## Compatibility
 
-Semantic module releases track API version `2026-08-22`; exported Go identifiers are the compatibility boundary.
+Semantic module releases track API version `2026-08-23`; exported Go identifiers are the compatibility boundary.
 
 ## Related guides
 

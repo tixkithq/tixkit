@@ -28,8 +28,6 @@ x-app-environment: &app-environment
   S3_REGION: us-east-1
   S3_FORCE_PATH_STYLE: 'true'
   QR_SIGNING_SECRET: ${QR_SIGNING_SECRET:?run bun run compact:init}
-  OFFLINE_MANIFEST_SIGNING_KEY: ${OFFLINE_MANIFEST_SIGNING_KEY:?run bun run compact:init}
-  OFFLINE_MANIFEST_KEY_ID: compact:v1
   WIDGET_IMPRESSION_HASH_SECRET: ${WIDGET_IMPRESSION_HASH_SECRET:?run bun run compact:init}
   DASHBOARD_CURSOR_SIGNING_KEY: ${DASHBOARD_CURSOR_SIGNING_KEY:?run bun run compact:init}
   TIXKIT_MIGRATION_CURSOR_KEY: ${TIXKIT_MIGRATION_CURSOR_KEY:?run bun run compact:init}
@@ -188,6 +186,11 @@ services:
     mem_limit: 1g
     environment:
       <<: *app-environment
+      API_BASE_URL: http://localhost:${API_PORT:-4000}
+      OFFLINE_MANIFEST_SIGNING_KEY: ${OFFLINE_MANIFEST_SIGNING_KEY:?run bun run compact:init}
+      OFFLINE_MANIFEST_KEY_ID: compact:v1
+      OFFLINE_MANIFEST_ACTIVE_KEY_ID: ${OFFLINE_MANIFEST_ACTIVE_KEY_ID:?run bun run compact:init}
+      OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON: ${OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON:?run bun run compact:init}
       PORT: 4000
       UPLOAD_MALWARE_SCANNER: clamav
       CLAMAV_HOST: clamav

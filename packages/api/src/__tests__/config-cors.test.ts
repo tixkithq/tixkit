@@ -21,6 +21,8 @@ const ENV_KEYS = [
   'DB_DRIVER',
   'METRICS_BEARER_TOKEN',
   'NODE_ENV',
+  'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+  'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
   'OIDC_AUDIENCE',
   'OIDC_ISSUER_URL',
   'OTEL_EXPORTER_OTLP_ENDPOINT',
@@ -68,6 +70,16 @@ function setValidProductionConfig(): void {
   process.env.DATABASE_URL = 'postgres://tixkit:secret@db.example.com:5432/tixkit';
   process.env.DASHBOARD_CURSOR_SIGNING_KEY = 'production-dashboard-cursor-signing-key';
   process.env.METRICS_BEARER_TOKEN = 'metrics-token';
+  process.env.OFFLINE_MANIFEST_ACTIVE_KEY_ID = 'manifest-production';
+  process.env.OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON = JSON.stringify([
+    {
+      keyId: 'manifest-production',
+      privateKeyPem:
+        '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQguuqSuoL6HAyrMjU7\nQqbeBD0vTTJjUyVvjYCenHz2YnahRANCAATBXJgyEdtghsSJWFjGH55lEfbPnMZk\nI3FQVU+ihGu0ZWb3laTbq8k9W2H2B3BIZ+BLtbL6QRIsfcYecnFXq+W4\n-----END PRIVATE KEY-----',
+      notBefore: '2020-01-01T00:00:00.000Z',
+      notAfter: '2100-01-01T00:00:00.000Z',
+    },
+  ]);
   process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'https://otel.example.com';
   process.env.REDIS_URL = 'rediss://redis.example.com:6379';
   process.env.S3_ACCESS_KEY_ID = 's3-production-key';
@@ -509,6 +521,24 @@ describe('API exposure config parsing', () => {
 
     process.env.ADMIN_DASHBOARD_URL = 'https://admin.example.com:8443';
     expect(loadConfig().nodeEnv).toBe('production');
+  });
+
+  it('requires an exact HTTPS API origin in production', () => {
+    setValidProductionConfig();
+    for (const value of [
+      'http://api.example.com',
+      'https://api.example.com/',
+      'https://api.example.com/v1',
+      'https://api.example.com?source=test',
+      'https://api.example.com#fragment',
+      'https://user@api.example.com',
+      'https://api.example.com:443',
+    ]) {
+      process.env.API_BASE_URL = value;
+      expect(() => loadConfig(), value).toThrow(
+        'API_BASE_URL must be an exact HTTPS origin in production',
+      );
+    }
   });
 
   it('rejects local production endpoints and default MinIO credentials', () => {

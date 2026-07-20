@@ -254,6 +254,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-22 strict mutation contracts',
         routeId: 'apiMigration20260821To20260822',
       },
+      {
+        label: 'Adopt 2026-08-23 offline manifest v2',
+        routeId: 'apiMigration20260822To20260823',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

@@ -762,6 +762,142 @@ describe('buildOfflineManifest', () => {
 });
 
 describe('offline manifest endpoint', () => {
+  it('keeps V1 as the default and explicitly serves scoped V2 plus public verification keys', async () => {
+    const originalApiBaseUrl = process.env.API_BASE_URL;
+    process.env.API_BASE_URL = 'https://api.example.test';
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.read'],
+    };
+    const { db } = buildOfflineSyncMockDb({
+      ticket: [
+        {
+          id: 'tkt_1',
+          ticket_id: 'tkt_1',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_allowed',
+          event_occurrence_id: null,
+          qr_hash: 'hash_1',
+          status: 'valid',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@example.test',
+        },
+      ],
+    });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    try {
+      const legacy = await app.inject({
+        method: 'GET',
+        url: '/events/evt_1/check-in-lists/cil_1/manifest',
+      });
+      expect(legacy.statusCode).toBe(200);
+      expect(legacy.headers['cache-control']).toBe('no-store');
+      expect(legacy.json()).not.toHaveProperty('version');
+
+      const v2 = await app.inject({
+        method: 'GET',
+        url: '/events/evt_1/check-in-lists/cil_1/manifest?version=2',
+      });
+      expect(v2.statusCode).toBe(200);
+      expect(v2.headers['cache-control']).toBe('no-store');
+      expect(v2.json()).toMatchObject({
+        version: 2,
+        algorithm: 'ES256',
+        issuer: 'https://api.example.test',
+        tenantId: 'tnt_1',
+        eventId: 'evt_1',
+        checkInListId: 'cil_1',
+      });
+      expect(v2.body).not.toContain('ada@example.test');
+
+      const invalid = await app.inject({
+        method: 'GET',
+        url: '/events/evt_1/check-in-lists/cil_1/manifest?version=3',
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      const keys = await app.inject({
+        method: 'GET',
+        url: '/events/evt_1/check-in-manifest-keys',
+      });
+      expect(keys.statusCode).toBe(200);
+      expect(keys.headers['cache-control']).toBe('private, max-age=300, must-revalidate');
+      expect(keys.headers.vary).toContain('Authorization');
+      expect(keys.json()).toMatchObject({
+        version: 1,
+        issuer: 'https://api.example.test',
+        keys: [{ algorithm: 'ES256', publicKey: { kty: 'EC', crv: 'P-256' } }],
+      });
+      expect(keys.body).not.toContain('privateKey');
+    } finally {
+      await app.close();
+      if (originalApiBaseUrl === undefined) delete process.env.API_BASE_URL;
+      else process.env.API_BASE_URL = originalApiBaseUrl;
+    }
+  });
+
+  it('denies manifest key discovery without permission and hides cross-tenant events', async () => {
+    let principal: Principal = {
+      type: 'user',
+      id: 'usr_denied',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: [],
+    };
+    const { db } = buildOfflineSyncMockDb({ ticket: [] });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      pricingEngine: {},
+      inventoryService: {},
+      qrService: {},
+      authService: {},
+      temporalClient: {},
+    } as unknown as AppContext);
+    app.addHook('onRequest', async (request) => {
+      request.principal = principal;
+    });
+    await app.register(checkInRoutes);
+
+    const denied = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/check-in-manifest-keys',
+    });
+    expect(denied.statusCode).toBe(403);
+
+    principal = {
+      ...principal,
+      id: 'usr_other_tenant',
+      tenantId: 'tnt_other',
+      scopes: ['checkins.read'],
+    };
+    const hidden = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/check-in-manifest-keys',
+    });
+    expect(hidden.statusCode).toBe(404);
+    await app.close();
+  });
+
   it('rejects single-download manifests above the ticket cap before signing', async () => {
     const principal: Principal = {
       type: 'user',

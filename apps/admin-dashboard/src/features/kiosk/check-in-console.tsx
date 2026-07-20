@@ -374,9 +374,13 @@ export function CheckInConsole({
         returnTo: inviteReturnTo,
       }).toString()}`
     : `${routes.settingsMembers}?invite=1`;
+  const Root = isKiosk ? 'main' : 'section';
 
   return (
-    <main className={cn(isKiosk ? 'min-h-svh bg-muted/25' : 'bg-transparent')}>
+    <Root
+      className={cn(isKiosk ? 'min-h-svh bg-muted/25' : 'bg-transparent')}
+      aria-labelledby="check-in-console-title"
+    >
       <div
         className={cn(
           'mx-auto flex w-full flex-col gap-4',
@@ -389,7 +393,10 @@ export function CheckInConsole({
               <QrCode className="size-4" />
               {isKiosk ? 'Check-in kiosk' : 'Check-in'}
             </div>
-            <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">
+            <h1
+              id="check-in-console-title"
+              className="truncate text-xl font-bold tracking-tight sm:text-2xl"
+            >
               {selectedEvent?.title ?? 'Choose an event'}
             </h1>
             <p className="text-sm text-muted-foreground">
@@ -604,6 +611,37 @@ export function CheckInConsole({
                 <div className="rounded-xl border bg-background px-4 py-3 text-center text-sm">
                   <span className="font-semibold tabular-nums">{scanner.acceptedScanCount}</span>{' '}
                   <span className="text-muted-foreground">accepted on this device</span>
+                  <span className="mx-2 text-muted-foreground" aria-hidden="true">
+                    ·
+                  </span>
+                  <output className="text-muted-foreground" aria-live="polite">
+                    {scanner.offlinePreparing
+                      ? 'Preparing verified offline check-in'
+                      : scanner.offlineReady
+                        ? `Offline ready${
+                            scanner.pendingOfflineCount > 0
+                              ? ` · ${scanner.pendingOfflineCount} pending sync`
+                              : ''
+                          }`
+                        : 'Online check-in only'}
+                  </output>
+                  {scanner.pendingOfflineCount > 0 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="ml-3"
+                      disabled={scanner.offlineSyncing}
+                      onClick={() => void scanner.syncPendingOffline()}
+                    >
+                      {scanner.offlineSyncing ? 'Syncing offline scans…' : 'Sync offline scans'}
+                    </Button>
+                  ) : null}
+                  {scanner.offlineSyncError ? (
+                    <p className="mt-2 text-destructive" role="alert">
+                      {scanner.offlineSyncError}
+                    </p>
+                  ) : null}
                 </div>
               </TabsContent>
             ) : null}
@@ -761,7 +799,7 @@ export function CheckInConsole({
           </Tabs>
         )}
       </div>
-    </main>
+    </Root>
   );
 }
 

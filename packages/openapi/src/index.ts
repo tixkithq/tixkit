@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-22',
+    version: '2026-08-23',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5075,8 +5075,42 @@ const rawOpenApiSpec = {
         },
         required: ['items', 'nextCursor', 'hasMore'],
       },
-      OfflineManifest: {
+      OfflineManifestTicket: {
         type: 'object',
+        properties: {
+          ticketId: { type: 'string' },
+          ticketTypeId: { type: 'string' },
+          eventOccurrenceId: { type: 'string' },
+          attendeeName: { type: 'string' },
+          qrHash: { type: 'string' },
+          status: {
+            type: 'string',
+            description:
+              'V2 producers emit only valid, checked_in, void, refunded or transferred. Consumers must fail closed on unknown values.',
+          },
+        },
+        required: ['ticketId', 'ticketTypeId', 'attendeeName', 'qrHash', 'status'],
+      },
+      OfflineManifestTicketV2: {
+        allOf: [
+          { $ref: '#/components/schemas/OfflineManifestTicket' },
+          {
+            type: 'object',
+            properties: {
+              status: {
+                type: 'string',
+                enum: ['valid', 'checked_in', 'void', 'refunded', 'transferred'],
+              },
+            },
+            required: ['status'],
+          },
+        ],
+      },
+      OfflineManifestV1: {
+        type: 'object',
+        not: { required: ['version'] },
+        description:
+          'Legacy HMAC manifest retained temporarily for native scanner compatibility. Browser clients must request and require V2.',
         properties: {
           eventId: { type: 'string' },
           checkInListId: { type: 'string' },
@@ -5092,18 +5126,7 @@ const rawOpenApiSpec = {
             maxItems: 50_000,
             description:
               'Single-download offline manifests are capped at 50,000 tickets. Lists above this size must use a smaller check-in list scope before downloading a manifest.',
-            items: {
-              type: 'object',
-              properties: {
-                ticketId: { type: 'string' },
-                ticketTypeId: { type: 'string' },
-                eventOccurrenceId: { type: 'string' },
-                attendeeName: { type: 'string' },
-                qrHash: { type: 'string' },
-                status: { type: 'string' },
-              },
-              required: ['ticketId', 'ticketTypeId', 'attendeeName', 'qrHash', 'status'],
-            },
+            items: { $ref: '#/components/schemas/OfflineManifestTicket' },
           },
         },
         required: [
@@ -5115,6 +5138,90 @@ const rawOpenApiSpec = {
           'signature',
           'tickets',
         ],
+      },
+      OfflineManifestV2: {
+        type: 'object',
+        description:
+          'Browser-safe manifest signed with ES256. The signature is unpadded base64url of the 64-byte IEEE-P1363 r||s value over the canonical UTF-8 payload.',
+        properties: {
+          version: { type: 'integer', enum: [2] },
+          algorithm: { type: 'string', enum: ['ES256'] },
+          issuer: { type: 'string', format: 'uri' },
+          tenantId: { type: 'string' },
+          eventId: { type: 'string' },
+          checkInListId: { type: 'string' },
+          generatedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          keyId: { type: 'string' },
+          signature: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9_-]{86}$',
+          },
+          tickets: {
+            type: 'array',
+            maxItems: 50_000,
+            items: { $ref: '#/components/schemas/OfflineManifestTicketV2' },
+          },
+        },
+        required: [
+          'version',
+          'algorithm',
+          'issuer',
+          'tenantId',
+          'eventId',
+          'checkInListId',
+          'generatedAt',
+          'expiresAt',
+          'keyId',
+          'signature',
+          'tickets',
+        ],
+      },
+      OfflineManifest: {
+        oneOf: [
+          { $ref: '#/components/schemas/OfflineManifestV1' },
+          { $ref: '#/components/schemas/OfflineManifestV2' },
+        ],
+      },
+      OfflineManifestVerificationKeySet: {
+        type: 'object',
+        properties: {
+          version: { type: 'integer', enum: [1] },
+          issuer: { type: 'string', format: 'uri' },
+          keys: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              properties: {
+                keyId: { type: 'string' },
+                algorithm: { type: 'string', enum: ['ES256'] },
+                publicKey: {
+                  type: 'object',
+                  properties: {
+                    kty: { type: 'string', enum: ['EC'] },
+                    crv: { type: 'string', enum: ['P-256'] },
+                    x: {
+                      type: 'string',
+                      pattern: '^[A-Za-z0-9_-]{43}$',
+                      example: 'wVyYMhHbYIbEiVhYxh-eZRH2z5zGZCNxUFVPooRrtGU',
+                    },
+                    y: {
+                      type: 'string',
+                      pattern: '^[A-Za-z0-9_-]{43}$',
+                      example: 'ZveVpNuryT1bYfYHcEhn4Eu1svpBEix9xh5ycVer5bg',
+                    },
+                  },
+                  required: ['kty', 'crv', 'x', 'y'],
+                },
+                notBefore: { type: 'string', format: 'date-time' },
+                notAfter: { type: 'string', format: 'date-time' },
+              },
+              required: ['keyId', 'algorithm', 'publicKey', 'notBefore', 'notAfter'],
+            },
+          },
+        },
+        required: ['version', 'issuer', 'keys'],
       },
       ScanResult: {
         type: 'object',
@@ -5940,7 +6047,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-22, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-23, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5987,7 +6094,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-22, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-23, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6094,7 +6201,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-22 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-23 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6131,7 +6238,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-22 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-23 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8417,7 +8524,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-22 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-23 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8474,7 +8581,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-22 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-23 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -13450,9 +13557,22 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Download offline check-in manifest',
         description:
-          'Returns a signed single-download offline manifest for active check-in lists up to 50,000 tickets.',
+          'Returns a signed single-download offline manifest for active check-in lists up to 50,000 tickets. Browser clients must request version 2 and reject legacy responses.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
-        parameters: [{ $ref: '#/components/parameters/OptionalScannerDeviceSecret' }],
+        'x-required-permissions': ['checkins.read'],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'checkInListId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'version',
+            in: 'query',
+            required: false,
+            description:
+              'Omit or use 1 for legacy native compatibility. Use 2 for the asymmetric browser-safe contract.',
+            schema: { type: 'integer', enum: [1, 2] },
+          },
+          { $ref: '#/components/parameters/OptionalScannerDeviceSecret' },
+        ],
         responses: {
           '200': {
             description: 'Offline manifest',
@@ -13465,6 +13585,32 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Check-in list is inactive or exceeds the offline manifest cap',
           },
+        },
+      },
+    },
+    '/events/{eventId}/check-in-manifest-keys': {
+      get: {
+        summary: 'Discover offline manifest verification keys',
+        description:
+          'Returns authenticated, event-contained public verification keys. Retired keys remain available until every manifest they signed has expired.',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
+        'x-required-permissions': ['checkins.read'],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/OptionalScannerDeviceSecret' },
+        ],
+        responses: {
+          '200': {
+            description: 'Offline manifest verification key set',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OfflineManifestVerificationKeySet' },
+              },
+            },
+          },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Missing checkins.read permission' },
+          '404': { description: 'Event not found or inaccessible' },
         },
       },
     },

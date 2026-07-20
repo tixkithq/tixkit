@@ -52,6 +52,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       {...runtimeConfigDataAttributes(runtimeConfig)}
     >
       <body>
+        <script
+          id="zod-jitless-config"
+          nonce={nonce}
+          dangerouslySetInnerHTML={{
+            __html:
+              'globalThis.__zod_globalConfig={...(globalThis.__zod_globalConfig||{}),jitless:true}',
+          }}
+        />
         {runtimeConfig.authProvider === 'clerk' && runtimeConfig.clerkPublishableKey ? (
           <ClerkProvider dynamic publishableKey={runtimeConfig.clerkPublishableKey}>
             {content}

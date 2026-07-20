@@ -1,6 +1,7 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminApi, type CheckInScanResult } from '@/lib/api';
+import * as offlineCheckIn from './browser-offline-checkin';
 import { useTicketScanner } from './use-ticket-scanner';
 
 afterEach(() => {
@@ -12,6 +13,22 @@ beforeEach(() => {
 });
 
 describe('useTicketScanner', () => {
+  function readyOfflineSession(initialPending = 0) {
+    const session = {
+      pendingCount: vi.fn().mockResolvedValueOnce(initialPending).mockResolvedValue(0),
+      scan: vi.fn().mockResolvedValue({
+        status: 'accepted',
+        message: 'Check-in accepted offline and queued for synchronization.',
+        scannedAt: '2026-07-05T12:00:00.000Z',
+      }),
+      sync: vi.fn().mockResolvedValue(null),
+    };
+    vi.spyOn(offlineCheckIn, 'prepareBrowserOfflineCheckIn').mockResolvedValue(
+      session as unknown as Awaited<ReturnType<typeof offlineCheckIn.prepareBrowserOfflineCheckIn>>,
+    );
+    return session;
+  }
+
   it('returns null and does not call the API when the payload is empty', async () => {
     const spy = vi.spyOn(adminApi, 'scanTicket').mockResolvedValue({
       ok: true,
@@ -134,6 +151,156 @@ describe('useTicketScanner', () => {
     expect(result.current.scanError).toBe('Ticket not found');
     expect(result.current.lastResult).toBeNull();
     expect(result.current.acceptedScanCount).toBe(0);
+  });
+
+  it('falls back to a verified durable offline session only for transient failures', async () => {
+    const session = readyOfflineSession();
+    vi.spyOn(adminApi, 'scanTicket').mockResolvedValue({
+      ok: false,
+      error: { code: 'network_error', message: 'Network unavailable' },
+    });
+    const { result } = renderHook(() =>
+      useTicketScanner({ eventId: 'evt_1', checkInListId: 'cil_1' }),
+    );
+    await waitFor(() => expect(result.current.offlineReady).toBe(true));
+
+    let resolved: CheckInScanResult | null = null;
+    await act(async () => {
+      resolved = await result.current.scan(' offline-ticket ');
+    });
+
+    expect(session.scan).toHaveBeenCalledWith('offline-ticket');
+    expect(session.pendingCount).toHaveBeenCalledTimes(2);
+    expect(resolved).toMatchObject({ status: 'accepted' });
+    expect(result.current.pendingOfflineCount).toBe(0);
+    expect(result.current.acceptedScanCount).toBe(1);
+  });
+
+  it('fails closed without offline admission for authorization and other non-transient errors', async () => {
+    const session = readyOfflineSession();
+    vi.spyOn(adminApi, 'scanTicket').mockResolvedValue({
+      ok: false,
+      error: { code: 'forbidden', message: 'Check-in permission required', status: 403 },
+    });
+    const { result } = renderHook(() =>
+      useTicketScanner({ eventId: 'evt_1', checkInListId: 'cil_1' }),
+    );
+    await waitFor(() => expect(result.current.offlineReady).toBe(true));
+
+    await act(async () => {
+      await expect(result.current.scan('denied-ticket')).rejects.toThrow(
+        'Check-in permission required',
+      );
+    });
+
+    expect(session.scan).not.toHaveBeenCalled();
+    expect(result.current.lastResult).toBeNull();
+    expect(result.current.acceptedScanCount).toBe(0);
+  });
+
+  it('reconciles retained offline admissions when connectivity returns', async () => {
+    const session = readyOfflineSession(1);
+    const { result } = renderHook(() =>
+      useTicketScanner({ eventId: 'evt_1', checkInListId: 'cil_1' }),
+    );
+    await waitFor(() => expect(result.current.pendingOfflineCount).toBe(1));
+
+    act(() => window.dispatchEvent(new Event('online')));
+
+    await waitFor(() => expect(session.sync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.pendingOfflineCount).toBe(0));
+    expect(result.current.offlineSyncError).toBeNull();
+  });
+
+  it('does not let an old context keep a replacement context in the syncing state', async () => {
+    let resolveOldSync!: () => void;
+    const oldSession = {
+      pendingCount: vi.fn().mockResolvedValue(0),
+      scan: vi.fn(),
+      sync: vi.fn(
+        () =>
+          new Promise<null>((resolve) => {
+            resolveOldSync = () => resolve(null);
+          }),
+      ),
+    };
+    const newSession = {
+      pendingCount: vi.fn().mockResolvedValue(0),
+      scan: vi.fn(),
+      sync: vi.fn().mockResolvedValue(null),
+    };
+    vi.spyOn(offlineCheckIn, 'prepareBrowserOfflineCheckIn')
+      .mockResolvedValueOnce(oldSession as never)
+      .mockResolvedValueOnce(newSession as never);
+    const { result, rerender } = renderHook(
+      ({ checkInListId }) => useTicketScanner({ eventId: 'evt_1', checkInListId }),
+      { initialProps: { checkInListId: 'cil_old' } },
+    );
+    await waitFor(() => expect(result.current.offlineReady).toBe(true));
+
+    let oldSync!: Promise<void>;
+    act(() => {
+      oldSync = result.current.syncPendingOffline();
+    });
+    expect(result.current.offlineSyncing).toBe(true);
+
+    rerender({ checkInListId: 'cil_new' });
+    await waitFor(() => expect(result.current.offlineReady).toBe(true));
+    expect(result.current.offlineSyncing).toBe(false);
+    await act(() => result.current.syncPendingOffline());
+    expect(newSession.sync).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveOldSync();
+      await oldSync;
+    });
+    expect(result.current.offlineSyncing).toBe(false);
+  });
+
+  it('invalidates an in-flight sync while disabled and permits sync after re-enabling', async () => {
+    let resolveOldSync!: () => void;
+    const oldSession = {
+      pendingCount: vi.fn().mockResolvedValue(0),
+      scan: vi.fn(),
+      sync: vi.fn(
+        () =>
+          new Promise<null>((resolve) => {
+            resolveOldSync = () => resolve(null);
+          }),
+      ),
+    };
+    const replacementSession = {
+      pendingCount: vi.fn().mockResolvedValue(0),
+      scan: vi.fn(),
+      sync: vi.fn().mockResolvedValue(null),
+    };
+    vi.spyOn(offlineCheckIn, 'prepareBrowserOfflineCheckIn')
+      .mockResolvedValueOnce(oldSession as never)
+      .mockResolvedValueOnce(replacementSession as never);
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useTicketScanner({ eventId: 'evt_1', checkInListId: 'cil_1', enabled }),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() => expect(result.current.offlineReady).toBe(true));
+
+    let oldSync!: Promise<void>;
+    act(() => {
+      oldSync = result.current.syncPendingOffline();
+    });
+    expect(result.current.offlineSyncing).toBe(true);
+
+    rerender({ enabled: false });
+    await waitFor(() => expect(result.current.offlineSyncing).toBe(false));
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.offlineReady).toBe(true));
+    await act(() => result.current.syncPendingOffline());
+    expect(replacementSession.sync).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveOldSync();
+      await oldSync;
+    });
+    expect(result.current.offlineSyncing).toBe(false);
   });
 
   it('exposes a thrown transport failure without synthesizing a ticket result', async () => {

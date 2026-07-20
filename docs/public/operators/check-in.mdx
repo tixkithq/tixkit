@@ -7,7 +7,7 @@ product_area: check-in
 content_type: how-to
 status: beta
 owner: product-ui
-last_verified: 2026-07-10
+last_verified: 2026-07-18
 prerequisites:
   - Check-in read permission; write permission to admit attendees
   - A published event with issued test tickets
@@ -30,6 +30,12 @@ Keep the camera permission and event scope visible. After a successful admission
 
 ## Offline behavior
 
-Use offline manifests only when the configured scanner flow supports them. Verify manifest signature and freshness; reconnect and synchronize as soon as practical. Offline acceptance is not permission to bypass event scope or admit a duplicate without review.
+Use offline manifests only when the configured scanner flow supports them. Browser scanners require the explicitly negotiated V2 manifest and the authenticated event-scoped verification-key response. They reject the legacy HMAC shape, an issuer that differs from the configured API origin, a different tenant/event/list scope, an expired or future-dated payload, an unknown ticket status, or any signature/key-window mismatch. The legacy response remains available temporarily for native SDK compatibility and must not be used as a browser fallback.
+
+Reconnect and synchronize as soon as practical. The browser retries after reconnect and at a bounded interval; staff can also use **Sync offline scans**. Do not close the station until the pending count reaches zero. Manifest expiry blocks new offline admissions but does not authorize deleting queued scans. Treat `checked_in` as a duplicate, `void`/`refunded`/`transferred` as revoked, and any unrecognized status as invalid. Offline acceptance is not permission to bypass event scope or admit a duplicate without review.
+
+Preparing a station requires a live authenticated principal, key-set download and V2 manifest download. A page reload during a complete outage intentionally does not restore admission authority because the browser cannot re-prove the current principal and tenant; already queued scans remain durable and will reconcile after authentication and connectivity return. Avoid reloading a prepared station during an outage.
+
+The browser stores attendee names and ticket hashes only in its origin-scoped offline database. Manifests expire within 24 hours. When the station next prepares or reconciles, expired manifests with no pending work are deleted, expired manifests with pending work have their ticket list stripped, and terminal reconciliation evidence older than 24 hours is removed. Use a dedicated device profile, never share an unlocked station, and clear site data only after the pending count is zero.
 
 If a ticket fails, identify whether it is unknown, wrong-event, already used, stale/offline, or blocked by device authorization before escalating.

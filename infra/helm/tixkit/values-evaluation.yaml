@@ -6,6 +6,11 @@ global:
 secrets:
   mode: create
   create: true
+  offlineManifestSigningKey: evaluation-v1-offline-manifest-key-not-for-production
+  offlineManifestKeyId: manifest-v1-evaluation
+  offlineManifestActiveKeyId: manifest-v2-evaluation
+  offlineManifestSigningPrivateKeysJson: >-
+    [{"keyId":"manifest-v2-evaluation","privateKeyPem":"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQguuqSuoL6HAyrMjU7\nQqbeBD0vTTJjUyVvjYCenHz2YnahRANCAATBXJgyEdtghsSJWFjGH55lEfbPnMZk\nI3FQVU+ihGu0ZWb3laTbq8k9W2H2B3BIZ+BLtbL6QRIsfcYecnFXq+W4\n-----END PRIVATE KEY-----","notBefore":"2020-01-01T00:00:00.000Z","notAfter":"2100-01-01T00:00:00.000Z"}]
 
 postgres:
   enabled: true

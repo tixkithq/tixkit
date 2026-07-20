@@ -5,6 +5,15 @@ import { join } from 'node:path';
 import { validateEnvFile, formatValidationResult, ENV_RULES } from '../setup-check.js';
 
 function makeCompleteEnv(extra: Record<string, string> = {}): string {
+  const manifestRegistry = JSON.stringify([
+    {
+      keyId: 'manifest-v2-test',
+      privateKeyPem:
+        '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQguuqSuoL6HAyrMjU7\nQqbeBD0vTTJjUyVvjYCenHz2YnahRANCAATBXJgyEdtghsSJWFjGH55lEfbPnMZk\nI3FQVU+ihGu0ZWb3laTbq8k9W2H2B3BIZ+BLtbL6QRIsfcYecnFXq+W4\n-----END PRIVATE KEY-----',
+      notBefore: '2020-01-01T00:00:00.000Z',
+      notAfter: '2100-01-01T00:00:00.000Z',
+    },
+  ]);
   const base: Record<string, string> = {
     NODE_ENV: 'development',
     PORT: '4000',
@@ -22,6 +31,8 @@ function makeCompleteEnv(extra: Record<string, string> = {}): string {
     QR_SIGNING_SECRET: 'qr-local-secret',
     OFFLINE_MANIFEST_SIGNING_KEY: 'offline-local-key',
     OFFLINE_MANIFEST_KEY_ID: 'manifest:v1',
+    OFFLINE_MANIFEST_ACTIVE_KEY_ID: 'manifest-v2-test',
+    OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON: manifestRegistry,
     WIDGET_IMPRESSION_HASH_SECRET: 'widget-hash-local-secret',
     DASHBOARD_CURSOR_SIGNING_KEY: 'local-dashboard-cursor-signing-key',
     TEMPORAL_ADDRESS: 'localhost:7233',
@@ -96,6 +107,8 @@ describe('validateEnvFile', () => {
         NODE_ENV: 'production',
         QR_SIGNING_SECRET: '',
         OFFLINE_MANIFEST_SIGNING_KEY: '',
+        OFFLINE_MANIFEST_ACTIVE_KEY_ID: '',
+        OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON: '',
         WIDGET_IMPRESSION_HASH_SECRET: '',
         EMAIL_WEBHOOK_SECRET: '',
       }),
@@ -105,8 +118,33 @@ describe('validateEnvFile', () => {
     const variables = result.issues.map((issue) => issue.variable);
     expect(variables).toContain('QR_SIGNING_SECRET');
     expect(variables).toContain('OFFLINE_MANIFEST_SIGNING_KEY');
+    expect(variables).toContain('OFFLINE_MANIFEST_ACTIVE_KEY_ID');
+    expect(variables).toContain('OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON');
     expect(variables).toContain('WIDGET_IMPRESSION_HASH_SECRET');
     expect(variables).toContain('EMAIL_WEBHOOK_SECRET');
+  });
+
+  it('rejects malformed or non-P-256 offline manifest V2 registries', async () => {
+    const path = await writeEnvFile(
+      makeCompleteEnv({
+        OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON: JSON.stringify([
+          {
+            keyId: 'manifest-v2-test',
+            privateKeyPem: 'not-a-private-key',
+            notBefore: '2026-07-18T00:00:00.000Z',
+            notAfter: '2026-07-19T00:00:00.000Z',
+          },
+        ]),
+      }),
+    );
+    const result = await validateEnvFile(path, 'production');
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        variable: 'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
+        severity: 'error',
+      }),
+    );
   });
 
   it('auto-detects provider mode when a real provider key is present', async () => {

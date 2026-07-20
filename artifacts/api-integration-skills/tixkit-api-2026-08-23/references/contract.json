@@ -1,0 +1,92 @@
+{
+  "apiVersion": "2026-08-23",
+  "skillName": "tixkit-api-2026-08-23",
+  "source": {
+    "publication": "approval-required",
+    "generationMode": "local-evaluation",
+    "publishable": false,
+    "worktreeState": "modified",
+    "releaseManifestSha256": "29c09c7c75525912f557b33ebc75710152c0fdf61bc4731205b8e5c6950a922e",
+    "openApiSha256": "49d6abe3f4c7675475d90d5f705d9ddb0136464964ec3b84c5e685f9ee8de172",
+    "examplesSha256": "c58bc20981ad6e6ae2c21f37dc40182f5dee91231b1b4bf62d176276a270a704",
+    "webhookEventsSha256": "0c8c4a0a7a2d67fd5f01861c38e6b796a195bc7054efe427708624a7d0daf688"
+  },
+  "securitySchemes": {
+    "BearerAuth": {
+      "type": "http",
+      "scheme": "bearer",
+      "bearerFormat": "JWT"
+    },
+    "ApiKey": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "Authorization",
+      "description": "Bearer tk_<key>",
+      "x-api-key-scopes": [
+        "events.read",
+        "events.write",
+        "tickets.write",
+        "orders.read",
+        "orders.write",
+        "refunds.write",
+        "attendees.read",
+        "attendees.write",
+        "checkins.read",
+        "checkins.write",
+        "box_office.write",
+        "messages.write",
+        "reports.read",
+        "settings.write",
+        "developers.write",
+        "provider_incidents.read",
+        "migrations.read",
+        "migrations.write",
+        "migrations.commit",
+        "migrations.rollback",
+        "billing.write"
+      ]
+    },
+    "ScannerDeviceAuth": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "X-Device-Id",
+      "description": "Scanner device authentication via X-Device-Id and X-Device-Secret headers"
+    },
+    "AgentOAuth": {
+      "type": "oauth2",
+      "description": "Short-lived explicit agent identity. Agent tokens do not inherit sponsor permissions and are accepted only by routes that opt in to agent access.",
+      "flows": {
+        "clientCredentials": {
+          "tokenUrl": "/v1/oauth/token",
+          "scopes": {
+            "agent.invoke": "Authenticate an explicit agent principal"
+          }
+        }
+      }
+    },
+    "StripeSignature": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "Stripe-Signature",
+      "description": "Stripe webhook signature verified against the configured endpoint secret."
+    },
+    "SvixSignature": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "svix-signature",
+      "description": "Svix signature verified with the Clerk webhook signing secret and timestamp headers."
+    },
+    "TelnyxSignature": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "telnyx-signature-ed25519",
+      "description": "Telnyx Ed25519 signature verified with the configured public key."
+    },
+    "EmailProviderSignature": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "x-tixkit-provider-signature",
+      "description": "Provider feedback signature verified with the configured HMAC secret."
+    }
+  }
+}

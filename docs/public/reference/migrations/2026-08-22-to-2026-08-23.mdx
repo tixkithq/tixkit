@@ -1,0 +1,24 @@
+---
+title: Migrate API 2026-08-22 to 2026-08-23
+description: Adopt the browser-safe offline check-in manifest and verification-key contract.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-20
+prerequisites:
+  - /reference/api-versions
+related:
+  - /operators/check-in
+  - /reference/api
+---
+
+API `2026-08-23` adds a browser-safe, tenant- and event-scoped offline check-in manifest. Existing runtime V1 requests remain byte-compatible: an omitted `version` query parameter, or `version=1`, returns the legacy HMAC manifest. The generated OpenAPI type changes from one manifest shape to an `OfflineManifestV1 | OfflineManifestV2` union, so generated and strongly typed clients must regenerate and narrow on `version` before accessing V2-only fields. Treat an absent `version` as V1; browser clients must explicitly request `version=2` and must not accept a V1 response.
+
+V2 manifests are signed with ES256 over the documented canonical payload. Fetch the authenticated event verification-key set from `GET /events/{eventId}/check-in-manifest-keys`, select the manifest's `keyId`, and validate the issuer, tenant, event, check-in list, validity window, 24-hour maximum lifetime, key window and signature before storing or using the manifest. If a key ID is unknown, refresh the key set once without cache and fail closed if it remains unknown.
+
+V2 ticket status is restricted to `valid`, `checked_in`, `void`, `refunded` or `transferred`. Consumers must reject unknown values. The legacy V1 ticket status remains an unconstrained string for compatibility.
+
+Verification keys are public material. Private signing keys remain API-only deployment secrets and must never be distributed to workers, dashboards, checkout applications or storage services. Follow the [check-in operator guide](/operators/check-in) for overlap rotation and reconciliation procedures.

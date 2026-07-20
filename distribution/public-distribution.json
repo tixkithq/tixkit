@@ -305,6 +305,7 @@
       { "name": "checkout", "dockerfile": "Dockerfile.checkout" }
     ],
     "contracts": [
+      "artifacts/api/2026-08-23",
       "artifacts/api/2026-08-22",
       "artifacts/api/2026-08-21",
       "artifacts/api/2026-08-20",
@@ -378,6 +379,11 @@
       "packages/embed-core/schemas/lifecycle.schema.json"
     ],
     "agentIntegrationSkills": [
+      {
+        "path": "artifacts/api-integration-skills/tixkit-api-2026-08-23",
+        "apiVersion": "2026-08-23",
+        "releaseManifestSha256": "29c09c7c75525912f557b33ebc75710152c0fdf61bc4731205b8e5c6950a922e"
+      },
       {
         "path": "artifacts/api-integration-skills/tixkit-api-2026-08-22",
         "apiVersion": "2026-08-22",

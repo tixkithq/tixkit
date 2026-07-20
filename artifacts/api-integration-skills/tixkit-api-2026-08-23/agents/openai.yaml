@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tixkit API 2026-08-23"
+  short_description: "Build against the pinned Tixkit API contract"
+  default_prompt: "Use $tixkit-api-2026-08-23 to implement a safe Tixkit API integration."

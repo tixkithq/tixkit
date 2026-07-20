@@ -59,6 +59,10 @@
       "types": "./dist/tickets/index.d.ts",
       "import": "./dist/tickets/index.js"
     },
+    "./offline-checkin": {
+      "types": "./dist/offline-checkin/index.d.ts",
+      "import": "./dist/offline-checkin/index.js"
+    },
     "./forms": {
       "types": "./dist/forms/index.d.ts",
       "import": "./dist/forms/index.js"

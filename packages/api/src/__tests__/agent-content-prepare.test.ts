@@ -12,8 +12,8 @@ const event = {
   slug: 'summer-night',
   title: 'Summer Night',
   description: 'Doors at seven.',
-  startsAt: '2026-08-22T00:00:00.000Z',
-  endsAt: '2026-08-22T03:00:00.000Z',
+  startsAt: '2026-08-23T00:00:00.000Z',
+  endsAt: '2026-08-23T03:00:00.000Z',
   timezone: 'America/Chicago',
   coverImageUrl: '/v1/public/event-media/media_1/original',
 };

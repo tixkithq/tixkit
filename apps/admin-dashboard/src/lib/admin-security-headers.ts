@@ -8,6 +8,14 @@ export const ADMIN_SECURITY_HEADER_NAMES = [
   'X-Frame-Options',
 ] as const;
 
+// Sonner creates an empty <style> element before appending its bundled, static
+// stylesheet. Keep these hashes pinned to that exact behavior instead of
+// allowing arbitrary inline styles in production.
+const RUNTIME_STYLE_HASHES = [
+  "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
+  "'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY='",
+] as const;
+
 export function adminContentSecurityPolicy(
   config: PublicAdminRuntimeConfig,
   nonce: string,
@@ -52,7 +60,7 @@ export function adminContentSecurityPolicy(
     `img-src 'self' data: blob: https: ${config.apiBaseUrl} ${config.uploadOrigin}`,
     "font-src 'self' data:",
     `style-src 'self' 'nonce-${nonce}'`,
-    `style-src-elem 'self' 'nonce-${nonce}'`,
+    `style-src-elem 'self' 'nonce-${nonce}' ${RUNTIME_STYLE_HASHES.join(' ')}`,
     "style-src-attr 'unsafe-inline'",
     `script-src ${scriptSources.join(' ')}`,
     "script-src-attr 'none'",
