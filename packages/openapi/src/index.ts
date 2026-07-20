@@ -644,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-27',
+    version: '2026-08-28',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -6071,7 +6071,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-27, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-28, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6118,7 +6118,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-27, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-28, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6225,7 +6225,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-27 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-28 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6262,7 +6262,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-27 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-28 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8548,7 +8548,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-27 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-28 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8605,7 +8605,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-27 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-28 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -9480,12 +9480,36 @@ const rawOpenApiSpec = {
     },
     '/events': {
       get: {
+        operationId: 'getEvents',
         summary: 'List events',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.read'],
         parameters: [
           ...adminTableQueryParameterRefs,
           {
+            name: 'organizationId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'brandId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
             name: 'status',
+            in: 'query',
+            required: false,
+            schema: {
+              type: 'string',
+              description: 'Runtime accepts draft, published, paused, or archived.',
+              'x-runtime-values': ['draft', 'published', 'paused', 'archived'],
+            },
+          },
+          {
+            name: 'title',
             in: 'query',
             required: false,
             schema: { type: 'string' },
@@ -9494,25 +9518,41 @@ const rawOpenApiSpec = {
             name: 'startsAtFrom',
             in: 'query',
             required: false,
-            schema: { type: 'string' },
+            schema: {
+              type: 'string',
+              description: 'Inclusive ISO 8601 date-time lower bound.',
+              'x-runtime-format': 'date-time',
+            },
           },
           {
             name: 'startsAtTo',
             in: 'query',
             required: false,
-            schema: { type: 'string' },
+            schema: {
+              type: 'string',
+              description: 'Inclusive ISO 8601 date-time upper bound.',
+              'x-runtime-format': 'date-time',
+            },
           },
           {
             name: 'createdAtFrom',
             in: 'query',
             required: false,
-            schema: { type: 'string' },
+            schema: {
+              type: 'string',
+              description: 'Inclusive ISO 8601 creation date-time lower bound.',
+              'x-runtime-format': 'date-time',
+            },
           },
           {
             name: 'createdAtTo',
             in: 'query',
             required: false,
-            schema: { type: 'string' },
+            schema: {
+              type: 'string',
+              description: 'Inclusive ISO 8601 creation date-time upper bound.',
+              'x-runtime-format': 'date-time',
+            },
           },
         ],
         responses: {

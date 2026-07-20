@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { ulid } from 'ulid';
+import { sql } from 'kysely';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   BrandRepository,
@@ -386,8 +387,13 @@ const eventListColumns = [
   'visibility',
   'seo',
   'capacity',
+  'minimum_age',
   'cover_image_url',
+  'cover_image_alt',
   'external_url',
+  'version',
+  'last_setup_section',
+  'seo_use_cover_image',
   'resale_enabled',
   'resale_max_multiplier',
   'resale_max_absolute_cents',
@@ -980,22 +986,21 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const rawQuery = request.query as Record<string, string | undefined>;
     const { organizationId, brandId } = rawQuery;
 
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
+        searchParams.set(key, value);
+      }
+    }
+    const tableQuery = parseStrictTableQuery(eventsTableSchema, searchParams);
+
     if (organizationId) ClerkAuthService.requireOrganizationScope(principal, organizationId);
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
-
-    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return {
-        items: [],
-        nextCursor: undefined,
-        total: 0,
-        filterTotal: 0,
-      } as AdminTablePage<unknown>;
-    }
 
     const scope: Record<string, string | string[]> = {};
     if (organizationId) {
       scope.organization_id = organizationId;
-    } else if (principal.type !== 'system') {
+    } else if (principal.type !== 'system' && principal.organizationIds.length > 0) {
       scope.organization_id = principal.organizationIds;
     }
     if (brandId) {
@@ -1007,14 +1012,6 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       scope.id = principal.eventIds;
     }
 
-    const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(rawQuery)) {
-      if (value !== undefined && key !== 'organizationId' && key !== 'brandId') {
-        searchParams.set(key, value);
-      }
-    }
-    const tableQuery = parseStrictTableQuery(eventsTableSchema, searchParams);
-
     const result = await executeTableQuery(
       db,
       {
@@ -1022,8 +1019,13 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         schema: eventsTableSchema,
         tenantId: principal.tenantId,
         scope,
+        applyScope:
+          principal.type !== 'system' && principal.organizationIds.length === 0
+            ? (query) => query.where(sql<boolean>`false`)
+            : undefined,
         serialize: serializeEvent,
         selectFields: eventListColumns,
+        strictValidation: true,
       },
       tableQuery,
     );

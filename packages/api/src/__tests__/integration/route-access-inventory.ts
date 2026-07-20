@@ -124,6 +124,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'resale-policy-route-authorization-db.integration.test.ts'),
   ],
   [
+    'event-list-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'event-list-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'event-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'event-route-authorization-db.integration.test.ts'),
   ],
@@ -351,6 +355,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getAuditLogs'], {
     source: 'audit-log-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getEvents'], {
+    source: 'event-list-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['listSavedVenues'], {
     source: 'saved-venue-route-authorization-db.integration.test.ts',
