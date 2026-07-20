@@ -2,8 +2,9 @@ import Fastify from 'fastify';
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { AGENT_PROTOCOL_VERSION } from '@tixkit/agent-protocol';
-import { createDb, type Database } from '@tixkit/db';
+import { AgentExecutionRepository, createDb, type Database } from '@tixkit/db';
 import { registerErrorHandler, type AppContext } from '../../app.js';
+import { ClerkAuthService } from '../../auth/clerk.js';
 import { oauthTokenRoutes } from '../../routes/modules/oauth.js';
 import {
   describeWithIntegrationDatabase,
@@ -32,6 +33,7 @@ describeWithIntegrationDatabase('agent OAuth protocol issuance locking', () => {
   const applicationId = `oapp_ao_${suffix}`;
   const clientId = `agent_oauth_${suffix}`;
   const clientSecret = `agent_secret_${suffix}`;
+  const sponsorId = `usr_ao_${suffix}`;
 
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
@@ -63,12 +65,42 @@ describeWithIntegrationDatabase('agent OAuth protocol issuance locking', () => {
       })
       .execute();
     await db
+      .insertInto('user_profiles')
+      .values({
+        id: sponsorId,
+        tenant_id: tenantId,
+        clerk_user_id: `clerk_${sponsorId}`,
+        email: `${sponsorId}@example.test`,
+        first_name: null,
+        last_name: null,
+        avatar_url: null,
+        status: 'active',
+        last_seen_at: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('permission_grants')
+      .values({
+        id: `pg_${suffix}`,
+        tenant_id: tenantId,
+        principal_type: 'user',
+        principal_id: sponsorId,
+        permission: 'developers.write',
+        scope_type: 'tenant',
+        scope_id: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
       .insertInto('agent_principals')
       .values({
         id: agentPrincipalId,
         tenant_id: tenantId,
         kind: 'third_party',
-        sponsor_principal_id: `usr_ao_${suffix}`,
+        sponsor_principal_id: sponsorId,
         capabilities: '["events.read"]',
         maximum_autonomy: 'read',
         protocol_version: AGENT_PROTOCOL_VERSION,
@@ -104,17 +136,7 @@ describeWithIntegrationDatabase('agent OAuth protocol issuance locking', () => {
 
   afterAll(async () => {
     await app?.close();
-    if (db) {
-      await db
-        .deleteFrom('oauth_access_tokens')
-        .where('oauth_application_id', '=', applicationId)
-        .execute();
-      await db.deleteFrom('oauth_applications').where('id', '=', applicationId).execute();
-      await db.deleteFrom('agent_principals').where('id', '=', agentPrincipalId).execute();
-      await db.deleteFrom('organizations').where('id', '=', organizationId).execute();
-      await db.deleteFrom('tenants').where('id', '=', tenantId).execute();
-      await db.destroy();
-    }
+    await db?.destroy();
     restoreDatabaseDriver(previousDriver);
   });
 
@@ -166,5 +188,65 @@ describeWithIntegrationDatabase('agent OAuth protocol issuance locking', () => {
       .where('oauth_application_id', '=', applicationId)
       .executeTakeFirstOrThrow();
     expect(Number(tokenCount.count)).toBe(0);
+    await db
+      .updateTable('agent_principals')
+      .set({ protocol_version: AGENT_PROTOCOL_VERSION, updated_at: new Date() })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', agentPrincipalId)
+      .execute();
+  });
+
+  it('invalidates an issued token immediately after transactional principal revocation', async () => {
+    const rawToken = `tk_aat_${suffix}`;
+    const now = new Date();
+    await db
+      .insertInto('oauth_access_tokens')
+      .values({
+        id: `oat_revoke_${suffix}`,
+        oauth_application_id: applicationId,
+        refresh_token_id: null,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        token_hash: createHash('sha256').update(rawToken).digest('hex'),
+        scopes: '["agent.invoke"]',
+        subject_type: 'agent',
+        subject_id: agentPrincipalId,
+        expires_at: new Date(now.getTime() + 600_000),
+        revoked_at: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    const auth = new ClerkAuthService('sk_test_agent_protocol', db);
+    await expect(
+      auth.authenticateAgentAccessToken({
+        headers: { authorization: `Bearer ${rawToken}` },
+      } as never),
+    ).resolves.toMatchObject({ principal: { type: 'agent', id: agentPrincipalId } });
+
+    await expect(
+      new AgentExecutionRepository(db).revokePrincipal({
+        tenantId,
+        principalId: agentPrincipalId,
+        audit: {
+          id: `agent_revoke_${suffix}`,
+          actorPrincipalId: sponsorId,
+          reasonCode: 'PLATFORM_AGENT_PRINCIPAL_REVOKE',
+          idempotencyKey: `agent-principal-revoke-${suffix}`,
+        },
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      auth.authenticateAgentAccessToken({
+        headers: { authorization: `Bearer ${rawToken}` },
+      } as never),
+    ).rejects.toThrow('Invalid, expired, or revoked agent access token');
+    expect(
+      await db
+        .selectFrom('oauth_access_tokens')
+        .select('revoked_at')
+        .where('id', '=', `oat_revoke_${suffix}`)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ revoked_at: null });
   });
 });

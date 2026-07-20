@@ -9,6 +9,7 @@ import {
 import { buildAuthenticatedRouteTestApp, buildRouteManifest } from './route-manifest.js';
 import {
   AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -168,7 +169,8 @@ describe('API route access inventory (C-123)', () => {
     expect(WEBHOOK_REPLAY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(124);
+    expect(AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(131);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -193,8 +195,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(124);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(511);
+    expect(coveredRoutes).toHaveLength(131);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(547);
     expect(
       inventory.routes
         .filter((route) => route.operationId?.includes('UploadArtifacts'))
@@ -205,7 +207,7 @@ describe('API route access inventory (C-123)', () => {
       .flatMap((route) => route.negativeAuthorizationEvidence)
       .filter((evidence) => evidence.denialKind === 'policy')
       .map((evidence) => JSON.stringify(evidence.condition));
-    expect(policyConditions).toHaveLength(80);
+    expect(policyConditions).toHaveLength(94);
     expect(
       policyConditions.filter(
         (condition) =>
@@ -221,7 +223,7 @@ describe('API route access inventory (C-123)', () => {
             value: 'organization-wide',
           }),
       ),
-    ).toHaveLength(72);
+    ).toHaveLength(86);
     expect(
       policyConditions.filter(
         (condition) =>

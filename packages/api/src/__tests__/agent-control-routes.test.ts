@@ -32,6 +32,7 @@ function sponsor(overrides: Partial<Principal> = {}): Principal {
 function store(overrides: Partial<AgentControlStore> = {}): AgentControlStore {
   return {
     assertControlActor: vi.fn(async () => undefined),
+    getSponsoredPrincipal: vi.fn(async () => undefined),
     registerPrincipal: vi.fn(async (principal) => ({
       ...principal,
       registeredAt: now.toISOString(),
@@ -240,14 +241,78 @@ describe('agent control routes', () => {
     await thirdApp.close();
   });
 
+  it.each(['api_key', 'agent', 'mobile_device', 'system'] as const)(
+    'denies %s principals across every agent-control lifecycle route',
+    async (type) => {
+      const repository = store();
+      const app = await testApp(sponsor({ type: type as never }), repository);
+      const principalId = `agt_${'a'.repeat(48)}`;
+      const delegationId = `dlg_${'b'.repeat(48)}`;
+      const clientId = `oapp_${'c'.repeat(27)}`;
+      const requests = [
+        {
+          method: 'POST' as const,
+          url: '/agent-principals',
+          headers: { 'idempotency-key': idempotencyKey },
+          payload: registration,
+        },
+        { method: 'GET' as const, url: `/agent-principals/${principalId}` },
+        {
+          method: 'POST' as const,
+          url: `/agent-principals/${principalId}/revoke`,
+          headers: { 'idempotency-key': idempotencyKey },
+        },
+        {
+          method: 'POST' as const,
+          url: `/agent-principals/${principalId}/oauth-clients`,
+          headers: { 'idempotency-key': idempotencyKey },
+          payload: { organizationId: 'org_agent_route_01', name: 'Denied client' },
+        },
+        {
+          method: 'POST' as const,
+          url: `/agent-principals/${principalId}/oauth-clients/${clientId}/revoke`,
+          headers: { 'idempotency-key': idempotencyKey },
+        },
+        {
+          method: 'POST' as const,
+          url: '/agent-delegations',
+          headers: { 'idempotency-key': idempotencyKey },
+          payload: {
+            id: 'denied_delegation',
+            agentPrincipalId: principalId,
+            capabilities: ['events.read'],
+            resourceScopes: ['event:event_agent_route_01'],
+            expiresAt: '2026-07-15T12:00:00.000Z',
+          },
+        },
+        {
+          method: 'POST' as const,
+          url: `/agent-delegations/${delegationId}/revoke`,
+          headers: { 'idempotency-key': idempotencyKey },
+        },
+      ];
+      for (const request of requests) {
+        const response = await app.inject(request);
+        expect(response.statusCode).toBe(403);
+      }
+      expect(repository.getSponsoredPrincipal).not.toHaveBeenCalled();
+      expect(repository.getPrincipal).not.toHaveBeenCalled();
+      expect(repository.getDelegation).not.toHaveBeenCalled();
+      expect(repository.registerPrincipal).not.toHaveBeenCalled();
+      expect(repository.revokePrincipal).not.toHaveBeenCalled();
+      expect(repository.createAgentOAuthClient).not.toHaveBeenCalled();
+      expect(repository.revokeAgentOAuthClient).not.toHaveBeenCalled();
+      expect(repository.grantDelegation).not.toHaveBeenCalled();
+      expect(repository.revokeDelegation).not.toHaveBeenCalled();
+      await app.close();
+    },
+  );
+
   it.each([
-    sponsor({ type: 'api_key' as never }),
-    sponsor({ type: 'mobile_device' as never }),
-    sponsor({ type: 'system' as never }),
     sponsor({ scopes: ['events.read', 'events.write'] }),
     sponsor({ eventIds: ['evt_scoped_01'] }),
     sponsor({ brandIds: ['brand_scoped_01'] }),
-  ])('denies non-human, underprivileged, and resource-scoped actors', async (principal) => {
+  ])('denies underprivileged and resource-scoped actors', async (principal) => {
     const repository = store();
     const app = await testApp(principal, repository);
     const response = await app.inject({
@@ -292,7 +357,7 @@ describe('agent control routes', () => {
   it('rechecks tenant-wide database authorization before reading a sponsored principal', async () => {
     const principalId = `agt_${'a'.repeat(48)}`;
     const repository = store({
-      assertControlActor: vi.fn(async () => {
+      getSponsoredPrincipal: vi.fn(async () => {
         throw new Error('AGENT_CONTROL_ACTOR_DENIED');
       }),
       getPrincipal: vi.fn(async () => undefined),
@@ -300,7 +365,7 @@ describe('agent control routes', () => {
     const app = await testApp(sponsor(), repository);
     const response = await app.inject({ method: 'GET', url: `/agent-principals/${principalId}` });
     expect(response.statusCode).toBe(403);
-    expect(repository.getPrincipal).not.toHaveBeenCalled();
+    expect(repository.getSponsoredPrincipal).toHaveBeenCalledWith(tenantId, sponsorId, principalId);
     await app.close();
   });
 
@@ -580,6 +645,35 @@ describe('agent control routes', () => {
     }
     expect(repository.revokePrincipal).not.toHaveBeenCalled();
     expect(repository.revokeDelegation).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('hides cross-sponsor OAuth client creation and revocation without effects', async () => {
+    const principalId = `agt_${'d'.repeat(48)}`;
+    const clientId = `oapp_${'e'.repeat(27)}`;
+    const repository = store({
+      createAgentOAuthClient: vi.fn(async () => {
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      }),
+      revokeAgentOAuthClient: vi.fn(async () => {
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      }),
+    });
+    const app = await testApp(sponsor(), repository);
+    const create = await app.inject({
+      method: 'POST',
+      url: `/agent-principals/${principalId}/oauth-clients`,
+      headers: { 'idempotency-key': 'cross-sponsor-oauth-create-0001' },
+      payload: { organizationId: 'org_agent_route_01', name: 'Concealed client' },
+    });
+    const revoke = await app.inject({
+      method: 'POST',
+      url: `/agent-principals/${principalId}/oauth-clients/${clientId}/revoke`,
+      headers: { 'idempotency-key': 'cross-sponsor-oauth-revoke-0001' },
+    });
+    expect([create.statusCode, revoke.statusCode]).toEqual([404, 404]);
+    expect(repository.createAgentOAuthClient).toHaveBeenCalledOnce();
+    expect(repository.revokeAgentOAuthClient).toHaveBeenCalledOnce();
     await app.close();
   });
 

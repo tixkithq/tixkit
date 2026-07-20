@@ -83,6 +83,7 @@ const createOAuthClientSchema = z
 export type AgentControlStore = Pick<
   AgentExecutionRepository,
   | 'assertControlActor'
+  | 'getSponsoredPrincipal'
   | 'getPrincipal'
   | 'getDelegation'
   | 'registerPrincipal'
@@ -180,10 +181,9 @@ async function translateControlError<T>(key: string, operation: () => Promise<T>
       throw new ForbiddenError('Agent control authorization changed');
     if (message === 'AGENT_CONTROL_ORGANIZATION_DENIED')
       throw new ForbiddenError('Agent credential organization authorization changed');
-    if (
-      message === 'AGENT_CONTROL_SPONSOR_MISMATCH' ||
-      message === 'AGENT_CONTROL_SPONSOR_PERMISSION_DENIED'
-    )
+    if (message === 'AGENT_CONTROL_SPONSOR_MISMATCH')
+      throw new NotFoundError('Agent control resource', 'requested');
+    if (message === 'AGENT_CONTROL_SPONSOR_PERMISSION_DENIED')
       throw new ForbiddenError('Agent sponsor authorization changed');
     if (message === 'AGENT_PRINCIPAL_INACTIVE')
       throw new ConflictError('Agent principal is unavailable for delegation');
@@ -250,13 +250,11 @@ export const agentControlRoutes: FastifyPluginAsync<AgentControlRouteOptions> = 
   app.get('/agent-principals/:id', async (request) => {
     const actor = request.principal!;
     requireHumanAgentAdministrator(actor);
-    await translateControlError('agent-control-read', () =>
-      repository.assertControlActor(actor.tenantId, actor.id),
-    );
     const { id } = parseBody(idParamsSchema, request.params);
-    const principal = await repository.getPrincipal(actor.tenantId, id);
-    if (!principal || principal.sponsorPrincipalId !== actor.id)
-      throw new NotFoundError('AgentPrincipal', id);
+    const principal = await translateControlError('agent-control-read', () =>
+      repository.getSponsoredPrincipal(actor.tenantId, actor.id, id),
+    );
+    if (!principal) throw new NotFoundError('AgentPrincipal', id);
     return principal;
   });
 

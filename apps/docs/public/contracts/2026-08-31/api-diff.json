@@ -1,0 +1,36 @@
+{
+  "from": "2026-08-30",
+  "to": "2026-08-31",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 4
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /agent-principals.requestBody.content.application/json.schema.properties.capabilities.items",
+      "message": "Enum value reports.read was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /agent-principals.requestBody.content.application/json.schema.properties.capabilities.items",
+      "message": "Enum value campaigns.prepare was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /agent-delegations.requestBody.content.application/json.schema.properties.capabilities.items",
+      "message": "Enum value reports.read was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /agent-delegations.requestBody.content.application/json.schema.properties.capabilities.items",
+      "message": "Enum value campaigns.prepare was added."
+    }
+  ]
+}

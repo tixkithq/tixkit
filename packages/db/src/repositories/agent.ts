@@ -56,34 +56,54 @@ function delegationPermissionSnapshot(capabilities: readonly AgentCapability[]):
   return [...permissions].sort();
 }
 
+function controlProductPermissions(capabilities: readonly AgentCapability[]): string[] {
+  return [
+    ...new Set(
+      delegationPermissionSnapshot(capabilities).map((permission) => {
+        if (permission === 'events:read') return 'events.read';
+        if (permission === 'reports:read') return 'reports.read';
+        if (permission === 'messages:write') return 'messages.write';
+        return 'events.write';
+      }),
+    ),
+  ].sort();
+}
+
+async function assertControlCapabilityAuthority(
+  db: Executor,
+  tenantId: string,
+  sponsorPrincipalId: string,
+  capabilities: readonly AgentCapability[],
+): Promise<void> {
+  const requiredProductPermissions = controlProductPermissions(capabilities);
+  const grants = await db
+    .selectFrom('permission_grants')
+    .select(['permission'])
+    .where('tenant_id', '=', tenantId)
+    .where('principal_type', '=', 'user')
+    .where('principal_id', '=', sponsorPrincipalId)
+    .where('permission', 'in', requiredProductPermissions)
+    .where('scope_type', '=', 'tenant')
+    .where('scope_id', 'is', null)
+    .forUpdate()
+    .execute();
+  const granted = new Set(grants.map(({ permission }) => permission));
+  if (requiredProductPermissions.some((permission) => !granted.has(permission)))
+    throw new Error('AGENT_CONTROL_SPONSOR_PERMISSION_DENIED');
+}
+
 async function assertDelegationAuthority(
   db: Executor,
   delegation: AgentDelegationGrant,
   now: Date,
 ): Promise<string[]> {
   const permissionSnapshot = delegationPermissionSnapshot(delegation.capabilities);
-  const requiredProductPermissions = new Set(
-    permissionSnapshot.map((permission) => {
-      if (permission === 'events:read') return 'events.read';
-      if (permission === 'reports:read') return 'reports.read';
-      if (permission === 'messages:write') return 'messages.write';
-      return 'events.write';
-    }),
+  await assertControlCapabilityAuthority(
+    db,
+    delegation.tenantId,
+    delegation.sponsorPrincipalId,
+    delegation.capabilities,
   );
-  const grants = await db
-    .selectFrom('permission_grants')
-    .select(['permission'])
-    .where('tenant_id', '=', delegation.tenantId)
-    .where('principal_type', '=', 'user')
-    .where('principal_id', '=', delegation.sponsorPrincipalId)
-    .where('permission', 'in', [...requiredProductPermissions])
-    .where('scope_type', '=', 'tenant')
-    .where('scope_id', 'is', null)
-    .forUpdate()
-    .execute();
-  const granted = new Set(grants.map(({ permission }) => permission));
-  if ([...requiredProductPermissions].some((permission) => !granted.has(permission)))
-    throw new Error('AGENT_CONTROL_SPONSOR_PERMISSION_DENIED');
 
   const eventIds = delegation.resourceScopes.map((scope) => {
     if (!scope.startsWith('event:')) throw new Error('AGENT_DELEGATION_SCOPE_UNSUPPORTED');
@@ -730,6 +750,26 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     });
   }
 
+  async getSponsoredPrincipal(
+    tenantId: string,
+    actorPrincipalId: string,
+    principalId: string,
+  ): Promise<AgentPrincipal | undefined> {
+    return executeControlTransaction(this.db, async (tx) => {
+      await lockControlTenant(tx, tenantId);
+      await authorizeControlActor(tx, tenantId, actorPrincipalId);
+      const principal = await tx
+        .selectFrom('agent_principals')
+        .selectAll()
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', principalId)
+        .where('sponsor_principal_id', '=', actorPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      return principal ? this.getPrincipalFrom(tx, principal) : undefined;
+    });
+  }
+
   async createAgentOAuthClient(input: {
     tenantId: string;
     organizationId: string;
@@ -768,12 +808,9 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .where('id', '=', input.agentPrincipalId)
         .forUpdate()
         .executeTakeFirst();
-      if (
-        !principal ||
-        principal.state !== 'active' ||
-        principal.sponsor_principal_id !== input.audit.actorPrincipalId
-      )
-        throw new Error('AGENT_PRINCIPAL_INACTIVE');
+      if (!principal || principal.sponsor_principal_id !== input.audit.actorPrincipalId)
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      if (principal.state !== 'active') throw new Error('AGENT_PRINCIPAL_INACTIVE');
       const membership = await tx
         .selectFrom('organization_members')
         .select('organization_id')
@@ -971,6 +1008,12 @@ export class AgentExecutionRepository implements AgentExecutionStore {
       );
       if (principal.sponsorPrincipalId !== audit.actorPrincipalId)
         throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      await assertControlCapabilityAuthority(
+        tx,
+        principal.tenantId,
+        principal.sponsorPrincipalId,
+        principal.capabilities,
+      );
       const now = await databaseNow(tx);
       const persistedPrincipal: AgentPrincipal = {
         ...principal,
@@ -1065,12 +1108,9 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .where('id', '=', delegation.agentPrincipalId)
         .forUpdate()
         .executeTakeFirst();
-      if (
-        !principal ||
-        principal.state !== 'active' ||
-        principal.sponsor_principal_id !== delegation.sponsorPrincipalId
-      )
-        throw new Error('AGENT_PRINCIPAL_INACTIVE');
+      if (!principal || principal.sponsor_principal_id !== delegation.sponsorPrincipalId)
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      if (principal.state !== 'active') throw new Error('AGENT_PRINCIPAL_INACTIVE');
       const persistedPrincipal = await this.getPrincipalFrom(tx, principal);
       const now = await databaseNow(tx);
       const permissionSnapshot = await assertDelegationAuthority(tx, delegation, now);

@@ -165,7 +165,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-30');
+    expect(openApiSpec.info.version).toBe('2026-08-31');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -936,6 +936,7 @@ describe('openApiSpec', () => {
       expect(operation.security).not.toContainEqual({ ApiKey: [] });
       expect(operation.tags).toEqual(['Agent platform']);
       expect(operation['x-required-permissions']).toEqual(['developers.write']);
+      expect(operation['x-principal-type-restrictions']).toEqual({ allowed: ['user'] });
     }
     for (const mutation of [register, revokePrincipal, grant, revokeDelegation]) {
       expect(mutation.parameters).toContainEqual({
@@ -958,6 +959,12 @@ describe('openApiSpec', () => {
     expect(registerSchema.properties).not.toHaveProperty('tenantId');
     expect(registerSchema.properties).not.toHaveProperty('sponsorPrincipalId');
     expect(registerSchema.properties).not.toHaveProperty('registeredAt');
+    expect(registerSchema.properties.capabilities).toMatchObject({
+      maxItems: 7,
+      items: {
+        enum: expect.arrayContaining(['reports.read', 'campaigns.prepare']),
+      },
+    });
 
     const grantSchema = grant.requestBody.content['application/json'].schema;
     expect(grantSchema.additionalProperties).toBe(false);
@@ -979,6 +986,7 @@ describe('openApiSpec', () => {
     for (const operation of [create, revoke]) {
       expect(operation.security).toEqual([{ BearerAuth: [] }]);
       expect(operation['x-required-permissions']).toEqual(['developers.write']);
+      expect(operation['x-principal-type-restrictions']).toEqual({ allowed: ['user'] });
       expect(operation.parameters).toContainEqual({
         $ref: '#/components/parameters/AgentControlIdempotencyKey',
       });
@@ -1342,7 +1350,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-30');
+    expect(openApiSpec.info.version).toBe('2026-08-31');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',

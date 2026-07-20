@@ -644,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-30',
+    version: '2026-08-31',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -6084,7 +6084,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-30, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-31, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6131,7 +6131,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-30, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-31, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6238,7 +6238,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-30 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-31 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6275,7 +6275,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-30 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-31 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8561,7 +8561,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-30 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-31 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8618,7 +8618,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-30 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-31 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -14293,6 +14293,7 @@ const rawOpenApiSpec = {
         description:
           'Experimental/private beta. Requires a human bearer principal with tenant-wide `developers.write` and the live permissions implied by every requested capability. The server binds the principal to the authenticated sponsor and derives tenant, protocol version, state, identifier, and registration time. Managed Cloud accepts third-party agents; Self-Hosted deployments may also accept self-hosted agents.',
         'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
         requestBody: {
@@ -14316,7 +14317,7 @@ const rawOpenApiSpec = {
                   capabilities: {
                     type: 'array',
                     minItems: 1,
-                    maxItems: 5,
+                    maxItems: 7,
                     uniqueItems: true,
                     items: {
                       type: 'string',
@@ -14325,7 +14326,9 @@ const rawOpenApiSpec = {
                         'events.prepare',
                         'events.execute',
                         'readiness.read',
+                        'reports.read',
                         'content.prepare',
+                        'campaigns.prepare',
                       ],
                     },
                   },
@@ -14369,6 +14372,7 @@ const rawOpenApiSpec = {
         description:
           'Requires the human bearer sponsor with tenant-wide `developers.write`. Principals sponsored by another user are hidden as not found.',
         'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
         responses: {
           '200': {
@@ -14399,6 +14403,7 @@ const rawOpenApiSpec = {
         description:
           'Revokes the sponsored principal and its active delegations atomically. Requires fresh human sponsor authorization and is idempotent for an identical request.',
         'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
         responses: {
@@ -14432,6 +14437,7 @@ const rawOpenApiSpec = {
         description:
           'Experimental/private beta. A human sponsor with live tenant-wide `developers.write` creates a fixed-scope credential for one active sponsored agent. The organization identifies credential administration ownership only and grants the agent no event authority. The secret is returned once; an identical idempotent replay returns metadata without the secret.',
         'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
         parameters: [
           {
@@ -14502,6 +14508,7 @@ const rawOpenApiSpec = {
         description:
           'Revokes the exact sponsor-owned credential and all of its access tokens atomically. Live application and principal checks also make revocation effective on every request.',
         'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
         parameters: [
           {
@@ -16063,6 +16070,7 @@ const rawOpenApiSpec = {
         description:
           'Experimental/private beta. Grants an active sponsored agent a bounded set of event capabilities for one to 100 event scopes and at most 30 days. The server rechecks sponsor permissions and resource membership under lock, then derives the immutable permission snapshot and issue time.',
         'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
         requestBody: {
@@ -16086,7 +16094,7 @@ const rawOpenApiSpec = {
                   capabilities: {
                     type: 'array',
                     minItems: 1,
-                    maxItems: 5,
+                    maxItems: 7,
                     uniqueItems: true,
                     items: {
                       type: 'string',
@@ -16095,7 +16103,9 @@ const rawOpenApiSpec = {
                         'events.prepare',
                         'events.execute',
                         'readiness.read',
+                        'reports.read',
                         'content.prepare',
+                        'campaigns.prepare',
                       ],
                     },
                   },
@@ -16153,6 +16163,7 @@ const rawOpenApiSpec = {
         description:
           'Revokes an active delegation using fresh human sponsor authorization. Delegations sponsored by another user are hidden as not found.',
         'x-required-permissions': ['developers.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
         responses: {

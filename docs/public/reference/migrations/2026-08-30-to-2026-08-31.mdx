@@ -1,0 +1,24 @@
+---
+title: Migrate API 2026-08-30 to 2026-08-31
+description: Adopt transactional, human-only agent-control authorization.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-20
+prerequisites:
+  - /reference/api-versions
+related:
+  - /platform/agent-platform
+  - /reference/api
+---
+
+API `2026-08-31` documents the existing human-only boundary on all agent-principal, agent-delegation and agent OAuth-client lifecycle operations. API keys, agents, mobile devices and internal system principals receive `403` before reads, persistence or audit effects. Integrations must use an authenticated human sponsor holding tenant-wide `developers.write`; machine credentials cannot recursively create or manage agent identities.
+
+Principal registration now revalidates every capability-derived product permission in the same database transaction that locks the tenant, registers the principal and appends immutable audit evidence. A stale bearer permission snapshot therefore cannot register `events.read`, `events.prepare`, `events.execute`, `readiness.read`, `reports.read`, `content.prepare` or `campaigns.prepare` after the corresponding live product grant is removed.
+
+Sponsored-principal reads now combine live actor authorization, sponsor ownership and principal retrieval in one locked transaction. Concurrent profile or `developers.write` revocation is serialized before the read and fails closed with `403`; another sponsor's principal remains concealed as `404`.
+
+The agent capability request schemas now expose all seven capabilities already accepted by the runtime. This is a compatible schema correction: `reports.read` and `campaigns.prepare` are newly documented, and the maximum capability count increases from five to seven. Agent protocol versions, approval digests, OAuth scope and execution semantics do not change in this release.

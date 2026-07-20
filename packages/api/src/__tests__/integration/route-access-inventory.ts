@@ -83,6 +83,11 @@ export type NegativeAuthorizationEvidence = {
 };
 
 const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
+  ['agent-control-routes.test.ts', resolve(import.meta.dirname, '../agent-control-routes.test.ts')],
+  [
+    'agent-control-db.integration.test.ts',
+    resolve(import.meta.dirname, 'agent-control-db.integration.test.ts'),
+  ],
   [
     'agent-action-execution-route-authorization-db.integration.test.ts',
     resolve(
@@ -531,6 +536,23 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'api-key-route-authorization.test.ts',
     persistenceSource: 'api-key-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    [
+      'postAgentPrincipals',
+      'postAgentPrincipalsByIdRevoke',
+      'postAgentPrincipalsByIdOauthClients',
+      'postAgentPrincipalsByIdOauthClientsByClientIdRevoke',
+      'postAgentDelegations',
+      'postAgentDelegationsByIdRevoke',
+    ],
+    {
+      source: 'agent-control-routes.test.ts',
+      persistenceSource: 'agent-control-db.integration.test.ts',
+    },
+  ),
+  ...evidenceBindings(['getAgentPrincipalsById'], {
+    source: 'agent-control-routes.test.ts',
+  }),
   ...evidenceBindings(['postOauthApplications', 'deleteOauthApplicationsByAppId'], {
     source: 'oauth-application-route-authorization.test.ts',
     persistenceSource: 'oauth-application-route-authorization-db.integration.test.ts',
@@ -689,6 +711,7 @@ const eventScopeGuards = new Set([
 ]);
 const organizationWideScopeGuards = new Set([
   'report',
+  'requireHumanAgentAdministrator',
   'requireMigrationPermission',
   'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
@@ -1091,6 +1114,12 @@ function boundariesFor(
   }
   if (/requireBrandScope|brandIds|brand_id/.test(handlerSource)) boundaries.push('brand');
   if (/requireEventScope|eventIds|event_id/.test(handlerSource)) boundaries.push('event');
+  if (
+    /sponsorPrincipalId|sponsor_principal_id|getSponsoredPrincipal|agentPrincipalId:\s*id/.test(
+      handlerSource,
+    )
+  )
+    boundaries.push('owner');
   if (/requireResourceTenant|tenantId|tenant_id/.test(handlerSource)) boundaries.push('tenant');
   if (guardEvidence.some((guard) => eventScopeGuards.has(guard))) {
     boundaries.push('tenant', 'organization', 'brand', 'event');
@@ -1103,7 +1132,11 @@ function boundariesFor(
   }
   if (guardEvidence.includes('scopedJob')) boundaries.push('organization');
   if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');
-  if (guardEvidence.includes('requireHumanUserPrincipal')) boundaries.push('principal-type');
+  if (
+    guardEvidence.includes('requireHumanUserPrincipal') ||
+    guardEvidence.includes('requireHumanAgentAdministrator')
+  )
+    boundaries.push('principal-type');
   if (guardEvidence.includes('requireAgent')) boundaries.push('principal-type');
   if (guardEvidence.includes('requireUploadArtifactAccess')) {
     boundaries.push('organization', 'brand', 'event', 'owner', 'principal-type');

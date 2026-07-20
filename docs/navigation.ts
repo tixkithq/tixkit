@@ -266,6 +266,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-30 human-only API key lifecycle controls',
         routeId: 'apiMigration20260829To20260830',
       },
+      {
+        label: 'Adopt 2026-08-31 transactional agent-control authorization',
+        routeId: 'apiMigration20260830To20260831',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },
