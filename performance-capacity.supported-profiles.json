@@ -15,7 +15,7 @@
       "deployment": {
         "kind": "compact-compose",
         "files": ["infra/compact/.env.example", "infra/compact/compose.yml"],
-        "manifestSha256": "fd846ac49767b6bdb780c53c311c6312151bcc46e3f3b801a5ffab7346fd9018"
+        "manifestSha256": "651474b2140bee5c91c94fe46a0b402773a1c3c307d898f08334a8c65992598a"
       },
       "database": { "engine": "postgresql", "topology": "bundled-single-instance" },
       "resources": {
@@ -68,7 +68,7 @@
           "infra/helm/tixkit/templates/temporal.yaml",
           "infra/helm/tixkit/templates/worker.yaml"
         ],
-        "manifestSha256": "d266fcd3d467476831e00fc7c51655834bfb1a07f3f1f44d3aa1e9687a12ca29"
+        "manifestSha256": "ef11d1104bfa60c198256495908b71899c1f2d647a21dc1e3585ebeaa1e72921"
       },
       "database": { "engine": "postgresql", "topology": "external-high-availability" },
       "resources": {
