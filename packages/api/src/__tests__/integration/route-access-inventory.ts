@@ -525,10 +525,16 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'resale-listing-read-route-authorization-db.integration.test.ts',
     persistenceSource: 'resale-listing-read-route-authorization-db.integration.test.ts',
   }),
-  ...evidenceBindings(['putEventsByEventIdMarketingIntegrationsByProvider'], {
-    source: 'marketing-integration-route-authorization-db.integration.test.ts',
-    persistenceSource: 'marketing-integration-route-authorization-db.integration.test.ts',
-  }),
+  ...evidenceBindings(
+    [
+      'getEventsByEventIdMarketingIntegrations',
+      'putEventsByEventIdMarketingIntegrationsByProvider',
+    ],
+    {
+      source: 'marketing-integration-route-authorization-db.integration.test.ts',
+      persistenceSource: 'marketing-integration-route-authorization-db.integration.test.ts',
+    },
+  ),
   ...evidenceBindings(['postEventsByEventIdQuestionsReorder'], {
     source: 'question-reorder-route-authorization-db.integration.test.ts',
     persistenceSource: 'question-reorder-route-authorization-db.integration.test.ts',

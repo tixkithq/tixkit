@@ -262,12 +262,19 @@ export async function loadPublicEventById(db: Database, eventId: string): Promis
   return event as PublicEventRow;
 }
 
-export async function loadPublicMarketingIntegrations(db: Database, eventId: string) {
+export async function loadPublicMarketingIntegrations(
+  db: Database,
+  event: Pick<PublicEventRow, 'id' | 'tenant_id' | 'organization_id' | 'brand_id'>,
+) {
   const rows = await db
     .selectFrom('marketing_integrations')
     .select(['provider', 'config', 'consent_required', 'status'])
-    .where('event_id', '=', eventId)
+    .where('tenant_id', '=', event.tenant_id)
+    .where('organization_id', '=', event.organization_id)
+    .where('brand_id', '=', event.brand_id)
+    .where('event_id', '=', event.id)
     .where('status', '=', 'active')
+    .orderBy('provider', 'asc')
     .execute();
   return rows.filter((row) => hasSafeMarketingIntegrationConfig(row.provider, row.config));
 }
@@ -714,7 +721,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const event = await loadPublicEventById(db, eventId);
     const [marketingIntegrations, mediaAssets] = await Promise.all([
-      loadPublicMarketingIntegrations(db, eventId),
+      loadPublicMarketingIntegrations(db, event),
       loadPublicEventMedia(db, eventId),
     ]);
     return serializePublicEvent(event, marketingIntegrations, mediaAssets);
@@ -761,7 +768,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     if (!tenant || tenant.plan === 'free') throw new NotFoundError('Event', slug);
 
     const [marketingIntegrations, mediaAssets] = await Promise.all([
-      loadPublicMarketingIntegrations(db, event.id),
+      loadPublicMarketingIntegrations(db, event),
       loadPublicEventMedia(db, event.id),
     ]);
     return {
@@ -786,8 +793,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/public/events/:eventId/marketing-integrations', async (request) => {
     const { eventId } = request.params as { eventId: string };
-    await loadPublicEventById(db, eventId);
-    const rows = await loadPublicMarketingIntegrations(db, eventId);
+    const event = await loadPublicEventById(db, eventId);
+    const rows = await loadPublicMarketingIntegrations(db, event);
     return {
       items: rows.map((row) => serializeMarketingIntegration(row, { public: true })),
       nextCursor: null,
@@ -927,7 +934,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       resaleListing,
       occurrences,
     ] = await Promise.all([
-      loadPublicMarketingIntegrations(db, eventId),
+      loadPublicMarketingIntegrations(db, event),
       loadPublicEventMedia(db, eventId),
       loadPublicAvailability(
         db,

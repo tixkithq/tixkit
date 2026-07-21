@@ -1542,6 +1542,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       .where('organization_id', '=', event.organization_id)
       .where('brand_id', '=', event.brand_id)
       .where('event_id', '=', eventId)
+      .orderBy('provider', 'asc')
       .execute();
     return {
       items: rows

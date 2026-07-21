@@ -165,6 +165,9 @@ function createEventMutationDb(
         conditions.push([column, value]);
         return query;
       },
+      orderBy() {
+        return query;
+      },
       limit() {
         return query;
       },

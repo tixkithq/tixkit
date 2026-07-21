@@ -4039,6 +4039,9 @@ describe('public access code validation', () => {
         marketing_integrations: [
           {
             id: 'mi_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'br_1',
             event_id: 'evt_1',
             provider: 'ga4',
             config: JSON.stringify({ measurementId: 'G-TEST' }),

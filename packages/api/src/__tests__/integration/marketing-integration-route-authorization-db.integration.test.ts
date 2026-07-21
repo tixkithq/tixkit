@@ -28,6 +28,7 @@ function marketingIntegrationContract(operationId: string) {
 const updateContract = marketingIntegrationContract(
   'putEventsByEventIdMarketingIntegrationsByProvider',
 );
+const readContract = marketingIntegrationContract('getEventsByEventIdMarketingIntegrations');
 
 const suffix = ulid().slice(-10).toLowerCase();
 const tenantA = `tnt_mkt_auth_a_${suffix}`;
@@ -39,6 +40,9 @@ const brandA = `brd_mkt_auth_a_${suffix}`;
 const brandAScoped = `brd_mkt_auth_scope_${suffix}`;
 const brandB = `brd_mkt_auth_b_${suffix}`;
 const actorId = `usr_mkt_auth_${suffix}`;
+const allowedGa4Integration = `mkt_read_ga4_${suffix}`;
+const allowedMetaIntegration = `mkt_read_meta_${suffix}`;
+const excludedIntegration = `mkt_read_excluded_${suffix}`;
 
 type MarketingProvider = 'ga4' | 'meta_pixel' | 'generic_tag';
 type MarketingPayload = Readonly<{
@@ -65,7 +69,14 @@ async function insertTenant(id: string, name: string): Promise<void> {
   const now = new Date('2026-07-17T12:00:00.000Z');
   await db
     .insertInto('tenants')
-    .values({ id, name, status: 'active', plan: 'test', created_at: now, updated_at: now })
+    .values({
+      id,
+      name,
+      status: 'active',
+      plan: 'test',
+      created_at: now,
+      updated_at: now,
+    })
     .execute();
 }
 
@@ -151,7 +162,9 @@ function providerPayload(provider: MarketingProvider, variant = 'one'): Marketin
     };
   }
   return {
-    config: { pixelUrl: `https://metrics.example.test/${suffix}/${variant}.gif` },
+    config: {
+      pixelUrl: `https://metrics.example.test/${suffix}/${variant}.gif`,
+    },
     consentRequired: true,
     status: 'active',
   };
@@ -250,6 +263,55 @@ async function seedIntegration(
     .execute();
 }
 
+async function insertIntegrationRow(input: {
+  brandId: string;
+  config: Record<string, string>;
+  eventId: string;
+  id: string;
+  organizationId: string;
+  provider: MarketingProvider;
+  tenantId: string;
+}): Promise<void> {
+  const now = new Date('2026-07-21T12:30:00.000Z');
+  await db
+    .insertInto('marketing_integrations')
+    .values({
+      id: input.id,
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      brand_id: input.brandId,
+      event_id: input.eventId,
+      provider: input.provider,
+      config: JSON.stringify(input.config),
+      consent_required: input.provider !== 'ga4',
+      status: input.provider === 'meta_pixel' ? 'disabled' : 'active',
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+}
+
+async function seedAllowedReadIntegrations(): Promise<void> {
+  await insertIntegrationRow({
+    id: allowedMetaIntegration,
+    tenantId: tenantA,
+    organizationId: organizationA,
+    brandId: brandA,
+    eventId: eventA,
+    provider: 'meta_pixel',
+    config: { pixelId: `pixel-read-${suffix}` },
+  });
+  await insertIntegrationRow({
+    id: allowedGa4Integration,
+    tenantId: tenantA,
+    organizationId: organizationA,
+    brandId: brandA,
+    eventId: eventA,
+    provider: 'ga4',
+    config: { measurementId: `G-READ-${suffix.toUpperCase()}` },
+  });
+}
+
 function invokeIntegration(
   targetEventId: string,
   provider: string,
@@ -260,6 +322,13 @@ function invokeIntegration(
     method: updateContract.method,
     url: path.replace('{eventId}', targetEventId).replace('{provider}', provider),
     payload,
+  });
+}
+
+function invokeRead(targetEventId: string) {
+  return app.inject({
+    method: readContract.method,
+    url: readContract.path.replace('{eventId}', targetEventId),
   });
 }
 
@@ -277,7 +346,7 @@ function transitionChain(
   return { first, second };
 }
 
-describeWithIntegrationDatabase('marketing integration write route authorization matrix', () => {
+describeWithIntegrationDatabase('marketing integration route authorization matrix', () => {
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -390,6 +459,16 @@ describeWithIntegrationDatabase('marketing integration write route authorization
   });
 
   it('binds the immutable route contract to this executable proof', () => {
+    expect(readContract).toMatchObject({
+      authorizedControl: { status: 200 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      method: 'GET',
+      operationId: 'getEventsByEventIdMarketingIntegrations',
+      path: '/events/{eventId}/marketing-integrations',
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      persistenceSource: 'marketing-integration-route-authorization-db.integration.test.ts',
+      source: 'marketing-integration-route-authorization-db.integration.test.ts',
+    });
     expect(updateContract).toMatchObject({
       authorizedControl: { status: 200 },
       deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
@@ -397,6 +476,11 @@ describeWithIntegrationDatabase('marketing integration write route authorization
       persistenceSource: 'marketing-integration-route-authorization-db.integration.test.ts',
       source: 'marketing-integration-route-authorization-db.integration.test.ts',
     });
+    expect(
+      openApiSpec.paths['/events/{eventId}/marketing-integrations'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/MarketingIntegrationPage' });
     const publicSchema =
       openApiSpec.paths['/events/{eventId}/marketing-integrations/{provider}'].put.requestBody
         .content['application/json'].schema;
@@ -417,6 +501,170 @@ describeWithIntegrationDatabase('marketing integration write route authorization
       },
     });
   });
+
+  it('returns only two safe integrations in deterministic provider order without mutation', async () => {
+    await seedAllowedReadIntegrations();
+    await insertIntegrationRow({
+      id: excludedIntegration,
+      tenantId: tenantA,
+      organizationId: organizationA,
+      brandId: brandA,
+      eventId: eventA,
+      provider: 'generic_tag',
+      config: { pixelUrl: 'javascript:legacy-unsafe' },
+    });
+    const before = await evidenceSnapshot();
+
+    const response = await invokeRead(eventA);
+
+    expect(response.statusCode, response.body).toBe(readContract.authorizedControl.status);
+    expect(response.json()).toEqual({
+      items: [
+        {
+          id: allowedGa4Integration,
+          tenantId: tenantA,
+          organizationId: organizationA,
+          brandId: brandA,
+          eventId: eventA,
+          provider: 'ga4',
+          config: { measurementId: `G-READ-${suffix.toUpperCase()}` },
+          consentRequired: false,
+          status: 'active',
+          createdAt: '2026-07-21T12:30:00.000Z',
+          updatedAt: '2026-07-21T12:30:00.000Z',
+        },
+        {
+          id: allowedMetaIntegration,
+          tenantId: tenantA,
+          organizationId: organizationA,
+          brandId: brandA,
+          eventId: eventA,
+          provider: 'meta_pixel',
+          config: { pixelId: `pixel-read-${suffix}` },
+          consentRequired: true,
+          status: 'disabled',
+          createdAt: '2026-07-21T12:30:00.000Z',
+          updatedAt: '2026-07-21T12:30:00.000Z',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+    });
+    expect(response.body).not.toContain(excludedIntegration);
+    expect(response.body).not.toContain('javascript:legacy-unsafe');
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+  });
+
+  it.each([
+    ['tenant', tenantB, organizationA, brandA],
+    ['organization', tenantA, organizationAScoped, brandA],
+    ['brand', tenantA, organizationA, brandAScoped],
+  ] as const)(
+    'excludes a direct-SQL %s mismatch even when it references the authorized event',
+    async (_boundary, mismatchedTenant, mismatchedOrganization, mismatchedBrand) => {
+      await seedAllowedReadIntegrations();
+      await insertIntegrationRow({
+        id: excludedIntegration,
+        tenantId: mismatchedTenant,
+        organizationId: mismatchedOrganization,
+        brandId: mismatchedBrand,
+        eventId: eventA,
+        provider: 'generic_tag',
+        config: {
+          pixelUrl: `https://metrics.example.test/${suffix}/excluded.gif`,
+        },
+      });
+      const before = await evidenceSnapshot();
+
+      const response = await invokeRead(eventA);
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toEqual({
+        items: [
+          expect.objectContaining({
+            id: allowedGa4Integration,
+            provider: 'ga4',
+          }),
+          expect.objectContaining({
+            id: allowedMetaIntegration,
+            provider: 'meta_pixel',
+          }),
+        ],
+        nextCursor: null,
+        hasMore: false,
+      });
+      expect(response.body).not.toContain(excludedIntegration);
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    },
+  );
+
+  it.each([
+    ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+    ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+    [
+      'organization',
+      () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+      () => eventAScoped,
+      404,
+      'NOT_FOUND',
+    ],
+    [
+      'brand',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA],
+      }),
+      () => eventAScoped,
+      404,
+      'NOT_FOUND',
+    ],
+    [
+      'event',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA, brandAScoped],
+        eventIds: [eventA],
+      }),
+      () => eventAScoped,
+      404,
+      'NOT_FOUND',
+    ],
+  ] as const)(
+    'denies the read %s boundary before marketing persistence access',
+    async (boundary, makePrincipal, targetEvent, status, code) => {
+      await seedAllowedReadIntegrations();
+      activePrincipal = makePrincipal();
+      const eventId = targetEvent();
+      const before = await evidenceSnapshot();
+      const eventQuery = vi.spyOn(EventRepository.prototype, 'findById');
+      const databaseQuery = vi.spyOn(db, 'executeQuery');
+
+      try {
+        const response = await invokeRead(eventId);
+
+        expect(response.statusCode, response.body).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        expect(response.json()).not.toHaveProperty('items');
+        const marketingQueries = databaseQuery.mock.calls.filter(([query]) =>
+          String((query as { sql?: string }).sql ?? '').includes('marketing_integrations'),
+        );
+        expect(marketingQueries).toHaveLength(0);
+        if (boundary === 'permission') {
+          expect(eventQuery).not.toHaveBeenCalled();
+        } else {
+          expect(eventQuery.mock.calls).toEqual([[eventId]]);
+        }
+        expect(response.body).not.toContain(allowedGa4Integration);
+        expect(response.body).not.toContain(allowedMetaIntegration);
+      } finally {
+        databaseQuery.mockRestore();
+        eventQuery.mockRestore();
+      }
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    },
+  );
 
   it('creates the exact integration with one monotonic revision and exact atomic audit', async () => {
     const before = await evidenceSnapshot();
@@ -665,17 +913,29 @@ describeWithIntegrationDatabase('marketing integration write route authorization
       [
         'generic tag credential-bearing URL',
         'generic_tag',
-        { config: { pixelUrl: 'https://user:password@metrics.example.test/pixel.gif' } },
+        {
+          config: {
+            pixelUrl: 'https://user:password@metrics.example.test/pixel.gif',
+          },
+        },
       ],
       [
         'generic tag query-bearing URL',
         'generic_tag',
-        { config: { pixelUrl: 'https://metrics.example.test/pixel.gif?token=secret' } },
+        {
+          config: {
+            pixelUrl: 'https://metrics.example.test/pixel.gif?token=secret',
+          },
+        },
       ],
       [
         'generic tag fragment-bearing URL',
         'generic_tag',
-        { config: { pixelUrl: 'https://metrics.example.test/pixel.gif#secret' } },
+        {
+          config: {
+            pixelUrl: 'https://metrics.example.test/pixel.gif#secret',
+          },
+        },
       ],
       ['generic tag malformed URL', 'generic_tag', { config: { pixelUrl: 'not-a-url' } }],
       [

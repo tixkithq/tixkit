@@ -1723,7 +1723,7 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
   ): Promise<PublicEventPageBootstrap> {
     const [marketingIntegrations, mediaAssets, contentPage, availability, resaleListings] =
       await Promise.all([
-        loadPublicMarketingIntegrations(db, event.id),
+        loadPublicMarketingIntegrations(db, event),
         loadPublicEventMedia(db, event.id),
         loadOptionalPublicPage(event, locale, host),
         loadPublicAvailability(
