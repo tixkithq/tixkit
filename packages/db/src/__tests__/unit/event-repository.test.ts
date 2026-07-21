@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  EventOccurrenceRepository,
   EventRepository,
   ProductCategoryRepository,
   ProductRepository,
@@ -41,6 +42,19 @@ function createSelectDb() {
 }
 
 describe('event product repositories', () => {
+  it('uses occurrence id as the deterministic final ordering key', async () => {
+    const { db, orderByCalls, whereCalls } = createSelectDb();
+
+    await new EventOccurrenceRepository(db).findByEvent('evt_1');
+
+    expect(orderByCalls).toEqual([
+      ['starts_at', 'asc'],
+      ['sort_order', 'asc'],
+      ['id', 'asc'],
+    ]);
+    expect(whereCalls).toEqual([['event_id', '=', 'evt_1']]);
+  });
+
   it('aligns product category pagination ordering with the id cursor contract', async () => {
     const { db, orderByCalls, whereCalls } = createSelectDb();
 

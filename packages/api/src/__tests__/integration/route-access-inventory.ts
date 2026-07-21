@@ -441,7 +441,11 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     persistenceSource: 'event-duplication-db.integration.test.ts',
   }),
   ...evidenceBindings(
-    ['postEventsByEventIdOccurrences', 'patchEventsByEventIdOccurrencesByOccurrenceId'],
+    [
+      'getEventsByEventIdOccurrences',
+      'postEventsByEventIdOccurrences',
+      'patchEventsByEventIdOccurrencesByOccurrenceId',
+    ],
     {
       source: 'event-occurrence-route-authorization-db.integration.test.ts',
       persistenceSource: 'event-occurrence-route-authorization-db.integration.test.ts',

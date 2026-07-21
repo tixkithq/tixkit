@@ -31,6 +31,7 @@ function occurrenceContract(operationId: string) {
 
 const createContract = occurrenceContract('postEventsByEventIdOccurrences');
 const updateContract = occurrenceContract('patchEventsByEventIdOccurrencesByOccurrenceId');
+const readContract = occurrenceContract('getEventsByEventIdOccurrences');
 
 const suffix = ulid().slice(-10).toLowerCase();
 const tenantA = `tnt_occ_auth_a_${suffix}`;
@@ -239,6 +240,13 @@ function invokeCreate(targetEventId: string, title?: string) {
   });
 }
 
+function invokeRead(targetEventId: string) {
+  return app.inject({
+    method: readContract.method,
+    url: readContract.path.replace('{eventId}', targetEventId),
+  });
+}
+
 function invokeUpdate(targetEventId: string, targetOccurrenceId: string, title?: string) {
   return app.inject({
     method: updateContract.method,
@@ -249,7 +257,7 @@ function invokeUpdate(targetEventId: string, targetOccurrenceId: string, title?:
   });
 }
 
-describeWithIntegrationDatabase('event occurrence write route authorization matrix', () => {
+describeWithIntegrationDatabase('event occurrence route authorization matrix', () => {
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -349,7 +357,13 @@ describeWithIntegrationDatabase('event occurrence write route authorization matr
     }
   });
 
-  it('binds both immutable route contracts to this executable proof', () => {
+  it('binds all three immutable route contracts to this executable proof', () => {
+    expect(readContract).toMatchObject({
+      authorizedControl: { status: 200 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      source: 'event-occurrence-route-authorization-db.integration.test.ts',
+    });
     expect(createContract).toMatchObject({
       authorizedControl: { status: 201 },
       deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
@@ -362,6 +376,34 @@ describeWithIntegrationDatabase('event occurrence write route authorization matr
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       source: 'event-occurrence-route-authorization-db.integration.test.ts',
     });
+  });
+
+  it('returns only the exact authorized event occurrences', async () => {
+    const before = await evidenceSnapshot();
+    const query = vi.spyOn(EventOccurrenceRepository.prototype, 'findByEvent');
+
+    try {
+      const response = await invokeRead(eventA);
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toEqual({
+        items: [
+          serializeEventOccurrence(
+            before.occurrences.find((occurrence) => occurrence.id === occurrenceA) as Record<
+              string,
+              unknown
+            >,
+          ),
+        ],
+      });
+      expect(query).toHaveBeenCalledOnce();
+      expect(query).toHaveBeenCalledWith(eventA);
+      expect(response.body).not.toContain(occurrenceAScoped);
+      expect(response.body).not.toContain(occurrenceB);
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    } finally {
+      query.mockRestore();
+    }
   });
 
   it('creates and patches the exact occurrence with exact atomic audit evidence', async () => {
@@ -494,7 +536,7 @@ describeWithIntegrationDatabase('event occurrence write route authorization matr
       'NOT_FOUND',
     ],
   ] as const)(
-    'denies the %s boundary for create and patch with exact occurrence and audit snapshots',
+    'denies the %s boundary for read, create and patch with exact occurrence and audit snapshots',
     async (_boundary, makePrincipal, targetEvent, status, code) => {
       activePrincipal = makePrincipal();
       const eventId = targetEvent();
@@ -505,16 +547,29 @@ describeWithIntegrationDatabase('event occurrence write route authorization matr
             ? occurrenceAScoped
             : occurrenceB;
       const before = await evidenceSnapshot();
+      const query = vi.spyOn(EventOccurrenceRepository.prototype, 'findByEvent');
 
-      const responses = [
-        await invokeCreate(eventId, 'Forbidden create'),
-        await invokeUpdate(eventId, targetOccurrence, 'Forbidden update'),
-      ];
-      for (const response of responses) {
-        expect(response.statusCode, response.body).toBe(status);
-        expect(response.json()).toMatchObject({ error: { code } });
+      try {
+        const readResponse = await invokeRead(eventId);
+        expect(query).not.toHaveBeenCalled();
+        expect(readResponse.json()).not.toHaveProperty('items');
+        const responses = [
+          readResponse,
+          await invokeCreate(eventId, 'Forbidden create'),
+          await invokeUpdate(eventId, targetOccurrence, 'Forbidden update'),
+        ];
+        for (const response of responses) {
+          expect(response.statusCode, response.body).toBe(status);
+          expect(response.json()).toMatchObject({ error: { code } });
+          expect(response.body).not.toContain(targetOccurrence);
+          expect(response.body).not.toContain('Allowed occurrence');
+          expect(response.body).not.toContain('Scoped occurrence');
+          expect(response.body).not.toContain('Foreign occurrence');
+        }
+        await expect(evidenceSnapshot()).resolves.toEqual(before);
+      } finally {
+        query.mockRestore();
       }
-      await expect(evidenceSnapshot()).resolves.toEqual(before);
     },
   );
 

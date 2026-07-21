@@ -245,6 +245,7 @@ export class EventOccurrenceRepository extends BaseRepository {
       .where('event_id', '=', eventId)
       .orderBy('starts_at', 'asc')
       .orderBy('sort_order', 'asc')
+      .orderBy('id', 'asc')
       .execute();
   }
 
