@@ -3034,6 +3034,29 @@ describe('openApiSpec', () => {
     });
   });
 
+  it('documents organization-safe short-link contracts', () => {
+    const create = openApiSpec.paths['/short-links'].post;
+    const list = openApiSpec.paths['/short-links'].get;
+    const clicks = openApiSpec.paths['/short-links/{id}/clicks'].get;
+    expect(create.operationId).toBe('postShortLinks');
+    expect(list.operationId).toBe('getShortLinks');
+    expect(clicks.operationId).toBe('getShortLinksByIdClicks');
+    for (const operation of [create, list, clicks]) {
+      expect(operation['x-required-permissions']).toEqual(['messages.write']);
+      expect(operation.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+    }
+    expect(create.description).toContain('Non-system principals must provide brandId');
+    expect(create.responses).toHaveProperty('404');
+    expect(list.description).toContain('only brand-owned links in their organization');
+    expect(clicks.parameters).toContainEqual({
+      name: 'id',
+      in: 'path',
+      required: true,
+      schema: { type: 'string' },
+    });
+    expect(clicks.responses).toHaveProperty('404');
+  });
+
   it('documents audit logging and GDPR privacy request routes', () => {
     expect(
       openApiSpec.paths['/audit-logs'].get.responses['200'].content['application/json'].schema,

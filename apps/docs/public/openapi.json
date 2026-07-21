@@ -46945,11 +46945,19 @@
     },
     "/short-links": {
       "post": {
+        "operationId": "postShortLinks",
         "summary": "Create a short link (C-078)",
+        "description": "Creates a brand-owned short link. Non-system principals must provide brandId; only system principals may create legacy tenant-wide links.",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
           }
+        ],
+        "x-required-permissions": [
+          "messages.write"
         ],
         "requestBody": {
           "required": true,
@@ -47084,19 +47092,43 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Brand not found in the authorized tenant, organization, or brand scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
           }
         },
-        "operationId": "postShortLinks",
         "tags": [
           "Platform"
         ]
       },
       "get": {
-        "summary": "List short links for the tenant (C-078)",
+        "operationId": "getShortLinks",
+        "summary": "List authorized short links (C-078)",
+        "description": "Non-system principals receive only brand-owned links in their organization and optional brand scope; systems may read tenant-wide legacy links.",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
           }
+        ],
+        "x-required-permissions": [
+          "messages.write"
         ],
         "responses": {
           "200": {
@@ -47188,7 +47220,6 @@
             }
           }
         },
-        "operationId": "getShortLinks",
         "tags": [
           "Platform"
         ]
@@ -47196,11 +47227,18 @@
     },
     "/short-links/{id}/clicks": {
       "get": {
+        "operationId": "getShortLinksByIdClicks",
         "summary": "Get privacy-safe click aggregates for a short link (C-078)",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
           }
+        ],
+        "x-required-permissions": [
+          "messages.write"
         ],
         "parameters": [
           {
@@ -47280,9 +47318,25 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Short link not found in the authorized tenant, organization, or brand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
           }
         },
-        "operationId": "getShortLinksByIdClicks",
         "tags": [
           "Platform"
         ]

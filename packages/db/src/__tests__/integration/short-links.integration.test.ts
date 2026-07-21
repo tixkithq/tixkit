@@ -74,7 +74,7 @@ describe.sequential.each(driverCases)('short-links integration: $driver', ({ dri
       await repo.recordClick(created.id, tenantId, at);
     }
 
-    const aggregate = await repo.getClickAggregate(created.id);
+    const aggregate = await repo.getClickAggregate(created.id, tenantId);
     expect(aggregate.totalClicks).toBe(20);
     expect(aggregate.byDay).toEqual({
       '2026-06-28': 12,

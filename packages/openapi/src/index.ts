@@ -22392,8 +22392,12 @@ const rawOpenApiSpec = {
     },
     '/short-links': {
       post: {
+        operationId: 'postShortLinks',
         summary: 'Create a short link (C-078)',
-        security: [{ BearerAuth: [] }],
+        description:
+          'Creates a brand-owned short link. Non-system principals must provide brandId; only system principals may create legacy tenant-wide links.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['messages.write'],
         requestBody: {
           required: true,
           content: {
@@ -22462,11 +22466,23 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '404': {
+            description: 'Brand not found in the authorized tenant, organization, or brand scope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
       get: {
-        summary: 'List short links for the tenant (C-078)',
-        security: [{ BearerAuth: [] }],
+        operationId: 'getShortLinks',
+        summary: 'List authorized short links (C-078)',
+        description:
+          'Non-system principals receive only brand-owned links in their organization and optional brand scope; systems may read tenant-wide legacy links.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['messages.write'],
         responses: {
           '200': {
             description: 'Short links',
@@ -22516,8 +22532,10 @@ const rawOpenApiSpec = {
     },
     '/short-links/{id}/clicks': {
       get: {
+        operationId: 'getShortLinksByIdClicks',
         summary: 'Get privacy-safe click aggregates for a short link (C-078)',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['messages.write'],
         parameters: [
           {
             name: 'id',
@@ -22556,6 +22574,14 @@ const rawOpenApiSpec = {
           },
           '403': {
             description: 'Forbidden',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description: 'Short link not found in the authorized tenant, organization, or brand',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },

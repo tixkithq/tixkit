@@ -30897,13 +30897,18 @@ export const apiReferenceOperations = [
       "Platform"
     ],
     "summary": "Create a short link (C-078)",
-    "description": "",
+    "description": "Creates a brand-owned short link. Non-system principals must provide brandId; only system principals may create legacy tenant-wide links.",
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "messages.write"
+    ],
     "parameters": [],
     "requestBody": {
       "required": true,
@@ -31038,6 +31043,23 @@ export const apiReferenceOperations = [
             }
           }
         }
+      },
+      "404": {
+        "description": "Brand not found in the authorized tenant, organization, or brand scope",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -31048,14 +31070,19 @@ export const apiReferenceOperations = [
     "tags": [
       "Platform"
     ],
-    "summary": "List short links for the tenant (C-078)",
-    "description": "",
+    "summary": "List authorized short links (C-078)",
+    "description": "Non-system principals receive only brand-owned links in their organization and optional brand scope; systems may read tenant-wide legacy links.",
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "messages.write"
+    ],
     "parameters": [],
     "requestBody": null,
     "responses": {
@@ -31161,9 +31188,14 @@ export const apiReferenceOperations = [
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "messages.write"
+    ],
     "parameters": [
       {
         "name": "id",
@@ -31229,6 +31261,23 @@ export const apiReferenceOperations = [
       },
       "403": {
         "description": "Forbidden",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Short link not found in the authorized tenant, organization, or brand",
         "content": {
           "application/json": {
             "schema": {

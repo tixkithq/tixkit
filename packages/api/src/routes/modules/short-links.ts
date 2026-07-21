@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ShortLinkRepository } from '@tixkit/db';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import { ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   generateUniqueSlug,
   sanitizeUtmParams,
@@ -35,16 +35,27 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
         field: 'destinationUrl',
       });
     }
+    if (!body.brandId && principal.type !== 'system') {
+      throw new ForbiddenError('Non-system principals must bind short links to a brand');
+    }
     if (body.brandId) {
-      const brand = await db
+      let brandQuery = db
         .selectFrom('brands')
-        .select(['id', 'organization_id'])
+        .select('id')
         .where('tenant_id', '=', principal.tenantId)
-        .where('id', '=', body.brandId)
-        .executeTakeFirst();
+        .where('id', '=', body.brandId);
+      if (principal.type !== 'system') {
+        if (
+          principal.organizationIds.length === 0 ||
+          (principal.brandIds && principal.brandIds.length === 0)
+        ) {
+          throw new NotFoundError('Brand', body.brandId);
+        }
+        brandQuery = brandQuery.where('organization_id', 'in', principal.organizationIds);
+        if (principal.brandIds) brandQuery = brandQuery.where('id', 'in', principal.brandIds);
+      }
+      const brand = await brandQuery.executeTakeFirst();
       if (!brand) throw new NotFoundError('Brand', body.brandId);
-      ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-      ClerkAuthService.requireBrandScope(principal, body.brandId);
     }
     const repo = new ShortLinkRepository(db);
     const slug = body.slug
@@ -77,10 +88,14 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'messages.write');
     ClerkAuthService.requireNoEventScope(principal, 'short links');
     const repo = new ShortLinkRepository(db);
-    const scopedBrandIds = principal.brandIds?.length ? principal.brandIds : undefined;
-    const links = scopedBrandIds
-      ? await repo.listByTenantAndBrands(principal.tenantId, scopedBrandIds)
-      : await repo.listByTenant(principal.tenantId);
+    const links =
+      principal.type === 'system'
+        ? await repo.listByTenant(principal.tenantId)
+        : await repo.listByTenantOrganizationsAndBrands(
+            principal.tenantId,
+            principal.organizationIds,
+            principal.brandIds,
+          );
     return {
       links: links.map((row) => ({
         id: row.id,
@@ -98,18 +113,19 @@ export const shortLinkRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireNoEventScope(principal, 'short links');
     const { id } = request.params as { id: string };
     const repo = new ShortLinkRepository(db);
-    const link = await repo.findById(id);
-    if (!link || link.tenant_id !== principal.tenantId) {
+    const link =
+      principal.type === 'system'
+        ? await repo.findManageableByIdForTenant(principal.tenantId, id)
+        : await repo.findByIdForTenantOrganizationsAndBrands(
+            principal.tenantId,
+            id,
+            principal.organizationIds,
+            principal.brandIds,
+          );
+    if (!link) {
       throw new NotFoundError('ShortLink', id);
     }
-    if (
-      principal.brandIds?.length &&
-      (!link.brand_id ||
-        !principal.brandIds.includes(link.brand_id as (typeof principal.brandIds)[number]))
-    ) {
-      throw new NotFoundError('ShortLink', id);
-    }
-    const aggregate = await repo.getClickAggregate(id);
+    const aggregate = await repo.getClickAggregate(id, principal.tenantId);
     return { id, totalClicks: aggregate.totalClicks, byDay: aggregate.byDay };
   });
 };

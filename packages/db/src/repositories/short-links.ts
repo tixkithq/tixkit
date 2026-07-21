@@ -58,12 +58,57 @@ export class ShortLinkRepository extends BaseRepository {
     return this.db.selectFrom('short_links').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
-  async listByTenant(tenantId: string, limit = 50) {
+  async findByIdForTenant(tenantId: string, id: string) {
     return this.db
       .selectFrom('short_links')
       .selectAll()
       .where('tenant_id', '=', tenantId)
-      .orderBy('created_at', 'desc')
+      .where('id', '=', id)
+      .executeTakeFirst();
+  }
+
+  async findManageableByIdForTenant(tenantId: string, id: string) {
+    return this.db
+      .selectFrom('short_links')
+      .leftJoin('brands', 'brands.id', 'short_links.brand_id')
+      .selectAll('short_links')
+      .where('short_links.tenant_id', '=', tenantId)
+      .where('short_links.id', '=', id)
+      .where((eb) =>
+        eb.or([eb('short_links.brand_id', 'is', null), eb('brands.tenant_id', '=', tenantId)]),
+      )
+      .executeTakeFirst();
+  }
+
+  async findByIdForTenantOrganizationsAndBrands(
+    tenantId: string,
+    id: string,
+    organizationIds: string[],
+    brandIds?: string[],
+  ) {
+    if (organizationIds.length === 0 || (brandIds && brandIds.length === 0)) return undefined;
+    let query = this.db
+      .selectFrom('short_links')
+      .innerJoin('brands', 'brands.id', 'short_links.brand_id')
+      .selectAll('short_links')
+      .where('short_links.tenant_id', '=', tenantId)
+      .where('short_links.id', '=', id)
+      .where('brands.tenant_id', '=', tenantId)
+      .where('brands.organization_id', 'in', organizationIds);
+    if (brandIds) query = query.where('short_links.brand_id', 'in', brandIds);
+    return query.executeTakeFirst();
+  }
+
+  async listByTenant(tenantId: string, limit = 50) {
+    return this.db
+      .selectFrom('short_links')
+      .leftJoin('brands', 'brands.id', 'short_links.brand_id')
+      .selectAll('short_links')
+      .where('short_links.tenant_id', '=', tenantId)
+      .where((eb) =>
+        eb.or([eb('short_links.brand_id', 'is', null), eb('brands.tenant_id', '=', tenantId)]),
+      )
+      .orderBy('short_links.created_at', 'desc')
       .limit(limit)
       .execute();
   }
@@ -78,6 +123,26 @@ export class ShortLinkRepository extends BaseRepository {
       .orderBy('created_at', 'desc')
       .limit(limit)
       .execute();
+  }
+
+  async listByTenantOrganizationsAndBrands(
+    tenantId: string,
+    organizationIds: string[],
+    brandIds?: string[],
+    limit = 50,
+  ) {
+    if (organizationIds.length === 0 || (brandIds && brandIds.length === 0)) return [];
+    let query = this.db
+      .selectFrom('short_links')
+      .innerJoin('brands', 'brands.id', 'short_links.brand_id')
+      .selectAll('short_links')
+      .where('short_links.tenant_id', '=', tenantId)
+      .where('brands.tenant_id', '=', tenantId)
+      .where('brands.organization_id', 'in', organizationIds)
+      .orderBy('short_links.created_at', 'desc')
+      .limit(limit);
+    if (brandIds) query = query.where('short_links.brand_id', 'in', brandIds);
+    return query.execute();
   }
 
   async slugExists(slug: string): Promise<boolean> {
@@ -113,11 +178,12 @@ export class ShortLinkRepository extends BaseRepository {
     });
   }
 
-  async getClickAggregate(shortLinkId: string) {
+  async getClickAggregate(shortLinkId: string, tenantId: string) {
     const rows = await this.db
       .selectFrom('link_clicks')
       .select(({ fn }) => ['day_bucket', fn.countAll<number>().as('clicks')])
       .where('short_link_id', '=', shortLinkId)
+      .where('tenant_id', '=', tenantId)
       .groupBy('day_bucket')
       .execute();
     const byDay: Record<string, number> = {};

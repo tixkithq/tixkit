@@ -1986,6 +1986,55 @@ export const PRIVACY_REQUEST_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.
   }),
 ]);
 
+export const SHORT_LINK_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand'],
+    method: 'POST',
+    operationId: 'postShortLinks',
+    path: '/short-links',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyDeniedBoundaries: ['event'],
+    persistenceSource: 'short-link-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'short-link-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'GET',
+    operationId: 'getShortLinks',
+    path: '/short-links',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyDeniedBoundaries: ['event'],
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'short-link-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand'],
+    method: 'GET',
+    operationId: 'getShortLinksByIdClicks',
+    path: '/short-links/{id}/clicks',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyDeniedBoundaries: ['event'],
+    resourceParameters: ['id'],
+    sideEffectAssertions: [],
+    source: 'short-link-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     assertions: [
@@ -2197,6 +2246,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...PRIVACY_ERASURE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PRIVACY_EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PRIVACY_REQUEST_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...SHORT_LINK_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);
