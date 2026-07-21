@@ -327,7 +327,9 @@ test('rejects omitted, unmapped, missing and renamed trust surfaces or evidence'
   const unmappedViolations = trustProgramViolations(unmapped, root, publicDistribution);
   assert.ok(unmappedViolations.includes('accepted trust-bearing surface map drifted'));
   assert.ok(
-    unmappedViolations.includes('SECURITY.md: mapped trust record does not exist: invented-record'),
+    unmappedViolations.includes(
+      `${unmapped.surfaces[0].path}: mapped trust record does not exist: invented-record`,
+    ),
   );
 
   for (const replacement of [
@@ -341,6 +343,245 @@ test('rejects omitted, unmapped, missing and renamed trust surfaces or evidence'
     const violations = trustProgramViolations(missing, root, publicDistribution);
     assert.ok(violations.some((violation) => /accepted public artifacts/u.test(violation)));
     assert.ok(violations.some((violation) => /does not exist/u.test(violation)));
+  }
+});
+
+test('requires every trust-bearing Markdown artifact to map back to its record', () => {
+  for (const [path, recordId, replacementId] of [
+    ['ARCHITECTURE.md', 'security-architecture', 'version-lifecycle'],
+    ['docs/public/support.mdx', 'support-boundaries', 'managed-sla'],
+  ]) {
+    const candidate = structuredClone(program);
+    candidate.surfaces.find((surface) => surface.path === path).recordIds = [replacementId];
+    assert.ok(
+      trustProgramViolations(candidate, root, publicDistribution).includes(
+        `${recordId}: trust-bearing Markdown artifact is not mapped to its record: ${path}`,
+      ),
+    );
+  }
+});
+
+test('requires managed privacy and support non-commitment disclosures', () => {
+  for (const [path, disclosure] of [
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud controller, processor, retention, residency, transfer, and subprocessor commitments are not approved or published.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Self-Hosted operator choices do not create managed Cloud commitments.',
+    ],
+    [
+      'docs/public/support.mdx',
+      'Managed Cloud support plans and SLA commitments are not approved or published.',
+    ],
+    [
+      'docs/public/support.mdx',
+      'Self-Hosted support arrangements do not create managed Cloud support or SLA commitments.',
+    ],
+  ]) {
+    const content = readFileSync(resolve(root, path), 'utf8');
+    assert.ok(
+      trustSurfaceContentViolations(path, content.replace(disclosure, '')).some((violation) =>
+        /required trust disclosure is missing/u.test(violation),
+      ),
+    );
+  }
+});
+
+test('rejects affirmative managed privacy and SLA claims while allowing explicit denials', () => {
+  for (const [path, claim] of [
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud is the controller for all customer data.',
+    ],
+    ['docs/public/reference/privacy-and-retention.mdx', 'Managed Cloud data remains in eu-west-1.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud data residency is in Europe.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud subprocessors include Example Corp.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud guarantees a 99.9% SLA.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Tixkit Cloud is the processor for customer data.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Tixkit Cloud data residency is in Europe.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Our subprocessors for Managed Cloud include Example Corp.',
+    ],
+    ['docs/public/support.mdx', 'Tixkit Cloud provides enterprise support.'],
+    ['docs/public/support.mdx', 'Managed Cloud comes with enterprise support.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud does not act as controller and is the processor.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Tixkit Cloud residency is not in the United States and is in Europe.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud uses no domestic subprocessors and uses Example Corp as an international subprocessor.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud support is not free and includes a guaranteed SLA.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud residency is not in the United States and will be in Europe.',
+    ],
+    [
+      'docs/public/support.mdx',
+      'Managed Cloud does not provide support today and will guarantee an SLA at launch.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud uses no subprocessors today and may use Example Corp tomorrow.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud is not the controller and can act as processor.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud offers support with no extra fee.'],
+    ['docs/public/support.mdx', 'Managed Cloud provides support without additional charge.'],
+    [
+      'docs/public/support.mdx',
+      'Managed Cloud does not provide support today and eventually will guarantee an SLA.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud is not the controller and should act as processor.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud provides no support outside business hours.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud stores no customer data outside Europe.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud uses no subprocessors outside the EU.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud is private beta. It provides enterprise support.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Tixkit Cloud is private beta. It acts as the processor for customer data.',
+    ],
+    [
+      'docs/public/support.mdx',
+      'Managed Cloud provides support because Self-Hosted operators do not provide support.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud hosts customer records in Europe.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Tixkit Cloud handles personal information in the United States.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud transfers customer data to the United States.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Tixkit Cloud sends personal information outside Europe.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud deletes customer records after 30 days.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud guarantees email assistance during business hours.'],
+  ]) {
+    const content = `${readFileSync(resolve(root, path), 'utf8')}\n${claim}`;
+    assert.ok(
+      trustSurfaceContentViolations(path, content).some((violation) =>
+        /pending trust decision/u.test(violation),
+      ),
+      `expected managed policy claim to be rejected: ${claim}`,
+    );
+  }
+
+  for (const [path, denial] of [
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud is not the controller and does not store data in a promised region.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud does not guarantee support or an SLA.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud never stores customer data.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud never provides enterprise support.'],
+    ['docs/public/support.mdx', 'Managed Cloud currently provides no support.'],
+    ['docs/public/reference/privacy-and-retention.mdx', 'Managed Cloud uses no subprocessors.'],
+    [
+      'docs/public/support.mdx',
+      'Managed Cloud is experimental; Self-Hosted support is provided by operators.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud is experimental; Self-Hosted operators choose their subprocessors.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Tixkit Cloud is private beta, but Self-Hosted data remains on operator infrastructure.',
+    ],
+    [
+      'docs/public/support.mdx',
+      'Tixkit Cloud is private beta and Self-Hosted support is provided by operators.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud is experimental while operators choose their subprocessors.',
+    ],
+    [
+      'docs/public/support.mdx',
+      'Managed Cloud is experimental whereas Self-Hosted support is provided by operators.',
+    ],
+    [
+      'docs/public/support.mdx',
+      'Managed Cloud is experimental because Self-Hosted operators provide support.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud does not currently provide support.'],
+    ['docs/public/support.mdx', 'Managed Cloud does not offer any support.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud does not store any customer data.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud does not use third-party subprocessors.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud does not guarantee 24/7 support.'],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud does not use external subprocessors.',
+    ],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud does not store personal data.',
+    ],
+    ['docs/public/reference/privacy-and-retention.mdx', "Managed Cloud isn't the controller."],
+    [
+      'docs/public/reference/privacy-and-retention.mdx',
+      'Managed Cloud is neither the controller nor the processor.',
+    ],
+    ['docs/public/support.mdx', 'Managed Cloud does not guarantee email assistance.'],
+  ]) {
+    const content = `${readFileSync(resolve(root, path), 'utf8')}\n${denial}`;
+    assert.equal(
+      trustSurfaceContentViolations(path, content).some((violation) =>
+        /pending trust decision/u.test(violation),
+      ),
+      false,
+      `expected explicit denial to remain allowed: ${denial}`,
+    );
   }
 });
 

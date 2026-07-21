@@ -6,6 +6,10 @@
   "documentation": "docs/public/reference/trust.mdx",
   "surfaces": [
     {
+      "path": "ARCHITECTURE.md",
+      "recordIds": ["security-architecture"]
+    },
+    {
       "path": "SECURITY.md",
       "recordIds": ["security-architecture", "version-lifecycle", "vulnerability-response"]
     },
@@ -28,6 +32,10 @@
     {
       "path": "docs/public/reference/performance.mdx",
       "recordIds": ["performance-evidence"]
+    },
+    {
+      "path": "docs/public/reference/privacy-and-retention.mdx",
+      "recordIds": ["data-residency", "privacy-roles", "subprocessors"]
     },
     {
       "path": "docs/public/reference/trust.mdx",
@@ -56,6 +64,10 @@
     {
       "path": "docs/public/self-hosting/observability.mdx",
       "recordIds": ["performance-evidence"]
+    },
+    {
+      "path": "docs/public/support.mdx",
+      "recordIds": ["managed-sla", "support-boundaries"]
     }
   ],
   "records": [

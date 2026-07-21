@@ -635,7 +635,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/reference/privacy-and-retention": {
     sourcePath: "docs/public/reference/privacy-and-retention.mdx",
-    frontmatter: {"title":"Privacy and retention","description":"Minimize personal data across checkout, attendees, messaging, logs, exports, documentation, and integrations.","audience":["operator","developer","self-hoster"],"product_area":"platform","content_type":"reference","status":"beta","owner":"security","last_verified":"2026-07-10","prerequisites":[],"related":["/operators/events/checkout-forms","/support"]},
+    frontmatter: {"title":"Privacy and retention","description":"Minimize personal data across checkout, attendees, messaging, logs, exports, documentation, and integrations.","audience":["operator","developer","self-hoster"],"product_area":"platform","content_type":"reference","status":"beta","owner":"security","last_verified":"2026-07-20","prerequisites":[],"related":["/operators/events/checkout-forms","/support"]},
     headings: [],
     load: () => import("../../../../docs/public/reference/privacy-and-retention.mdx"),
   },
@@ -815,7 +815,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/support": {
     sourcePath: "docs/public/support.mdx",
-    frontmatter: {"title":"Support and responsible reporting","description":"Choose the correct private or public channel for usage questions, defects, security issues, and documentation changes.","audience":["operator","developer","self-hoster","contributor"],"product_area":"platform","content_type":"overview","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-10","prerequisites":[],"related":["/contributing/add-documentation","/operations/incidents"]},
+    frontmatter: {"title":"Support and responsible reporting","description":"Choose the correct private or public channel for usage questions, defects, security issues, and documentation changes.","audience":["operator","developer","self-hoster","contributor"],"product_area":"platform","content_type":"overview","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-20","prerequisites":[],"related":["/contributing/add-documentation","/operations/incidents"]},
     headings: [],
     load: () => import("../../../../docs/public/support.mdx"),
   },

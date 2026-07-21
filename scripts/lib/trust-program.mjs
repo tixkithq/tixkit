@@ -23,6 +23,7 @@ export const REQUIRED_TRUST_RECORDS = Object.freeze([
 ]);
 
 export const EXPECTED_TRUST_SURFACES = Object.freeze([
+  ['ARCHITECTURE.md', ['security-architecture']],
   ['SECURITY.md', ['security-architecture', 'version-lifecycle', 'vulnerability-response']],
   ['SUPPORT.md', ['managed-sla', 'support-boundaries']],
   ['docs/public/operations/incidents.mdx', ['cloud-status', 'incident-history']],
@@ -35,9 +36,14 @@ export const EXPECTED_TRUST_SURFACES = Object.freeze([
     ['release-provenance', 'signed-sbom', 'version-lifecycle'],
   ],
   ['docs/public/reference/performance.mdx', ['performance-evidence']],
+  [
+    'docs/public/reference/privacy-and-retention.mdx',
+    ['data-residency', 'privacy-roles', 'subprocessors'],
+  ],
   ['docs/public/reference/trust.mdx', REQUIRED_TRUST_RECORDS],
   ['docs/public/self-hosting/backups-and-restore.mdx', ['dr-evidence']],
   ['docs/public/self-hosting/observability.mdx', ['performance-evidence']],
+  ['docs/public/support.mdx', ['managed-sla', 'support-boundaries']],
 ]);
 
 function validationCommand(argv, timeoutMs) {
@@ -254,6 +260,7 @@ const MAX_EVIDENCE_OUTPUT_BYTES = 1024 * 1024;
 const ALLOWED_EVIDENCE_EXECUTABLES = new Set(['node']);
 
 const SURFACE_REQUIRED_DISCLOSURES = Object.freeze({
+  'ARCHITECTURE.md': ['Public code and CI must never depend on private source.'],
   'SECURITY.md': [
     'does not promise a fixed service-level agreement',
     'No product-wide supported-version or end-of-life window is approved or published.',
@@ -275,6 +282,10 @@ const SURFACE_REQUIRED_DISCLOSURES = Object.freeze({
     'The trend implementation is locally validated, but no hosted trend artifact is claimed',
     'A committed executable workflow is not a hosted soak result',
   ],
+  'docs/public/reference/privacy-and-retention.mdx': [
+    'Managed Cloud controller, processor, retention, residency, transfer, and subprocessor commitments are not approved or published.',
+    'Self-Hosted operator choices do not create managed Cloud commitments.',
+  ],
   'docs/public/reference/trust.mdx': [
     'it does not mean a hosted production run occurred',
     'are not generally available',
@@ -288,6 +299,10 @@ const SURFACE_REQUIRED_DISCLOSURES = Object.freeze({
     'do not claim abuse resistance, an SLO or representative user experience',
     'A rendered `ServiceMonitor` alone is not runtime proof.',
   ],
+  'docs/public/support.mdx': [
+    'Managed Cloud support plans and SLA commitments are not approved or published.',
+    'Self-Hosted support arrangements do not create managed Cloud support or SLA commitments.',
+  ],
 });
 
 const FORBIDDEN_SURFACE_CLAIMS = Object.freeze([
@@ -295,6 +310,92 @@ const FORBIDDEN_SURFACE_CLAIMS = Object.freeze([
   /(?:acknowledge|triage|remediat\w*)[^.\n]{0,80}\bwithin\s+\d/iu,
   /https?:\/\/(?:status\.)?tixkit\.(?:com|dev)/iu,
 ]);
+
+const MANAGED_CLOUD_SUBJECT = /\b(?:managed|Tixkit)\s+Cloud\b/iu;
+const OTHER_POLICY_SUBJECT = /\b(?:Self-Hosted|self-hosters?|operators?)\b/iu;
+const MANAGED_POLICY_TERM =
+  /(?:\b(?:controller|processor|privacy roles?|retention responsibilities|residency|resident|data (?:location|region)|cross-border transfers?|subprocessors?|support plans?|support commitments?|support|assistance|help[ -]?desk|SLA|service-level agreements?)\b|\bdata\b[^.\n]{0,40}\b(?:stays|remains|resides|is stored)\b|\b(?:store|stores|stored|host|hosts|hosted|handle|handles|handled|keep|keeps|kept|retain|retains|retained|transfer|transfers|transferred|send|sends|sent|delete|deletes|deleted|erase|erases|erased|purge|purges|purged)\b[^.\n]{0,30}\b(?:data|records|personal information)\b)/iu;
+const COORDINATED_POLICY_CLAUSE =
+  /;|\b(?:but|however|yet|while|whereas)\b|,\s*(?=(?:(?:managed|Tixkit)\s+Cloud|Self-Hosted|self-hosters?|operators?)\b)|\band\s+(?=(?:(?:managed|Tixkit)\s+Cloud|Self-Hosted|self-hosters?|operators?)\b|(?:it\s+)?(?:\w+ly\s+)*(?:(?:will|may|can|could|would|shall|should|might|must)\s+|(?:plans?|intends?|expects?)\s+to\s+|(?:is|are|does|do|acts?|serves?|uses?|engages?|lists?|includes?|offers?|provides?|guarantees?|comes?|stores?|hosts?|keeps?|retains?)\b))/iu;
+const INHERITED_POLICY_PREDICATE =
+  /^\s*(?:it\s+)?(?:\w+ly\s+)*(?:(?:will|may|can|could|would|shall|should|might|must)\s+(?:\w+ly\s+)*|(?:plans?|intends?|expects?)\s+to\s+)?(?:is|are|be|acts?|serves?|uses?|engages?|lists?|includes?|offers?|provides?|guarantees?|comes?|stores?|hosts?|keeps?|retains?)\b/iu;
+const POLICY_SUBJECT_BOUNDARY =
+  /(?=\b(?:(?:managed|Tixkit)\s+Cloud|Self-Hosted|self-hosters?|operators?)\b)/giu;
+const NEGATED_POLICY_OBJECT =
+  /(?:acts?|serves?)\s+as\s+(?:the\s+)?(?:controller|processor)|(?:provides?|guarantees?|offers?)\s+(?:(?:any|email|enterprise|24\/7)\s+)?(?:support(?:\s+or\s+an?\s+SLA)?|assistance|help[ -]?desk|an?\s+SLA|service-level agreements?)|(?:uses?|engages?|lists?|includes?)\s+(?:(?:any|external|third-party)\s+)?subprocessors?|(?:stores?|hosts?|handles?|keeps?|retains?)\s+(?:any\s+)?(?:(?:customer|personal)\s+)?(?:data|records|information)(?:\s+in\s+a\s+promised\s+region)?|(?:create|creates|establish|establishes)\s+(?:a\s+)?managed\s+Cloud\s+(?:residency\s+promise,\s+subprocessor\s+list,\s+status\s+history\s+or\s+SLA|residency\s+promise|subprocessor\s+list|support(?:\s+or\s+SLA\s+commitments?)?|SLA\s+commitments?)/iu;
+const POLICY_OBJECT_AFTER_NO =
+  /(?:enterprise\s+)?(?:support|SLA|service-level agreements?)|(?:domestic\s+)?subprocessors?|(?:customer\s+)?data/iu;
+const DENIAL_TAIL = /(?:\s+(?:today|currently|yet|at\s+this\s+time))?\s*$/iu;
+
+function isExplicitPolicyDenial(clause) {
+  const normalized = clause.trim();
+  const modalDenial = new RegExp(
+    `\\b(?:(?:do|does|did|will|would|shall|should|can|could|may|might|must)\\s+(?:\\w+ly\\s+)*not\\s+(?:\\w+ly\\s+)*|never\\s+)(?:${NEGATED_POLICY_OBJECT.source})${DENIAL_TAIL.source}`,
+    'iu',
+  );
+  const noObjectDenial = new RegExp(
+    `\\b(?:currently\\s+)?(?:provides?|guarantees?|offers?|uses?|engages?|lists?|includes?|stores?|hosts?|keeps?|retains?)\\s+no\\s+(?:${POLICY_OBJECT_AFTER_NO.source})${DENIAL_TAIL.source}`,
+    'iu',
+  );
+  if (modalDenial.test(normalized) || noObjectDenial.test(normalized)) return true;
+  if (
+    /\b(?:(?:is|are|was|were)\s+not|isn't|aren't|wasn't|weren't)\s+(?:the\s+)?(?:controller|processor)\s*$/iu.test(
+      normalized,
+    ) ||
+    /\b(?:is|are|was|were)\s+neither\s+(?:the\s+)?controller\s+nor\s+(?:the\s+)?processor\s*$/iu.test(
+      normalized,
+    )
+  )
+    return true;
+
+  return /\b(?:controller|processor|privacy roles?|retention responsibilities|residency|data (?:location|region)|cross-border transfers?|subprocessors?|support plans?|support commitments?|support|SLA|service-level agreements?)[^.;!?]{0,80}\b(?:is|are|was|were)\s+(?:not|never)\s+(?:approved|published|decided|known|offered|available|guaranteed|supported)\b/iu.test(
+    clause,
+  );
+}
+
+function containsAffirmativeManagedPolicyClaim(value) {
+  const sentences = value.split(/(?:\r?\n)+|(?<!\d)[.!?](?!\d)/u);
+  let managedSubject = false;
+  for (const sentence of sentences) {
+    const hasExplicitSubject =
+      MANAGED_CLOUD_SUBJECT.test(sentence) || OTHER_POLICY_SUBJECT.test(sentence);
+    if (!hasExplicitSubject && !/^\s*It\b/u.test(sentence)) managedSubject = false;
+    let policyContext = false;
+    for (const clause of sentence.split(COORDINATED_POLICY_CLAUSE)) {
+      const managedIndex = clause.search(MANAGED_CLOUD_SUBJECT);
+      const otherIndex = clause.search(OTHER_POLICY_SUBJECT);
+      const denialCoversClause =
+        isExplicitPolicyDenial(clause) &&
+        (managedIndex < 0 || otherIndex < 0 || otherIndex < managedIndex);
+      if (denialCoversClause) {
+        managedSubject = managedIndex >= 0 && (otherIndex < 0 || managedIndex < otherIndex);
+        if (MANAGED_POLICY_TERM.test(clause)) policyContext = true;
+        continue;
+      }
+      for (const segment of clause.split(POLICY_SUBJECT_BOUNDARY).filter(Boolean)) {
+        const hasManagedSubject = MANAGED_CLOUD_SUBJECT.test(segment);
+        const hasOtherSubject = OTHER_POLICY_SUBJECT.test(segment);
+        if (hasOtherSubject) {
+          managedSubject = false;
+          policyContext = false;
+        } else if (hasManagedSubject) managedSubject = true;
+        const predicate = segment
+          .replace(MANAGED_CLOUD_SUBJECT, '')
+          .replace(OTHER_POLICY_SUBJECT, '');
+        const hasPolicyTerm = MANAGED_POLICY_TERM.test(segment);
+        const continuesPolicy = policyContext && INHERITED_POLICY_PREDICATE.test(predicate);
+        if (
+          managedSubject &&
+          (hasPolicyTerm || continuesPolicy) &&
+          !isExplicitPolicyDenial(segment)
+        )
+          return true;
+        if (hasPolicyTerm) policyContext = true;
+      }
+    }
+  }
+  return false;
+}
 
 function parseCalendarDate(value) {
   if (typeof value !== 'string') return null;
@@ -479,6 +580,9 @@ export function trustProgramViolations(program, root, publicDistribution) {
     violations.push('trust program snapshot exceeds the declared freshness window');
 
   const roots = publicRoots(publicDistribution);
+  const surfaceRecordIdsByPath = new Map(
+    program.surfaces.map(({ path, recordIds }) => [path, new Set(recordIds)]),
+  );
   for (const record of program.records) {
     const expected = EXPECTED_TRUST_DECISIONS[record.id];
     if (
@@ -526,6 +630,11 @@ export function trustProgramViolations(program, root, publicDistribution) {
         );
       else if (artifact.reason === 'symlink-escape')
         violations.push(`${record.id}: public artifact escapes through a parent symlink: ${path}`);
+      if (/\.(?:md|mdx)$/u.test(path) && !surfaceRecordIdsByPath.get(path)?.has(record.id)) {
+        violations.push(
+          `${record.id}: trust-bearing Markdown artifact is not mapped to its record: ${path}`,
+        );
+      }
     }
     for (const evidence of record.immutableEvidence ?? []) {
       if (!isInsideRoot(root, evidence.path)) {
@@ -657,6 +766,8 @@ export function trustSurfaceContentViolations(path, content, now = Date.now()) {
       violations.push(`${path}: required trust disclosure is missing`);
   if (containsUnsupportedClaim(content))
     violations.push(`${path}: unsupported numeric, regional, or assessment claim`);
+  if (containsAffirmativeManagedPolicyClaim(content))
+    violations.push(`${path}: public claim conflicts with a pending trust decision`);
   for (const pattern of FORBIDDEN_SURFACE_CLAIMS)
     if (hasAffirmativeMatch(content, pattern))
       violations.push(`${path}: public claim conflicts with a pending trust decision`);
