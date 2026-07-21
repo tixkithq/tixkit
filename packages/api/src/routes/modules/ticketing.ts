@@ -385,6 +385,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
     const listings = await new TicketListingRepository(db).findByEvent(
+      principal.tenantId,
       eventId,
       pagination.limit + 1,
       pagination.cursor,

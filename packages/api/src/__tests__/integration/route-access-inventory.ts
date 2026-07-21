@@ -210,6 +210,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'ticket-configuration-route-authorization-db.integration.test.ts'),
   ],
   [
+    'resale-listing-read-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'resale-listing-read-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'product-catalog-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'product-catalog-route-authorization-db.integration.test.ts'),
   ],
@@ -516,6 +520,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['getEventsByEventIdResalePolicy', 'putEventsByEventIdResalePolicy'], {
     source: 'resale-policy-route-authorization-db.integration.test.ts',
     persistenceSource: 'resale-policy-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getEventsByEventIdResaleListings'], {
+    source: 'resale-listing-read-route-authorization-db.integration.test.ts',
+    persistenceSource: 'resale-listing-read-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['putEventsByEventIdMarketingIntegrationsByProvider'], {
     source: 'marketing-integration-route-authorization-db.integration.test.ts',

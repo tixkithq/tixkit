@@ -226,10 +226,11 @@ export class TicketListingRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
-  async findByEvent(eventId: string, limit = 50, cursor?: string) {
+  async findByEvent(tenantId: string, eventId: string, limit = 50, cursor?: string) {
     let query = this.db
       .selectFrom('ticket_listings')
       .selectAll()
+      .where('tenant_id', '=', tenantId)
       .where('event_id', '=', eventId)
       .orderBy('id', 'asc')
       .limit(limit);

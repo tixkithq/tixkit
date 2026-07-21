@@ -46,6 +46,23 @@ describe.skipIf(!canRunPostgresExplain)(
 
     const explainCases: ExplainCase[] = [
       {
+        name: 'ticket listings by tenant/event/id cursor',
+        indexName: 'idx_ticket_listings_event_id',
+        expectedIndexColumns: ['tenant_id', 'event_id', 'id'],
+        expectedPlanIndexName: 'idx_ticket_listings_event_id',
+        explain: (database) =>
+          sql<PlanRow>`
+            explain (analyze, costs off, timing off, summary off)
+            select *
+            from ticket_listings
+            where tenant_id = ${tenantId}
+              and event_id = ${eventId}
+              and id > 'lst_cursor'
+            order by id asc
+            limit 51
+          `.execute(database),
+      },
+      {
         name: 'product categories by event/id cursor',
         indexName: 'idx_product_categories_event_id',
         expectedIndexColumns: ['event_id', 'id'],

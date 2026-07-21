@@ -9,10 +9,10 @@ const source = readFileSync(
 );
 
 describe('ProductCatalogPaginationIndexesMigration', () => {
-  it('is the final registered migration', async () => {
+  it('remains registered immediately before the ticket-listing pagination migration', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0097_product_catalog_pagination_indexes');
+    expect(Object.keys(migrations).at(-2)).toBe('0097_product_catalog_pagination_indexes');
     expect(migrations['0097_product_catalog_pagination_indexes']).toBe(
       ProductCatalogPaginationIndexesMigration,
     );
