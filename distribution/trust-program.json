@@ -96,15 +96,20 @@
       "kind": "evidence",
       "scope": "self-hosted",
       "state": "locally-proven",
-      "claim": "Self-Hosted DR contracts and rehearsal tooling are locally validated; no hosted or production DR receipt is published.",
+      "claim": "Self-Hosted DR contracts and a protected two-key producer are locally validated; no hosted or production DR receipt is published.",
       "lastVerified": "2026-07-20",
       "publicArtifacts": [
+        ".github/workflows/production-dr.yml",
         "distribution/hosted-production-dr-receipt.schema.json",
         "docs/public/self-hosting/backups-and-restore.mdx",
         "infra/scripts/production-backup.sh",
         "infra/scripts/production-restore.sh",
         "scripts/__tests__/dr-safety.test.mjs",
         "scripts/__tests__/production-dr.integration.test.mjs",
+        "scripts/__tests__/production-dr-workflow.test.mjs",
+        "scripts/create-hosted-production-dr-receipt.mjs",
+        "scripts/prepare-production-dr-workflow.mjs",
+        "scripts/stage-production-dr-bundle.mjs",
         "scripts/verify-hosted-production-dr.mjs",
         "scripts/verify-production-rehearsal.mjs"
       ],
@@ -119,9 +124,14 @@
           ],
           "cwd": ".",
           "timeoutMs": 120000
+        },
+        {
+          "argv": ["node", "--test", "scripts/__tests__/production-dr-workflow.test.mjs"],
+          "cwd": ".",
+          "timeoutMs": 30000
         }
       ],
-      "blocker": "A protected hosted rehearsal with retained RPO and RTO evidence is still required."
+      "blocker": "The protected workflow has not run; authenticated keyring publication, durable hosted receipts, complete drill coverage and retained RPO/RTO evidence remain required."
     },
     {
       "id": "incident-history",

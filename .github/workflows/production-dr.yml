@@ -1,0 +1,270 @@
+name: Protected Production DR Rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      drill_id:
+        description: Pre-reviewed drill bundle identifier
+        required: true
+        type: string
+      kind:
+        description: Authorized production rehearsal kind
+        required: true
+        type: choice
+        options: [zone-loss, dependency-loss, release-upgrade-rollback]
+      dependency:
+        description: Lost dependency for dependency-loss; otherwise none
+        required: true
+        type: choice
+        options: [none, postgres, mysql, redis, temporal, object-storage]
+      config_sha256:
+        description: SHA-256 of the independently reviewed config.json
+        required: true
+        type: string
+      expectations_sha256:
+        description: SHA-256 of the independently reviewed expectations.json
+        required: true
+        type: string
+      proof_public_key_sha256:
+        description: SHA-256 of the reviewed Ed25519 proof public key file
+        required: true
+        type: string
+      release_tag:
+        description: Immutable attested public release tag (vX.Y.Z)
+        required: true
+        type: string
+
+concurrency:
+  group: protected-production-dr
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+
+jobs:
+  rehearse:
+    name: Execute reviewed drill and retain proof
+    runs-on: [self-hosted, tixkit-production-dr]
+    environment: production-dr
+    timeout-minutes: 240
+    outputs:
+      artifact_id: ${{ steps.upload-proof.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload-proof.outputs.artifact-digest }}
+    env:
+      TIXKIT_DR_DRILL_ID: ${{ inputs.drill_id }}
+      TIXKIT_DR_KIND: ${{ inputs.kind }}
+      TIXKIT_DR_DEPENDENCY: ${{ inputs.dependency }}
+      TIXKIT_DR_CONFIG_SHA256: ${{ inputs.config_sha256 }}
+      TIXKIT_DR_EXPECTATIONS_SHA256: ${{ inputs.expectations_sha256 }}
+      TIXKIT_DR_PUBLIC_KEY_SHA256: ${{ inputs.proof_public_key_sha256 }}
+      TIXKIT_DR_RELEASE_TAG: ${{ inputs.release_tag }}
+      TIXKIT_DR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      TIXKIT_PRODUCTION_DR_REVIEWED_ROOT: ${{ vars.TIXKIT_PRODUCTION_DR_REVIEWED_ROOT }}
+      TIXKIT_PRODUCTION_DR_PROOF_PRIVATE_KEY_PATH: ${{ secrets.TIXKIT_PRODUCTION_DR_PROOF_PRIVATE_KEY_PATH }}
+      TIXKIT_PRODUCTION_DR_PROOF_PUBLIC_KEY_PATH: ${{ vars.TIXKIT_PRODUCTION_DR_PROOF_PUBLIC_KEY_PATH }}
+    steps:
+      - name: Reject non-authoritative invocation
+        run: |
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = workflow_dispatch
+          test "${GITHUB_REPOSITORY}" = tixkit/tixkit
+          test -n "${TIXKIT_DR_DEFAULT_BRANCH}"
+          test "${GITHUB_REF_NAME}" = "${TIXKIT_DR_DEFAULT_BRANCH}"
+          [[ "${TIXKIT_DR_RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+      - name: Bind the authoritative source checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_root="${RUNNER_TEMP}/production-dr-release"
+          mkdir -m 700 "${release_root}"
+          gh release download "${TIXKIT_DR_RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern public-release-manifest.json --dir "${release_root}"
+          gh attestation verify "${release_root}/public-release-manifest.json" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/public-artifact-release.yml" \
+            --source-ref "refs/tags/${TIXKIT_DR_RELEASE_TAG}" --deny-self-hosted-runners
+          manifest_commit="$(jq -er '.core.sourceCommit | select(test("^[a-f0-9]{40}$"))' \
+            "${release_root}/public-release-manifest.json")"
+          test "$(git rev-parse HEAD)" = "${manifest_commit}"
+          test "$(git rev-parse "${TIXKIT_DR_RELEASE_TAG}^{commit}")" = "${manifest_commit}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          infra/ci/scripts/verify-github-action-pins.sh
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Validate the pre-reviewed invocation before fault injection
+        run: node scripts/prepare-production-dr-workflow.mjs
+      - name: Execute the authorized production rehearsal
+        run: |
+          node scripts/prove-production-rehearsal.mjs \
+            --config "${TIXKIT_DR_CONFIG_PATH}" \
+            --evidence-dir "${TIXKIT_DR_EVIDENCE_DIR}" \
+            --private-key "${TIXKIT_DR_PRIVATE_KEY_PATH}" \
+            --expectations "${TIXKIT_DR_EXPECTATIONS_PATH}"
+      - name: Verify exact proof semantics before retention
+        run: |
+          node scripts/verify-production-rehearsal.mjs \
+            --evidence "${TIXKIT_DR_EVIDENCE_DIR}/${TIXKIT_DR_DRILL_ID}.json" \
+            --signature "${TIXKIT_DR_EVIDENCE_DIR}/${TIXKIT_DR_DRILL_ID}.json.sig" \
+            --checksum "${TIXKIT_DR_EVIDENCE_DIR}/${TIXKIT_DR_DRILL_ID}.json.sha256" \
+            --public-key "${TIXKIT_DR_PUBLIC_KEY_PATH}" \
+            --expectations "${TIXKIT_DR_EXPECTATIONS_PATH}"
+      - name: Close and re-bind the exact intermediate bundle
+        run: |
+          set -euo pipefail
+          intermediate="$(mktemp -d "${RUNNER_TEMP}/production-dr-intermediate-XXXXXX")"
+          chmod 0700 "${intermediate}"
+          node scripts/stage-production-dr-bundle.mjs \
+            --evidence-dir "${TIXKIT_DR_EVIDENCE_DIR}" \
+            --drill-id "${TIXKIT_DR_DRILL_ID}" \
+            --kind "${TIXKIT_DR_KIND}" \
+            --dependency "${TIXKIT_DR_DEPENDENCY}" \
+            --config "${TIXKIT_DR_CONFIG_PATH}" \
+            --config-sha256 "${TIXKIT_DR_CONFIG_SHA256}" \
+            --expectations "${TIXKIT_DR_EXPECTATIONS_PATH}" \
+            --expectations-sha256 "${TIXKIT_DR_EXPECTATIONS_SHA256}" \
+            --public-key "${TIXKIT_DR_PUBLIC_KEY_PATH}" \
+            --public-key-sha256 "${TIXKIT_DR_PUBLIC_KEY_SHA256}" \
+            --stage-output "${intermediate}"
+          echo "TIXKIT_DR_INTERMEDIATE_DIR=${intermediate}" >> "${GITHUB_ENV}"
+      - name: Upload private checksum-bound proof for independent receipt signing
+        id: upload-proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: production-dr-${{ inputs.drill_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TIXKIT_DR_INTERMEDIATE_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+  sign-receipt:
+    name: Independently sign and verify the hosted receipt
+    needs: rehearse
+    runs-on: ubuntu-24.04
+    environment: production-dr-receipt-signing
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    env:
+      TIXKIT_DR_DRILL_ID: ${{ inputs.drill_id }}
+      TIXKIT_DR_KIND: ${{ inputs.kind }}
+      TIXKIT_DR_DEPENDENCY: ${{ inputs.dependency }}
+      TIXKIT_DR_CONFIG_SHA256: ${{ inputs.config_sha256 }}
+      TIXKIT_DR_EXPECTATIONS_SHA256: ${{ inputs.expectations_sha256 }}
+      TIXKIT_DR_PUBLIC_KEY_SHA256: ${{ inputs.proof_public_key_sha256 }}
+      TIXKIT_DR_RELEASE_TAG: ${{ inputs.release_tag }}
+      TIXKIT_DR_ARTIFACT_ID: ${{ needs.rehearse.outputs.artifact_id }}
+      TIXKIT_DR_ARTIFACT_DIGEST: ${{ needs.rehearse.outputs.artifact_digest }}
+      TIXKIT_DR_RECEIPT_KEY_ID: ${{ vars.TIXKIT_PRODUCTION_DR_RECEIPT_KEY_ID }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+      - name: Re-bind the attested immutable public source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "${TIXKIT_DR_DRILL_ID}" =~ ^[a-z0-9]([-a-z0-9]{0,62})$ ]]
+          [[ "${TIXKIT_DR_ARTIFACT_ID}" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "${TIXKIT_DR_ARTIFACT_DIGEST}" =~ ^[a-f0-9]{64}$ ]]
+          release_root="${RUNNER_TEMP}/production-dr-release"
+          mkdir -m 700 "${release_root}"
+          gh release download "${TIXKIT_DR_RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern public-release-manifest.json --dir "${release_root}"
+          gh attestation verify "${release_root}/public-release-manifest.json" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/public-artifact-release.yml" \
+            --source-ref "refs/tags/${TIXKIT_DR_RELEASE_TAG}" --deny-self-hosted-runners
+          manifest_commit="$(jq -er '.core.sourceCommit | select(test("^[a-f0-9]{40}$"))' \
+            "${release_root}/public-release-manifest.json")"
+          test "$(git rev-parse HEAD)" = "${manifest_commit}"
+          test "$(git rev-parse "${TIXKIT_DR_RELEASE_TAG}^{commit}")" = "${manifest_commit}"
+          artifact_json="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${TIXKIT_DR_ARTIFACT_ID}")"
+          test "$(jq -er '.digest' <<<"${artifact_json}")" = "sha256:${TIXKIT_DR_ARTIFACT_DIGEST}"
+          test "$(jq -er '.workflow_run.id' <<<"${artifact_json}")" = "${GITHUB_RUN_ID}"
+          test "$(jq -er '.workflow_run.head_sha' <<<"${artifact_json}")" = "${GITHUB_SHA}"
+          test "$(jq -er '.expired' <<<"${artifact_json}")" = false
+          test "$(jq -er '.name' <<<"${artifact_json}")" = \
+            "production-dr-${TIXKIT_DR_DRILL_ID}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          artifact-ids: ${{ needs.rehearse.outputs.artifact_id }}
+          path: production-dr-proof
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Re-verify the closed bundle against approved dispatch inputs
+        run: |
+          set -euo pipefail
+          verified="$(mktemp -d "${RUNNER_TEMP}/production-dr-verified-XXXXXX")"
+          chmod 0700 "${verified}"
+          node scripts/stage-production-dr-bundle.mjs \
+            --evidence-dir "${GITHUB_WORKSPACE}/production-dr-proof" \
+            --drill-id "${TIXKIT_DR_DRILL_ID}" \
+            --kind "${TIXKIT_DR_KIND}" \
+            --dependency "${TIXKIT_DR_DEPENDENCY}" \
+            --config "${GITHUB_WORKSPACE}/production-dr-proof/config.json" \
+            --config-sha256 "${TIXKIT_DR_CONFIG_SHA256}" \
+            --expectations "${GITHUB_WORKSPACE}/production-dr-proof/expectations.json" \
+            --expectations-sha256 "${TIXKIT_DR_EXPECTATIONS_SHA256}" \
+            --public-key "${GITHUB_WORKSPACE}/production-dr-proof/proof-public-key.pem" \
+            --public-key-sha256 "${TIXKIT_DR_PUBLIC_KEY_SHA256}" \
+            --stage-output "${verified}"
+          echo "TIXKIT_DR_VERIFIED_BUNDLE=${verified}" >> "${GITHUB_ENV}"
+      - name: Materialize isolated receipt-signing inputs
+        env:
+          RECEIPT_PRIVATE_KEY_BASE64: ${{ secrets.TIXKIT_PRODUCTION_DR_RECEIPT_PRIVATE_KEY_BASE64 }}
+          TRUSTED_KEYRING_BASE64: ${{ secrets.TIXKIT_PRODUCTION_DR_TRUSTED_KEYRING_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${RECEIPT_PRIVATE_KEY_BASE64}"
+          test -n "${TRUSTED_KEYRING_BASE64}"
+          printf '%s' "${RECEIPT_PRIVATE_KEY_BASE64}" | base64 --decode > "${RUNNER_TEMP}/receipt-private-key.pem"
+          printf '%s' "${TRUSTED_KEYRING_BASE64}" | base64 --decode > "${RUNNER_TEMP}/trusted-keyring.json"
+          chmod 0400 "${RUNNER_TEMP}/receipt-private-key.pem" "${RUNNER_TEMP}/trusted-keyring.json"
+      - name: Create and independently verify the exact hosted receipt
+        run: |
+          set -euo pipefail
+          proof_root="${TIXKIT_DR_VERIFIED_BUNDLE}"
+          node scripts/create-hosted-production-dr-receipt.mjs \
+            --evidence "${proof_root}/${TIXKIT_DR_DRILL_ID}.json" \
+            --signature "${proof_root}/${TIXKIT_DR_DRILL_ID}.json.sig" \
+            --checksum "${proof_root}/${TIXKIT_DR_DRILL_ID}.json.sha256" \
+            --public-key "${proof_root}/proof-public-key.pem" \
+            --expectations "${proof_root}/expectations.json" \
+            --receipt-private-key "${RUNNER_TEMP}/receipt-private-key.pem" \
+            --receipt-key-id "${TIXKIT_DR_RECEIPT_KEY_ID}" \
+            --trusted-keyring "${RUNNER_TEMP}/trusted-keyring.json" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --output "${proof_root}/hosted-receipt.json"
+          cd "${proof_root}"
+          LC_ALL=C sha256sum "${TIXKIT_DR_DRILL_ID}.json" "${TIXKIT_DR_DRILL_ID}.json.sig" \
+            "${TIXKIT_DR_DRILL_ID}.json.sha256" config.json expectations.json proof-public-key.pem \
+            hosted-receipt.json > bundle.sha256
+          sha256sum --check bundle.sha256
+          node --input-type=module <<'NODE'
+          import { lstatSync, readdirSync, realpathSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const root=resolve(process.env.TIXKIT_DR_VERIFIED_BUNDLE);const drill=process.env.TIXKIT_DR_DRILL_ID;
+          const expected=[`${drill}.json`,`${drill}.json.sig`,`${drill}.json.sha256`,'bundle.sha256','config.json','expectations.json','hosted-receipt.json','proof-public-key.pem'].sort();
+          const actual=readdirSync(root).sort();if(actual.join('\n')!==expected.join('\n'))throw new Error('final production DR bundle cardinality drifted');
+          for(const name of actual){const path=resolve(root,name),metadata=lstatSync(path);if(!metadata.isFile()||metadata.isSymbolicLink()||metadata.nlink!==1||realpathSync(path)!==path)throw new Error('final production DR bundle contains an unsafe file');}
+          NODE
+      - name: Upload receipt-bound bundle for external retention and review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-production-dr-${{ inputs.drill_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TIXKIT_DR_VERIFIED_BUNDLE }}
+          if-no-files-found: error
+          retention-days: 30

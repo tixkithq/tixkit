@@ -21,6 +21,10 @@ require_file infra/docker-compose.yml
 require_file .github/workflows/release-dry-run.yml
 require_file .github/workflows/trusted-release-dry-run.yml
 require_file .github/workflows/public-artifact-release.yml
+require_file .github/workflows/production-dr.yml
+require_file scripts/create-hosted-production-dr-receipt.mjs
+require_file scripts/prepare-production-dr-workflow.mjs
+require_file scripts/stage-production-dr-bundle.mjs
 require_file Dockerfile.api
 require_file Dockerfile.worker
 require_file Dockerfile.checkout
@@ -1077,6 +1081,7 @@ helm template tixkit infra/helm/tixkit \
   --set admin.imageDigest=sha256:3456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012 \
   --set global.buildRevision=release-2026.08.10 \
   --set migrations.imageDigest=sha256:456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123 \
+  --set uploads.malwareScanner.host=clamav.production.svc.cluster.local \
   --set 'networkPolicy.externalEgressCidrs[0]=192.0.2.0/24' \
   --set 'networkPolicy.externalEgressCidrs[1]=2001:db8::/32' \
   --set 'networkPolicy.databaseEgressCidrs[0]=198.51.100.0/24' >/dev/null

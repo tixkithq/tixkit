@@ -22,6 +22,7 @@ import { verifyProductionRehearsal } from './verify-production-rehearsal.mjs';
 const repositoryRoot = resolve(import.meta.dirname, '..');
 const receiptSchema = 'https://tixkit.com/schemas/hosted-production-dr-receipt.schema.json';
 const protectedSourcePaths = Object.freeze([
+  '.github/workflows/production-dr.yml',
   'distribution/hosted-production-dr-receipt.schema.json',
   'distribution/hosted-trust-keyring.schema.json',
   'distribution/hosted-trust-receipt.schema.json',
@@ -30,6 +31,9 @@ const protectedSourcePaths = Object.freeze([
   'infra/production/rehearsal-proof.schema.json',
   'scripts/lib/hosted-trust-receipt.mjs',
   'scripts/lib/public-distribution.mjs',
+  'scripts/create-hosted-production-dr-receipt.mjs',
+  'scripts/prepare-production-dr-workflow.mjs',
+  'scripts/stage-production-dr-bundle.mjs',
   'scripts/verify-hosted-production-dr.mjs',
   'scripts/verify-production-rehearsal.mjs',
 ]);

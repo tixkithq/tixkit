@@ -72,7 +72,7 @@ export const EXPECTED_TRUST_CLAIMS = Object.freeze({
   'cloud-status': 'No public Tixkit Cloud status page is offered.',
   'data-residency': 'Managed Cloud residency and transfer commitments are not published.',
   'dr-evidence':
-    'Self-Hosted DR contracts and rehearsal tooling are locally validated; no hosted or production DR receipt is published.',
+    'Self-Hosted DR contracts and a protected two-key producer are locally validated; no hosted or production DR receipt is published.',
   'incident-history': 'No public Tixkit Cloud incident history is offered.',
   'independent-assessments':
     'No independent security assessment or remediation summary has been published.',
@@ -101,7 +101,7 @@ export const EXPECTED_TRUST_BLOCKERS = Object.freeze({
   'data-residency':
     'Product, infrastructure, privacy and legal review must approve the managed residency policy.',
   'dr-evidence':
-    'A protected hosted rehearsal with retained RPO and RTO evidence is still required.',
+    'The protected workflow has not run; authenticated keyring publication, durable hosted receipts, complete drill coverage and retained RPO/RTO evidence remain required.',
   'incident-history': 'No generally available managed service or public status history exists.',
   'independent-assessments':
     'An independent assessor must complete the work and approve a public summary.',
@@ -127,12 +127,17 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
   'data-residency': [[], []],
   'dr-evidence': [
     [
+      '.github/workflows/production-dr.yml',
       'distribution/hosted-production-dr-receipt.schema.json',
       'docs/public/self-hosting/backups-and-restore.mdx',
       'infra/scripts/production-backup.sh',
       'infra/scripts/production-restore.sh',
       'scripts/__tests__/dr-safety.test.mjs',
       'scripts/__tests__/production-dr.integration.test.mjs',
+      'scripts/__tests__/production-dr-workflow.test.mjs',
+      'scripts/create-hosted-production-dr-receipt.mjs',
+      'scripts/prepare-production-dr-workflow.mjs',
+      'scripts/stage-production-dr-bundle.mjs',
       'scripts/verify-hosted-production-dr.mjs',
       'scripts/verify-production-rehearsal.mjs',
     ],
@@ -146,6 +151,10 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
           'scripts/__tests__/production-rehearsal.test.mjs',
         ],
         120_000,
+      ),
+      validationCommand(
+        ['node', '--test', 'scripts/__tests__/production-dr-workflow.test.mjs'],
+        30_000,
       ),
     ],
   ],

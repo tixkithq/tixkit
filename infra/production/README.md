@@ -2,6 +2,10 @@
 
 `bun run iac:prove:production` runs one explicitly authorized Production failure or release drill and publishes Ed25519-signed, SHA-256-checksummed evidence. It is designed for a dedicated production-like cluster. It does not provision a cluster and it does not turn a local adapter test into production evidence.
 
+The manual `Protected Production DR Rehearsal` workflow is the hosted producer for this harness. The `production-dr` environment must require operator approval and expose only a dedicated `[self-hosted, tixkit-production-dr]` runner, `TIXKIT_PRODUCTION_DR_REVIEWED_ROOT`, `TIXKIT_PRODUCTION_DR_PROOF_PRIVATE_KEY_PATH`, and `TIXKIT_PRODUCTION_DR_PROOF_PUBLIC_KEY_PATH`. Each drill ID selects one owner-only self-contained directory containing `config.json`, `expectations.json`, the referenced immutable release manifests, and all five adapters. Dispatch supplies the exact config, expectations and proof-public-key SHA-256 values plus an attested public release tag; arbitrary paths and commands are not accepted.
+
+Receipt signing runs in the separate `production-dr-receipt-signing` environment on GitHub-hosted Ubuntu. Configure `TIXKIT_PRODUCTION_DR_RECEIPT_KEY_ID`, `TIXKIT_PRODUCTION_DR_RECEIPT_PRIVATE_KEY_BASE64`, and `TIXKIT_PRODUCTION_DR_TRUSTED_KEYRING_BASE64` there only. The workflow checks the immutable intermediate artifact ID, digest, run, source and name, independently rebinds the downloaded config, expectations, proof key, drill kind and dependency to dispatch inputs, rejects extra files, and reruns semantic verification before signing. Do not place the receipt private key on the destructive rehearsal runner. The retained Actions artifact is private, time-bounded review input; it is not durable public evidence or a published trust claim.
+
 The configuration must validate against `rehearsal-config.schema.json`. Supported drill kinds and exact acknowledgements are:
 
 | Kind                       | Exact acknowledgement                                                 | Required behavior                                                                                                                           |

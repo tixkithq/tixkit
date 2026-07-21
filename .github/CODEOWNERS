@@ -5,6 +5,7 @@
 /bun.lock @tixkit/maintainers
 /pnpm-lock.yaml @tixkit/maintainers
 /infra/ci/scripts/verify-github-action-pins.sh @tixkit/maintainers
+/infra/scripts/validate-deploy-templates.sh @tixkit/maintainers
 /scripts/public-remote-guardrails.mjs @tixkit/maintainers
 /scripts/__tests__/github-action-pins.test.mjs @tixkit/maintainers
 /scripts/__tests__/public-artifact-safety.test.ts @tixkit/maintainers
@@ -15,6 +16,10 @@
 /scripts/__tests__/hosted-trust-receipt.test.mjs @tixkit/maintainers
 /scripts/__tests__/policy-approval-receipt.test.mjs @tixkit/maintainers
 /scripts/__tests__/production-rehearsal.test.mjs @tixkit/maintainers
+/scripts/__tests__/production-dr-workflow.test.mjs @tixkit/maintainers
+/scripts/create-hosted-production-dr-receipt.mjs @tixkit/maintainers
+/scripts/prepare-production-dr-workflow.mjs @tixkit/maintainers
+/scripts/stage-production-dr-bundle.mjs @tixkit/maintainers
 /scripts/build-public-release-manifest.mjs @tixkit/maintainers
 /scripts/lib/hosted-trust-receipt.mjs @tixkit/maintainers
 /scripts/lib/policy-approval-receipt.mjs @tixkit/maintainers

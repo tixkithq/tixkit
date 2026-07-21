@@ -8,13 +8,14 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -23,9 +24,11 @@ const root = resolve(import.meta.dirname, '../..');
 const prove = resolve(root, 'scripts/prove-production-rehearsal.mjs');
 const verify = resolve(root, 'scripts/verify-production-rehearsal.mjs');
 const verifyHosted = resolve(root, 'scripts/verify-hosted-production-dr.mjs');
+const createHostedReceipt = resolve(root, 'scripts/create-hosted-production-dr-receipt.mjs');
 const { writeAll } = await import('../prove-production-rehearsal.mjs');
 const { verifyHostedProductionDr } = await import('../verify-hosted-production-dr.mjs');
 const { verifyProductionRehearsal } = await import('../verify-production-rehearsal.mjs');
+const { stageProductionDrBundle } = await import('../stage-production-dr-bundle.mjs');
 const { canonicalHostedTrustJson, hostedTrustReceiptSigningBytes } =
   await import('../lib/hosted-trust-receipt.mjs');
 const hostedProductionDrReceiptSchema = JSON.parse(
@@ -843,6 +846,7 @@ function hostedInput(value, evidencePath) {
         },
       },
     },
+    hostedPrivateKeyPem: hostedKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }),
     root,
     now: Date.parse(receipt.observedAt),
     resign,
@@ -1224,6 +1228,116 @@ test('hosted production DR combines semantic and receipt proof over one exact ar
       });
       assert.notEqual(refused.status, 0);
       assert.match(refused.stderr, /non-symlink regular file/u);
+    });
+
+    await t.test(
+      'independent producer creates one canonical verified receipt and refuses overwrite',
+      () => {
+        const privateKeyPath = join(value.directory, 'hosted-private-key.pem');
+        const keyringPath = join(value.directory, 'producer-keyring.json');
+        const outputPath = join(value.directory, 'produced-hosted-receipt.json');
+        writeFileSync(privateKeyPath, input.hostedPrivateKeyPem, { mode: 0o640 });
+        writeFileSync(keyringPath, `${canonicalHostedTrustJson(input.keyring)}\n`, { mode: 0o400 });
+        const args = [
+          '--evidence',
+          evidencePath,
+          '--signature',
+          `${evidencePath}.sig`,
+          '--checksum',
+          `${evidencePath}.sha256`,
+          '--public-key',
+          value.publicKeyPath,
+          '--expectations',
+          value.expectationsPath,
+          '--receipt-private-key',
+          privateKeyPath,
+          '--receipt-key-id',
+          'hosted-dr-2026',
+          '--trusted-keyring',
+          keyringPath,
+          '--run-id',
+          '123456789',
+          '--run-attempt',
+          '1',
+          '--output',
+          outputPath,
+        ];
+        const insecure = spawnSync(process.execPath, [createHostedReceipt, ...args], {
+          cwd: root,
+          encoding: 'utf8',
+        });
+        assert.notEqual(insecure.status, 0);
+        assert.match(insecure.stderr, /direct owner-only file/u);
+        assert.equal(existsSync(outputPath), false);
+        chmodSync(privateKeyPath, 0o400);
+        const created = JSON.parse(
+          execFileSync(process.execPath, [createHostedReceipt, ...args], {
+            cwd: root,
+            encoding: 'utf8',
+          }),
+        );
+        assert.equal(created.output, join(realpathSync(value.directory), basename(outputPath)));
+        assert.equal(statSync(outputPath).mode & 0o777, 0o400);
+        const receiptBytes = readFileSync(outputPath);
+        const produced = JSON.parse(receiptBytes);
+        assert.deepEqual(receiptBytes, Buffer.from(`${canonicalHostedTrustJson(produced)}\n`));
+        assert.equal(produced.artifact.sha256, input.receipt.artifact.sha256);
+        const duplicate = spawnSync(process.execPath, [createHostedReceipt, ...args], {
+          cwd: root,
+          encoding: 'utf8',
+        });
+        assert.notEqual(duplicate.status, 0);
+        assert.match(duplicate.stderr, /EEXIST|file already exists/u);
+        chmodSync(outputPath, 0o600);
+      },
+    );
+
+    await t.test('staging closes the bundle and rejects adapter-created extra files', () => {
+      const staged = join(value.directory, 'closed-intermediate');
+      mkdirSync(staged, { mode: 0o700 });
+      const stageArgs = [
+        '--evidence-dir',
+        dirname(evidencePath),
+        '--drill-id',
+        'zone-loss-001',
+        '--kind',
+        'zone-loss',
+        '--dependency',
+        'none',
+        '--config',
+        value.configPath,
+        '--config-sha256',
+        createHash('sha256').update(readFileSync(value.configPath)).digest('hex'),
+        '--expectations',
+        value.expectationsPath,
+        '--expectations-sha256',
+        createHash('sha256').update(readFileSync(value.expectationsPath)).digest('hex'),
+        '--public-key',
+        value.publicKeyPath,
+        '--public-key-sha256',
+        createHash('sha256').update(readFileSync(value.publicKeyPath)).digest('hex'),
+        '--stage-output',
+        realpathSync(staged),
+      ];
+      const result = stageProductionDrBundle(stageArgs);
+      assert.equal(result.drillId, 'zone-loss-001');
+      assert.deepEqual(readdirSync(staged).sort(), [
+        'config.json',
+        'expectations.json',
+        'proof-public-key.pem',
+        'zone-loss-001.json',
+        'zone-loss-001.json.sha256',
+        'zone-loss-001.json.sig',
+      ]);
+      const leaked = join(dirname(evidencePath), 'adapter-leak.txt');
+      writeFileSync(leaked, 'sensitive adapter output');
+      const refusedOutput = join(value.directory, 'refused-intermediate');
+      mkdirSync(refusedOutput, { mode: 0o700 });
+      const refusedArgs = [...stageArgs];
+      refusedArgs[refusedArgs.lastIndexOf(realpathSync(staged))] = realpathSync(refusedOutput);
+      assert.throws(() => stageProductionDrBundle(refusedArgs), /missing or additional files/u);
+      assert.deepEqual(readdirSync(refusedOutput), []);
+      rmSync(leaked);
     });
   } finally {
     rmSync(value.directory, { recursive: true, force: true });
