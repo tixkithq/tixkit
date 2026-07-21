@@ -42,6 +42,18 @@ jobs:
           git fetch --tags --force
           test "$(git tag --points-at "${{ inputs.release_tag }}" | grep -Fx "${{ inputs.release_tag }}")" = "${{ inputs.release_tag }}"
           echo "commit=$(git rev-list -n1 "${{ inputs.release_tag }}")" >> "$GITHUB_OUTPUT"
+      - name: Download the tag-owned public package trust root
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p public-release-trust
+          gh release download "${{ inputs.release_tag }}" \
+            --repo "${{ github.repository }}" \
+            --dir public-release-trust \
+            --pattern public-release-manifest.json \
+            --pattern CHECKSUMS.sha256 \
+            --pattern npm-packages.spdx.json
+          test "$(find public-release-trust -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
       - name: Clean-download and verify contracts and registry SDK
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,3 +65,9 @@ jobs:
           --trusted-contracts-root artifacts/api
           --commit "${{ steps.tag.outputs.commit }}"
           --repository "${{ github.repository }}"
+          --signer-workflow "${{ github.repository }}/.github/workflows/api-contract-release.yml"
+          --source-ref "refs/tags/${{ inputs.release_tag }}"
+          --source-digest "${{ steps.tag.outputs.commit }}"
+          --public-release-manifest public-release-trust/public-release-manifest.json
+          --public-release-checksums public-release-trust/CHECKSUMS.sha256
+          --public-release-sbom public-release-trust/npm-packages.spdx.json

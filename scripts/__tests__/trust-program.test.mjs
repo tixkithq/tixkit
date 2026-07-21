@@ -260,7 +260,7 @@ test('rejects impossible, future-relative, and stale verification dates', () => 
       /lastVerified is not a real date/u,
     ],
     [
-      (candidate) => (candidate.records[0].lastVerified = '2026-07-17'),
+      (candidate) => (candidate.records[0].lastVerified = '2026-07-21'),
       /lastVerified is after asOf/u,
     ],
     [
@@ -662,8 +662,8 @@ test('bounded local evidence execution invokes every declared command', async ()
       invocations.push({ command, commandRoot });
     },
   });
-  assert.equal(executed, 5);
-  assert.equal(invocations.length, 5);
+  assert.equal(executed, 6);
+  assert.equal(invocations.length, 6);
   for (const invocation of invocations) {
     assert.equal(invocation.command.argv[0], 'node');
     assert.equal(invocation.commandRoot, root);

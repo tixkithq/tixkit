@@ -13,9 +13,12 @@ on:
       - 'scripts/docs/generate-openapi-reference.mjs'
       - 'scripts/lib/openapi-compatibility.ts'
       - 'scripts/lib/public-artifact-safety.ts'
+      - 'scripts/lib/github-attestation.mjs'
+      - 'scripts/verify-api-release-candidate.mjs'
       - 'scripts/verify-public-api-release.mjs'
       - 'scripts/__tests__/openapi-compatibility.test.ts'
       - 'scripts/__tests__/public-artifact-safety.test.ts'
+      - 'scripts/__tests__/public-release-verifier.test.mjs'
       - 'artifacts/api/**'
       - 'artifacts/api-integration-skills/**'
       - 'scripts/build-api-release.ts'
@@ -144,10 +147,13 @@ jobs:
 
   publication-gate:
     name: Publication requires release approval
-    if: always() && github.event_name == 'workflow_dispatch' && (needs.build-contract-release.result == 'success' || needs.approved-breaking-build.result == 'success')
+    if: always() && github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && (needs.build-contract-release.result == 'success' || needs.approved-breaking-build.result == 'success')
     needs: [build-contract-release, approved-breaking-build]
     runs-on: ubuntu-latest
     environment: api-contract-production
+    permissions:
+      attestations: read
+      contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -159,13 +165,18 @@ jobs:
           path: candidate
       - name: Verify downloaded candidate and provenance binding
         run: |
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           source_commit="$(node -p "require('./candidate/release-manifest.json').commit")"
           git merge-base --is-ancestor "$source_commit" "$GITHUB_SHA"
           (cd candidate && sha256sum --check CHECKSUMS.sha256)
           node -e "const fs=require('fs');const m=require('./candidate/release-manifest.json');const expected=new Set([...m.artifacts.map(x=>x.name),'release-manifest.json','CHECKSUMS.sha256']);const actual=fs.readdirSync('candidate');if(actual.some(x=>!expected.has(x))||expected.size!==actual.length)process.exit(1)"
-          while IFS= read -r artifact; do
-            gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"
-          done < <(find candidate -maxdepth 1 -type f -print | sort)
+          node scripts/verify-api-release-candidate.mjs \
+            --directory candidate \
+            --repository "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/api-contract-release.yml" \
+            --source-ref "$GITHUB_REF" \
+            --source-digest "$GITHUB_SHA"
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Preserve the external release gate

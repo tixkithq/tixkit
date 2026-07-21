@@ -20,6 +20,7 @@ jobs:
     permissions:
       attestations: read
       contents: read
+      packages: read
     outputs:
       resume: ${{ steps.resume.outputs.resume }}
     steps:
@@ -29,9 +30,16 @@ jobs:
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Require authoritative, approved public release context
-        run: node scripts/build-public-release-manifest.mjs --preflight
+        run: |
+          node scripts/build-public-release-manifest.mjs --preflight
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Run independent public repository rehearsal
         run: bun run validate:public-repository -- --repository .
+      - name: Authenticate for exact-digest OCI attestation verification
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Recover a previously staged immutable candidate
         id: resume
         env:
@@ -48,15 +56,13 @@ jobs:
               echo "resume=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            signer="${GITHUB_REPOSITORY}/.github/workflows/public-artifact-release.yml"
-            for asset in "${assets[@]}"; do
-              gh attestation verify "$asset" \
-                --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "$signer" \
-                --source-ref "$GITHUB_REF" \
-                --source-digest "$GITHUB_SHA" \
-                --deny-self-hosted-runners
-            done
+            node scripts/verify-public-artifact-release.mjs \
+              --directory resumed-public-release \
+              --repository "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/public-artifact-release.yml" \
+              --source-ref "$GITHUB_REF" \
+              --source-digest "$GITHUB_SHA" \
+              --existing-assets-only
             classification="$(node scripts/validate-staged-public-release.mjs \
               --directory resumed-public-release --classify)"
             if test "$classification" = incomplete; then
@@ -66,25 +72,16 @@ jobs:
               exit 0
             fi
             test "$classification" = complete
+            node scripts/verify-public-artifact-release.mjs \
+              --directory resumed-public-release \
+              --repository "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/public-artifact-release.yml" \
+              --source-ref "$GITHUB_REF" \
+              --source-digest "$GITHUB_SHA"
             node scripts/validate-staged-public-release.mjs \
               --directory resumed-public-release \
               --source-commit "$GITHUB_SHA" \
               --release-version "${GITHUB_REF_NAME#v}"
-            jq -r '.[].reference' resumed-public-release/images.json | while read -r reference; do
-              gh attestation verify "oci://${reference}" \
-                --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "$signer" \
-                --source-ref "$GITHUB_REF" \
-                --source-digest "$GITHUB_SHA" \
-                --deny-self-hosted-runners
-              gh attestation verify "oci://${reference}" \
-                --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "$signer" \
-                --source-ref "$GITHUB_REF" \
-                --source-digest "$GITHUB_SHA" \
-                --predicate-type https://spdx.dev/Document \
-                --deny-self-hosted-runners
-            done
             echo "resume=true" >> "$GITHUB_OUTPUT"
           elif grep -Eqi 'release not found|HTTP 404' /tmp/tixkit-release-error; then
             echo "resume=false" >> "$GITHUB_OUTPUT"
@@ -129,7 +126,10 @@ jobs:
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Require authoritative, approved public release context
-        run: node scripts/build-public-release-manifest.mjs --preflight
+        run: |
+          node scripts/build-public-release-manifest.mjs --preflight
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Authenticate to the public container registry
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
         env:
@@ -201,6 +201,7 @@ jobs:
       attestations: write
       contents: write
       id-token: write
+      packages: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -208,7 +209,14 @@ jobs:
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Require authoritative, approved public release context
-        run: node scripts/build-public-release-manifest.mjs --preflight
+        run: |
+          node scripts/build-public-release-manifest.mjs --preflight
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Authenticate for exact-digest OCI attestation verification
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: needs.validate.outputs.resume != 'true'
         with:
@@ -293,6 +301,16 @@ jobs:
         with:
           subject-path: public-release/packages/*.tgz
           sbom-path: public-release/npm-packages.spdx.json
+      - name: Consume exact provenance and SBOM attestations before publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          node scripts/verify-public-artifact-release.mjs
+          --directory public-release
+          --repository "$GITHUB_REPOSITORY"
+          --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/public-artifact-release.yml"
+          --source-ref "$GITHUB_REF"
+          --source-digest "$GITHUB_SHA"
       - name: Stage or reconcile the immutable draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

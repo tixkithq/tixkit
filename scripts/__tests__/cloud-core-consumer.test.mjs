@@ -1410,21 +1410,58 @@ test('release workflow resumes staged bytes instead of rebuilding image candidat
     'utf8',
   );
   assert.match(workflow, /validate-staged-public-release\.mjs/u);
-  assert.ok(
-    workflow.indexOf('gh attestation verify "$asset"') <
-      workflow.indexOf('validate-staged-public-release.mjs'),
+  const classification = workflow.indexOf(
+    'classification="$(node scripts/validate-staged-public-release.mjs',
   );
+  const existingAssetVerification = workflow.indexOf(
+    'node scripts/verify-public-artifact-release.mjs',
+  );
+  const resumedVerification = workflow.indexOf(
+    'node scripts/verify-public-artifact-release.mjs',
+    classification,
+  );
+  const structuralValidation = workflow.indexOf('--source-commit "$GITHUB_SHA"');
+  assert.ok(
+    existingAssetVerification < classification &&
+      classification < resumedVerification &&
+      resumedVerification < structuralValidation,
+  );
+  assert.ok(workflow.indexOf('--existing-assets-only', existingAssetVerification) < classification);
   assert.match(workflow, /if: needs\.validate\.outputs\.resume != 'true'/u);
   assert.match(workflow, /name: resumed-public-release/u);
   assert.match(workflow, /image-\{admin,api,checkout,worker\}\.json/u);
   assert.match(workflow, /validate:public-repository -- --repository \./u);
   assert.match(workflow, /assets=\(resumed-public-release\/\*\)/u);
-  assert.match(workflow, /for asset in "\$\{assets\[@\]\}"/u);
-  assert.match(workflow, /gh attestation verify "oci:\/\/\$\{reference\}"/u);
+  assert.equal(workflow.match(/node scripts\/verify-public-artifact-release\.mjs/gu)?.length, 3);
+  assert.match(
+    workflow,
+    /--signer-workflow "\$GITHUB_REPOSITORY\/\.github\/workflows\/public-artifact-release\.yml"/u,
+  );
+  assert.match(workflow, /--source-ref "\$GITHUB_REF"/u);
+  assert.match(workflow, /--source-digest "\$GITHUB_SHA"/u);
   assert.ok(
-    workflow.indexOf('subject-path: public-release/public-release-manifest.json') <
+    workflow.lastIndexOf('node scripts/verify-public-artifact-release.mjs') <
       workflow.indexOf('name: Stage or reconcile the immutable draft release'),
   );
+  assert.ok(
+    workflow.indexOf('name: Stage or reconcile the immutable draft release') <
+      workflow.indexOf('name: Publish the exact attested npm tarballs'),
+  );
+  assert.ok(
+    workflow.indexOf('name: Publish the exact attested npm tarballs') <
+      workflow.indexOf('name: Finalize the reconciled immutable release'),
+  );
+  assert.ok(
+    workflow.indexOf('subject-path: public-release/packages/*.tgz') <
+      workflow.lastIndexOf('node scripts/verify-public-artifact-release.mjs'),
+  );
+  assert.equal(workflow.match(/packages: read/gu)?.length, 2);
+  assert.equal(workflow.match(/docker login ghcr\.io/gu)?.length, 3);
+  assert.equal(
+    workflow.match(/test "\$GITHUB_REF" = "refs\/tags\/\$GITHUB_REF_NAME"/gu)?.length,
+    3,
+  );
+  assert.equal(workflow.match(/test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/gu)?.length, 3);
   assert.match(
     workflow,
     /gh release delete "\$GITHUB_REF_NAME" --repo "\$GITHUB_REPOSITORY" --yes/u,

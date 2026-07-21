@@ -224,6 +224,8 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
     [
       'docs/public/reference/api-release-train.mdx',
       'docs/public/reference/api-versions.mdx',
+      'scripts/lib/github-attestation.mjs',
+      'scripts/verify-api-release-candidate.mjs',
       'scripts/verify-public-api-release.mjs',
     ],
     [
@@ -235,8 +237,17 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
   ],
   'security-architecture': [['ARCHITECTURE.md', 'SECURITY.md'], []],
   'signed-sbom': [
-    ['.github/workflows/public-artifact-release.yml', 'scripts/validate-staged-public-release.mjs'],
     [
+      '.github/workflows/public-artifact-release.yml',
+      'scripts/lib/github-attestation.mjs',
+      'scripts/validate-staged-public-release.mjs',
+      'scripts/verify-public-artifact-release.mjs',
+    ],
+    [
+      validationCommand(
+        ['node', '--test', 'scripts/__tests__/public-artifact-release-verifier.test.mjs'],
+        120_000,
+      ),
       validationCommand(
         [
           'node',

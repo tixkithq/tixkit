@@ -1,7 +1,7 @@
 {
   "$schema": "./trust-program.schema.json",
   "schemaVersion": 1,
-  "asOf": "2026-07-16",
+  "asOf": "2026-07-20",
   "maxRecordAgeDays": 90,
   "documentation": "docs/public/reference/trust.mdx",
   "surfaces": [
@@ -245,10 +245,12 @@
       "scope": "public-core",
       "state": "locally-proven",
       "claim": "Public release provenance generation and consumer verification are locally tested workflow contracts; no approved public release receipt exists.",
-      "lastVerified": "2026-07-15",
+      "lastVerified": "2026-07-20",
       "publicArtifacts": [
         "docs/public/reference/api-release-train.mdx",
         "docs/public/reference/api-versions.mdx",
+        "scripts/lib/github-attestation.mjs",
+        "scripts/verify-api-release-candidate.mjs",
         "scripts/verify-public-api-release.mjs"
       ],
       "validationCommands": [
@@ -275,12 +277,19 @@
       "scope": "public-core",
       "state": "locally-proven",
       "claim": "SBOM generation and attestation-consumer checks are locally tested workflow contracts; no approved hosted release verification receipt exists.",
-      "lastVerified": "2026-07-15",
+      "lastVerified": "2026-07-20",
       "publicArtifacts": [
         ".github/workflows/public-artifact-release.yml",
-        "scripts/validate-staged-public-release.mjs"
+        "scripts/lib/github-attestation.mjs",
+        "scripts/validate-staged-public-release.mjs",
+        "scripts/verify-public-artifact-release.mjs"
       ],
       "validationCommands": [
+        {
+          "argv": ["node", "--test", "scripts/__tests__/public-artifact-release-verifier.test.mjs"],
+          "cwd": ".",
+          "timeoutMs": 120000
+        },
         {
           "argv": [
             "node",

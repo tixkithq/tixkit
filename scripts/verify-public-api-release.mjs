@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import {
+  GITHUB_BUILD_PROVENANCE_PREDICATE,
+  GITHUB_SPDX_PREDICATE,
+  createGithubAttestationVerifier,
+} from './lib/github-attestation.mjs';
 
 const options = Object.fromEntries(
   process.argv
@@ -36,9 +42,79 @@ if (!options['trusted-contracts-root'])
   throw new Error(
     'trusted-contracts-root must identify contracts from the protected tag checkout.',
   );
+if (options.repository) {
+  const expectedSigner = `${options.repository}/.github/workflows/api-contract-release.yml`;
+  if (options['signer-workflow'] !== expectedSigner)
+    throw new Error(`signer-workflow must be exactly ${expectedSigner}.`);
+  if (!/^refs\/tags\/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(options['source-ref']))
+    throw new Error('source-ref must bind the protected release tag.');
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(options['source-digest'] ?? ''))
+    throw new Error('source-digest must be an exact lowercase commit digest.');
+  if (options.commit && options['source-digest'] !== options.commit)
+    throw new Error('source-digest must equal the protected release tag commit.');
+  for (const name of ['public-release-manifest', 'public-release-checksums', 'public-release-sbom'])
+    if (!options[name]) throw new Error(`${name} is required when repository is configured.`);
+}
+
+function checksumEntries(value) {
+  const entries = new Map();
+  for (const line of value.trim().split('\n')) {
+    const match = /^([a-f0-9]{64})  ([A-Za-z0-9@._+-]+)$/u.exec(line);
+    if (!match || entries.has(match[2])) throw new Error('Public release checksums are invalid.');
+    entries.set(match[2], match[1]);
+  }
+  return entries;
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 const temp = await mkdtemp(join(tmpdir(), 'tixkit-public-release-'));
 try {
+  const verifyAttestation = options.repository ? createGithubAttestationVerifier() : null;
+  let publicRelease;
+  let publicReleaseChecksums;
+  let publicReleaseSbom;
+  let verifyPublicAttestation;
+  if (verifyAttestation) {
+    const publicTrustPaths = [
+      resolve(options['public-release-manifest']),
+      resolve(options['public-release-checksums']),
+      resolve(options['public-release-sbom']),
+    ];
+    verifyPublicAttestation = createGithubAttestationVerifier();
+    const authority = {
+      repository: options.repository,
+      signerWorkflow: `${options.repository}/.github/workflows/public-artifact-release.yml`,
+      sourceRef: options['source-ref'],
+      sourceDigest: options['source-digest'],
+      predicateType: GITHUB_BUILD_PROVENANCE_PREDICATE,
+    };
+    for (const path of publicTrustPaths) verifyPublicAttestation(path, authority);
+    const [manifestBytes, checksumFileBytes, sbomBytes] = await Promise.all(
+      publicTrustPaths.map((path) => readFile(path)),
+    );
+    publicReleaseChecksums = checksumEntries(checksumFileBytes.toString('utf8'));
+    for (const [path, bytes] of [
+      [publicTrustPaths[0], manifestBytes],
+      [publicTrustPaths[2], sbomBytes],
+    ])
+      if (publicReleaseChecksums.get(basename(path)) !== sha256(bytes))
+        throw new Error(`Public release checksum mismatch for ${basename(path)}.`);
+    publicRelease = JSON.parse(manifestBytes.toString('utf8'));
+    publicReleaseSbom = JSON.parse(sbomBytes.toString('utf8'));
+    if (
+      publicRelease?.schemaVersion !== 1 ||
+      publicRelease.releaseVersion !== options['source-ref'].slice('refs/tags/v'.length) ||
+      publicRelease.core?.sourceCommit !== options['source-digest'] ||
+      !Array.isArray(publicRelease.core?.packages) ||
+      !publicReleaseSbom ||
+      typeof publicReleaseSbom !== 'object' ||
+      Array.isArray(publicReleaseSbom)
+    )
+      throw new Error('Public release package trust root is invalid.');
+  }
   const get = async (name) => {
     const response = await fetch(new URL(name, `${base.toString().replace(/\/$/u, '')}/`));
     if (!response.ok) throw new Error(`Unable to download ${name}: HTTP ${response.status}`);
@@ -81,19 +157,24 @@ try {
     if (hash !== checksums.get(name)) throw new Error(`Checksum mismatch for ${name}.`);
   }
 
-  if (options.repository) {
+  if (verifyAttestation) {
     for (const name of [...artifactNames, 'CHECKSUMS.sha256']) {
-      execFileSync(
-        'gh',
-        ['attestation', 'verify', join(temp, name), '--repo', options.repository],
-        {
-          stdio: 'inherit',
-        },
-      );
+      verifyAttestation(join(temp, name), {
+        repository: options.repository,
+        signerWorkflow: options['signer-workflow'],
+        sourceRef: options['source-ref'],
+        sourceDigest: options['source-digest'],
+        predicateType: GITHUB_BUILD_PROVENANCE_PREDICATE,
+      });
     }
   }
 
   const packExactRegistryPackage = (spec, expectedName) => {
+    const expectedPin = publicRelease?.core.packages.find(
+      ({ name, version }) => `${name}@${version}` === spec,
+    );
+    if (publicRelease && !expectedPin)
+      throw new Error(`Public release manifest does not pin ${spec}.`);
     const metadata = JSON.parse(
       execFileSync('npm', ['view', spec, 'name', 'version', 'dist.integrity', '--json'], {
         encoding: 'utf8',
@@ -108,13 +189,37 @@ try {
       metadata.name !== expectedName ||
       `${metadata.name}@${metadata.version}` !== spec ||
       !metadata['dist.integrity'] ||
-      packed.integrity !== metadata['dist.integrity']
+      packed.integrity !== metadata['dist.integrity'] ||
+      (expectedPin && packed.integrity !== expectedPin.integrity)
     ) {
       throw new Error(
         `Packed ${expectedName} integrity does not match the exact registry release.`,
       );
     }
-    return join(temp, packed.filename);
+    const tarball = join(temp, packed.filename);
+    if (
+      publicReleaseChecksums &&
+      publicReleaseChecksums.get(packed.filename) !== sha256(readFileSync(tarball))
+    )
+      throw new Error(`Public release checksum mismatch for ${packed.filename}.`);
+    if (verifyPublicAttestation) {
+      const authority = {
+        repository: options.repository,
+        signerWorkflow: `${options.repository}/.github/workflows/public-artifact-release.yml`,
+        sourceRef: options['source-ref'],
+        sourceDigest: options['source-digest'],
+      };
+      verifyPublicAttestation(tarball, {
+        ...authority,
+        predicateType: GITHUB_BUILD_PROVENANCE_PREDICATE,
+      });
+      verifyPublicAttestation(tarball, {
+        ...authority,
+        predicateType: GITHUB_SPDX_PREDICATE,
+        expectedPredicate: publicReleaseSbom,
+      });
+    }
+    return tarball;
   };
   const sdkTarball = packExactRegistryPackage(sdkSpec, '@tixkit/js');
   const contractTarball = packExactRegistryPackage(contractTestsSpec, '@tixkit/contract-tests');
