@@ -32,6 +32,8 @@ function productCatalogContract(operationId: string) {
 
 const categoryContract = productCatalogContract('postEventsByEventIdProductCategories');
 const productContract = productCatalogContract('postEventsByEventIdProducts');
+const categoryReadContract = productCatalogContract('getEventsByEventIdProductCategories');
+const productReadContract = productCatalogContract('getEventsByEventIdProducts');
 
 const suffix = ulid().slice(-10).toLowerCase();
 const tenantA = `tnt_pcat_auth_a_${suffix}`;
@@ -55,6 +57,9 @@ let eventB: string;
 let categoryA: string;
 let categoryAScoped: string;
 let categoryB: string;
+let productA: string;
+let productAScoped: string;
+let productB: string;
 
 type ProductConfigurationOperation = 'product_category_create' | 'product_create';
 
@@ -192,9 +197,9 @@ async function seedBaselineCatalog(): Promise<void> {
   categoryA = await seedCategory(eventA, 'Allowed baseline category');
   categoryAScoped = await seedCategory(eventAScoped, 'Scoped baseline category');
   categoryB = await seedCategory(eventB, 'Foreign baseline category');
-  await seedProduct(eventA, categoryA, 'Allowed baseline product');
-  await seedProduct(eventAScoped, categoryAScoped, 'Scoped baseline product');
-  await seedProduct(eventB, categoryB, 'Foreign baseline product');
+  productA = await seedProduct(eventA, categoryA, 'Allowed baseline product');
+  productAScoped = await seedProduct(eventAScoped, categoryAScoped, 'Scoped baseline product');
+  productB = await seedProduct(eventB, categoryB, 'Foreign baseline product');
 }
 
 async function evidenceSnapshot() {
@@ -252,6 +257,24 @@ function invokeCategory(targetEventId: string, name?: string) {
     method: categoryContract.method,
     url: categoryContract.path.replace('{eventId}', targetEventId),
     payload: categoryPayload(name),
+  });
+}
+
+function invokeCategoryRead(targetEventId: string, cursor?: string) {
+  const query = new URLSearchParams({ limit: '1' });
+  if (cursor) query.set('cursor', cursor);
+  return app.inject({
+    method: categoryReadContract.method,
+    url: `${categoryReadContract.path.replace('{eventId}', targetEventId)}?${query}`,
+  });
+}
+
+function invokeProductRead(targetEventId: string, cursor?: string) {
+  const query = new URLSearchParams({ limit: '1' });
+  if (cursor) query.set('cursor', cursor);
+  return app.inject({
+    method: productReadContract.method,
+    url: `${productReadContract.path.replace('{eventId}', targetEventId)}?${query}`,
   });
 }
 
@@ -405,7 +428,15 @@ describeWithIntegrationDatabase('product catalog write route authorization matri
     }
   });
 
-  it('binds both immutable route contracts to this executable proof', () => {
+  it('binds all four immutable route contracts to this executable proof', () => {
+    for (const contract of [categoryReadContract, productReadContract]) {
+      expect(contract).toMatchObject({
+        authorizedControl: { status: 200 },
+        deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+        permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+        source: 'product-catalog-route-authorization-db.integration.test.ts',
+      });
+    }
     for (const contract of [categoryContract, productContract]) {
       expect(contract).toMatchObject({
         authorizedControl: { status: 201 },
@@ -413,6 +444,84 @@ describeWithIntegrationDatabase('product catalog write route authorization matri
         permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
         source: 'product-catalog-route-authorization-db.integration.test.ts',
       });
+    }
+  });
+
+  it('returns exact two-page event-scoped category and product collections', async () => {
+    const secondCategoryId = await seedCategory(eventA, 'Allowed second read category');
+    await seedProduct(eventA, secondCategoryId, 'Allowed second read product');
+    const before = await evidenceSnapshot();
+    const expectedCategories = before.categories
+      .filter((category) => category.event_id === eventA)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((category) => serializeProductCategory(category as Record<string, unknown>));
+    const expectedProducts = before.products
+      .filter((product) => product.event_id === eventA)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((product) => serializeProduct(product as Record<string, unknown>));
+    expect(expectedCategories).toHaveLength(2);
+    expect(expectedProducts).toHaveLength(2);
+    expect(expectedProducts.map((product) => product.id)).toContain(productA);
+    const categoryQuery = vi.spyOn(ProductCategoryRepository.prototype, 'findByEvent');
+    const productQuery = vi.spyOn(ProductRepository.prototype, 'findByEvent');
+
+    try {
+      const [firstCategoryResponse, firstProductResponse] = await Promise.all([
+        invokeCategoryRead(eventA),
+        invokeProductRead(eventA),
+      ]);
+      expect(firstCategoryResponse.statusCode, firstCategoryResponse.body).toBe(200);
+      expect(firstProductResponse.statusCode, firstProductResponse.body).toBe(200);
+      const [secondCategoryResponse, secondProductResponse] = await Promise.all([
+        invokeCategoryRead(eventA, firstCategoryResponse.json().nextCursor),
+        invokeProductRead(eventA, firstProductResponse.json().nextCursor),
+      ]);
+
+      expect(firstCategoryResponse.json()).toEqual({
+        items: [expectedCategories[0]],
+        nextCursor: expectedCategories[0]!.id,
+        hasMore: true,
+      });
+      expect(secondCategoryResponse.json()).toEqual({
+        items: [expectedCategories[1]],
+        nextCursor: null,
+        hasMore: false,
+      });
+      expect(firstProductResponse.json()).toEqual({
+        items: [expectedProducts[0]],
+        nextCursor: expectedProducts[0]!.id,
+        hasMore: true,
+      });
+      expect(secondProductResponse.json()).toEqual({
+        items: [expectedProducts[1]],
+        nextCursor: null,
+        hasMore: false,
+      });
+      expect(categoryQuery.mock.calls).toEqual([
+        [eventA, 2, undefined],
+        [eventA, 2, expectedCategories[0]!.id],
+      ]);
+      expect(productQuery.mock.calls).toEqual([
+        [eventA, 2, undefined],
+        [eventA, 2, expectedProducts[0]!.id],
+      ]);
+      for (const response of [
+        firstCategoryResponse,
+        secondCategoryResponse,
+        firstProductResponse,
+        secondProductResponse,
+      ]) {
+        expect(response.body).not.toContain(categoryAScoped);
+        expect(response.body).not.toContain(categoryB);
+        expect(response.body).not.toContain(productAScoped);
+        expect(response.body).not.toContain(productB);
+        expect(response.body).not.toContain('Scoped baseline');
+        expect(response.body).not.toContain('Foreign baseline');
+      }
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    } finally {
+      categoryQuery.mockRestore();
+      productQuery.mockRestore();
     }
   });
 
@@ -541,23 +650,42 @@ describeWithIntegrationDatabase('product catalog write route authorization matri
       404,
     ],
   ] as const)(
-    'denies the %s boundary for both creates with exact catalog and audit snapshots',
+    'denies the %s boundary for both reads and creates with exact catalog and audit snapshots',
     async (_boundary, makePrincipal, targetEvent, targetCategory, status) => {
       activePrincipal = makePrincipal();
       const eventId = targetEvent();
       const before = await evidenceSnapshot();
+      const categoryQuery = vi.spyOn(ProductCategoryRepository.prototype, 'findByEvent');
+      const productQuery = vi.spyOn(ProductRepository.prototype, 'findByEvent');
 
-      const responses = [
-        await invokeCategory(eventId, 'Forbidden category'),
-        await invokeProduct(eventId, targetCategory(), 'Forbidden product'),
-      ];
-      for (const response of responses) {
-        expect(response.statusCode, response.body).toBe(status);
-        expect(response.json()).toMatchObject({
-          error: { code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND' },
-        });
+      try {
+        const readResponses = [await invokeCategoryRead(eventId), await invokeProductRead(eventId)];
+        expect(categoryQuery).not.toHaveBeenCalled();
+        expect(productQuery).not.toHaveBeenCalled();
+        for (const response of readResponses) expect(response.json()).not.toHaveProperty('items');
+
+        const responses = [
+          ...readResponses,
+          await invokeCategory(eventId, 'Forbidden category'),
+          await invokeProduct(eventId, targetCategory(), 'Forbidden product'),
+        ];
+        for (const response of responses) {
+          expect(response.statusCode, response.body).toBe(status);
+          expect(response.json()).toMatchObject({
+            error: { code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND' },
+          });
+          expect(response.body).not.toContain(categoryAScoped);
+          expect(response.body).not.toContain(categoryB);
+          expect(response.body).not.toContain(productAScoped);
+          expect(response.body).not.toContain(productB);
+          expect(response.body).not.toContain('Scoped baseline');
+          expect(response.body).not.toContain('Foreign baseline');
+        }
+        await expect(evidenceSnapshot()).resolves.toEqual(before);
+      } finally {
+        categoryQuery.mockRestore();
+        productQuery.mockRestore();
       }
-      await expect(evidenceSnapshot()).resolves.toEqual(before);
     },
   );
 

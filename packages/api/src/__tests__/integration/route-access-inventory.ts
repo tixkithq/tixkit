@@ -501,10 +501,18 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       persistenceSource: 'event-route-authorization-db.integration.test.ts',
     },
   ),
-  ...evidenceBindings(['postEventsByEventIdProductCategories', 'postEventsByEventIdProducts'], {
-    source: 'product-catalog-route-authorization-db.integration.test.ts',
-    persistenceSource: 'product-catalog-route-authorization-db.integration.test.ts',
-  }),
+  ...evidenceBindings(
+    [
+      'getEventsByEventIdProductCategories',
+      'getEventsByEventIdProducts',
+      'postEventsByEventIdProductCategories',
+      'postEventsByEventIdProducts',
+    ],
+    {
+      source: 'product-catalog-route-authorization-db.integration.test.ts',
+      persistenceSource: 'product-catalog-route-authorization-db.integration.test.ts',
+    },
+  ),
   ...evidenceBindings(['putEventsByEventIdResalePolicy'], {
     source: 'resale-policy-route-authorization-db.integration.test.ts',
     persistenceSource: 'resale-policy-route-authorization-db.integration.test.ts',
