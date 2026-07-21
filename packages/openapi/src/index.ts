@@ -644,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-31',
+    version: '2026-09-01',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -700,6 +700,19 @@ const rawOpenApiSpec = {
         required: true,
         schema: { type: 'string' },
         description: 'Required for idempotent mutations',
+      },
+      OrganizationMemberIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          minLength: 16,
+          maxLength: 255,
+          pattern: '^\\S(?:.*\\S)?$',
+        },
+        description:
+          'Required for organization-member mutations. Use 16-255 characters without surrounding whitespace and reuse the key only for the same actor, organization, target and payload.',
       },
       ApiKeyCreationIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -6084,7 +6097,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-31, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-09-01, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6131,7 +6144,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-31, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-09-01, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6238,7 +6251,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-31 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-09-01 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6275,7 +6288,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-31 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-09-01 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8561,7 +8574,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-31 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-09-01 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8618,7 +8631,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-31 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-09-01 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -16801,6 +16814,10 @@ const rawOpenApiSpec = {
     '/organizations/{organizationId}/members': {
       get: {
         summary: 'List organization members',
+        description:
+          'Requires a bearer principal with a live organization membership and organization-scoped `settings.write`. Human users and trusted system principals are supported; other machine principals are forbidden.',
+        'x-required-permissions': ['settings.write'],
+        'x-principal-type-restrictions': { allowed: ['user', 'system'] },
         security: [{ BearerAuth: [] }],
         responses: {
           '200': {
@@ -16874,8 +16891,12 @@ const rawOpenApiSpec = {
     '/organizations/{organizationId}/members/invitations': {
       post: {
         summary: 'Invite a member to the organization',
+        description:
+          'Requires a human bearer principal with a live organization membership and organization-scoped `settings.write`. The idempotency key binds the actor, organization, and exact invitation payload.',
+        'x-required-permissions': ['settings.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
-        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
+        parameters: [{ $ref: '#/components/parameters/OrganizationMemberIdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
@@ -16982,13 +17003,26 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '409': {
+            description: 'Idempotency conflict or existing accepted membership',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
     '/organizations/{organizationId}/members/{memberId}': {
       patch: {
         summary: 'Update an organization member role and permission grants',
+        description:
+          'Requires a human bearer principal with a live organization membership and organization-scoped `settings.write`. The idempotency key binds the actor, organization, member, and exact role-and-scope payload.',
+        'x-required-permissions': ['settings.write'],
+        'x-principal-type-restrictions': { allowed: ['user'] },
         security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/OrganizationMemberIdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
@@ -17074,6 +17108,14 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Organization or member not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description: 'Idempotency conflict',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },

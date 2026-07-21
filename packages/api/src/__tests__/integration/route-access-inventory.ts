@@ -241,6 +241,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'api-key-route-authorization-db.integration.test.ts'),
   ],
   [
+    'organization-member-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'organization-member-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'oauth-application-route-authorization.test.ts',
     resolve(import.meta.dirname, '../oauth-application-route-authorization.test.ts'),
   ],
@@ -621,6 +625,19 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['getApiKeys'], {
     source: 'api-key-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['getOrganizationsByOrganizationIdMembers'], {
+    source: 'organization-member-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(
+    [
+      'postOrganizationsByOrganizationIdMembersInvitations',
+      'patchOrganizationsByOrganizationIdMembersByMemberId',
+    ],
+    {
+      source: 'organization-member-route-authorization-db.integration.test.ts',
+      persistenceSource: 'organization-member-route-authorization-db.integration.test.ts',
+    },
+  ),
   ...evidenceBindings(
     [
       'postOrganizationsByOrganizationIdPaymentAccountsStripeConnect',
@@ -684,6 +701,7 @@ const delegatedAuthorizationGuards = new Set([
   'requireExportTypePermission',
   'requireHistoricalAuthorizationPrincipal',
   'requireMigrationPermission',
+  'requireLiveOrganizationMemberPermission',
   'requireOrganizationScopedPermission',
   'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
@@ -752,6 +770,20 @@ const delegatedPermissionContracts = new Map<
   string,
   Readonly<{ guard: string; permissions: readonly Permission[] }>
 >([
+  ...[
+    'getOrganizationsByOrganizationIdMembers',
+    'postOrganizationsByOrganizationIdMembersInvitations',
+    'patchOrganizationsByOrganizationIdMembersByMemberId',
+  ].map(
+    (operationId) =>
+      [
+        operationId,
+        {
+          guard: 'requireLiveOrganizationMemberPermission',
+          permissions: ['settings.write'],
+        },
+      ] as const,
+  ),
   [
     'getBootstrapContext',
     {
@@ -837,6 +869,7 @@ const enforcingPermissionCalls = new Set([
   'requireContentListPermission',
   'requireContentPermission',
   'requireMigrationPermission',
+  'requireLiveOrganizationMemberPermission',
   'requireOrganizationScopedPermission',
 ]);
 
@@ -1134,7 +1167,10 @@ function boundariesFor(
   if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');
   if (
     guardEvidence.includes('requireHumanUserPrincipal') ||
-    guardEvidence.includes('requireHumanAgentAdministrator')
+    guardEvidence.includes('requireHumanAgentAdministrator') ||
+    guardEvidence.includes('requireLiveOrganizationMemberPermission') ||
+    guardEvidence.includes('requireOrganizationScopedPermission') ||
+    /principalType|principal\.type/.test(handlerSource)
   )
     boundaries.push('principal-type');
   if (guardEvidence.includes('requireAgent')) boundaries.push('principal-type');

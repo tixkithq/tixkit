@@ -585,12 +585,27 @@ test(
           env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
         },
       );
+      const committedDistribution = JSON.parse(
+        execFileSync(
+          '/usr/bin/git',
+          ['show', `${sourceCommit}:distribution/public-distribution.json`],
+          {
+            cwd: root,
+            encoding: 'utf8',
+            env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
+          },
+        ),
+      );
+      const committedActiveApiContract = committedDistribution.release.contracts.find((path) =>
+        path.startsWith('artifacts/api/'),
+      );
+      assert.ok(committedActiveApiContract);
       const realDistribution = {
         authority: { publicRepository: 'tixkit/tixkit' },
         release: {
           packages: [{ path: 'packages/domain', ecosystem: 'npm' }],
-          images: distribution.release.images,
-          contracts: [activeApiContract],
+          images: committedDistribution.release.images,
+          contracts: [committedActiveApiContract],
         },
       };
       const images = realDistribution.release.images.map(({ name }, index) => {

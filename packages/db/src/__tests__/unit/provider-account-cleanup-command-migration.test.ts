@@ -3,9 +3,9 @@ import { TixkitMigrationProvider } from '../../migrate.js';
 import { ProviderAccountCleanupCommandsMigration } from '../../migrations/0094_provider_account_cleanup_commands.js';
 
 describe('ProviderAccountCleanupCommandsMigration', () => {
-  it('is the final registered migration', async () => {
+  it('remains registered immediately before membership provenance', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
-    expect(Object.keys(migrations).at(-1)).toBe('0094_provider_account_cleanup_commands');
+    expect(Object.keys(migrations).at(-2)).toBe('0094_provider_account_cleanup_commands');
     expect(migrations['0094_provider_account_cleanup_commands']).toBe(
       ProviderAccountCleanupCommandsMigration,
     );

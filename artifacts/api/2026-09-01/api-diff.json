@@ -1,0 +1,54 @@
+{
+  "from": "2026-08-31",
+  "to": "2026-09-01",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 4,
+    "compatible": 3
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /organizations/{organizationId}/members",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /organizations/{organizationId}/members/invitations",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-pattern",
+      "path": "POST /organizations/{organizationId}/members/invitations.parameters.header:Idempotency-Key",
+      "message": "pattern changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "POST /organizations/{organizationId}/members/invitations.parameters.header:Idempotency-Key",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maxLength",
+      "path": "POST /organizations/{organizationId}/members/invitations.parameters.header:Idempotency-Key",
+      "message": "maxLength became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "PATCH /organizations/{organizationId}/members/{memberId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "required-parameter-added",
+      "path": "PATCH /organizations/{organizationId}/members/{memberId}.parameters.header:Idempotency-Key",
+      "message": "A required parameter was added."
+    }
+  ]
+}

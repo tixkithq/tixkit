@@ -165,7 +165,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-31');
+    expect(openApiSpec.info.version).toBe('2026-09-01');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -936,7 +936,9 @@ describe('openApiSpec', () => {
       expect(operation.security).not.toContainEqual({ ApiKey: [] });
       expect(operation.tags).toEqual(['Agent platform']);
       expect(operation['x-required-permissions']).toEqual(['developers.write']);
-      expect(operation['x-principal-type-restrictions']).toEqual({ allowed: ['user'] });
+      expect(operation['x-principal-type-restrictions']).toEqual({
+        allowed: ['user'],
+      });
     }
     for (const mutation of [register, revokePrincipal, grant, revokeDelegation]) {
       expect(mutation.parameters).toContainEqual({
@@ -986,7 +988,9 @@ describe('openApiSpec', () => {
     for (const operation of [create, revoke]) {
       expect(operation.security).toEqual([{ BearerAuth: [] }]);
       expect(operation['x-required-permissions']).toEqual(['developers.write']);
-      expect(operation['x-principal-type-restrictions']).toEqual({ allowed: ['user'] });
+      expect(operation['x-principal-type-restrictions']).toEqual({
+        allowed: ['user'],
+      });
       expect(operation.parameters).toContainEqual({
         $ref: '#/components/parameters/AgentControlIdempotencyKey',
       });
@@ -1124,7 +1128,9 @@ describe('openApiSpec', () => {
 
     for (const operation of [list, create, revoke]) {
       expect(operation['x-required-permissions']).toEqual(['developers.write']);
-      expect(operation['x-principal-type-restrictions']).toEqual({ allowed: ['user'] });
+      expect(operation['x-principal-type-restrictions']).toEqual({
+        allowed: ['user'],
+      });
       expect(operation.security).toEqual([{ BearerAuth: [] }]);
     }
     expect(list.parameters).toContainEqual({
@@ -1350,7 +1356,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-31');
+    expect(openApiSpec.info.version).toBe('2026-09-01');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',
@@ -1604,8 +1610,16 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/manifest'].get.parameters,
     ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'eventId', in: 'path', required: true }),
-        expect.objectContaining({ name: 'checkInListId', in: 'path', required: true }),
+        expect.objectContaining({
+          name: 'eventId',
+          in: 'path',
+          required: true,
+        }),
+        expect.objectContaining({
+          name: 'checkInListId',
+          in: 'path',
+          required: true,
+        }),
         expect.objectContaining({ name: 'version', in: 'query' }),
       ]),
     );
@@ -1621,7 +1635,9 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/events/{eventId}/check-in-manifest-keys'].get.responses['200'].content[
         'application/json'
       ].schema,
-    ).toEqual({ $ref: '#/components/schemas/OfflineManifestVerificationKeySet' });
+    ).toEqual({
+      $ref: '#/components/schemas/OfflineManifestVerificationKeySet',
+    });
     expect(openApiSpec.paths['/check-ins/sync'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
@@ -1906,7 +1922,10 @@ describe('openApiSpec', () => {
         .requestBody.content['application/json'].schema;
     for (const schema of [staffListing, buyerListing]) {
       expect(schema.required).toEqual(['priceCents', 'termsAcceptance']);
-      expect(schema.properties.priceCents).toEqual({ type: 'integer', exclusiveMinimum: 0 });
+      expect(schema.properties.priceCents).toEqual({
+        type: 'integer',
+        exclusiveMinimum: 0,
+      });
       expect(schema.properties.termsAcceptance).toEqual({
         $ref: '#/components/schemas/ResaleTermsAcceptance',
       });
@@ -1919,9 +1938,14 @@ describe('openApiSpec', () => {
     });
     expect(checkout.allOf).toEqual(
       expect.arrayContaining([
-        // oxlint-disable-next-line unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
-        expect.objectContaining({ then: { required: ['resaleTermsAcceptance'] } }),
-        expect.objectContaining({ if: { required: ['resaleTermsAcceptance'] } }),
+        // oxlint-disable unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
+        expect.objectContaining({
+          then: { required: ['resaleTermsAcceptance'] },
+        }),
+        // oxlint-enable unicorn/no-thenable
+        expect.objectContaining({
+          if: { required: ['resaleTermsAcceptance'] },
+        }),
       ]),
     );
   });
@@ -2800,10 +2824,14 @@ describe('openApiSpec', () => {
           properties: expect.objectContaining({ provider: { const: 'ga4' } }),
         }),
         expect.objectContaining({
-          properties: expect.objectContaining({ provider: { const: 'meta_pixel' } }),
+          properties: expect.objectContaining({
+            provider: { const: 'meta_pixel' },
+          }),
         }),
         expect.objectContaining({
-          properties: expect.objectContaining({ provider: { const: 'generic_tag' } }),
+          properties: expect.objectContaining({
+            provider: { const: 'generic_tag' },
+          }),
         }),
       ]);
     }
@@ -3053,12 +3081,35 @@ describe('openApiSpec', () => {
 
   it('documents the durable organization invitation contract', () => {
     const operation = openApiSpec.paths['/organizations/{organizationId}/members/invitations'].post;
+    const listOperation = openApiSpec.paths['/organizations/{organizationId}/members'].get;
+    const updateOperation =
+      openApiSpec.paths['/organizations/{organizationId}/members/{memberId}'].patch;
     const requestSchema = operation.requestBody.content['application/json'].schema;
     const responseSchema = operation.responses['201'].content['application/json'].schema;
 
     expect(operation.parameters).toContainEqual({
-      $ref: '#/components/parameters/RequiredIdempotencyKey',
+      $ref: '#/components/parameters/OrganizationMemberIdempotencyKey',
     });
+    expect(updateOperation.parameters).toContainEqual({
+      $ref: '#/components/parameters/OrganizationMemberIdempotencyKey',
+    });
+    expect(openApiSpec.components.parameters.OrganizationMemberIdempotencyKey.schema).toEqual({
+      type: 'string',
+      minLength: 16,
+      maxLength: 255,
+      pattern: '^\\S(?:.*\\S)?$',
+    });
+    expect(listOperation['x-required-permissions']).toEqual(['settings.write']);
+    expect(listOperation['x-principal-type-restrictions']).toEqual({
+      allowed: ['user', 'system'],
+    });
+    for (const memberMutation of [operation, updateOperation]) {
+      expect(memberMutation['x-required-permissions']).toEqual(['settings.write']);
+      expect(memberMutation['x-principal-type-restrictions']).toEqual({
+        allowed: ['user'],
+      });
+      expect(memberMutation.responses).toHaveProperty('409');
+    }
     expect(requestSchema.properties.returnTo).toMatchObject({
       type: 'string',
       maxLength: 500,
@@ -3155,12 +3206,16 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/webhooks/stripe'].post.responses).toMatchObject({
       '400': {
         content: {
-          'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+          'application/json': {
+            schema: { $ref: '#/components/schemas/ApiError' },
+          },
         },
       },
       '503': {
         content: {
-          'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+          'application/json': {
+            schema: { $ref: '#/components/schemas/ApiError' },
+          },
         },
       },
     });

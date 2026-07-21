@@ -2023,6 +2023,7 @@ describe('TixkitClient new resource methods', () => {
     });
 
     await c.organizations.updateMember('org_1', 'mem_1', {
+      idempotencyKey: 'member-update-example-0001',
       role: 'door_staff',
       eventIds: ['evt_1'],
     });
@@ -2030,6 +2031,7 @@ describe('TixkitClient new resource methods', () => {
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/organizations/org_1/members/mem_1');
     expect(call.method).toBe('PATCH');
+    expect(call.headers['Idempotency-Key']).toBe('member-update-example-0001');
     expect(JSON.parse(call.body)).toEqual({
       role: 'door_staff',
       eventIds: ['evt_1'],
@@ -2048,14 +2050,14 @@ describe('TixkitClient new resource methods', () => {
       email: 'door@example.test',
       eventIds: ['evt_1'],
       returnTo: '/kiosk/evt_1',
-      idempotencyKey: 'invite_1',
+      idempotencyKey: 'member-invite-example-0001',
     });
 
     expect(getCall(fm, 0).url).toBe('https://api.test/v1/organizations/org_1/members');
     const invite = getCall(fm, 1);
     expect(invite.url).toBe('https://api.test/v1/organizations/org_1/members/invitations');
     expect(invite.method).toBe('POST');
-    expect(invite.headers['Idempotency-Key']).toBe('invite_1');
+    expect(invite.headers['Idempotency-Key']).toBe('member-invite-example-0001');
     expect(JSON.parse(invite.body)).toEqual({
       email: 'door@example.test',
       eventIds: ['evt_1'],
@@ -4057,7 +4059,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-31',
+        'X-Tixkit-Version': '2026-09-01',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

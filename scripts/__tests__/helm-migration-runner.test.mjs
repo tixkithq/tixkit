@@ -19,7 +19,7 @@ function harness({ realHelm = false } = {}) {
 set -euo pipefail
 printf '%s\\n' "$*" >>"$MOCK_HELM_ARGS"
 if [[ "$*" == *"templates/external-secret.yaml"* ]]; then
-  printf '%s\\n' 'apiVersion: external-secrets.io/v1' 'kind: ExternalSecret' 'spec:' '  data:' '    - remoteRef:' '        key: database' '      secretKey: DATABASE_URL' '    - remoteRef:' '        key: redis' '      secretKey: REDIS_URL' '    - remoteRef:' '        key: temporal' '      secretKey: TEMPORAL_ADDRESS'
+  printf '%s\\n' 'apiVersion: external-secrets.io/v1' 'kind: ExternalSecret' 'spec:' '  target:' '    name: tixkit-production-secrets' '  data:' '    - remoteRef:' '        key: database' '      secretKey: DATABASE_URL' '    - remoteRef:' '        key: redis' '      secretKey: REDIS_URL' '    - remoteRef:' '        key: temporal' '      secretKey: TEMPORAL_ADDRESS' '---' 'apiVersion: external-secrets.io/v1' 'kind: ExternalSecret' 'spec:' '  target:' '    name: tixkit-offline-manifest' '  data:' '    - remoteRef:' '        key: offline-manifest' '      secretKey: OFFLINE_MANIFEST_SIGNING_KEY'
 elif [[ "$*" == *"templates/migration-network-policy.yaml"* ]]; then
   printf '%s\\n' 'apiVersion: networking.k8s.io/v1' 'kind: NetworkPolicy' 'metadata:' '  name: tixkit-tixkit-migration-egress'
 else
@@ -118,6 +118,10 @@ function externalSecretKeysForValues() {
     'STRIPE_PUBLISHABLE_KEY',
     'METRICS_BEARER_TOKEN',
     'DASHBOARD_CURSOR_SIGNING_KEY',
+    'OFFLINE_MANIFEST_SIGNING_KEY',
+    'OFFLINE_MANIFEST_KEY_ID',
+    'OFFLINE_MANIFEST_ACTIVE_KEY_ID',
+    'OFFLINE_MANIFEST_SIGNING_PRIVATE_KEYS_JSON',
     'CLERK_SECRET_KEY',
     'CLERK_PUBLISHABLE_KEY',
     'CLERK_WEBHOOK_SECRET',
@@ -211,6 +215,21 @@ test('manual migration fails before rendering or creating a Job when the reconci
     assert.match(result.stderr, /missing REDIS_URL/);
     assert.doesNotMatch(readFileSync(env.MOCK_HELM_ARGS, 'utf8'), /templates\/migrations.yaml/);
     assert.throws(() => readFileSync(env.MOCK_APPLIED));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('manual migration ignores keys reconciled into a separate ExternalSecret target', () => {
+  const { directory, env } = harness();
+  try {
+    const output = execFileSync(runner, {
+      cwd: root,
+      env: { ...env, MOCK_MISSING: 'OFFLINE_MANIFEST_SIGNING_KEY' },
+      encoding: 'utf8',
+    });
+    assert.match(output, /migration complete/);
+    assert.match(readFileSync(env.MOCK_APPLIED, 'utf8'), /kind: Job/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

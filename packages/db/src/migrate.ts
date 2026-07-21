@@ -95,6 +95,7 @@ import { MigrationLifecycleCommandsMigration } from './migrations/0091_migration
 import { MigrationLifecycleCommandOutcomesMigration } from './migrations/0092_migration_lifecycle_command_outcomes.js';
 import { PaymentAccountRefreshGenerationMigration } from './migrations/0093_payment_account_refresh_generation.js';
 import { ProviderAccountCleanupCommandsMigration } from './migrations/0094_provider_account_cleanup_commands.js';
+import { PermissionGrantMembershipProvenanceMigration } from './migrations/0095_permission_grant_membership_provenance.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -199,6 +200,7 @@ const ALL_SCHEMA_TABLES = [
   'dashboard_action_revisions',
   'provider_incident_evidence',
   'provider_account_cleanup_commands',
+  'permission_grant_provenance_quarantine',
   'resale_settlements',
   'resale_settlement_entries',
   'webhook_replay_requests',
@@ -387,6 +389,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0092_migration_lifecycle_command_outcomes': MigrationLifecycleCommandOutcomesMigration,
       '0093_payment_account_refresh_generation': PaymentAccountRefreshGenerationMigration,
       '0094_provider_account_cleanup_commands': ProviderAccountCleanupCommandsMigration,
+      '0095_permission_grant_membership_provenance': PermissionGrantMembershipProvenanceMigration,
     };
   }
 }

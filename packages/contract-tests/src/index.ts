@@ -34,7 +34,7 @@ import {
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-31' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-09-01' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';

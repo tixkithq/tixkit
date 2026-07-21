@@ -384,8 +384,23 @@ export interface PermissionGrantTable {
   permission: string;
   scope_type: string;
   scope_id: string | null;
+  organization_member_id: Generated<string | null>;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export interface PermissionGrantProvenanceQuarantineTable {
+  id: string;
+  tenant_id: string;
+  principal_type: string;
+  principal_id: string;
+  permission: string;
+  scope_type: string;
+  scope_id: string | null;
+  original_created_at: Timestamp;
+  original_updated_at: Timestamp;
+  quarantine_reason: string;
+  quarantined_at: Timestamp;
 }
 
 export interface ApiKeyTable {
@@ -2371,6 +2386,7 @@ export interface DB {
   organization_members: OrganizationMemberTable;
   roles: RoleTable;
   permission_grants: PermissionGrantTable;
+  permission_grant_provenance_quarantine: PermissionGrantProvenanceQuarantineTable;
   api_keys: ApiKeyTable;
   scanner_devices: ScannerDeviceTable;
   audit_logs: AuditLogTable;

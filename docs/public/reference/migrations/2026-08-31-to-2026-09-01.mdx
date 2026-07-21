@@ -1,0 +1,25 @@
+---
+title: Migrate API 2026-08-31 to 2026-09-01
+description: Adopt transactional organization-member administration and membership-owned grants.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-20
+prerequisites:
+  - /reference/api-versions
+related:
+  - /reference/api
+---
+
+API `2026-09-01` makes organization-member administration explicitly human-controlled, live-authorized and replay-safe. Listing members requires a live accepted membership plus an organization-scoped `settings.write` grant. Invitations and member updates reject API keys, agents and mobile devices with `403`; trusted internal system principals remain supported only for the read operation.
+
+`POST /organizations/{organizationId}/members/invitations` and `PATCH /organizations/{organizationId}/members/{memberId}` require an `Idempotency-Key` containing 16–255 characters without surrounding whitespace. Exact retries return the original result. Reusing a key with another actor, organization, member or payload returns `409`. Clients that previously omitted the update key must generate and persist one per intended mutation.
+
+Invitations now atomically persist the pending profile, membership, role grants, delivery job, audit record and idempotency result. A provider handoff failure leaves one durable `start_failed` job; retrying the same request resumes delivery without duplicating membership, grants or audit history.
+
+Role changes now lock and revalidate the acting membership, exact live grant, organization, requested resources and target member. Owners cannot be changed through this endpoint, and administrators cannot demote or scope down their own access. Organization, brand, event and member ownership failures are concealed as `404` and produce no durable side effects.
+
+Permission grants created by these operations carry membership provenance. Replacing a member's role removes their prior membership-owned grants even if a referenced brand or event was later moved to another organization. Migration `0095_permission_grant_membership_provenance` backfills only exact organization grants whose membership is provable. Historical user brand/event grants and organization grants without a matching membership are revoked from the active grant table and preserved in `permission_grant_provenance_quarantine` with a reason and timestamp because prior resource ownership cannot be inferred safely. Operators must inspect that ledger and explicitly reapply intended member roles/scopes after upgrade; Tixkit never silently attributes ambiguous authority to a destination membership. A composite tenant/member foreign key prevents cross-tenant provenance, membership deletion cascades its active grants, and rollback intentionally fails closed because discarding provenance or restoring quarantined authority would be unsafe.

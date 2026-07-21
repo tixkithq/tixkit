@@ -43,7 +43,42 @@ external_secret_render="$("${helm_bin}" template "${release}" "${chart}" \
 required_keys=()
 while IFS= read -r key; do
   required_keys+=("${key}")
-done < <(printf '%s\n' "${external_secret_render}" | awk '/secretKey:/ { sub(/^.*secretKey:[[:space:]]*/, ""); print }')
+done < <(
+  printf '%s\n' "${external_secret_render}" | awk -v expected_target="${secret_name}" '
+    function emit_target_keys() {
+      if (target_name == expected_target) printf "%s", keys
+      target_name = ""
+      keys = ""
+      in_target = 0
+    }
+    /^---[[:space:]]*$/ {
+      emit_target_keys()
+      next
+    }
+    /^  target:[[:space:]]*$/ {
+      in_target = 1
+      next
+    }
+    in_target && /^    name:[[:space:]]*/ {
+      target_name = $0
+      sub(/^    name:[[:space:]]*/, "", target_name)
+      gsub(/^['\''"]|['\''"]$/, "", target_name)
+      next
+    }
+    in_target && !/^    / {
+      in_target = 0
+    }
+    /^[[:space:]]*(-[[:space:]]*)?secretKey:[[:space:]]*/ {
+      key = $0
+      sub(/^[[:space:]]*(-[[:space:]]*)?secretKey:[[:space:]]*/, "", key)
+      gsub(/^['\''"]|['\''"]$/, "", key)
+      keys = keys key "\n"
+    }
+    END {
+      emit_target_keys()
+    }
+  '
+)
 (( ${#required_keys[@]} > 0 )) || {
   printf 'production values did not render an ExternalSecret key inventory\n' >&2
   exit 1

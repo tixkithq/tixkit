@@ -47,7 +47,10 @@ export class UserProfileRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('user_profiles', id, { ...input, updated_at: new Date() });
+    return this.updateReturning('user_profiles', id, {
+      ...input,
+      updated_at: new Date(),
+    });
   }
 
   async suspend(id: string) {
@@ -464,6 +467,7 @@ export class PermissionGrantRepository extends BaseRepository {
     tenantId: string;
     principalId: string;
     organizationId: string;
+    organizationMemberId?: string;
     permissions: Permission[];
     brandIds?: string[];
     eventIds?: string[];
@@ -496,6 +500,9 @@ export class PermissionGrantRepository extends BaseRepository {
       .where('principal_id', '=', input.principalId)
       .where((eb) =>
         eb.or([
+          ...(input.organizationMemberId
+            ? [eb('organization_member_id', '=', input.organizationMemberId)]
+            : []),
           eb.and([
             eb('scope_type', '=', 'organization'),
             eb('scope_id', '=', input.organizationId),
@@ -518,6 +525,7 @@ export class PermissionGrantRepository extends BaseRepository {
       permission: string;
       scope_type: string;
       scope_id: string | null;
+      organization_member_id: string | null;
       created_at: Date;
       updated_at: Date;
     }> = [];
@@ -533,6 +541,7 @@ export class PermissionGrantRepository extends BaseRepository {
             permission,
             scope_type: 'brand',
             scope_id: brandId,
+            organization_member_id: input.organizationMemberId ?? null,
             created_at: now,
             updated_at: now,
           });
@@ -550,6 +559,7 @@ export class PermissionGrantRepository extends BaseRepository {
             permission,
             scope_type: 'event',
             scope_id: eventId,
+            organization_member_id: input.organizationMemberId ?? null,
             created_at: now,
             updated_at: now,
           });
@@ -565,6 +575,7 @@ export class PermissionGrantRepository extends BaseRepository {
         permission,
         scope_type: 'organization',
         scope_id: input.organizationId,
+        organization_member_id: input.organizationMemberId ?? null,
         created_at: now,
         updated_at: now,
       });

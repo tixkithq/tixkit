@@ -1185,6 +1185,50 @@ export const API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const ORGANIZATION_MEMBER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'GET',
+    operationId: 'getOrganizationsByOrganizationIdMembers',
+    path: '/organizations/{organizationId}/members',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: ['organizationId'],
+    sideEffectAssertions: [],
+    source: 'organization-member-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postOrganizationsByOrganizationIdMembersInvitations',
+    path: '/organizations/{organizationId}/members/invitations',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'organization-member-route-authorization-db.integration.test.ts',
+    resourceParameters: ['organizationId'],
+    sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'organization-member-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'PATCH',
+    operationId: 'patchOrganizationsByOrganizationIdMembersByMemberId',
+    path: '/organizations/{organizationId}/members/{memberId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'organization-member-route-authorization-db.integration.test.ts',
+    resourceParameters: ['organizationId', 'memberId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'organization-member-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -1748,7 +1792,10 @@ export const AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Objec
 
 const agentControlPolicy = {
   policyDenialResponse: { code: 'FORBIDDEN', status: 403 } as const,
-  policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' } as const,
+  policyCondition: {
+    discriminator: 'principal-scope',
+    value: 'organization-wide',
+  } as const,
   policyDeniedBoundaries: ['brand', 'event'] as const,
 };
 
@@ -1888,6 +1935,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...PORTABLE_MIGRATION_ACTIVATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...ORGANIZATION_MEMBER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

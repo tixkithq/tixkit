@@ -147,8 +147,14 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
         value,
       }),
       {
-        and: (conditions: MockCondition[]): MockCondition => ({ type: 'and', conditions }),
-        or: (conditions: MockCondition[]): MockCondition => ({ type: 'or', conditions }),
+        and: (conditions: MockCondition[]): MockCondition => ({
+          type: 'and',
+          conditions,
+        }),
+        or: (conditions: MockCondition[]): MockCondition => ({
+          type: 'or',
+          conditions,
+        }),
       },
     );
     const query = {
@@ -206,7 +212,12 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
       },
       where: (...args: unknown[]) => {
         if (typeof args[0] === 'string' && typeof args[1] === 'string') {
-          filters.push({ type: 'comparison', column: args[0], op: args[1], value: args[2] });
+          filters.push({
+            type: 'comparison',
+            column: args[0],
+            op: args[1],
+            value: args[2],
+          });
         } else if (typeof args[0] === 'function') {
           filters.push(args[0](expressionBuilder));
         }
@@ -346,7 +357,9 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
               return updated[0];
             },
           }),
-          executeTakeFirst: async () => ({ numUpdatedRows: BigInt(applyUpdate().length) }),
+          executeTakeFirst: async () => ({
+            numUpdatedRows: BigInt(applyUpdate().length),
+          }),
           execute: async () => {
             applyUpdate();
             return [];
@@ -402,7 +415,10 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
   function createInsert(table: string) {
     return {
       values: (vals: Record<string, unknown>) => {
-        const row: Record<string, unknown> = { id: String(vals.id ?? 'new_1'), ...vals };
+        const row: Record<string, unknown> = {
+          id: String(vals.id ?? 'new_1'),
+          ...vals,
+        };
         const insertRow = async () => {
           const rows = getRows(table);
           if (table === 'payment_accounts' && tableState.paymentAccountInsertConflictRow) {
@@ -533,6 +549,16 @@ function invitationTables() {
   const auditLogs: Record<string, unknown>[] = [];
 
   return {
+    tenants: [
+      {
+        id: 'tnt_1',
+        name: 'Tenant One',
+        status: 'active',
+        plan: 'test',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ],
     organizations: [
       {
         id: 'org_1',
@@ -568,6 +594,42 @@ function invitationTables() {
   };
 }
 
+function seedMembershipAdministrator(tables: ReturnType<typeof invitationTables>) {
+  const now = new Date();
+  tables.user_profiles.push({
+    id: 'usr_1',
+    tenant_id: 'tnt_1',
+    email: 'admin@example.com',
+    first_name: 'Workspace',
+    last_name: 'Admin',
+    status: 'active',
+    created_at: now,
+    updated_at: now,
+  });
+  tables.organization_members.push({
+    id: 'mem_admin',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    user_id: 'usr_1',
+    role: 'admin',
+    invited_at: now,
+    accepted_at: now,
+    created_at: now,
+    updated_at: now,
+  });
+  tables.permission_grants.push({
+    id: 'pg_admin_settings',
+    tenant_id: 'tnt_1',
+    principal_type: 'user',
+    principal_id: 'usr_1',
+    permission: 'settings.write',
+    scope_type: 'organization',
+    scope_id: 'org_1',
+    created_at: now,
+    updated_at: now,
+  });
+}
+
 function publishedSmsContentRows(now: Date) {
   return {
     document: {
@@ -596,7 +658,9 @@ function publishedSmsContentRows(now: Date) {
       preview_text: null,
       content_json: JSON.stringify(
         createDefaultSmsTemplate({
-          editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
+          editor: {
+            body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.',
+          },
           settings: {
             templateKey: 'attendee-message',
             category: 'bulk',
@@ -1068,7 +1132,10 @@ describe('OAuth application CRUD', () => {
       ],
     };
     const app = await setupApp(developerRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'DELETE', url: '/oauth-applications/oapp_1' });
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/oauth-applications/oapp_1',
+    });
     expect(res.statusCode).toBe(204);
     await app.close();
   });
@@ -1369,7 +1436,11 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/brands',
-      payload: { organizationId: outsideOrganizationId, name: 'Other Brand', slug: 'other-brand' },
+      payload: {
+        organizationId: outsideOrganizationId,
+        name: 'Other Brand',
+        slug: 'other-brand',
+      },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -1490,6 +1561,7 @@ describe('brand domain creation', () => {
 
   it('POST /organizations/:organizationId/members/invitations persists an invited member', async () => {
     const tables = invitationTables();
+    seedMembershipAdministrator(tables);
     const startNotificationDelivery = vi.fn(async () => undefined);
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
       temporalClient: { startNotificationDelivery },
@@ -1509,10 +1581,14 @@ describe('brand domain creation', () => {
       invitationDelivery: 'queued',
       invitationProvider: 'temporal',
     });
-    expect(tables.user_profiles).toHaveLength(1);
-    expect(tables.user_profiles[0]).toMatchObject({ email: 'teammate@example.com' });
-    expect(tables.organization_members).toHaveLength(1);
-    expect(tables.organization_members[0]).toMatchObject({ role: 'organizer' });
+    expect(tables.user_profiles).toHaveLength(2);
+    expect(tables.user_profiles).toContainEqual(
+      expect.objectContaining({ email: 'teammate@example.com' }),
+    );
+    expect(tables.organization_members).toHaveLength(2);
+    expect(tables.organization_members).toContainEqual(
+      expect.objectContaining({ role: 'organizer' }),
+    );
     expect(tables.permission_grants.length).toBeGreaterThan(0);
     expect(tables.permission_grants).toEqual(
       expect.arrayContaining([
@@ -1584,7 +1660,7 @@ describe('brand domain creation', () => {
         scope_id: 'evt_other_org',
       },
     );
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const app = await setupApp(tenantRoutes, makePrincipal({ type: 'system' }), tables);
 
     const res = await app.inject({
       method: 'GET',
@@ -1652,7 +1728,10 @@ describe('brand domain creation', () => {
     });
     const multiOrgApp = await setupApp(
       tenantRoutes,
-      makePrincipal({ organizationIds: ['org_1', 'org_2'], brandIds: undefined }),
+      makePrincipal({
+        organizationIds: ['org_1', 'org_2'],
+        brandIds: undefined,
+      }),
       multiOrgTables,
     );
     const crossOrganization = await multiOrgApp.inject({
@@ -1718,6 +1797,7 @@ describe('brand domain creation', () => {
 
   it('POST /organizations/:organizationId/members/invitations safely resends a pending invitation', async () => {
     const tables = invitationTables();
+    seedMembershipAdministrator(tables);
     const startNotificationDelivery = vi.fn(async () => undefined);
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
       temporalClient: { startNotificationDelivery },
@@ -1741,8 +1821,8 @@ describe('brand domain creation', () => {
         })
       ).statusCode,
     ).toBe(201);
-    expect(tables.user_profiles).toHaveLength(1);
-    expect(tables.organization_members).toHaveLength(1);
+    expect(tables.user_profiles).toHaveLength(2);
+    expect(tables.organization_members).toHaveLength(2);
     expect(tables.email_jobs).toHaveLength(2);
     expect(startNotificationDelivery).toHaveBeenCalledTimes(2);
 
@@ -1751,6 +1831,7 @@ describe('brand domain creation', () => {
 
   it('retries a failed invitation workflow handoff with the same idempotency key', async () => {
     const tables = invitationTables();
+    seedMembershipAdministrator(tables);
     const startNotificationDelivery = vi
       .fn()
       .mockRejectedValueOnce(new Error('Temporal unavailable'))
@@ -1761,17 +1842,20 @@ describe('brand domain creation', () => {
     const request = {
       method: 'POST' as const,
       url: '/organizations/org_1/members/invitations',
-      headers: { 'Idempotency-Key': 'invite_retry_1' },
+      headers: { 'Idempotency-Key': 'invite_retry_route_1' },
       payload: { email: 'retry@example.com', role: 'organizer' },
     };
 
     expect((await app.inject(request)).statusCode).toBe(500);
     expect(tables.email_jobs).toHaveLength(1);
-    expect(tables.email_jobs[0]).toMatchObject({ status: 'start_failed', workflow_id: null });
+    expect(tables.email_jobs[0]).toMatchObject({
+      status: 'start_failed',
+      workflow_id: null,
+    });
 
     expect((await app.inject(request)).statusCode).toBe(201);
     expect(startNotificationDelivery).toHaveBeenCalledTimes(2);
-    expect(tables.organization_members).toHaveLength(1);
+    expect(tables.organization_members).toHaveLength(2);
     expect(tables.email_jobs).toHaveLength(1);
     expect(tables.email_jobs[0]).toMatchObject({
       status: 'queued',
@@ -1782,6 +1866,7 @@ describe('brand domain creation', () => {
 
   it('POST /organizations/:organizationId/members/invitations grants door staff brand-scoped check-in only', async () => {
     const tables = invitationTables();
+    seedMembershipAdministrator(tables);
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
       method: 'POST',
@@ -1815,6 +1900,7 @@ describe('brand domain creation', () => {
 
   it('POST member invitations grants event-only access and links back to that kiosk', async () => {
     const tables = invitationTables();
+    seedMembershipAdministrator(tables);
     (tables as typeof tables & { events: Record<string, unknown>[] }).events = [
       {
         id: 'evt_1',
@@ -1924,7 +2010,11 @@ describe('brand domain creation', () => {
     const tables = invitationTables();
     const app = await setupApp(
       tenantRoutes,
-      makePrincipal({ type: 'api_key', id: 'key_1', scopes: ['settings.write'] }),
+      makePrincipal({
+        type: 'api_key',
+        id: 'key_1',
+        scopes: ['settings.write'],
+      }),
       tables,
     );
     const res = await app.inject({
@@ -1974,11 +2064,13 @@ describe('brand domain creation', () => {
       created_at: new Date(),
       updated_at: new Date(),
     });
+    seedMembershipAdministrator(tables);
 
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
       method: 'PATCH',
       url: '/organizations/org_1/members/mem_door',
+      headers: { 'Idempotency-Key': 'member-update-door-0001' },
       payload: {
         role: 'door_staff_sales',
         brandIds: ['brd_1'],
@@ -1990,7 +2082,9 @@ describe('brand domain creation', () => {
       role: 'door_staff_sales',
       brandIds: ['brd_1'],
     });
-    expect(tables.organization_members[0]).toMatchObject({ role: 'door_staff_sales' });
+    expect(tables.organization_members[0]).toMatchObject({
+      role: 'door_staff_sales',
+    });
     expect(tables.permission_grants.some((grant) => grant.id === 'pg_old')).toBe(false);
     expect(tables.permission_grants).toEqual(
       expect.arrayContaining([
@@ -2032,10 +2126,12 @@ describe('brand domain creation', () => {
       created_at: new Date(),
       updated_at: new Date(),
     });
+    seedMembershipAdministrator(tables);
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
       method: 'PATCH',
       url: '/organizations/org_1/members/mem_owner',
+      headers: { 'Idempotency-Key': 'member-update-owner-0001' },
       payload: { role: 'viewer' },
     });
     expect(res.statusCode).toBe(400);
@@ -2073,9 +2169,15 @@ describe('brand domain creation', () => {
       ],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'GET', url: '/organizations/org_1/payment-accounts' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_1/payment-accounts',
+    });
     expect(res.statusCode).toBe(200);
-    expect(res.json()[0]).toMatchObject({ id: 'pa_1', providerAccountId: 'acct_1' });
+    expect(res.json()[0]).toMatchObject({
+      id: 'pa_1',
+      providerAccountId: 'acct_1',
+    });
     await app.close();
   });
 
@@ -2152,7 +2254,10 @@ describe('brand domain creation', () => {
       ],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'GET', url: '/organizations/org_1/billing' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_1/billing',
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
       organizationId: 'org_1',
@@ -2228,7 +2333,9 @@ describe('brand domain creation', () => {
       ...stripeGatewayTestDouble({}),
       createConnectAccount,
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripeGateway });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway,
+    });
 
     const response = await app.inject({
       method: 'POST',
@@ -2322,7 +2429,9 @@ describe('brand domain creation', () => {
       ...stripeGatewayTestDouble({}),
       createConnectAccount: vi.fn(async () => Promise.reject(error)),
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripeGateway });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway,
+    });
 
     const response = await app.inject({
       method: 'POST',
@@ -2381,7 +2490,9 @@ describe('brand domain creation', () => {
         })),
       },
       accountLinks: {
-        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_created_1' })),
+        create: vi.fn(async () => ({
+          url: 'https://connect.stripe.test/onboard/acct_created_1',
+        })),
       },
     };
     const onExactRequestId = vi.fn();
@@ -2533,7 +2644,9 @@ describe('brand domain creation', () => {
           details_submitted: false,
           charges_enabled: false,
           payouts_enabled: false,
-          requirements: JSON.stringify({ currently_due: ['business_profile.url'] }),
+          requirements: JSON.stringify({
+            currently_due: ['business_profile.url'],
+          }),
           disabled_reason: null,
           created_at: new Date(),
           updated_at: new Date(),
@@ -2545,7 +2658,9 @@ describe('brand domain creation', () => {
         create: vi.fn(),
       },
       accountLinks: {
-        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_connect' })),
+        create: vi.fn(async () => ({
+          url: 'https://connect.stripe.test/onboard/acct_connect',
+        })),
       },
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
@@ -2576,7 +2691,9 @@ describe('brand domain creation', () => {
           '/settings/payments?organizationId=org_1&stripeConnect=return',
         ),
       },
-      { idempotencyKey: 'stripe-connect-test-existing:account-link:acct_connect' },
+      {
+        idempotencyKey: 'stripe-connect-test-existing:account-link:acct_connect',
+      },
     );
     await app.close();
   });
@@ -2609,7 +2726,9 @@ describe('brand domain creation', () => {
         details_submitted: false,
         charges_enabled: false,
         payouts_enabled: false,
-        requirements: JSON.stringify({ currently_due: ['business_profile.url'] }),
+        requirements: JSON.stringify({
+          currently_due: ['business_profile.url'],
+        }),
         disabled_reason: null,
         created_at: new Date(),
         updated_at: new Date(),
@@ -2741,7 +2860,9 @@ describe('brand domain creation', () => {
         del: vi.fn(),
       },
       accountLinks: {
-        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_winner' })),
+        create: vi.fn(async () => ({
+          url: 'https://connect.stripe.test/onboard/acct_winner',
+        })),
       },
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
@@ -2780,7 +2901,9 @@ describe('brand domain creation', () => {
           '/settings/payments?organizationId=org_1&stripeConnect=return',
         ),
       },
-      { idempotencyKey: 'stripe-connect-test-cleanup:account-link:acct_winner' },
+      {
+        idempotencyKey: 'stripe-connect-test-cleanup:account-link:acct_winner',
+      },
     );
     await app.close();
   });
@@ -2835,7 +2958,9 @@ describe('brand domain creation', () => {
         del: vi.fn(),
       },
       accountLinks: {
-        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/onboard/acct_replayed' })),
+        create: vi.fn(async () => ({
+          url: 'https://connect.stripe.test/onboard/acct_replayed',
+        })),
       },
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
@@ -2958,7 +3083,9 @@ describe('brand domain creation', () => {
       retrieveConnectAccount: vi.fn(),
       createAccountLink: vi.fn(),
     };
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripeGateway });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      stripeGateway,
+    });
 
     for (const headers of [
       undefined,
@@ -3028,7 +3155,9 @@ describe('brand domain creation', () => {
         })),
       },
       accountLinks: {
-        create: vi.fn(async () => ({ url: 'https://connect.stripe.test/update/acct_refresh_1' })),
+        create: vi.fn(async () => ({
+          url: 'https://connect.stripe.test/update/acct_refresh_1',
+        })),
       },
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
@@ -3081,7 +3210,9 @@ describe('brand domain creation', () => {
           '/settings/payments?organizationId=org_1&stripeConnect=return',
         ),
       },
-      { idempotencyKey: 'stripe-connect-test-refresh:account-link:acct_refresh_1' },
+      {
+        idempotencyKey: 'stripe-connect-test-refresh:account-link:acct_refresh_1',
+      },
     );
     await app.close();
   });
@@ -3120,7 +3251,12 @@ describe('public checkout questions', () => {
       ],
       brands: [
         { id: 'br_1', name: 'Brand', slug: 'brand', white_label: 1 },
-        { id: 'br_other', name: 'Other Brand', slug: 'other-brand', white_label: 1 },
+        {
+          id: 'br_other',
+          name: 'Other Brand',
+          slug: 'other-brand',
+          white_label: 1,
+        },
       ],
       brand_domains: [
         {
@@ -3287,7 +3423,10 @@ describe('public checkout questions', () => {
       ],
     });
 
-    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/questions',
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.buyerQuestions[0]).toMatchObject({
@@ -3299,7 +3438,11 @@ describe('public checkout questions', () => {
       id: 'q_child',
       appliesTo: 'attendee',
       validationPattern: '^[A-Za-z ]+$',
-      conditionalVisibility: { field: 'q_parent', operator: 'equals', value: 'yes' },
+      conditionalVisibility: {
+        field: 'q_parent',
+        operator: 'equals',
+        value: 'yes',
+      },
     });
     await app.close();
   });
@@ -3308,7 +3451,11 @@ describe('public checkout questions', () => {
     const app = await setupApp(publicRoutes, makePrincipal(), {
       events: [publishedEvent],
       questions: [
-        customQuestionRow({ id: 'q_visible', label: 'Visible', applies_to: 'buyer' }),
+        customQuestionRow({
+          id: 'q_visible',
+          label: 'Visible',
+          applies_to: 'buyer',
+        }),
         customQuestionRow({
           id: 'q_hidden',
           label: 'Hidden',
@@ -3320,7 +3467,10 @@ describe('public checkout questions', () => {
       ],
     });
 
-    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/questions',
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json().buyerQuestions.map((question: { id: string }) => question.id)).toEqual([
       'q_visible',
@@ -3354,7 +3504,10 @@ describe('public checkout questions', () => {
       ],
     });
 
-    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/questions' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/questions',
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json().buyerQuestions).toEqual([
       expect.objectContaining({
@@ -3702,7 +3855,10 @@ describe('public access code validation', () => {
       },
     );
 
-    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/availability' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/availability',
+    });
 
     expect(res.statusCode).toBe(200);
     expect(getAvailabilityBatch).toHaveBeenCalledTimes(1);
@@ -3794,10 +3950,20 @@ describe('public access code validation', () => {
     expect(getAvailabilityBatch).toHaveBeenCalledTimes(2);
     expect(getOccurrenceAvailabilityBatch).toHaveBeenCalledTimes(2);
     expect(first.json()).toMatchObject([
-      { ticketTypeId: 'tt_cache', name: 'Original Name', priceCents: 2500, available: 5 },
+      {
+        ticketTypeId: 'tt_cache',
+        name: 'Original Name',
+        priceCents: 2500,
+        available: 5,
+      },
     ]);
     expect(second.json()).toMatchObject([
-      { ticketTypeId: 'tt_cache', name: 'Original Name', priceCents: 2500, available: 2 },
+      {
+        ticketTypeId: 'tt_cache',
+        name: 'Original Name',
+        priceCents: 2500,
+        available: 2,
+      },
     ]);
     await app.close();
   });
@@ -4010,7 +4176,10 @@ describe('public access code validation', () => {
       },
     );
 
-    const res = await app.inject({ method: 'GET', url: '/public/events/evt_1/availability' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/availability',
+    });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject([
@@ -4723,10 +4892,15 @@ describe('messaging endpoint', () => {
       audienceCount: 1,
       queuedSmsJobs: 1,
     });
-    const smsJobs = tables.sms_jobs as Array<{ to_phone: string; variables: string }>;
+    const smsJobs = tables.sms_jobs as Array<{
+      to_phone: string;
+      variables: string;
+    }>;
     expect(smsJobs).toHaveLength(1);
     expect(smsJobs[0].to_phone).toBe('+15550000002');
-    expect(JSON.parse(smsJobs[0].variables)).toMatchObject({ attendeeId: 'att_1' });
+    expect(JSON.parse(smsJobs[0].variables)).toMatchObject({
+      attendeeId: 'att_1',
+    });
 
     await app.close();
   });
@@ -4814,7 +4988,11 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_test_consent' },
-      payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: {
+        smsTemplateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'sms',
+      },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({
@@ -5803,7 +5981,10 @@ describe('messaging endpoint', () => {
       ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages',
+    });
     expect(res.statusCode).toBe(200);
     // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh key array keeps response-shape assertions stable.
     expect(Object.keys(res.json()).sort()).toEqual(['items']);
@@ -5868,7 +6049,10 @@ describe('messaging endpoint', () => {
       ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages',
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json().items[0]).toMatchObject({
       id: 'msg_specific',
@@ -5943,7 +6127,10 @@ describe('messaging endpoint', () => {
       ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_detail' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_detail',
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
       id: 'msg_detail',
@@ -6014,7 +6201,10 @@ describe('messaging endpoint', () => {
       ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const res = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_%25' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_%25',
+    });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
@@ -6073,11 +6263,17 @@ describe('messaging endpoint', () => {
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
 
-    const prefixRes = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg' });
+    const prefixRes = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg',
+    });
     expect(prefixRes.statusCode).toBe(400);
     expect(prefixRes.json().message).toBe('Message campaign not found');
 
-    const exactRes = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg%3Afoo' });
+    const exactRes = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg%3Afoo',
+    });
     expect(exactRes.statusCode).toBe(200);
     expect(exactRes.json()).toMatchObject({
       id: 'msg:foo',
@@ -6130,7 +6326,10 @@ describe('messaging endpoint', () => {
       ],
     };
     const app = await setupApp(messagingRoutes, makePrincipal(), tables);
-    const list = await app.inject({ method: 'GET', url: '/events/evt_1/messages/msg_jobs/jobs' });
+    const list = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/messages/msg_jobs/jobs',
+    });
     expect(list.statusCode).toBe(200);
     // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh key array keeps response-shape assertions stable.
     expect(Object.keys(list.json()).sort()).toEqual(['items']);
@@ -6138,7 +6337,11 @@ describe('messaging endpoint', () => {
       {
         channel: 'sms',
         campaignId: 'msg_jobs',
-        job: { id: 'smj_1', recipient: '***0002', template_key: 'attendee-message' },
+        job: {
+          id: 'smj_1',
+          recipient: '***0002',
+          template_key: 'attendee-message',
+        },
       },
     ]);
     expect(JSON.stringify(list.json())).not.toContain('+15550000002');
@@ -6154,7 +6357,11 @@ describe('messaging endpoint', () => {
     expect(detail.json()).toMatchObject({
       channel: 'sms',
       campaignId: 'msg_jobs',
-      job: { id: 'smj_1', recipient: '***0002', template_key: 'attendee-message' },
+      job: {
+        id: 'smj_1',
+        recipient: '***0002',
+        template_key: 'attendee-message',
+      },
     });
     expect(JSON.stringify(detail.json())).not.toContain('+15550000002');
     expect(JSON.stringify(detail.json())).not.toContain('"body"');
@@ -6250,7 +6457,10 @@ describe('messaging endpoint', () => {
     // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh key array keeps response-shape assertions stable.
     expect(Object.keys(list.json()).sort()).toEqual(['items']);
     expect(list.json().items).toHaveLength(1);
-    expect(list.json().items[0]).toMatchObject({ channel: 'sms', delivery: { id: 'smd_1' } });
+    expect(list.json().items[0]).toMatchObject({
+      channel: 'sms',
+      delivery: { id: 'smd_1' },
+    });
 
     const detail = await app.inject({
       method: 'GET',
@@ -6389,7 +6599,11 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_test_2' },
-      payload: { emailTemplateKey: 'attendee-message', audience: 'specific', channel: 'email' },
+      payload: {
+        emailTemplateKey: 'attendee-message',
+        audience: 'specific',
+        channel: 'email',
+      },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -6417,7 +6631,11 @@ describe('messaging endpoint', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages',
-      payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: {
+        smsTemplateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'sms',
+      },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -6473,7 +6691,11 @@ describe('messaging endpoint', () => {
         method: 'POST',
         url: '/events/evt_1/messages',
         ...(idempotencyKey === undefined ? {} : { headers: { 'Idempotency-Key': idempotencyKey } }),
-        payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+        payload: {
+          smsTemplateKey: 'attendee-message',
+          audience: 'all',
+          channel: 'sms',
+        },
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().message).toContain('1-255 safe token characters');
@@ -6516,7 +6738,11 @@ describe('messaging endpoint', () => {
         method: 'POST',
         url: '/events/evt_1/messages',
         headers: { 'Idempotency-Key': idempotencyKey },
-        payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+        payload: {
+          smsTemplateKey: 'attendee-message',
+          audience: 'all',
+          channel: 'sms',
+        },
       });
 
       expect(res.statusCode).toBe(400);
@@ -6569,7 +6795,11 @@ describe('messaging endpoint', () => {
       method: 'POST',
       url: '/events/evt_1/messages',
       headers: { 'Idempotency-Key': 'msg_no_recipients' },
-      payload: { smsTemplateKey: 'attendee-message', audience: 'all', channel: 'sms' },
+      payload: {
+        smsTemplateKey: 'attendee-message',
+        audience: 'all',
+        channel: 'sms',
+      },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -6696,7 +6926,10 @@ describe('ticket transfer and attendee update', () => {
       updated_at: new Date(),
     });
 
-    const app = await setupApp(checkInRoutes, makePrincipal(), { attendees, events: [event] });
+    const app = await setupApp(checkInRoutes, makePrincipal(), {
+      attendees,
+      events: [event],
+    });
     const byEmail = await app.inject({
       method: 'GET',
       url: '/events/evt_1/attendees?search=target%40example.test&limit=1',
@@ -6964,7 +7197,9 @@ describe('ticket transfer and attendee update', () => {
         ticketId: payload.replace('payload:', ''),
       }),
     };
-    const app = await setupApp(checkInRoutes, makePrincipal(), tables, { qrService });
+    const app = await setupApp(checkInRoutes, makePrincipal(), tables, {
+      qrService,
+    });
 
     const transfer = await app.inject({
       method: 'POST',
@@ -7026,7 +7261,10 @@ describe('ticket transfer and attendee update', () => {
       },
     });
     expect(oldScan.statusCode, oldScan.body).toBe(200);
-    expect(oldScan.json()).toMatchObject({ outcome: 'revoked', ticketId: 'tkt_1' });
+    expect(oldScan.json()).toMatchObject({
+      outcome: 'revoked',
+      ticketId: 'tkt_1',
+    });
 
     const newScan = await app.inject({
       method: 'POST',
@@ -7412,10 +7650,15 @@ describe('resale listing routes', () => {
   };
 
   it('reads and updates persisted event resale policy', async () => {
-    const tables = { events: [{ ...event, resale_enabled: false, resale_max_multiplier: 1 }] };
+    const tables = {
+      events: [{ ...event, resale_enabled: false, resale_max_multiplier: 1 }],
+    };
     const app = await setupApp(ticketingRoutes, principal(), tables);
 
-    const read = await app.inject({ method: 'GET', url: '/events/evt_1/resale-policy' });
+    const read = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/resale-policy',
+    });
     expect(read.statusCode).toBe(200);
     expect(read.json()).toEqual({ enabled: false, maxMultiplier: 1 });
 
@@ -7536,7 +7779,10 @@ describe('resale listing routes', () => {
     };
     const app = await setupApp(ticketingRoutes, principal(), tables);
 
-    const list = await app.inject({ method: 'GET', url: '/events/evt_1/resale-listings' });
+    const list = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/resale-listings',
+    });
     expect(list.statusCode).toBe(200);
     expect(list.json().items).toHaveLength(1);
     expect(list.json().items[0].id).toBe('lst_1');
@@ -7576,7 +7822,11 @@ describe('custom questions CRUD', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/questions',
-      payload: { type: 'text', label: 'What is your dietary preference?', appliesTo: 'attendee' },
+      payload: {
+        type: 'text',
+        label: 'What is your dietary preference?',
+        appliesTo: 'attendee',
+      },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
@@ -7586,7 +7836,9 @@ describe('custom questions CRUD', () => {
   });
 
   it('POST /events/:eventId/questions creates file questions', async () => {
-    const app = await setupApp(questionRoutes, makePrincipal(), { events: [event] });
+    const app = await setupApp(questionRoutes, makePrincipal(), {
+      events: [event],
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/questions',
@@ -7602,11 +7854,17 @@ describe('custom questions CRUD', () => {
   });
 
   it('POST /events/:eventId/questions requires waiver consent metadata and stores consent semantics', async () => {
-    const rejected = await setupApp(questionRoutes, makePrincipal(), { events: [event] });
+    const rejected = await setupApp(questionRoutes, makePrincipal(), {
+      events: [event],
+    });
     const missingConsent = await rejected.inject({
       method: 'POST',
       url: '/events/evt_1/questions',
-      payload: { type: 'waiver', label: 'Liability waiver', appliesTo: 'buyer' },
+      payload: {
+        type: 'waiver',
+        label: 'Liability waiver',
+        appliesTo: 'buyer',
+      },
     });
     expect(missingConsent.statusCode).toBe(400);
     expect(missingConsent.json().message).toContain('Consent fields require consent text');
@@ -7643,7 +7901,9 @@ describe('custom questions CRUD', () => {
   });
 
   it('POST /events/:eventId/questions validates option-bearing types', async () => {
-    const app = await setupApp(questionRoutes, makePrincipal(), { events: [event] });
+    const app = await setupApp(questionRoutes, makePrincipal(), {
+      events: [event],
+    });
     const missingOptions = await app.inject({
       method: 'POST',
       url: '/events/evt_1/questions',
@@ -7697,7 +7957,11 @@ describe('custom questions CRUD', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/questions',
-      payload: { type: 'text', label: 'Seat request', ticketTypeId: 'tt_other' },
+      payload: {
+        type: 'text',
+        label: 'Seat request',
+        ticketTypeId: 'tt_other',
+      },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -7905,7 +8169,13 @@ describe('checkout confirm', () => {
       brand_id: 'brd_1',
       status: 'open',
       currency: 'USD',
-      quote: { totalCents: 2500, subtotalCents: 2500, discountCents: 0, taxCents: 0, feeCents: 0 },
+      quote: {
+        totalCents: 2500,
+        subtotalCents: 2500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+      },
       buyer: { email: 'buyer@test.com' },
       cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
       expires_at: new Date(Date.now() + 60000),
@@ -8181,7 +8451,10 @@ describe('checkout confirm', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_1/confirm',
-      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      headers: {
+        'idempotency-key': 'key-2',
+        'x-checkout-session-token': 'tok_1',
+      },
       payload: {},
     });
     // Should return the completed order
@@ -8261,7 +8534,10 @@ describe('checkout confirm', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_1/confirm',
-      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      headers: {
+        'idempotency-key': 'key-2',
+        'x-checkout-session-token': 'tok_1',
+      },
       payload: {},
     });
 
@@ -8294,7 +8570,9 @@ describe('checkout confirm', () => {
             feeCents: 0,
           }),
           buyer: JSON.stringify({ email: 'buyer@test.com' }),
-          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_1', quantity: 1 }] }),
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+          }),
           expires_at: new Date(Date.now() + 60000),
           hold_id: 'hld_1',
           order_id: null,
@@ -8331,7 +8609,10 @@ describe('checkout confirm', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_1/confirm',
-      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      headers: {
+        'idempotency-key': 'key-2',
+        'x-checkout-session-token': 'tok_1',
+      },
       payload: {},
     });
 
@@ -8425,7 +8706,10 @@ describe('checkout confirm', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_1/confirm',
-      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      headers: {
+        'idempotency-key': 'key-2',
+        'x-checkout-session-token': 'tok_1',
+      },
       payload: {},
     });
 
@@ -8467,7 +8751,9 @@ describe('checkout confirm', () => {
             feeCents: 0,
           }),
           buyer: JSON.stringify({ email: 'buyer@test.com' }),
-          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_1', quantity: 1 }] }),
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+          }),
           expires_at: new Date(Date.now() + 60000),
           hold_id: 'hld_1',
           order_id: null,
@@ -8503,7 +8789,10 @@ describe('checkout confirm', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_1/confirm',
-      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      headers: {
+        'idempotency-key': 'key-2',
+        'x-checkout-session-token': 'tok_1',
+      },
       payload: {},
     });
 
@@ -8538,7 +8827,9 @@ describe('checkout confirm', () => {
             feeCents: 0,
           }),
           buyer: JSON.stringify({ email: 'buyer@test.com' }),
-          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_1', quantity: 1 }] }),
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+          }),
           expires_at: new Date(Date.now() + 60000),
           hold_id: 'hld_1',
           order_id: null,
@@ -8600,7 +8891,10 @@ describe('checkout confirm', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_1/confirm',
-      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      headers: {
+        'idempotency-key': 'key-2',
+        'x-checkout-session-token': 'tok_1',
+      },
       payload: {},
     });
 
@@ -8640,7 +8934,9 @@ describe('checkout confirm', () => {
             feeCents: 0,
           }),
           buyer: JSON.stringify({ email: 'buyer@test.com' }),
-          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_1', quantity: 1 }] }),
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+          }),
           expires_at: new Date(Date.now() + 60000),
           hold_id: 'hld_1',
           order_id: null,
@@ -8701,7 +8997,10 @@ describe('checkout confirm', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/checkout/sessions/cs_1/confirm',
-      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      headers: {
+        'idempotency-key': 'key-2',
+        'x-checkout-session-token': 'tok_1',
+      },
       payload: {},
     });
 
@@ -9234,7 +9533,9 @@ describe('checkout pricing tamper resistance', () => {
     expect(reserveCart).toHaveBeenCalledTimes(1);
     expect(tables.checkout_sessions).toHaveLength(1);
     const storedSession = (tables.checkout_sessions as Array<{ id: string; buyer: string }>)[0];
-    expect(JSON.parse(storedSession.buyer)).toMatchObject({ email: 'buyer@test.com' });
+    expect(JSON.parse(storedSession.buyer)).toMatchObject({
+      email: 'buyer@test.com',
+    });
     expect(
       ((tables as Record<string, unknown>).waitlist_entries as Array<Record<string, unknown>>)[0],
     ).toMatchObject({
@@ -9523,7 +9824,9 @@ describe('checkout question validation', () => {
 
     expect(res.statusCode).toBe(201);
     const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
-    const cart = JSON.parse(storedSession.cart) as { buyerFields: Record<string, unknown> };
+    const cart = JSON.parse(storedSession.cart) as {
+      buyerFields: Record<string, unknown>;
+    };
     expect(cart.buyerFields.q_guest).toBeUndefined();
     expect(cart.buyerFields.q_consent).toEqual({
       accepted: true,
@@ -9661,7 +9964,11 @@ describe('checkout question validation', () => {
           status: 'hidden',
           is_hidden: true,
         }),
-        checkoutQuestion({ id: 'q_deleted', label: 'Deleted required', deleted_at: new Date() }),
+        checkoutQuestion({
+          id: 'q_deleted',
+          label: 'Deleted required',
+          deleted_at: new Date(),
+        }),
       ],
     };
 
@@ -9679,11 +9986,16 @@ describe('checkout question validation', () => {
       questions: [],
     };
 
-    const res = await postCheckoutSession(tables, { trackingId: 'utm-widget-1' });
+    const res = await postCheckoutSession(tables, {
+      trackingId: 'utm-widget-1',
+    });
 
     expect(res.statusCode).toBe(201);
     const storedSession = (tables.checkout_sessions as Array<{ cart: string }>)[0];
-    const cart = JSON.parse(storedSession.cart) as { affiliateCode?: string; trackingId?: string };
+    const cart = JSON.parse(storedSession.cart) as {
+      affiliateCode?: string;
+      trackingId?: string;
+    };
     expect(cart.trackingId).toBe('utm-widget-1');
     expect(cart.affiliateCode).toBeUndefined();
   });
@@ -9695,7 +10007,11 @@ describe('checkout question validation', () => {
       checkout_sessions: [],
       idempotency_records: [],
       questions: [
-        checkoutQuestion({ id: 'q_attendee_name', label: 'Attendee name', applies_to: 'attendee' }),
+        checkoutQuestion({
+          id: 'q_attendee_name',
+          label: 'Attendee name',
+          applies_to: 'attendee',
+        }),
       ],
     };
 
@@ -9720,7 +10036,11 @@ describe('checkout question validation', () => {
       checkout_sessions: [],
       idempotency_records: [],
       questions: [
-        checkoutQuestion({ id: 'q_attendee_name', label: 'Attendee name', applies_to: 'attendee' }),
+        checkoutQuestion({
+          id: 'q_attendee_name',
+          label: 'Attendee name',
+          applies_to: 'attendee',
+        }),
       ],
     };
 
@@ -10070,7 +10390,9 @@ describe('POST /events/:eventId/messages/render-preview (C-076/C-077 merge-tag p
   };
 
   it('renders email templates with HTML-escaped merge tags and reports unknown tags', async () => {
-    const app = await setupApp(messagingRoutes, makePrincipal(), { events: [event] });
+    const app = await setupApp(messagingRoutes, makePrincipal(), {
+      events: [event],
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/render-preview',
@@ -10096,7 +10418,9 @@ describe('POST /events/:eventId/messages/render-preview (C-076/C-077 merge-tag p
   });
 
   it('renders SMS templates, injects opt-out token, and counts segments', async () => {
-    const app = await setupApp(messagingRoutes, makePrincipal(), { events: [event] });
+    const app = await setupApp(messagingRoutes, makePrincipal(), {
+      events: [event],
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/render-preview',
@@ -10123,14 +10447,19 @@ describe('POST /events/:eventId/messages/render-preview (C-076/C-077 merge-tag p
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/render-preview',
-      payload: { channel: 'email', htmlTemplate: '<p>Hi {{recipient.name}}</p>' },
+      payload: {
+        channel: 'email',
+        htmlTemplate: '<p>Hi {{recipient.name}}</p>',
+      },
     });
     expect(res.statusCode).toBe(403);
     await app.close();
   });
 
   it('rejects malformed render-preview payloads before rendering merge tags', async () => {
-    const app = await setupApp(messagingRoutes, makePrincipal(), { events: [event] });
+    const app = await setupApp(messagingRoutes, makePrincipal(), {
+      events: [event],
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/events/evt_1/messages/render-preview',

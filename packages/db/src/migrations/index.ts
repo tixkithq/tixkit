@@ -92,3 +92,4 @@ export { MigrationLifecycleCommandsMigration } from './0091_migration_lifecycle_
 export { MigrationLifecycleCommandOutcomesMigration } from './0092_migration_lifecycle_command_outcomes.js';
 export { PaymentAccountRefreshGenerationMigration } from './0093_payment_account_refresh_generation.js';
 export { ProviderAccountCleanupCommandsMigration } from './0094_provider_account_cleanup_commands.js';
+export { PermissionGrantMembershipProvenanceMigration } from './0095_permission_grant_membership_provenance.js';

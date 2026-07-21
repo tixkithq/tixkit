@@ -337,6 +337,23 @@ function operationReference(openApi: JsonObject, apiVersion: string): JsonObject
     throw new Error('openapi.json.paths is required');
   }
   const operations: JsonObject[] = [];
+  const resolveLocalReference = (value: unknown): JsonObject | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const record = value as JsonObject;
+    if (typeof record.$ref !== 'string') return record;
+    if (!record.$ref.startsWith('#/')) return undefined;
+    let resolved: unknown = openApi;
+    for (const segment of record.$ref
+      .slice(2)
+      .split('/')
+      .map((part) => part.replaceAll('~1', '/').replaceAll('~0', '~'))) {
+      if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved)) return undefined;
+      resolved = (resolved as JsonObject)[segment];
+    }
+    return resolved && typeof resolved === 'object' && !Array.isArray(resolved)
+      ? (resolved as JsonObject)
+      : undefined;
+  };
   for (const [path, pathValue] of Object.entries(paths as JsonObject).sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
@@ -350,14 +367,28 @@ function operationReference(openApi: JsonObject, apiVersion: string): JsonObject
         ...(Array.isArray(pathRecord.parameters) ? pathRecord.parameters : []),
         ...(Array.isArray(record.parameters) ? record.parameters : []),
       ];
-      const idempotencyRequired = parameters.some(
-        (parameter) =>
-          Boolean(parameter) &&
-          typeof parameter === 'object' &&
-          !Array.isArray(parameter) &&
-          String((parameter as JsonObject).name).toLowerCase() === 'idempotency-key' &&
-          (parameter as JsonObject).required === true,
-      );
+      const idempotencyRequired = parameters.some((parameter) => {
+        const resolved = resolveLocalReference(parameter);
+        return (
+          String(resolved?.name).toLowerCase() === 'idempotency-key' && resolved?.required === true
+        );
+      });
+      const principalRestrictionsDeclared = Object.hasOwn(record, 'x-principal-type-restrictions');
+      const principalRestrictionRecord = principalRestrictionsDeclared
+        ? resolveLocalReference(record['x-principal-type-restrictions'])
+        : undefined;
+      const principalTypes = Array.isArray(principalRestrictionRecord?.allowed)
+        ? principalRestrictionRecord.allowed.filter(
+            (principalType): principalType is string =>
+              typeof principalType === 'string' && principalType.length > 0,
+          )
+        : [];
+      const principalRestrictionsMetadataValid =
+        !principalRestrictionsDeclared ||
+        (Boolean(principalRestrictionRecord) &&
+          Array.isArray(principalRestrictionRecord?.allowed) &&
+          principalTypes.length === principalRestrictionRecord.allowed.length &&
+          new Set(principalTypes).size === principalTypes.length);
       const permissionsDeclared = Object.hasOwn(record, 'x-required-permissions');
       const permissionsMetadataValid =
         !permissionsDeclared ||
@@ -413,6 +444,9 @@ function operationReference(openApi: JsonObject, apiVersion: string): JsonObject
         permissions,
         permissionsDeclared,
         permissionsMetadataValid,
+        principalTypes,
+        principalRestrictionsDeclared,
+        principalRestrictionsMetadataValid,
         securityMetadataValid,
         authorizationClassification,
         security: effectiveSecurity ?? [],
