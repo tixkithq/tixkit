@@ -33,6 +33,7 @@ const SCOPED_CREDENTIAL_SCAN_MAX_ROWS = 500;
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{16,255}$/u;
 const API_KEY_CURSOR_TTL_MS = 15 * 60 * 1000;
 const API_KEY_CURSOR_PREFIX = 'aksc1';
+const SCANNER_DEVICE_CURSOR_PREFIX = 'sdsc1';
 type Principal = NonNullable<FastifyRequest['principal']>;
 type ScopedCredentialRow = {
   id: string;
@@ -97,7 +98,7 @@ function apiKeyCursorKey(): Buffer {
   return createHash('sha256').update(config.dashboardCursorSigningKey, 'utf8').digest();
 }
 
-function encodeApiKeyCursor(rawCursor: string, binding: string): string {
+function encodeScopedCredentialCursor(rawCursor: string, binding: string, prefix: string): string {
   const initializationVector = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', apiKeyCursorKey(), initializationVector);
   const plaintext = Buffer.from(
@@ -111,19 +112,24 @@ function encodeApiKeyCursor(rawCursor: string, binding: string): string {
   );
   const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   return [
-    API_KEY_CURSOR_PREFIX,
+    prefix,
     initializationVector.toString('base64url'),
     encrypted.toString('base64url'),
     cipher.getAuthTag().toString('base64url'),
   ].join('.');
 }
 
-function decodeApiKeyCursor(cursor: string, binding: string): string {
+function decodeScopedCredentialCursor(
+  cursor: string,
+  binding: string,
+  prefix: string,
+  errorMessage: string,
+): string {
   try {
-    const [prefix, initializationVector, encrypted, authenticationTag, ...extra] =
+    const [parsedPrefix, initializationVector, encrypted, authenticationTag, ...extra] =
       cursor.split('.');
     if (
-      prefix !== API_KEY_CURSOR_PREFIX ||
+      parsedPrefix !== prefix ||
       !initializationVector ||
       !encrypted ||
       !authenticationTag ||
@@ -156,8 +162,34 @@ function decodeApiKeyCursor(cursor: string, binding: string): string {
     }
     return payload.rawCursor;
   } catch {
-    throw new ValidationError('Invalid or expired API key cursor');
+    throw new ValidationError(errorMessage);
   }
+}
+
+function encodeApiKeyCursor(rawCursor: string, binding: string): string {
+  return encodeScopedCredentialCursor(rawCursor, binding, API_KEY_CURSOR_PREFIX);
+}
+
+function decodeApiKeyCursor(cursor: string, binding: string): string {
+  return decodeScopedCredentialCursor(
+    cursor,
+    binding,
+    API_KEY_CURSOR_PREFIX,
+    'Invalid or expired API key cursor',
+  );
+}
+
+function encodeScannerDeviceCursor(rawCursor: string, binding: string): string {
+  return encodeScopedCredentialCursor(rawCursor, binding, SCANNER_DEVICE_CURSOR_PREFIX);
+}
+
+function decodeScannerDeviceCursor(cursor: string, binding: string): string {
+  return decodeScopedCredentialCursor(
+    cursor,
+    binding,
+    SCANNER_DEVICE_CURSOR_PREFIX,
+    'Invalid or expired scanner device cursor',
+  );
 }
 
 function emptyPermissionAuthority(
@@ -436,41 +468,58 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     }
   }
 
-  async function loadEventBrandIds(principal: Principal, eventIds: string[]) {
+  async function loadEventScopes(
+    principal: Principal,
+    eventIds: string[],
+    database: Database = db,
+    lock = false,
+  ) {
     const uniqueEventIds = [...new Set(eventIds)];
-    if (uniqueEventIds.length === 0) return new Map<string, string>();
+    if (uniqueEventIds.length === 0) {
+      return new Map<string, { brandId: string; organizationId: string }>();
+    }
     const organizationIds = new Set<string>(principal.organizationIds);
 
-    const events = await db
+    let eventQuery = database
       .selectFrom('events')
-      .select(['id', 'tenant_id', 'organization_id', 'brand_id'])
+      .select(['id', 'organization_id', 'brand_id'])
+      .where('tenant_id', '=', principal.tenantId)
       .where('id', 'in', uniqueEventIds)
-      .execute();
+      .orderBy('id', 'asc');
+    if (lock) eventQuery = eventQuery.forUpdate();
+    const events = await eventQuery.execute();
 
-    const eventBrandIds = new Map<string, string>();
+    const eventScopes = new Map<string, { brandId: string; organizationId: string }>();
     for (const event of events) {
       if (
-        event.tenant_id === principal.tenantId &&
         (principal.type === 'system' || organizationIds.has(String(event.organization_id))) &&
         typeof event.id === 'string' &&
         typeof event.brand_id === 'string'
       ) {
-        eventBrandIds.set(event.id, event.brand_id);
+        eventScopes.set(event.id, {
+          brandId: event.brand_id,
+          organizationId: event.organization_id,
+        });
       }
     }
-    return eventBrandIds;
+    return eventScopes;
   }
 
   function canManageScopedCredentialRow(
     principal: Principal,
     row: ScopedCredentialRow,
-    eventBrandIds: Map<string, string>,
+    eventScopes: Map<string, { brandId: string; organizationId: string }>,
   ) {
     const eventIds = parseStringArray(row.event_ids);
 
     if (principal.eventIds?.length) {
       return (
-        parseStringArray(row.brand_ids).length === 0 && isContained(eventIds, principal.eventIds)
+        parseStringArray(row.brand_ids).length === 0 &&
+        eventIds.length > 0 &&
+        isContained(eventIds, principal.eventIds) &&
+        eventIds.every(
+          (eventId) => eventScopes.get(eventId)?.organizationId === row.organization_id,
+        )
       );
     }
 
@@ -488,8 +537,12 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     if (eventIds.length > 0) {
       const principalBrandIds = new Set<string>(principal.brandIds);
       return eventIds.every((eventId) => {
-        const brandId = eventBrandIds.get(eventId);
-        return Boolean(brandId && principalBrandIds.has(brandId));
+        const eventScope = eventScopes.get(eventId);
+        return Boolean(
+          eventScope &&
+          eventScope.organizationId === row.organization_id &&
+          principalBrandIds.has(eventScope.brandId),
+        );
       });
     }
     return true;
@@ -498,17 +551,68 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
   async function filterManageableScopedCredentialRows<T extends ScopedCredentialRow>(
     principal: Principal,
     rows: T[],
+    database: Database = db,
+    lock = false,
   ) {
     if (!hasScopedResourceBounds(principal)) {
       return rows;
     }
-    const eventBrandIds = principal.eventIds?.length
-      ? new Map<string, string>()
-      : await loadEventBrandIds(
-          principal,
-          rows.flatMap((row) => parseStringArray(row.event_ids)),
-        );
-    return rows.filter((row) => canManageScopedCredentialRow(principal, row, eventBrandIds));
+    const eventScopes = await loadEventScopes(
+      principal,
+      rows.flatMap((row) => parseStringArray(row.event_ids)),
+      database,
+      lock,
+    );
+    return rows.filter((row) => canManageScopedCredentialRow(principal, row, eventScopes));
+  }
+
+  async function revokeScannerDevice(
+    request: FastifyRequest,
+    principal: Principal,
+    deviceId: string,
+  ): Promise<void> {
+    await db.transaction().execute(async (transaction) => {
+      const device = await transaction
+        .selectFrom('scanner_devices')
+        .selectAll()
+        .where('tenant_id', '=', principal.tenantId)
+        .where('device_id', '=', deviceId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!device) throw new NotFoundError('ScannerDevice', deviceId);
+      ClerkAuthService.requireResourceTenant(principal, device, 'ScannerDevice', deviceId);
+      if (
+        principal.type !== 'system' &&
+        !principal.organizationIds.includes(device.organization_id)
+      ) {
+        throw new NotFoundError('ScannerDevice', deviceId);
+      }
+      const [authorizedDevice] = await filterManageableScopedCredentialRows(
+        principal,
+        [device],
+        transaction,
+        true,
+      );
+      if (!authorizedDevice) throw new NotFoundError('ScannerDevice', deviceId);
+      const revoked = await new ScannerDeviceRepository(transaction).revokeScoped({
+        id: device.id,
+        tenantId: principal.tenantId,
+        organizationId: device.organization_id,
+      });
+      if (revoked !== 1) throw new NotFoundError('ScannerDevice', deviceId);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'scanner_device.revoked',
+          organizationId: device.organization_id,
+          resourceType: 'ScannerDevice',
+          resourceId: device.id,
+        },
+        { failClosed: true },
+      );
+    });
   }
 
   async function listManageableScopedCredentialPage<T extends ScopedCredentialRow>(
@@ -517,9 +621,11 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     buildQuery: (cursor?: string) => CredentialListQuery<T>,
   ) {
     if (!hasScopedResourceBounds(principal)) {
-      return buildQuery(pagination.cursor)
-        .limit(pagination.limit + 1)
-        .execute();
+      return {
+        rows: await buildQuery(pagination.cursor)
+          .limit(pagination.limit + 1)
+          .execute(),
+      };
     }
 
     const batchSize = pagination.limit + 1;
@@ -537,18 +643,20 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     while (authorizedRows.length <= pagination.limit && scannedRows < maxRowsToScan) {
       const currentLimit = Math.min(batchSize, maxRowsToScan - scannedRows);
       const rows = await buildQuery(cursor).limit(currentLimit).execute();
-      if (rows.length === 0) break;
+      if (rows.length === 0) return { rows: authorizedRows };
 
       scannedRows += rows.length;
       authorizedRows.push(...(await filterManageableScopedCredentialRows(principal, rows)));
 
-      if (rows.length < currentLimit) break;
+      if (rows.length < currentLimit) return { rows: authorizedRows };
       const nextCursor = rows.at(-1)?.id;
-      if (!nextCursor || nextCursor === cursor) break;
+      if (!nextCursor || nextCursor === cursor) return { rows: authorizedRows };
       cursor = nextCursor;
     }
 
-    return authorizedRows;
+    return authorizedRows.length <= pagination.limit
+      ? { rows: authorizedRows, continuationCursor: cursor }
+      : { rows: authorizedRows };
   }
 
   async function filterCredentialRowsByAuthority<T extends ScopedCredentialRow>(
@@ -985,6 +1093,21 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const pagination = parsePagination(request.query);
+    const cursorBinding = hashRequest({
+      tenantId: principal.tenantId,
+      principalType: principal.type,
+      principalId: principal.id,
+      organizationIds: [...principal.organizationIds].sort(),
+      brandIds: principal.brandIds ? [...principal.brandIds].sort() : null,
+      eventIds: principal.eventIds ? [...principal.eventIds].sort() : null,
+      limit: pagination.limit,
+    });
+    const scopedPagination = {
+      ...pagination,
+      ...(pagination.cursor
+        ? { cursor: decodeScannerDeviceCursor(pagination.cursor, cursorBinding) }
+        : {}),
+    };
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
       return pageEnvelope([], pagination.limit);
     }
@@ -1012,59 +1135,31 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       }
       return query;
     };
-    const authorizedRows = await listManageableScopedCredentialPage(
+    const authorizedPage = await listManageableScopedCredentialPage(
       principal,
-      pagination,
+      scopedPagination,
       buildQuery,
     );
-    return pageEnvelope(
-      authorizedRows.map((row) => serializeScannerDevice(row)),
+    const envelope = pageEnvelope(
+      authorizedPage.rows.map((row) => serializeScannerDevice(row)),
       pagination.limit,
     );
+    const nextCursor =
+      authorizedPage.continuationCursor && !envelope.hasMore
+        ? authorizedPage.continuationCursor
+        : envelope.nextCursor;
+    return {
+      ...envelope,
+      hasMore: Boolean(nextCursor),
+      nextCursor: nextCursor ? encodeScannerDeviceCursor(nextCursor, cursorBinding) : null,
+    };
   });
 
   app.post('/scanner-devices/:deviceId/revoke', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
     const { deviceId } = request.params as { deviceId: string };
-    const device = await db
-      .selectFrom('scanner_devices')
-      .selectAll()
-      .where('device_id', '=', deviceId)
-      .executeTakeFirst();
-    if (!device) {
-      return reply.status(404).send({
-        error: { code: 'NOT_FOUND', message: 'Scanner device not found', requestId: request.id },
-      });
-    }
-    ClerkAuthService.requireResourceTenant(principal, device, 'ScannerDevice', deviceId);
-    ClerkAuthService.requireOrganizationScope(principal, device.organization_id);
-    const [authorizedDevice] = await filterManageableScopedCredentialRows(principal, [device]);
-    if (!authorizedDevice) {
-      return reply.status(404).send({
-        error: { code: 'NOT_FOUND', message: 'Scanner device not found', requestId: request.id },
-      });
-    }
-    await db.transaction().execute(async (transaction) => {
-      const revoked = await new ScannerDeviceRepository(transaction).revokeScoped({
-        id: device.id,
-        tenantId: principal.tenantId,
-        organizationId: device.organization_id,
-      });
-      if (revoked !== 1) throw new NotFoundError('ScannerDevice', deviceId);
-      await writeAuditLog(
-        new AuditLogRepository(transaction),
-        request,
-        principal,
-        {
-          action: 'scanner_device.revoked',
-          organizationId: device.organization_id,
-          resourceType: 'ScannerDevice',
-          resourceId: device.id,
-        },
-        { failClosed: true },
-      );
-    });
+    await revokeScannerDevice(request, principal, deviceId);
     return reply.status(200).send({ deviceId, status: 'revoked' });
   });
 

@@ -897,6 +897,20 @@ describe('openApiSpec', () => {
   it('uses implemented developer route paths', () => {
     expect(openApiSpec.paths['/api-keys']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices']).toBeDefined();
+    expect(openApiSpec.paths['/scanner-devices'].get).toMatchObject({
+      operationId: 'getScannerDevices',
+      'x-required-permissions': ['developers.write'],
+    });
+    expect(openApiSpec.paths['/scanner-devices'].get.description).toContain(
+      'empty page with a forward-only continuation cursor',
+    );
+    expect(openApiSpec.paths['/scanner-devices'].get.responses).toEqual(
+      expect.objectContaining({
+        '200': expect.any(Object),
+        '401': expect.any(Object),
+        '403': expect.any(Object),
+      }),
+    );
     expect(openApiSpec.paths['/oauth-applications']).toBeDefined();
     const oauthApplicationList = openApiSpec.paths['/oauth-applications'].get;
     expect(oauthApplicationList.operationId).toBe('getOauthApplications');

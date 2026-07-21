@@ -1465,6 +1465,18 @@ export const OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
 
 export const SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'GET',
+    operationId: 'getScannerDevices',
+    path: '/scanner-devices',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'scanner-device-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
     authorizedControl: { required: true, status: 201 },
     denialResponse: { code: 'NOT_FOUND', status: 404 },
     deniedBoundaries: ['organization', 'brand', 'event'],

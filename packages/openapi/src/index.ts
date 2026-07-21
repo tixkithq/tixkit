@@ -16416,8 +16416,12 @@ const rawOpenApiSpec = {
     },
     '/scanner-devices': {
       get: {
+        operationId: 'getScannerDevices',
         summary: 'List scanner devices',
+        description:
+          'Returns only devices inside the principal organization and complete nonempty event/brand scope. Bounded scope filtering can return an empty page with a forward-only continuation cursor.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
@@ -16431,6 +16435,8 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '401': { description: 'Unauthorized' },
+          '403': { description: 'Forbidden' },
         },
       },
       post: {

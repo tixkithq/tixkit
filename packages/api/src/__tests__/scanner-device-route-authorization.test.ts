@@ -136,6 +136,13 @@ describe('scanner device route authorization contract', () => {
   it('is the exact executable source for the immutable C-123 contracts', () => {
     expect(SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toEqual([
       expect.objectContaining({
+        method: 'GET',
+        operationId: 'getScannerDevices',
+        path: '/scanner-devices',
+        deniedBoundaries: [],
+        permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      }),
+      expect.objectContaining({
         method: 'POST',
         operationId: 'postScannerDevices',
         path: '/scanner-devices',
@@ -157,13 +164,15 @@ describe('scanner device route authorization contract', () => {
     async (contract) => {
       const { app, db } = await testApp(principal({ scopes: ['checkins.read'] }));
       const response = await app.inject(
-        contract.path === '/scanner-devices'
-          ? {
-              method: 'POST',
-              url: '/scanner-devices',
-              payload: { organizationId, name: 'Denied scanner' },
-            }
-          : { method: 'POST', url: `/scanner-devices/${deviceId}/revoke` },
+        contract.method === 'GET'
+          ? { method: 'GET', url: '/scanner-devices' }
+          : contract.path === '/scanner-devices'
+            ? {
+                method: 'POST',
+                url: '/scanner-devices',
+                payload: { organizationId, name: 'Denied scanner' },
+              }
+            : { method: 'POST', url: `/scanner-devices/${deviceId}/revoke` },
       );
 
       expect(response.statusCode).toBe(403);
@@ -225,7 +234,7 @@ describe('scanner device route authorization contract', () => {
     });
 
     expect(response.statusCode).toBe(404);
-    expect(db.transaction).not.toHaveBeenCalled();
+    expect(db.transaction).toHaveBeenCalledTimes(1);
     expect(ScannerDeviceRepository.prototype.revokeScoped).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
     await app.close();

@@ -633,6 +633,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'scanner-device-route-authorization.test.ts',
     persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['getScannerDevices'], {
+    source: 'scanner-device-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'postTicketListingsByListingIdComplete',
@@ -752,6 +755,8 @@ const delegatedAuthorizationGuards = new Set([
   'withCredentialCreationResources',
   'assertEventIds',
   'filterManageableScopedCredentialRows',
+  'listManageableScopedCredentialPage',
+  'revokeScannerDevice',
   'assertPrincipalCanAuthorizeOrganizationWideOAuth',
   'assertPrincipalCanAuthorizeResourceOwnerOAuth',
   'authorizeScope',
@@ -792,6 +797,8 @@ const eventScopeGuards = new Set([
   'withCredentialCreationResources',
   'assertEventIds',
   'filterManageableScopedCredentialRows',
+  'listManageableScopedCredentialPage',
+  'revokeScannerDevice',
   'loadCampaignProviderEventItems',
   'loadAuthorizedCampaign',
   'loadAuthorizedEvent',
