@@ -12,6 +12,7 @@ type ExplainCase = {
   name: string;
   indexName: string;
   expectedIndexColumns: readonly string[];
+  expectedPlanIndexName?: string;
   explain: (db: Database) => Promise<{ rows: PlanRow[] }>;
 };
 
@@ -44,6 +45,38 @@ describe.skipIf(!canRunPostgresExplain)(
     }, 60_000);
 
     const explainCases: ExplainCase[] = [
+      {
+        name: 'ticket types by event/id cursor',
+        indexName: 'idx_ticket_types_event_id',
+        expectedIndexColumns: ['event_id', 'id'],
+        expectedPlanIndexName: 'idx_ticket_types_event_id',
+        explain: (database) =>
+          sql<PlanRow>`
+            explain (analyze, costs off, timing off, summary off)
+            select *
+            from ticket_types
+            where event_id = ${eventId}
+              and id > 'tt_cursor'
+            order by id asc
+            limit 51
+          `.execute(database),
+      },
+      {
+        name: 'inventory pools by event/id cursor',
+        indexName: 'idx_inventory_pools_event_id',
+        expectedIndexColumns: ['event_id', 'id'],
+        expectedPlanIndexName: 'idx_inventory_pools_event_id',
+        explain: (database) =>
+          sql<PlanRow>`
+            explain (analyze, costs off, timing off, summary off)
+            select *
+            from inventory_pools
+            where event_id = ${eventId}
+              and id > 'inv_cursor'
+            order by id asc
+            limit 51
+          `.execute(database),
+      },
       {
         name: 'public marketing integrations by event/status',
         indexName: 'idx_marketing_integrations_event',
@@ -177,7 +210,7 @@ describe.skipIf(!canRunPostgresExplain)(
 
     it.each(explainCases)(
       'has $indexName and runs an index-backed EXPLAIN ANALYZE for $name',
-      async ({ indexName, expectedIndexColumns, explain }) => {
+      async ({ indexName, expectedIndexColumns, expectedPlanIndexName, explain }) => {
         const indexRow = await sql<{ indexdef: string }>`
           select indexdef
           from pg_indexes
@@ -198,6 +231,7 @@ describe.skipIf(!canRunPostgresExplain)(
           const plan = result.rows.map((row) => row['QUERY PLAN']).join('\n');
 
           expect(plan).toMatch(/(?:Index|Bitmap) Scan/);
+          if (expectedPlanIndexName) expect(plan).toContain(expectedPlanIndexName);
         });
       },
     );
