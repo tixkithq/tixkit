@@ -11969,7 +11969,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "checkins.read"
+    ],
     "parameters": [
       {
         "name": "jobId",
@@ -12047,7 +12049,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "checkins.read"
+    ],
     "parameters": [
       {
         "name": "jobId",

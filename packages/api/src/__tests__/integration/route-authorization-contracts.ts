@@ -1502,6 +1502,34 @@ export const CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const BULK_SYNC_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event', 'owner'],
+    method: 'GET',
+    operationId: 'getCheckInsBulkSyncJobsByJobId',
+    path: '/check-ins/bulk-sync-jobs/{jobId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'bulk-sync-job-read-route-authorization-db.integration.test.ts',
+    resourceParameters: ['jobId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'bulk-sync-job-read-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event', 'owner'],
+    method: 'GET',
+    operationId: 'getCheckInsBulkSyncJobsByJobIdChunks',
+    path: '/check-ins/bulk-sync-jobs/{jobId}/chunks',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: ['jobId'],
+    sideEffectAssertions: [],
+    source: 'bulk-sync-job-read-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const OFFLINE_MANIFEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 200 },
@@ -2101,6 +2129,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...BULK_SYNC_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...OFFLINE_MANIFEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BOX_OFFICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PAYMENT_ACCOUNT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

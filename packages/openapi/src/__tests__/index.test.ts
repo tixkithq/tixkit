@@ -1672,9 +1672,17 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}'].get.description).toContain(
       'checkins.read',
     );
+    expect(openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}'].get).toMatchObject({
+      operationId: 'getCheckInsBulkSyncJobsByJobId',
+      'x-required-permissions': ['checkins.read'],
+    });
     expect(openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}/chunks'].get.description).toContain(
       'checkins.read',
     );
+    expect(openApiSpec.paths['/check-ins/bulk-sync-jobs/{jobId}/chunks'].get).toMatchObject({
+      operationId: 'getCheckInsBulkSyncJobsByJobIdChunks',
+      'x-required-permissions': ['checkins.read'],
+    });
     expect(openApiSpec.components.schemas.BulkSyncJob.properties).not.toHaveProperty('results');
     expect(openApiSpec.components.schemas.BulkSyncJob.properties.sampleErrors.maxItems).toBe(25);
     expect(openApiSpec.components.schemas.BulkSyncErrorSample.properties).not.toHaveProperty(

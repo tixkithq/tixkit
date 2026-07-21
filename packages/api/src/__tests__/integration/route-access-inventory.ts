@@ -289,6 +289,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'checkin-scan-route-authorization-db.integration.test.ts'),
   ],
   [
+    'bulk-sync-job-read-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'bulk-sync-job-read-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'offline-manifest-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'offline-manifest-route-authorization-db.integration.test.ts'),
   ],
@@ -637,6 +641,13 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'checkin-scan-route-authorization-db.integration.test.ts',
     persistenceSource: 'checkin-scan-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['getCheckInsBulkSyncJobsByJobId'], {
+    source: 'bulk-sync-job-read-route-authorization-db.integration.test.ts',
+    persistenceSource: 'bulk-sync-job-read-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getCheckInsBulkSyncJobsByJobIdChunks'], {
+    source: 'bulk-sync-job-read-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(
     [
       'getEventsByEventIdCheckInListsByCheckInListIdManifest',
@@ -721,6 +732,7 @@ const delegatedAuthorizationGuards = new Set([
   'loadAuthorizedCampaign',
   'loadAuthorizedDocument',
   'loadAuthorizedEvent',
+  'loadAuthorizedBulkSyncJob',
   'loadSettlementScope',
   'report',
   'requireAgent',
@@ -755,6 +767,7 @@ const eventScopeGuards = new Set([
   'loadCampaignProviderEventItems',
   'loadAuthorizedCampaign',
   'loadAuthorizedEvent',
+  'loadAuthorizedBulkSyncJob',
   'loadSettlementScope',
   'requireEventAccess',
   'requireOrganizationWideOAuthApplicationPrincipal',
@@ -1213,6 +1226,7 @@ function boundariesFor(
   if (guardEvidence.includes('requireUploadArtifactAccess')) {
     boundaries.push('organization', 'brand', 'event', 'owner', 'principal-type');
   }
+  if (guardEvidence.includes('loadAuthorizedBulkSyncJob')) boundaries.push('owner');
   return sortedUnique(boundaries);
 }
 

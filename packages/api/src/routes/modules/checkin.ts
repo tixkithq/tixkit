@@ -1535,6 +1535,7 @@ async function loadAuthorizedBulkSyncJob(
     .selectFrom('offline_check_in_sync_jobs')
     .selectAll()
     .where('id', '=', jobId)
+    .where('tenant_id', '=', principal.tenantId)
     .executeTakeFirst()) as BulkSyncJobRow | undefined;
   if (!job) throw new NotFoundError('BulkSyncJob', jobId);
   ClerkAuthService.requireResourceTenant(principal, job, 'BulkSyncJob', jobId);

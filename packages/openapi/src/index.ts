@@ -14159,8 +14159,10 @@ const rawOpenApiSpec = {
     },
     '/check-ins/bulk-sync-jobs/{jobId}': {
       get: {
+        operationId: 'getCheckInsBulkSyncJobsByJobId',
         summary: 'Get async bulk sync job status',
         description: 'Requires `checkins.read`; read-only scanner principals can poll job status.',
+        'x-required-permissions': ['checkins.read'],
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
           {
@@ -14185,9 +14187,11 @@ const rawOpenApiSpec = {
     },
     '/check-ins/bulk-sync-jobs/{jobId}/chunks': {
       get: {
+        operationId: 'getCheckInsBulkSyncJobsByJobIdChunks',
         summary: 'List async bulk sync chunk summaries',
         description:
           'Requires `checkins.read`; read-only scanner principals can poll bounded chunk summaries.',
+        'x-required-permissions': ['checkins.read'],
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
           {
