@@ -343,7 +343,6 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'getEventsByEventIdAvailability',
       'getEventsByEventIdCheckInLists',
       'getEventsByEventIdLaunchReadiness',
-      'getEventsByEventIdMedia',
       'getEventsByEventIdMessages',
       'getEventsByEventIdOperationalHealth',
       'getEventsByEventIdQuestions',
@@ -442,6 +441,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'event-media-route-authorization-db.integration.test.ts',
     persistenceSource: 'event-media-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    ['getEventsByEventIdMedia', 'getEventsByEventIdMediaRenditionsByRenditionId'],
+    { source: 'event-media-route-authorization-db.integration.test.ts' },
+  ),
   ...evidenceBindings(['postEventsByEventIdDuplicate'], {
     source: 'event-duplication-db.integration.test.ts',
     persistenceSource: 'event-duplication-db.integration.test.ts',

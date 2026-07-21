@@ -114,7 +114,6 @@ const eventReadPaths = [
   ['/events/{eventId}/availability', 'getEventsByEventIdAvailability'],
   ['/events/{eventId}/check-in-lists', 'getEventsByEventIdCheckInLists'],
   ['/events/{eventId}/launch-readiness', 'getEventsByEventIdLaunchReadiness'],
-  ['/events/{eventId}/media', 'getEventsByEventIdMedia'],
   ['/events/{eventId}/messages', 'getEventsByEventIdMessages'],
   ['/events/{eventId}/questions', 'getEventsByEventIdQuestions'],
   ['/events/{eventId}/reports/sales', 'getEventsByEventIdReportsSales'],
@@ -615,6 +614,33 @@ export const EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     persistenceSource: 'event-media-route-authorization-db.integration.test.ts',
     resourceParameters: ['eventId', 'role'],
     sideEffectAssertions: ['persistence'],
+    source: 'event-media-route-authorization-db.integration.test.ts',
+  }),
+]);
+
+export const EVENT_MEDIA_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'GET',
+    operationId: 'getEventsByEventIdMedia',
+    path: '/events/{eventId}/media',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: ['eventId'],
+    sideEffectAssertions: [],
+    source: 'event-media-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'GET',
+    operationId: 'getEventsByEventIdMediaRenditionsByRenditionId',
+    path: '/events/{eventId}/media/renditions/{renditionId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: ['eventId', 'renditionId'],
+    sideEffectAssertions: [],
     source: 'event-media-route-authorization-db.integration.test.ts',
   }),
 ]);
@@ -2021,6 +2047,7 @@ export const AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze(
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...EVENT_MEDIA_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

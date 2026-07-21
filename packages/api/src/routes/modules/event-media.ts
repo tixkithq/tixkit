@@ -65,20 +65,24 @@ export const eventMediaRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
-    await scopedEvent(app, principal, eventId);
+    const event = await scopedEvent(app, principal, eventId);
     const assets = await app.context.db
       .selectFrom('event_media_assets')
       .selectAll()
-      .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
+      .where('organization_id', '=', event.organization_id)
+      .where('brand_id', '=', event.brand_id)
+      .where('event_id', '=', eventId)
       .orderBy('role', 'asc')
       .execute();
     const renditions = await app.context.db
       .selectFrom('event_media_renditions as rendition')
       .innerJoin('event_media_assets as asset', 'asset.id', 'rendition.asset_id')
       .selectAll('rendition')
-      .where('asset.event_id', '=', eventId)
       .where('asset.tenant_id', '=', principal.tenantId)
+      .where('asset.organization_id', '=', event.organization_id)
+      .where('asset.brand_id', '=', event.brand_id)
+      .where('asset.event_id', '=', eventId)
       .orderBy('rendition.variant', 'asc')
       .execute();
     return assets.map((asset) => ({

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import Fastify, { type FastifyInstance } from 'fastify';
 import sharp from 'sharp';
@@ -15,20 +16,25 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
-import { EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+import {
+  EVENT_MEDIA_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+} from './route-authorization-contracts.js';
 
 const contracts = new Map(
-  EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.map((contract) => [
-    contract.operationId,
-    contract,
-  ]),
+  [
+    ...EVENT_MEDIA_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+    ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ].map((contract) => [contract.operationId, contract]),
 );
 function requiredContract(operationId: string) {
   const contract = contracts.get(operationId);
-  if (!contract) throw new Error(`Missing event media write contract: ${operationId}`);
+  if (!contract) throw new Error(`Missing event media contract: ${operationId}`);
   return contract;
 }
 
+const listContract = requiredContract('getEventsByEventIdMedia');
+const renditionContract = requiredContract('getEventsByEventIdMediaRenditionsByRenditionId');
 const putContract = requiredContract('putEventsByEventIdMediaByRole');
 const deleteContract = requiredContract('deleteEventsByEventIdMediaByRole');
 
@@ -237,7 +243,23 @@ function invokeDelete(targetEventId: string) {
   });
 }
 
-describeWithIntegrationDatabase('event media write route authorization matrix', () => {
+function invokeList(targetEventId: string) {
+  return app.inject({
+    method: listContract.method,
+    url: listContract.path.replace('{eventId}', targetEventId),
+  });
+}
+
+function invokeRendition(targetEventId: string, renditionId: string) {
+  return app.inject({
+    method: renditionContract.method,
+    url: renditionContract.path
+      .replace('{eventId}', targetEventId)
+      .replace('{renditionId}', renditionId),
+  });
+}
+
+describeWithIntegrationDatabase('event media route authorization matrix', () => {
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -289,7 +311,11 @@ describeWithIntegrationDatabase('event media write route authorization matrix', 
 
     s3Send = vi.spyOn(S3Client.prototype, 'send').mockImplementation(async (command: unknown) => {
       if (command instanceof GetObjectCommand) {
-        return { Body: { transformToByteArray: async () => sourceImage } } as never;
+        const body = Readable.from([sourceImage]) as Readable & {
+          transformToByteArray: () => Promise<Buffer>;
+        };
+        body.transformToByteArray = async () => sourceImage;
+        return { Body: body } as never;
       }
       if (command instanceof PutObjectCommand) return {} as never;
       throw new Error(`Unexpected storage command: ${command?.constructor?.name ?? 'unknown'}`);
@@ -347,7 +373,21 @@ describeWithIntegrationDatabase('event media write route authorization matrix', 
     }
   });
 
-  it('binds both immutable route contracts to this executable proof', () => {
+  it('binds all immutable route contracts to this executable proof', () => {
+    expect(listContract).toMatchObject({
+      authorizedControl: { status: 200 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      resourceParameters: ['eventId'],
+      source: 'event-media-route-authorization-db.integration.test.ts',
+    });
+    expect(renditionContract).toMatchObject({
+      authorizedControl: { status: 200 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      resourceParameters: ['eventId', 'renditionId'],
+      source: 'event-media-route-authorization-db.integration.test.ts',
+    });
     expect(putContract).toMatchObject({
       authorizedControl: { status: 200 },
       deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
@@ -360,6 +400,174 @@ describeWithIntegrationDatabase('event media write route authorization matrix', 
       permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
       source: 'event-media-route-authorization-db.integration.test.ts',
     });
+  });
+
+  it('lists the exact fully scoped asset and renditions without object-storage access', async () => {
+    const attachedResponse = await invokePut(eventA);
+    expect(attachedResponse.statusCode, attachedResponse.body).toBe(200);
+    const before = await evidenceSnapshot();
+    expect(before.assets).toHaveLength(1);
+    expect(before.renditions).toHaveLength(4);
+    const asset = before.assets[0]!;
+    const renditionRows = [...before.renditions].sort((left, right) =>
+      left.variant.localeCompare(right.variant),
+    );
+    s3Send.mockClear();
+
+    const response = await invokeList(eventA);
+
+    expect(response.statusCode, response.body).toBe(listContract.authorizedControl.status);
+    expect(response.json()).toEqual([
+      {
+        id: asset.id,
+        role: 'cover',
+        original: {
+          uploadArtifactId,
+          width: 64,
+          height: 64,
+          format: 'png',
+          checksumSha256: asset.checksum_sha256,
+          sizeBytes: Number(asset.size_bytes),
+        },
+        focalPoint: { x: 0.5, y: 0.5 },
+        altText: 'Authorization proof cover',
+        renditions: renditionRows.map((rendition) => ({
+          id: rendition.id,
+          variant: rendition.variant,
+          width: rendition.width,
+          height: rendition.height,
+          format: rendition.format,
+          checksumSha256: rendition.checksum_sha256,
+          sizeBytes: Number(rendition.size_bytes),
+          url: `/v1/public/event-media/renditions/${rendition.id}`,
+          organizerUrl: `/v1/events/${eventA}/media/renditions/${rendition.id}`,
+        })),
+      },
+    ]);
+    expect(s3Send).not.toHaveBeenCalled();
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+  });
+
+  it('streams the exact scoped rendition with private immutable response metadata', async () => {
+    const attachedResponse = await invokePut(eventA);
+    expect(attachedResponse.statusCode, attachedResponse.body).toBe(200);
+    const before = await evidenceSnapshot();
+    const pageRendition = before.renditions.find((rendition) => rendition.variant === 'page');
+    expect(pageRendition).toBeDefined();
+    s3Send.mockClear();
+
+    const response = await invokeRendition(eventA, pageRendition!.id);
+
+    expect(response.statusCode, response.body).toBe(renditionContract.authorizedControl.status);
+    expect(Buffer.from(response.rawPayload)).toEqual(sourceImage);
+    expect(response.headers['content-type']).toBe('image/webp');
+    expect(response.headers['content-disposition']).toBe(`inline; filename="${eventA}-page.webp"`);
+    expect(response.headers['cache-control']).toBe('private, max-age=31536000, immutable');
+    expect(response.headers.etag).toBe(`"${pageRendition!.checksum_sha256}"`);
+    expect(s3Send.mock.calls).toHaveLength(1);
+    const getObject = s3Send.mock.calls[0]?.[0];
+    expect(getObject).toBeInstanceOf(GetObjectCommand);
+    expect((getObject as GetObjectCommand).input).toEqual({
+      Bucket: pageRendition!.bucket,
+      Key: pageRendition!.object_key,
+    });
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+  });
+
+  it.each([
+    ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+    ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+    [
+      'organization',
+      () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+      () => eventAScoped,
+      404,
+      'NOT_FOUND',
+    ],
+    [
+      'brand',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA],
+      }),
+      () => eventAScoped,
+      404,
+      'NOT_FOUND',
+    ],
+    [
+      'event',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA, brandAScoped],
+        eventIds: [eventA],
+      }),
+      () => eventAScoped,
+      404,
+      'NOT_FOUND',
+    ],
+  ] as const)(
+    'denies media reads at the %s boundary before media queries and object storage',
+    async (boundary, makePrincipal, targetEvent, expectedStatus, expectedCode) => {
+      const attachedResponse = await invokePut(eventA);
+      expect(attachedResponse.statusCode, attachedResponse.body).toBe(200);
+      const before = await evidenceSnapshot();
+      const renditionId = before.renditions[0]!.id;
+      activePrincipal = makePrincipal();
+      s3Send.mockClear();
+      const eventQuery = vi.spyOn(EventRepository.prototype, 'findById');
+      const databaseQuery = vi.spyOn(db, 'executeQuery');
+
+      try {
+        const eventId = targetEvent();
+        const listResponse = await invokeList(eventId);
+        const renditionResponse = await invokeRendition(eventId, renditionId);
+
+        for (const response of [listResponse, renditionResponse]) {
+          expect(response.statusCode, response.body).toBe(expectedStatus);
+          expect(response.json()).toMatchObject({ error: { code: expectedCode } });
+        }
+        const mediaQueries = databaseQuery.mock.calls.filter(([query]) =>
+          /event_media_(?:assets|renditions)/.test(String((query as { sql?: string }).sql ?? '')),
+        );
+        expect(mediaQueries).toHaveLength(0);
+        if (boundary === 'permission') {
+          expect(eventQuery).not.toHaveBeenCalled();
+        } else {
+          expect(eventQuery.mock.calls).toEqual([[eventId], [eventId]]);
+        }
+        expect(s3Send).not.toHaveBeenCalled();
+        await expect(evidenceSnapshot()).resolves.toEqual(before);
+      } finally {
+        databaseQuery.mockRestore();
+        eventQuery.mockRestore();
+      }
+    },
+  );
+
+  it('conceals cross-event and unknown rendition identifiers before object storage', async () => {
+    const attachedResponse = await invokePut(eventA);
+    expect(attachedResponse.statusCode, attachedResponse.body).toBe(200);
+    const before = await evidenceSnapshot();
+    const renditionId = before.renditions[0]!.id;
+    activePrincipal = {
+      ...basePrincipal,
+      organizationIds: [organizationA, organizationAScoped],
+      brandIds: [brandA, brandAScoped],
+      eventIds: [eventA, eventAScoped],
+    };
+    s3Send.mockClear();
+
+    const crossEvent = await invokeRendition(eventAScoped, renditionId);
+    const unknown = await invokeRendition(eventA, `emr_unknown_${suffix}`);
+
+    for (const response of [crossEvent, unknown]) {
+      expect(response.statusCode, response.body).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    }
+    expect(s3Send).not.toHaveBeenCalled();
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
   });
 
   it('allows the exact principal to attach and remove media with durable state and audit evidence', async () => {
