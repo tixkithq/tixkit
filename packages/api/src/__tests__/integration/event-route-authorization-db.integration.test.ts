@@ -37,7 +37,9 @@ import {
 
 const eventReadContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
   (contract) =>
-    contract.method === 'GET' && contract.operationId !== 'getEventsByEventIdOperationalHealth',
+    contract.method === 'GET' &&
+    contract.path.startsWith('/events/{eventId}') &&
+    contract.operationId !== 'getEventsByEventIdOperationalHealth',
 );
 const operationalHealthContract = (() => {
   const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
@@ -83,11 +85,25 @@ const feePolicyContract = (() => {
   if (!contract) throw new Error('fee policy authorization contract is not registered');
   return contract;
 })();
+const feePolicyReadContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'getEventsByEventIdFeePolicy',
+  );
+  if (!contract) throw new Error('fee policy read authorization contract is not registered');
+  return contract;
+})();
 const codeFormatContract = (() => {
   const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
     (candidate) => candidate.operationId === 'putEventsByEventIdCodeFormat',
   );
   if (!contract) throw new Error('code format authorization contract is not registered');
+  return contract;
+})();
+const codeFormatReadContract = (() => {
+  const contract = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+    (candidate) => candidate.operationId === 'getEventsByEventIdCodeFormat',
+  );
+  if (!contract) throw new Error('code format read authorization contract is not registered');
   return contract;
 })();
 
@@ -1590,6 +1606,13 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       });
     }
 
+    function readCodeFormat(targetEventId: string) {
+      return app.inject({
+        method: codeFormatReadContract.method,
+        url: codeFormatReadContract.path.replace('{eventId}', targetEventId),
+      });
+    }
+
     function storedCodeFormatAudit(value: unknown): Record<string, unknown> {
       return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
     }
@@ -1597,6 +1620,55 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     function storedCodeFormat(value: unknown): Record<string, unknown> {
       return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
     }
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without disclosing code-format data or mutating persistence',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await codeFormatSnapshot();
+
+        const response = await readCodeFormat(targetEvent());
+
+        expect(response.statusCode, response.body).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        expect(response.body).not.toContain('scannerContractVersion');
+        expect(response.body).not.toContain('codeFormat');
+        await expect(codeFormatSnapshot()).resolves.toEqual(before);
+      },
+    );
 
     it('atomically updates the exact code format with a monotonic revision and exact audit', async () => {
       const before = await codeFormatSnapshot();
@@ -1796,9 +1868,65 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       });
     }
 
+    function readFeePolicy(targetEventId: string) {
+      return app.inject({
+        method: feePolicyReadContract.method,
+        url: feePolicyReadContract.path.replace('{eventId}', targetEventId),
+      });
+    }
+
     function storedFeePolicyAudit(value: unknown): Record<string, unknown> {
       return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
     }
+
+    it.each([
+      ['permission', () => ({ ...basePrincipal, scopes: [] }), () => eventA, 403, 'FORBIDDEN'],
+      ['tenant', () => basePrincipal, () => eventB, 404, 'NOT_FOUND'],
+      [
+        'organization',
+        () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'brand',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+      [
+        'event',
+        () => ({
+          ...basePrincipal,
+          organizationIds: [organizationA, organizationAScoped],
+          brandIds: [brandA, brandAScoped],
+          eventIds: [eventA],
+        }),
+        () => eventAScoped,
+        404,
+        'NOT_FOUND',
+      ],
+    ] as const)(
+      'denies the %s boundary without disclosing fee-policy data or mutating persistence',
+      async (_boundary, makePrincipal, targetEvent, status, code) => {
+        principal = makePrincipal();
+        const before = await feePolicySnapshot();
+
+        const response = await readFeePolicy(targetEvent());
+
+        expect(response.statusCode, response.body).toBe(status);
+        expect(response.json()).toMatchObject({ error: { code } });
+        expect(response.body).not.toContain('passFeesToBuyer');
+        expect(response.body).not.toContain('rules');
+        await expect(feePolicySnapshot()).resolves.toEqual(before);
+      },
+    );
 
     it('atomically replaces the exact fee policy with a monotonic revision and exact audit', async () => {
       const before = await feePolicySnapshot();
