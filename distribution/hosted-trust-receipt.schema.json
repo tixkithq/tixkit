@@ -43,8 +43,7 @@
             ".github/workflows/performance-fault.yml",
             ".github/workflows/performance-nightly.yml",
             ".github/workflows/performance-soak.yml",
-            ".github/workflows/performance-temporal-fault.yml",
-            ".github/workflows/trusted-release-dry-run.yml"
+            ".github/workflows/performance-temporal-fault.yml"
           ]
         },
         "runId": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
@@ -67,8 +66,7 @@
             "performance-fault",
             "performance-soak",
             "performance-temporal-fault",
-            "performance-trends",
-            "production-dr"
+            "performance-trends"
           ]
         },
         "sizeBytes": { "type": "integer", "minimum": 1 },
@@ -87,8 +85,7 @@
             "scripts/performance-fault.mjs#validateFaultEvidence",
             "scripts/performance-soak.mjs#validateSoakEvidenceDirectory",
             "scripts/performance-temporal-fault.mjs#validateTemporalFaultEvidence",
-            "scripts/performance-trends.mjs#validateTrendEvidence",
-            "scripts/verify-production-rehearsal.mjs#cli"
+            "scripts/performance-trends.mjs#validateTrendEvidence"
           ]
         },
         "version": { "const": 1 },

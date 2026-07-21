@@ -77,12 +77,6 @@ const contracts = Object.freeze({
     workflow: '.github/workflows/performance-nightly.yml',
     validator: 'scripts/performance-trends.mjs#validateTrendEvidence',
   }),
-  'production-dr': Object.freeze({
-    trustRecordId: 'dr-evidence',
-    scope: 'self-hosted',
-    workflow: '.github/workflows/trusted-release-dry-run.yml',
-    validator: 'scripts/verify-production-rehearsal.mjs#cli',
-  }),
 });
 
 function plainJsonDataViolations(value, label) {

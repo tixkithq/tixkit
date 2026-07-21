@@ -238,6 +238,18 @@ test('rejects wrong record, scope, workflow, validator, repository, and run URL 
   }
 });
 
+test('rejects production DR receipts until a dedicated semantic producer exists', () => {
+  const candidate = signedReceipt((receipt) => {
+    receipt.trustRecordId = 'dr-evidence';
+    receipt.scope = 'self-hosted';
+    receipt.workflow.path = '.github/workflows/trusted-release-dry-run.yml';
+    receipt.artifact.kind = 'production-dr';
+    receipt.validation.validator = 'scripts/verify-production-rehearsal.mjs#cli';
+  });
+
+  assert.match(violations(candidate), /must be one of/u);
+});
+
 test('rejects unsupported, unknown, private, and non-Ed25519 trust keys', () => {
   const unknown = signedReceipt((receipt) => {
     receipt.signature.keyId = 'unknown-key';
