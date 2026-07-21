@@ -372,6 +372,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['getOrganizations', 'getBrands'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['getBrandsByBrandIdEmailSenderIdentities'], {
+    source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['getBootstrapContext'], {
     source: 'bootstrap-context-route-authorization-db.integration.test.ts',
   }),

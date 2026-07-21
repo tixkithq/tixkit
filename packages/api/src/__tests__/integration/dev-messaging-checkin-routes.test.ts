@@ -114,8 +114,21 @@ const mockConditionMatches = (row: Record<string, unknown>, condition: MockCondi
     const compared = mockValuesCompare(rowValue, condition.value);
     return compared == null ? false : compared >= 0;
   }
-  if (condition.op === 'in' && Array.isArray(condition.value)) {
-    return condition.value.includes(rowValue);
+  if (condition.op === 'in') {
+    if (Array.isArray(condition.value)) return condition.value.includes(rowValue);
+    if (
+      condition.value &&
+      typeof condition.value === 'object' &&
+      'rows' in condition.value &&
+      typeof condition.value.rows === 'function'
+    ) {
+      const subqueryRows = (condition.value.rows as () => Record<string, unknown>[])();
+      return subqueryRows.some((candidate) => {
+        const values = Object.values(candidate);
+        return mockValuesEqual(candidate.id ?? values[0], rowValue);
+      });
+    }
+    return false;
   }
   if (condition.op === 'is')
     return condition.value === null ? rowValue === null : rowValue === condition.value;

@@ -40,6 +40,13 @@ const SAFE_PLACEHOLDER_PATTERN =
 
 type JsonObject = Record<string, unknown>;
 
+type PermissionClause = Readonly<{
+  discriminator?: string;
+  kind: 'all-of' | 'any-of' | 'base' | 'conditional';
+  permissions: string[];
+  value?: string;
+}>;
+
 type ReleaseArtifact = {
   name: string;
   sha256: string;
@@ -331,6 +338,86 @@ function normalizeManifest(value: JsonObject): ReleaseManifest {
   };
 }
 
+function parsePermissionMetadata(
+  value: unknown,
+  declared: boolean,
+): Readonly<{
+  permissionClauses: PermissionClause[];
+  permissions: string[];
+  valid: boolean;
+}> {
+  if (!declared) return { permissionClauses: [], permissions: [], valid: true };
+
+  const validPermissions = (candidate: unknown): candidate is string[] =>
+    Array.isArray(candidate) &&
+    candidate.every((permission) => typeof permission === 'string' && permission.length > 0) &&
+    new Set(candidate).size === candidate.length;
+  const result = (permissionClauses: PermissionClause[]) => ({
+    permissionClauses,
+    permissions: [...new Set(permissionClauses.flatMap((clause) => clause.permissions))],
+    valid: true,
+  });
+
+  if (Array.isArray(value)) {
+    return validPermissions(value)
+      ? result(value.length > 0 ? [{ kind: 'all-of', permissions: [...value] }] : [])
+      : { permissionClauses: [], permissions: [], valid: false };
+  }
+  if (!value || typeof value !== 'object') {
+    return { permissionClauses: [], permissions: [], valid: false };
+  }
+
+  const record = value as JsonObject;
+  const allowedKeys = new Set(['allOf', 'anyOf', 'base', 'byType']);
+  if (
+    Object.keys(record).length === 0 ||
+    Object.keys(record).some((key) => !allowedKeys.has(key))
+  ) {
+    return { permissionClauses: [], permissions: [], valid: false };
+  }
+
+  const clauses: PermissionClause[] = [];
+  for (const [key, kind] of [
+    ['allOf', 'all-of'],
+    ['anyOf', 'any-of'],
+    ['base', 'base'],
+  ] as const) {
+    if (!Object.hasOwn(record, key)) continue;
+    if (!validPermissions(record[key]) || record[key].length === 0) {
+      return { permissionClauses: [], permissions: [], valid: false };
+    }
+    clauses.push({ kind, permissions: [...record[key]] });
+  }
+
+  if (Object.hasOwn(record, 'byType')) {
+    const byType = record.byType;
+    if (!byType || typeof byType !== 'object' || Array.isArray(byType)) {
+      return { permissionClauses: [], permissions: [], valid: false };
+    }
+    const entries = Object.entries(byType as JsonObject);
+    if (entries.length === 0) {
+      return { permissionClauses: [], permissions: [], valid: false };
+    }
+    for (const [value, permissions] of entries.sort(([left], [right]) =>
+      left.localeCompare(right),
+    )) {
+      if (!value || !validPermissions(permissions) || permissions.length === 0) {
+        return { permissionClauses: [], permissions: [], valid: false };
+      }
+      clauses.push({
+        discriminator: 'type',
+        kind: 'conditional',
+        permissions: [...permissions],
+        value,
+      });
+    }
+  }
+
+  return clauses.length > 0
+    ? result(clauses)
+    : { permissionClauses: [], permissions: [], valid: false };
+}
+
 function operationReference(openApi: JsonObject, apiVersion: string): JsonObject {
   const paths = openApi.paths;
   if (!paths || typeof paths !== 'object' || Array.isArray(paths)) {
@@ -390,18 +477,12 @@ function operationReference(openApi: JsonObject, apiVersion: string): JsonObject
           principalTypes.length === principalRestrictionRecord.allowed.length &&
           new Set(principalTypes).size === principalTypes.length);
       const permissionsDeclared = Object.hasOwn(record, 'x-required-permissions');
-      const permissionsMetadataValid =
-        !permissionsDeclared ||
-        (Array.isArray(record['x-required-permissions']) &&
-          record['x-required-permissions'].every(
-            (permission) => typeof permission === 'string' && permission.length > 0,
-          ) &&
-          new Set(record['x-required-permissions']).size ===
-            record['x-required-permissions'].length);
-      const permissions =
-        permissionsDeclared && permissionsMetadataValid
-          ? (record['x-required-permissions'] as string[])
-          : [];
+      const permissionMetadata = parsePermissionMetadata(
+        record['x-required-permissions'],
+        permissionsDeclared,
+      );
+      const permissionsMetadataValid = permissionMetadata.valid;
+      const { permissionClauses, permissions } = permissionMetadata;
       const securityMetadata = Object.hasOwn(record, 'security')
         ? record.security
         : Object.hasOwn(pathRecord, 'security')
@@ -442,6 +523,7 @@ function operationReference(openApi: JsonObject, apiVersion: string): JsonObject
         operationId: typeof record.operationId === 'string' ? record.operationId : null,
         summary: typeof record.summary === 'string' ? record.summary : null,
         permissions,
+        permissionClauses,
         permissionsDeclared,
         permissionsMetadataValid,
         principalTypes,

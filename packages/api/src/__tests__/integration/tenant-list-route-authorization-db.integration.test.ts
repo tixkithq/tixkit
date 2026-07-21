@@ -32,6 +32,9 @@ describeWithIntegrationDatabase('tenant list route authorization matrix', () => 
   const domainAOther = `dom_list_a_other_${suffix}`;
   const domainAScoped = `dom_list_scope_${suffix}`;
   const domainB = `dom_list_b_${suffix}`;
+  const senderIdentityA = `bsi_list_a_${suffix}`;
+  const senderIdentityAOther = `bsi_list_other_${suffix}`;
+  const senderIdentityCrossTenant = `bsi_list_cross_${suffix}`;
   const basePrincipal: Principal = {
     type: 'user',
     id: `usr_list_${suffix}`,
@@ -117,6 +120,39 @@ describeWithIntegrationDatabase('tenant list route authorization matrix', () => 
       .execute();
   }
 
+  async function insertSenderIdentity(
+    id: string,
+    tenantId: string,
+    brandId: string,
+    email: string,
+  ): Promise<void> {
+    const now = new Date('2026-07-21T00:00:00.000Z');
+    await db
+      .insertInto('brand_sender_identities')
+      .values({
+        id,
+        tenant_id: tenantId,
+        brand_id: brandId,
+        email,
+        name: id,
+        reply_to_email: null,
+        verified: true,
+        verified_at: now,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+  }
+
+  async function senderIdentitySnapshot(): Promise<unknown[]> {
+    return db
+      .selectFrom('brand_sender_identities')
+      .selectAll()
+      .where('id', 'in', [senderIdentityA, senderIdentityAOther, senderIdentityCrossTenant])
+      .orderBy('id', 'asc')
+      .execute();
+  }
+
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -133,6 +169,19 @@ describeWithIntegrationDatabase('tenant list route authorization matrix', () => 
     await insertDomain(domainAOther, brandAOther, `other-${suffix}.example.test`);
     await insertDomain(domainAScoped, brandAScoped, `scoped-${suffix}.example.test`);
     await insertDomain(domainB, brandB, `foreign-${suffix}.example.test`);
+    await insertSenderIdentity(senderIdentityA, tenantA, brandA, `allowed-${suffix}@example.test`);
+    await insertSenderIdentity(
+      senderIdentityAOther,
+      tenantA,
+      brandAOther,
+      `sibling-${suffix}@example.test`,
+    );
+    await insertSenderIdentity(
+      senderIdentityCrossTenant,
+      tenantB,
+      brandA,
+      `cross-tenant-${suffix}@example.test`,
+    );
 
     principal = basePrincipal;
     app = Fastify({ logger: false });
@@ -163,6 +212,12 @@ describeWithIntegrationDatabase('tenant list route authorization matrix', () => 
     } finally {
       try {
         if (db) {
+          await attempt(() =>
+            db
+              .deleteFrom('brand_sender_identities')
+              .where('id', 'in', [senderIdentityA, senderIdentityAOther, senderIdentityCrossTenant])
+              .execute(),
+          );
           await attempt(() =>
             db
               .deleteFrom('brand_domains')
@@ -270,5 +325,116 @@ describeWithIntegrationDatabase('tenant list route authorization matrix', () => 
 
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json()).toEqual([]);
+  });
+
+  it.each([
+    ['settings.write', ['settings.write']],
+    ['messages.write', ['messages.write']],
+  ] as const)(
+    'returns only the exact tenant and brand sender identities with %s',
+    async (_permission, scopes) => {
+      principal = { ...basePrincipal, scopes: [...scopes] };
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/brands/${brandA}/email-sender-identities`,
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toEqual([
+        expect.objectContaining({
+          id: senderIdentityA,
+          tenantId: tenantA,
+          brandId: brandA,
+          email: `allowed-${suffix}@example.test`,
+          verified: true,
+        }),
+      ]);
+      expect(response.body).not.toContain(senderIdentityAOther);
+      expect(response.body).not.toContain(senderIdentityCrossTenant);
+    },
+  );
+
+  it('denies sender identity reads without either allowed permission', async () => {
+    principal = { ...basePrincipal, scopes: [] };
+    const before = await senderIdentitySnapshot();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/brands/${brandA}/email-sender-identities`,
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    expect(response.body).not.toContain(senderIdentityA);
+    expect(await senderIdentitySnapshot()).toEqual(before);
+  });
+
+  it('denies event-scoped sender identity reads before disclosure', async () => {
+    principal = { ...basePrincipal, eventIds: [`evt_list_${suffix}`] };
+    const before = await senderIdentitySnapshot();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/brands/${brandA}/email-sender-identities`,
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    expect(response.body).not.toContain(senderIdentityA);
+    expect(await senderIdentitySnapshot()).toEqual(before);
+  });
+
+  it.each([
+    [
+      'tenant',
+      () => ({ ...basePrincipal, organizationIds: [organizationB], brandIds: [brandB] }),
+      () => brandB,
+    ],
+    [
+      'organization',
+      () => ({ ...basePrincipal, organizationIds: [organizationAScoped] }),
+      () => brandA,
+    ],
+    ['brand', () => ({ ...basePrincipal, brandIds: [brandAOther] }), () => brandA],
+  ] as const)(
+    'denies %s-scoped sender identity reads',
+    async (_boundary, makePrincipal, brandId) => {
+      principal = makePrincipal();
+      const before = await senderIdentitySnapshot();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/brands/${brandId()}/email-sender-identities`,
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+      expect(response.body).not.toContain(senderIdentityA);
+      expect(response.body).not.toContain(senderIdentityCrossTenant);
+      expect(await senderIdentitySnapshot()).toEqual(before);
+    },
+  );
+
+  it('makes unknown and foreign sender-identity resources indistinguishable', async () => {
+    const before = await senderIdentitySnapshot();
+    const [unknown, foreign] = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: `/brands/brd_missing_${suffix}/email-sender-identities`,
+      }),
+      app.inject({
+        method: 'GET',
+        url: `/brands/${brandB}/email-sender-identities`,
+      }),
+    ]);
+
+    expect(unknown.statusCode).toBe(404);
+    expect(foreign.statusCode).toBe(404);
+    expect(unknown.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    expect(foreign.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    expect(unknown.body).not.toContain(senderIdentityA);
+    expect(foreign.body).not.toContain(senderIdentityCrossTenant);
+    expect(await senderIdentitySnapshot()).toEqual(before);
   });
 });

@@ -1392,6 +1392,13 @@ describe('openApiSpec', () => {
   });
 
   it('documents brand sender identity list responses', () => {
+    expect(openApiSpec.paths['/brands/{brandId}/email-sender-identities'].get).toMatchObject({
+      operationId: 'getBrandsByBrandIdEmailSenderIdentities',
+      security: [{ BearerAuth: [] }],
+      'x-required-permissions': {
+        anyOf: ['settings.write', 'messages.write'],
+      },
+    });
     expect(openApiSpec.components.schemas.BrandSenderIdentity).toMatchObject({
       type: 'object',
       properties: expect.objectContaining({

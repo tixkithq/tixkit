@@ -9300,8 +9300,12 @@ const rawOpenApiSpec = {
     },
     '/brands/{brandId}/email-sender-identities': {
       get: {
+        operationId: 'getBrandsByBrandIdEmailSenderIdentities',
         summary: 'List brand email sender identities',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': {
+          anyOf: ['settings.write', 'messages.write'],
+        },
         parameters: [
           {
             name: 'brandId',

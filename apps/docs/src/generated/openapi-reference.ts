@@ -681,7 +681,12 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": {
+      "anyOf": [
+        "settings.write",
+        "messages.write"
+      ]
+    },
     "parameters": [
       {
         "name": "brandId",

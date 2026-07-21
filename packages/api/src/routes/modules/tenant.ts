@@ -1503,7 +1503,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { brandId } = request.params as { brandId: string };
 
     const brand = await new BrandRepository(db).findById(brandId);
-    if (!brand) throw new ValidationError('Brand not found');
+    if (!brand) throw new NotFoundError('Brand', brandId);
     ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
     ClerkAuthService.requireBrandScope(principal, brandId);
     ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
