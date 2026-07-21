@@ -10,6 +10,14 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
+import { OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
+
+const oauthApplicationListContract = OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+  (contract) => contract.method === 'GET' && contract.path === '/oauth-applications',
+);
+if (!oauthApplicationListContract) {
+  throw new Error('Missing OAuth application list authorization contract');
+}
 
 describeWithIntegrationDatabase('OAuth application route authorization persistence', () => {
   let db: Database;
@@ -135,6 +143,7 @@ describeWithIntegrationDatabase('OAuth application route authorization persisten
   async function seedApplication(input: {
     id: string;
     organizationId?: string;
+    subjectType?: 'agent' | 'resource_owner';
     tenantId?: string;
   }) {
     const createdAt = new Date();
@@ -149,7 +158,7 @@ describeWithIntegrationDatabase('OAuth application route authorization persisten
         client_secret_hash: 'a'.repeat(64),
         redirect_uris: JSON.stringify(['https://example.com/oauth/callback']),
         scopes: JSON.stringify(['events.read']),
-        subject_type: 'resource_owner',
+        subject_type: input.subjectType ?? 'resource_owner',
         agent_principal_id: null,
         status: 'active',
         created_at: createdAt,
@@ -163,6 +172,183 @@ describeWithIntegrationDatabase('OAuth application route authorization persisten
     name,
     redirectUris: ['https://example.com/oauth/callback'],
     scopes: ['events.read'],
+  });
+
+  it('binds the GET authorization contract to its real persistence fixture', () => {
+    expect(oauthApplicationListContract).toMatchObject({
+      authorizedControl: { required: true, status: 200 },
+      deniedBoundaries: [],
+      method: 'GET',
+      operationId: 'getOauthApplications',
+      path: '/oauth-applications',
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      policyDeniedBoundaries: ['brand', 'event'],
+      resourceParameters: [],
+      sideEffectAssertions: [],
+      source: 'oauth-application-route-authorization-db.integration.test.ts',
+    });
+  });
+
+  it('lists only authorized resource-owner applications with stable pagination and no private fields', async () => {
+    const localFirstId = `oapp_oa_a_${suffix}`;
+    const localSecondId = `oapp_oa_b_${suffix}`;
+    const siblingId = `oapp_oa_c_${suffix}`;
+    const foreignId = `oapp_oa_d_${suffix}`;
+    const agentId = `oapp_oa_e_${suffix}`;
+    const applicationIds = [localFirstId, localSecondId, siblingId, foreignId, agentId];
+    await seedApplication({ id: localFirstId });
+    await seedApplication({ id: localSecondId });
+    await seedApplication({ id: siblingId, organizationId: siblingOrganizationId });
+    await seedApplication({
+      id: foreignId,
+      organizationId: otherOrganizationId,
+      tenantId: otherTenantId,
+    });
+    await seedApplication({ id: agentId, subjectType: 'agent' });
+
+    const snapshotBefore = await db
+      .selectFrom('oauth_applications')
+      .selectAll()
+      .where('id', 'in', applicationIds)
+      .orderBy('id', 'asc')
+      .execute();
+
+    const userApp = await routeApp();
+    const userResponse = await userApp.inject({ method: 'GET', url: '/oauth-applications' });
+    expect(userResponse.statusCode, userResponse.body).toBe(
+      oauthApplicationListContract.authorizedControl.status,
+    );
+    expect(userResponse.json()).toMatchObject({ hasMore: false, nextCursor: null });
+    expect(userResponse.json().items.map((item: { id: string }) => item.id)).toEqual([
+      localFirstId,
+      localSecondId,
+    ]);
+    expect(userResponse.json().items[0]).toMatchObject({
+      redirectUris: ['https://example.com/oauth/callback'],
+      scopes: ['events.read'],
+    });
+    expect(userResponse.body).not.toContain('client_secret_hash');
+    expect(userResponse.body).not.toContain('a'.repeat(64));
+    expect(userResponse.body).not.toContain('agentPrincipalId');
+    expect(Object.keys(userResponse.json().items[0]).sort()).toEqual([
+      'clientId',
+      'createdAt',
+      'id',
+      'name',
+      'organizationId',
+      'redirectUris',
+      'scopes',
+      'status',
+      'tenantId',
+      'updatedAt',
+    ]);
+
+    const firstPage = await userApp.inject({
+      method: 'GET',
+      url: '/oauth-applications?limit=1',
+    });
+    expect(firstPage.statusCode, firstPage.body).toBe(200);
+    expect(firstPage.json()).toMatchObject({
+      hasMore: true,
+      nextCursor: localFirstId,
+      items: [{ id: localFirstId }],
+    });
+    const secondPage = await userApp.inject({
+      method: 'GET',
+      url: `/oauth-applications?limit=1&cursor=${encodeURIComponent(firstPage.json().nextCursor)}`,
+    });
+    expect(secondPage.statusCode, secondPage.body).toBe(200);
+    expect(secondPage.json()).toMatchObject({
+      hasMore: false,
+      nextCursor: null,
+      items: [{ id: localSecondId }],
+    });
+    await userApp.close();
+
+    const apiKeyApp = await routeApp(principal({ type: 'api_key', id: `key_oa_${suffix}` }));
+    const apiKeyResponse = await apiKeyApp.inject({ method: 'GET', url: '/oauth-applications' });
+    expect(apiKeyResponse.statusCode, apiKeyResponse.body).toBe(200);
+    expect(apiKeyResponse.json().items.map((item: { id: string }) => item.id)).toEqual([
+      localFirstId,
+      localSecondId,
+    ]);
+    expect(apiKeyResponse.json().items[0]).toMatchObject({
+      redirectUris: ['https://example.com/oauth/callback'],
+      scopes: ['events.read'],
+    });
+    await apiKeyApp.close();
+
+    const systemApp = await routeApp(
+      principal({ type: 'system', id: `sys_oa_${suffix}`, organizationIds: [] }),
+    );
+    const systemResponse = await systemApp.inject({ method: 'GET', url: '/oauth-applications' });
+    expect(systemResponse.statusCode, systemResponse.body).toBe(200);
+    expect(systemResponse.json().items.map((item: { id: string }) => item.id)).toEqual([
+      localFirstId,
+      localSecondId,
+      siblingId,
+    ]);
+    expect(systemResponse.json().items[0]).toMatchObject({
+      redirectUris: ['https://example.com/oauth/callback'],
+      scopes: ['events.read'],
+    });
+    expect(systemResponse.body).not.toContain(foreignId);
+    expect(systemResponse.body).not.toContain(agentId);
+    await systemApp.close();
+
+    const emptyApp = await routeApp(principal({ organizationIds: [] }));
+    const emptyResponse = await emptyApp.inject({ method: 'GET', url: '/oauth-applications' });
+    expect(emptyResponse.statusCode, emptyResponse.body).toBe(200);
+    expect(emptyResponse.json()).toEqual({ items: [], hasMore: false, nextCursor: null });
+    await emptyApp.close();
+
+    const permissionDeniedApp = await routeApp(principal({ scopes: ['events.read'] }));
+    const permissionDenied = await permissionDeniedApp.inject({
+      method: 'GET',
+      url: '/oauth-applications',
+    });
+    expect(permissionDenied.statusCode, permissionDenied.body).toBe(
+      oauthApplicationListContract.permissionDenialResponse?.status,
+    );
+    expect(permissionDenied.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    await permissionDeniedApp.close();
+
+    const scopedDenials = await Promise.all(
+      [
+        principal({ brandIds: [`brd_oa_${suffix}`] }),
+        principal({ eventIds: [`evt_oa_${suffix}`] }),
+      ].map(async (actor) => {
+        const app = await routeApp(actor);
+        const response = await app.inject({ method: 'GET', url: '/oauth-applications' });
+        await app.close();
+        return response;
+      }),
+    );
+    expect(scopedDenials.map((response) => response.statusCode)).toEqual([403, 403]);
+    expect(
+      scopedDenials.map((response) => {
+        const error = response.json().error as { code: string; message: string };
+        return { code: error.code, message: error.message };
+      }),
+    ).toEqual([
+      {
+        code: 'FORBIDDEN',
+        message: 'Scoped principals cannot manage organization-wide OAuth applications',
+      },
+      {
+        code: 'FORBIDDEN',
+        message: 'Scoped principals cannot manage organization-wide OAuth applications',
+      },
+    ]);
+
+    const snapshotAfter = await db
+      .selectFrom('oauth_applications')
+      .selectAll()
+      .where('id', 'in', applicationIds)
+      .orderBy('id', 'asc')
+      .execute();
+    expect(snapshotAfter).toEqual(snapshotBefore);
   });
 
   it('persists no application or audit mutation for permission, policy, tenant, or organization denial', async () => {

@@ -41524,6 +41524,7 @@
     },
     "/oauth-applications": {
       "get": {
+        "operationId": "getOauthApplications",
         "summary": "List OAuth applications",
         "security": [
           {
@@ -41532,6 +41533,9 @@
           {
             "ApiKey": []
           }
+        ],
+        "x-required-permissions": [
+          "developers.write"
         ],
         "parameters": [
           {
@@ -41628,7 +41632,6 @@
             }
           }
         },
-        "operationId": "getOauthApplications",
         "tags": [
           "Platform"
         ]

@@ -615,6 +615,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'oauth-application-route-authorization.test.ts',
     persistenceSource: 'oauth-application-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['getOauthApplications'], {
+    source: 'oauth-application-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['postScannerDevices', 'postScannerDevicesByDeviceIdRevoke'], {
     source: 'scanner-device-route-authorization.test.ts',
     persistenceSource: 'scanner-device-route-authorization-db.integration.test.ts',

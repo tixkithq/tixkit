@@ -19691,8 +19691,10 @@ const rawOpenApiSpec = {
     },
     '/oauth-applications': {
       get: {
+        operationId: 'getOauthApplications',
         summary: 'List OAuth applications',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },

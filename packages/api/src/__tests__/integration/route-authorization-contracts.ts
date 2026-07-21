@@ -1406,6 +1406,24 @@ export const ORGANIZATION_MEMBER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.f
 
 export const OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: [],
+    method: 'GET',
+    operationId: 'getOauthApplications',
+    path: '/oauth-applications',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: {
+      discriminator: 'principal-scope',
+      value: 'organization-wide',
+    },
+    policyDeniedBoundaries: ['brand', 'event'],
+    resourceParameters: [],
+    sideEffectAssertions: [],
+    source: 'oauth-application-route-authorization-db.integration.test.ts',
+  }),
+  denialContract({
     authorizedControl: { required: true, status: 201 },
     denialResponse: { code: 'NOT_FOUND', status: 404 },
     deniedBoundaries: ['organization'],

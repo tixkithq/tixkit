@@ -97,37 +97,38 @@ function database(input: { applications?: Row[]; organizations?: Row[] } = {}) {
     };
     return query;
   });
+  const selectFrom = vi.fn((table: string) => {
+    const predicates: Array<[string, string, unknown]> = [];
+    const query = {
+      selectAll() {
+        return query;
+      },
+      where(column: string, operator: string, value: unknown) {
+        predicates.push([column, operator, value]);
+        return query;
+      },
+      forUpdate() {
+        return query;
+      },
+      async executeTakeFirst() {
+        return (tables[table] ?? []).find((row) =>
+          predicates.every(([column, operator, value]) =>
+            operator === 'in'
+              ? Array.isArray(value) && value.includes(row[column])
+              : row[column] === value,
+          ),
+        );
+      },
+    };
+    return query;
+  });
   const db = {
     transaction,
     insertInto,
     updateTable,
-    selectFrom(table: string) {
-      const predicates: Array<[string, string, unknown]> = [];
-      const query = {
-        selectAll() {
-          return query;
-        },
-        where(column: string, operator: string, value: unknown) {
-          predicates.push([column, operator, value]);
-          return query;
-        },
-        forUpdate() {
-          return query;
-        },
-        async executeTakeFirst() {
-          return (tables[table] ?? []).find((row) =>
-            predicates.every(([column, operator, value]) =>
-              operator === 'in'
-                ? Array.isArray(value) && value.includes(row[column])
-                : row[column] === value,
-            ),
-          );
-        },
-      };
-      return query;
-    },
+    selectFrom,
   };
-  return { db, insertInto, tables, transaction, updateTable };
+  return { db, insertInto, selectFrom, tables, transaction, updateTable };
 }
 
 async function testApp(activePrincipal: Principal, databaseState = database()) {
@@ -149,6 +150,13 @@ describe('OAuth application route authorization contract', () => {
 
   it('is the exact executable source for the immutable C-123 contracts', () => {
     expect(OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toEqual([
+      expect.objectContaining({
+        method: 'GET',
+        operationId: 'getOauthApplications',
+        path: '/oauth-applications',
+        deniedBoundaries: [],
+        policyDeniedBoundaries: ['brand', 'event'],
+      }),
       expect.objectContaining({
         method: 'POST',
         operationId: 'postOauthApplications',
@@ -173,7 +181,9 @@ describe('OAuth application route authorization contract', () => {
       const response = await app.inject(
         contract.method === 'POST'
           ? { method: 'POST', url: '/oauth-applications', payload }
-          : { method: 'DELETE', url: `/oauth-applications/${appId}` },
+          : contract.method === 'DELETE'
+            ? { method: 'DELETE', url: `/oauth-applications/${appId}` }
+            : { method: 'GET', url: '/oauth-applications' },
       );
 
       expect(response.statusCode).toBe(403);
@@ -181,6 +191,7 @@ describe('OAuth application route authorization contract', () => {
       expect(databaseState.transaction).not.toHaveBeenCalled();
       expect(databaseState.insertInto).not.toHaveBeenCalled();
       expect(databaseState.updateTable).not.toHaveBeenCalled();
+      expect(databaseState.selectFrom).not.toHaveBeenCalled();
       expect(writeAuditLog).not.toHaveBeenCalled();
       await app.close();
     },
@@ -191,6 +202,7 @@ describe('OAuth application route authorization contract', () => {
     ['event', { eventIds: ['event_oauth_application_auth_01'] }],
   ])('returns 403 for a %s-scoped principal before any effect', async (_scope, bounds) => {
     for (const request of [
+      { method: 'GET' as const, url: '/oauth-applications' },
       { method: 'POST' as const, url: '/oauth-applications', payload },
       { method: 'DELETE' as const, url: `/oauth-applications/${appId}` },
     ]) {
@@ -199,6 +211,7 @@ describe('OAuth application route authorization contract', () => {
       expect(response.statusCode).toBe(403);
       expect(response.json().error.code).toBe('FORBIDDEN');
       expect(databaseState.transaction).not.toHaveBeenCalled();
+      expect(databaseState.selectFrom).not.toHaveBeenCalled();
       expect(writeAuditLog).not.toHaveBeenCalled();
       await app.close();
     }

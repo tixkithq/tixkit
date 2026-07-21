@@ -25395,7 +25395,9 @@ export const apiReferenceOperations = [
         "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "developers.write"
+    ],
     "parameters": [
       {
         "$ref": "#/components/parameters/Cursor"

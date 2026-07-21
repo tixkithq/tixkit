@@ -898,6 +898,10 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/api-keys']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices']).toBeDefined();
     expect(openApiSpec.paths['/oauth-applications']).toBeDefined();
+    const oauthApplicationList = openApiSpec.paths['/oauth-applications'].get;
+    expect(oauthApplicationList.operationId).toBe('getOauthApplications');
+    expect(oauthApplicationList['x-required-permissions']).toEqual(['developers.write']);
+    expect(oauthApplicationList.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
     expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke']).toBeDefined();
     expect(openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post.responses).toHaveProperty(
       '200',
