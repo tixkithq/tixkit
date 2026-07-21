@@ -724,6 +724,22 @@ export const BRAND_SENDER_IDENTITY_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = O
   }),
 ]);
 
+export const ORGANIZATION_BILLING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'GET',
+    operationId: 'getOrganizationsByOrganizationIdBilling',
+    path: '/organizations/{organizationId}/billing',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: ['organizationId'],
+    sideEffectAssertions: [],
+    source: 'billing-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 200 },
@@ -2101,6 +2117,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...TENANT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BRAND_SENDER_IDENTITY_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...ORGANIZATION_BILLING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

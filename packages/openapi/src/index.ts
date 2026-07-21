@@ -17329,8 +17329,19 @@ const rawOpenApiSpec = {
     },
     '/organizations/{organizationId}/billing': {
       get: {
+        operationId: 'getOrganizationsByOrganizationIdBilling',
         summary: 'Get billing overview for an organization',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['billing.write'],
+        'x-principal-type-restrictions': { allowed: ['user', 'system'] },
+        parameters: [
+          {
+            name: 'organizationId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Billing overview',
@@ -17342,7 +17353,11 @@ const rawOpenApiSpec = {
                     organizationId: { type: 'string' },
                     plan: { type: 'string' },
                     status: { type: 'string' },
-                    ticketsThisMonth: { type: 'integer' },
+                    ticketsThisMonth: {
+                      type: 'integer',
+                      description:
+                        'Tickets created during the current UTC calendar month, using a half-open month interval',
+                    },
                   },
                   required: ['organizationId', 'plan', 'status', 'ticketsThisMonth'],
                 },

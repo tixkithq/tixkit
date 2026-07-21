@@ -2195,6 +2195,10 @@ describe('brand domain creation', () => {
   });
 
   it('GET /organizations/:organizationId/billing returns tenant-backed billing overview', async () => {
+    const now = new Date();
+    const currentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 2));
+    const priorMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) - 1000);
+    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     const tables = {
       tenants: [
         {
@@ -2240,6 +2244,7 @@ describe('brand domain creation', () => {
           id: 'tkt_1',
           tenant_id: 'tnt_1',
           event_id: 'evt_org_1',
+          created_at: currentMonth,
           'events.tenant_id': 'tnt_1',
           'events.organization_id': 'org_1',
         },
@@ -2247,6 +2252,23 @@ describe('brand domain creation', () => {
           id: 'tkt_2',
           tenant_id: 'tnt_1',
           event_id: 'evt_org_1',
+          created_at: currentMonth,
+          'events.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+        },
+        {
+          id: 'tkt_prior_month',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_org_1',
+          created_at: priorMonth,
+          'events.tenant_id': 'tnt_1',
+          'events.organization_id': 'org_1',
+        },
+        {
+          id: 'tkt_next_month',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_org_1',
+          created_at: nextMonth,
           'events.tenant_id': 'tnt_1',
           'events.organization_id': 'org_1',
         },
@@ -2254,6 +2276,7 @@ describe('brand domain creation', () => {
           id: 'tkt_other_org',
           tenant_id: 'tnt_1',
           event_id: 'evt_org_other',
+          created_at: currentMonth,
           'events.tenant_id': 'tnt_1',
           'events.organization_id': 'org_other',
         },
@@ -2261,6 +2284,7 @@ describe('brand domain creation', () => {
           id: 'tkt_other_tenant',
           tenant_id: 'tnt_2',
           event_id: 'evt_other_tenant',
+          created_at: currentMonth,
           'events.tenant_id': 'tnt_2',
           'events.organization_id': 'org_external',
         },

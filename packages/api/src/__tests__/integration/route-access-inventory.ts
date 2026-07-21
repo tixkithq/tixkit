@@ -142,6 +142,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'tenant-list-route-authorization-db.integration.test.ts'),
   ],
   [
+    'billing-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'billing-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'bootstrap-context-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'bootstrap-context-route-authorization-db.integration.test.ts'),
   ],
@@ -378,6 +382,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getBrandsByBrandIdEmailSenderIdentities'], {
     source: 'tenant-list-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getOrganizationsByOrganizationIdBilling'], {
+    source: 'billing-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['getBootstrapContext'], {
     source: 'bootstrap-context-route-authorization-db.integration.test.ts',

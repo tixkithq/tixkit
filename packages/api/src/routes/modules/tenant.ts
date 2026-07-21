@@ -1798,16 +1798,19 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/organizations/:organizationId/billing', async (request) => {
     const principal = request.principal!;
     const { organizationId } = request.params as { organizationId: string };
-    const organization = await new OrganizationRepository(db).findById(organizationId);
-    if (!organization) throw new ValidationError('Organization not found');
-    ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
     await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
+    const organization = await new OrganizationRepository(db).findById(organizationId);
+    if (!organization) throw new NotFoundError('Organization', organizationId);
+    ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
 
     const tenant = await db
       .selectFrom('tenants')
-      .selectAll()
+      .select(['plan', 'status'])
       .where('id', '=', principal.tenantId)
       .executeTakeFirst();
+    const now = new Date();
+    const billingMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const billingMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     const ticketStats = await db
       .selectFrom('tickets')
       .innerJoin('events', 'events.id', 'tickets.event_id')
@@ -1815,6 +1818,8 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       .where('tickets.tenant_id', '=', principal.tenantId)
       .where('events.tenant_id', '=', principal.tenantId)
       .where('events.organization_id', '=', organizationId)
+      .where('tickets.created_at', '>=', billingMonthStart)
+      .where('tickets.created_at', '<', billingMonthEnd)
       .executeTakeFirst();
 
     return {

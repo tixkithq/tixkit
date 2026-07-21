@@ -19664,7 +19664,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "billing.write"
+    ],
     "parameters": [
       {
         "name": "organizationId",
@@ -19694,7 +19696,8 @@ export const apiReferenceOperations = [
                   "type": "string"
                 },
                 "ticketsThisMonth": {
-                  "type": "integer"
+                  "type": "integer",
+                  "description": "Tickets created during the current UTC calendar month, using a half-open month interval"
                 }
               },
               "required": [

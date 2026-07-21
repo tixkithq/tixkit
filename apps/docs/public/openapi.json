@@ -35919,10 +35919,30 @@
     },
     "/organizations/{organizationId}/billing": {
       "get": {
+        "operationId": "getOrganizationsByOrganizationIdBilling",
         "summary": "Get billing overview for an organization",
         "security": [
           {
             "BearerAuth": []
+          }
+        ],
+        "x-required-permissions": [
+          "billing.write"
+        ],
+        "x-principal-type-restrictions": {
+          "allowed": [
+            "user",
+            "system"
+          ]
+        },
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -35943,7 +35963,8 @@
                       "type": "string"
                     },
                     "ticketsThisMonth": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "Tickets created during the current UTC calendar month, using a half-open month interval"
                     }
                   },
                   "required": [
@@ -36014,17 +36035,6 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "organizationId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "operationId": "getOrganizationsByOrganizationIdBilling",
         "tags": [
           "Organizations"
         ]

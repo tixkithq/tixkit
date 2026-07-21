@@ -1511,6 +1511,20 @@ describe('openApiSpec', () => {
         'x-required-permissions'
       ],
     ).toEqual(['billing.write']);
+    const billing = openApiSpec.paths['/organizations/{organizationId}/billing'].get;
+    expect(billing.operationId).toBe('getOrganizationsByOrganizationIdBilling');
+    expect(billing['x-required-permissions']).toEqual(['billing.write']);
+    expect(billing['x-principal-type-restrictions']).toEqual({ allowed: ['user', 'system'] });
+    expect(billing.parameters).toContainEqual({
+      name: 'organizationId',
+      in: 'path',
+      required: true,
+      schema: { type: 'string' },
+    });
+    expect(
+      billing.responses['200'].content['application/json'].schema.properties.ticketsThisMonth
+        .description,
+    ).toContain('current UTC calendar month');
     expect(
       openApiSpec.paths[
         '/organizations/{organizationId}/payment-accounts/{paymentAccountId}/stripe-connect/refresh'
