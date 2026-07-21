@@ -38,7 +38,7 @@ import {
 const eventReadContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
   (contract) =>
     contract.method === 'GET' &&
-    contract.path.startsWith('/events/{eventId}') &&
+    contract.source === 'event-route-authorization-db.integration.test.ts' &&
     contract.operationId !== 'getEventsByEventIdOperationalHealth',
 );
 const operationalHealthContract = (() => {

@@ -41,6 +41,8 @@ function ticketConfigurationContract(operationId: string) {
 const poolContract = ticketConfigurationContract('postEventsByEventIdInventoryPools');
 const ticketContract = ticketConfigurationContract('postEventsByEventIdTicketTypes');
 const batchContract = ticketConfigurationContract('postEventsByEventIdTicketTypesBatch');
+const poolReadContract = ticketConfigurationContract('getEventsByEventIdInventoryPools');
+const ticketReadContract = ticketConfigurationContract('getEventsByEventIdTicketTypes');
 const listAccessRulesContract = ticketConfigurationContract(
   'getTicketTypesByTicketTypeIdAccessRules',
 );
@@ -392,6 +394,24 @@ function invokePool(targetEventId: string, name?: string) {
   });
 }
 
+function invokePoolRead(targetEventId: string, cursor?: string) {
+  const query = new URLSearchParams({ limit: '1' });
+  if (cursor) query.set('cursor', cursor);
+  return app.inject({
+    method: poolReadContract.method,
+    url: `${poolReadContract.path.replace('{eventId}', targetEventId)}?${query}`,
+  });
+}
+
+function invokeTicketRead(targetEventId: string, cursor?: string) {
+  const query = new URLSearchParams({ limit: '1' });
+  if (cursor) query.set('cursor', cursor);
+  return app.inject({
+    method: ticketReadContract.method,
+    url: `${ticketReadContract.path.replace('{eventId}', targetEventId)}?${query}`,
+  });
+}
+
 function invokeTicket(
   targetEventId: string,
   inventoryPoolId: string,
@@ -497,7 +517,7 @@ function sortAccessRules<T extends { type: unknown }>(rules: T[]): T[] {
   return [...rules].sort((left, right) => String(left.type).localeCompare(String(right.type)));
 }
 
-describeWithIntegrationDatabase('ticket configuration write route authorization matrix', () => {
+describeWithIntegrationDatabase('ticket configuration route authorization matrix', () => {
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -625,6 +645,8 @@ describeWithIntegrationDatabase('ticket configuration write route authorization 
 
   it('binds all ticket-configuration route contracts to this executable proof', () => {
     for (const contract of [
+      poolReadContract,
+      ticketReadContract,
       poolContract,
       ticketContract,
       batchContract,
@@ -637,6 +659,100 @@ describeWithIntegrationDatabase('ticket configuration write route authorization 
         permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
         source: 'ticket-configuration-route-authorization-db.integration.test.ts',
       });
+    }
+  });
+
+  it('returns only the exact authorized inventory pools and ticket types', async () => {
+    await seedPool(eventA, 'Allowed read pool two');
+    await seedAccessRuleFixture(eventA, poolA, occurrenceA, 'Allowed read ticket one');
+    await seedAccessRuleFixture(eventA, poolA, occurrenceA, 'Allowed read ticket two');
+    const scopedTicket = await seedAccessRuleFixture(
+      eventAScoped,
+      poolAScoped,
+      occurrenceAScoped,
+      'Scoped read ticket',
+    );
+    const foreignTicket = await seedAccessRuleFixture(
+      eventB,
+      poolB,
+      occurrenceB,
+      'Foreign read ticket',
+    );
+    const before = await evidenceSnapshot();
+    const expectedPools = before.pools
+      .filter((pool) => pool.event_id === eventA)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((pool) => serializeInventoryPool(pool as Record<string, unknown>));
+    const expectedTickets = before.ticketTypes
+      .filter((ticket) => ticket.event_id === eventA)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((ticket) => serializeTicketType(ticket as Record<string, unknown>));
+    expect(expectedPools).toHaveLength(2);
+    expect(expectedTickets).toHaveLength(2);
+    const poolQuery = vi.spyOn(InventoryPoolRepository.prototype, 'findByEvent');
+    const ticketQuery = vi.spyOn(TicketTypeRepository.prototype, 'findByEvent');
+
+    try {
+      const [firstPoolResponse, firstTicketResponse] = await Promise.all([
+        invokePoolRead(eventA),
+        invokeTicketRead(eventA),
+      ]);
+      const [secondPoolResponse, secondTicketResponse] = await Promise.all([
+        invokePoolRead(eventA, firstPoolResponse.json().nextCursor),
+        invokeTicketRead(eventA, firstTicketResponse.json().nextCursor),
+      ]);
+
+      expect(firstPoolResponse.statusCode, firstPoolResponse.body).toBe(200);
+      expect(firstPoolResponse.json()).toEqual({
+        items: [expectedPools[0]],
+        nextCursor: expectedPools[0]!.id,
+        hasMore: true,
+      });
+      expect(secondPoolResponse.statusCode, secondPoolResponse.body).toBe(200);
+      expect(secondPoolResponse.json()).toEqual({
+        items: [expectedPools[1]],
+        nextCursor: null,
+        hasMore: false,
+      });
+      expect(firstTicketResponse.statusCode, firstTicketResponse.body).toBe(200);
+      expect(firstTicketResponse.json()).toEqual({
+        items: [expectedTickets[0]],
+        nextCursor: expectedTickets[0]!.id,
+        hasMore: true,
+      });
+      expect(secondTicketResponse.statusCode, secondTicketResponse.body).toBe(200);
+      expect(secondTicketResponse.json()).toEqual({
+        items: [expectedTickets[1]],
+        nextCursor: null,
+        hasMore: false,
+      });
+      expect(poolQuery.mock.calls).toEqual([
+        [eventA, 2, undefined],
+        [eventA, 2, expectedPools[0]!.id],
+      ]);
+      expect(ticketQuery.mock.calls).toEqual([
+        [eventA, 2, undefined],
+        [eventA, 2, expectedTickets[0]!.id],
+      ]);
+      for (const response of [
+        firstPoolResponse,
+        secondPoolResponse,
+        firstTicketResponse,
+        secondTicketResponse,
+      ]) {
+        expect(response.body).not.toContain(poolAScoped);
+        expect(response.body).not.toContain(poolB);
+        expect(response.body).not.toContain('Scoped');
+        expect(response.body).not.toContain('Foreign');
+        expect(response.body).not.toContain(scopedTicket.ticketType.id);
+        expect(response.body).not.toContain(scopedTicket.ticketType.name);
+        expect(response.body).not.toContain(foreignTicket.ticketType.id);
+        expect(response.body).not.toContain(foreignTicket.ticketType.name);
+      }
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    } finally {
+      poolQuery.mockRestore();
+      ticketQuery.mockRestore();
     }
   });
 
@@ -1015,7 +1131,7 @@ describeWithIntegrationDatabase('ticket configuration write route authorization 
       'NOT_FOUND',
     ],
   ] as const)(
-    'denies the %s boundary for all three routes with exact configuration and audit snapshots',
+    'denies the %s boundary for both reads and all three writes with exact snapshots',
     async (_boundary, makePrincipal, targetEvent, status, code) => {
       activePrincipal = makePrincipal();
       const eventId = targetEvent();
@@ -1028,22 +1144,40 @@ describeWithIntegrationDatabase('ticket configuration write route authorization 
             ? occurrenceAScoped
             : occurrenceB;
       const before = await evidenceSnapshot();
+      const poolQuery = vi.spyOn(InventoryPoolRepository.prototype, 'findByEvent');
+      const ticketQuery = vi.spyOn(TicketTypeRepository.prototype, 'findByEvent');
 
-      const responses = [
-        await invokePool(eventId, 'Forbidden pool'),
-        await invokeTicket(eventId, targetPool, targetOccurrence, 'Forbidden ticket'),
-        await invokeBatchWithExistingPool(
-          eventId,
-          targetPool,
-          targetOccurrence,
-          'Forbidden batch ticket',
-        ),
-      ];
-      for (const response of responses) {
-        expect(response.statusCode, response.body).toBe(status);
-        expect(response.json()).toMatchObject({ error: { code } });
+      try {
+        const readResponses = [await invokePoolRead(eventId), await invokeTicketRead(eventId)];
+        expect(poolQuery).not.toHaveBeenCalled();
+        expect(ticketQuery).not.toHaveBeenCalled();
+        for (const response of readResponses) {
+          expect(response.json()).not.toHaveProperty('items');
+        }
+        const responses = [
+          ...readResponses,
+          await invokePool(eventId, 'Forbidden pool'),
+          await invokeTicket(eventId, targetPool, targetOccurrence, 'Forbidden ticket'),
+          await invokeBatchWithExistingPool(
+            eventId,
+            targetPool,
+            targetOccurrence,
+            'Forbidden batch ticket',
+          ),
+        ];
+        for (const response of responses) {
+          expect(response.statusCode, response.body).toBe(status);
+          expect(response.json()).toMatchObject({ error: { code } });
+          expect(response.body).not.toContain(targetPool);
+          expect(response.body).not.toContain('Allowed ticket pool');
+          expect(response.body).not.toContain('Scoped ticket pool');
+          expect(response.body).not.toContain('Foreign ticket pool');
+        }
+        await expect(evidenceSnapshot()).resolves.toEqual(before);
+      } finally {
+        poolQuery.mockRestore();
+        ticketQuery.mockRestore();
       }
-      await expect(evidenceSnapshot()).resolves.toEqual(before);
     },
   );
 

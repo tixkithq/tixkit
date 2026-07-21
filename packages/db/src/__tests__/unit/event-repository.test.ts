@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   EventOccurrenceRepository,
   EventRepository,
+  InventoryPoolRepository,
   ProductCategoryRepository,
   ProductRepository,
+  TicketTypeRepository,
 } from '../../repositories/event.js';
 import type { Database } from '../../client.js';
 
@@ -66,6 +68,24 @@ describe('event product repositories', () => {
       ['id', '>', 'pcat_1'],
     ]);
   });
+
+  it.each([
+    ['ticket type', (db: Database) => new TicketTypeRepository(db)],
+    ['inventory pool', (db: Database) => new InventoryPoolRepository(db)],
+  ] as const)(
+    'aligns %s pagination ordering with the id cursor contract',
+    async (_name, create) => {
+      const { db, orderByCalls, whereCalls } = createSelectDb();
+
+      await create(db).findByEvent('evt_1', 2, 'resource_1');
+
+      expect(orderByCalls).toEqual([['id', 'asc']]);
+      expect(whereCalls).toEqual([
+        ['event_id', '=', 'evt_1'],
+        ['id', '>', 'resource_1'],
+      ]);
+    },
+  );
 
   it('aligns product pagination ordering with the id cursor contract', async () => {
     const { db, orderByCalls, whereCalls } = createSelectDb();
