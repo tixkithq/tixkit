@@ -1341,7 +1341,8 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         if (!currentDocument || !currentVersion || currentVersion.documentId !== documentId) {
           throw new NotFoundError('ContentDocumentVersion', versionId);
         }
-        const mediaAssets = await loadPublicEventMedia(transaction, document.eventId!, {
+        const mediaAssets = await loadPublicEventMedia(transaction, {
+          eventId: document.eventId!,
           tenantId: document.tenantId,
           organizationId: document.organizationId,
           brandId: document.brandId,
@@ -1684,7 +1685,8 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
         version: result.version,
         host,
       }),
-      loadPublicEventMedia(db, event.id, {
+      loadPublicEventMedia(db, {
+        eventId: event.id,
         tenantId: event.tenant_id,
         organizationId: event.organization_id,
         brandId: event.brand_id,
@@ -1724,7 +1726,12 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     const [marketingIntegrations, mediaAssets, contentPage, availability, resaleListings] =
       await Promise.all([
         loadPublicMarketingIntegrations(db, event),
-        loadPublicEventMedia(db, event.id),
+        loadPublicEventMedia(db, {
+          eventId: event.id,
+          tenantId: event.tenant_id,
+          organizationId: event.organization_id,
+          brandId: event.brand_id,
+        }),
         loadOptionalPublicPage(event, locale, host),
         loadPublicAvailability(
           db,

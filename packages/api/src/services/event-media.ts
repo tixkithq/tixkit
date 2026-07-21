@@ -823,7 +823,13 @@ export async function streamEventMediaRendition(db: Database, renditionId: strin
   const rendition = await db
     .selectFrom('event_media_renditions as rendition')
     .innerJoin('event_media_assets as asset', 'asset.id', 'rendition.asset_id')
-    .innerJoin('events as event', 'event.id', 'asset.event_id')
+    .innerJoin('events as event', (join) =>
+      join
+        .onRef('event.id', '=', 'asset.event_id')
+        .onRef('event.tenant_id', '=', 'asset.tenant_id')
+        .onRef('event.organization_id', '=', 'asset.organization_id')
+        .onRef('event.brand_id', '=', 'asset.brand_id'),
+    )
     .select([
       'rendition.bucket',
       'rendition.object_key',

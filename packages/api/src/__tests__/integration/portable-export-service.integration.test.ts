@@ -905,7 +905,14 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         },
       ])
       .execute();
-    expect(await loadPublicEventMedia(db, event.id)).toEqual([
+    expect(
+      await loadPublicEventMedia(db, {
+        eventId: event.id,
+        tenantId: event.tenant_id,
+        organizationId: event.organization_id,
+        brandId: event.brand_id,
+      }),
+    ).toEqual([
       {
         role: 'cover',
         altText: 'Purple event cover',

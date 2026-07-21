@@ -4622,7 +4622,7 @@ describe('upload artifact routes', () => {
   it('serves public event media renditions with immutable cache and resource-timing evidence', async () => {
     const { Readable } = await import('node:stream');
     const renditionQuery = {
-      innerJoin: vi.fn(function (this: typeof renditionQuery) {
+      innerJoin: vi.fn(function (this: typeof renditionQuery, _table: unknown, _join: unknown) {
         return this;
       }),
       select: vi.fn(function (this: typeof renditionQuery) {
@@ -4674,6 +4674,20 @@ describe('upload artifact routes', () => {
     expect(renditionQuery.where).toHaveBeenCalledWith('rendition.id', '=', 'emr_public');
     expect(renditionQuery.where).toHaveBeenCalledWith('event.status', '=', 'published');
     expect(renditionQuery.where).toHaveBeenCalledWith('event.visibility', '!=', 'private');
+    const eventJoin = renditionQuery.innerJoin.mock.calls.find(
+      ([table]) => table === 'events as event',
+    )?.[1];
+    expect(eventJoin).toEqual(expect.any(Function));
+    const onRef = vi.fn();
+    const joinBuilder = { onRef };
+    onRef.mockReturnValue(joinBuilder);
+    (eventJoin as (join: typeof joinBuilder) => unknown)(joinBuilder);
+    expect(onRef.mock.calls).toEqual([
+      ['event.id', '=', 'asset.event_id'],
+      ['event.tenant_id', '=', 'asset.tenant_id'],
+      ['event.organization_id', '=', 'asset.organization_id'],
+      ['event.brand_id', '=', 'asset.brand_id'],
+    ]);
     await app.close();
   });
 
