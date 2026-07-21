@@ -38079,10 +38079,27 @@
     },
     "/privacy/requests/{requestId}": {
       "get": {
+        "operationId": "getPrivacyRequestsByRequestId",
         "summary": "Get GDPR request status and result",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "x-required-permissions": [
+          "settings.write"
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -38106,6 +38123,40 @@
               }
             }
           },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden by permission or event-scoped principal policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
+          },
           "404": {
             "description": "Privacy request not found",
             "content": {
@@ -38124,17 +38175,6 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "requestId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "operationId": "getPrivacyRequestsByRequestId",
         "tags": [
           "Privacy"
         ]

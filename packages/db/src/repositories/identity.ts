@@ -362,6 +362,15 @@ export class PrivacyRequestRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async findByIdForTenant(tenantId: string, id: string) {
+    return this.db
+      .selectFrom('privacy_requests')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', id)
+      .executeTakeFirst();
+  }
+
   async listByTenant(
     tenantId: string,
     filters: {

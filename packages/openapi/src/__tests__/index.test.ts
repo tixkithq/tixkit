@@ -3053,6 +3053,24 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/privacy/erasures'].post['x-required-permissions']).toEqual([
       'settings.write',
     ]);
+    const privacyRead = openApiSpec.paths['/privacy/requests/{requestId}'].get;
+    expect(privacyRead.operationId).toBe('getPrivacyRequestsByRequestId');
+    expect(privacyRead['x-required-permissions']).toEqual(['settings.write']);
+    expect(privacyRead.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+    expect(privacyRead.parameters).toContainEqual({
+      name: 'requestId',
+      in: 'path',
+      required: true,
+      schema: { type: 'string' },
+    });
+    expect(privacyRead.responses).toEqual(
+      expect.objectContaining({
+        '200': expect.any(Object),
+        '401': expect.any(Object),
+        '403': expect.any(Object),
+        '404': expect.any(Object),
+      }),
+    );
     expect(
       openApiSpec.paths['/privacy/erasures'].post.requestBody.content['application/json'].schema,
     ).toEqual({

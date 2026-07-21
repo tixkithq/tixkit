@@ -100,6 +100,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'privacy-erasure-route-authorization-db.integration.test.ts'),
   ],
   [
+    'privacy-request-read-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'privacy-request-read-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'message-campaign-write-route-authorization-db.integration.test.ts',
     resolve(
       import.meta.dirname,
@@ -339,6 +343,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['postPrivacyDataExports', 'postPrivacyErasures'], {
     source: 'privacy-erasure-route-authorization-db.integration.test.ts',
     persistenceSource: 'privacy-erasure-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getPrivacyRequestsByRequestId'], {
+    source: 'privacy-request-read-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['postEventsByEventIdMessages'], {
     source: 'message-campaign-write-route-authorization-db.integration.test.ts',

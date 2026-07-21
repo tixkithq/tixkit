@@ -18330,14 +18330,40 @@ const rawOpenApiSpec = {
     },
     '/privacy/requests/{requestId}': {
       get: {
+        operationId: 'getPrivacyRequestsByRequestId',
         summary: 'Get GDPR request status and result',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['settings.write'],
+        parameters: [
+          {
+            name: 'requestId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Privacy request status',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/PrivacyRequest' },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden by permission or event-scoped principal policy',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },

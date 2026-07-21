@@ -21860,9 +21860,14 @@ export const apiReferenceOperations = [
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "settings.write"
+    ],
     "parameters": [
       {
         "name": "requestId",
@@ -21891,6 +21896,40 @@ export const apiReferenceOperations = [
               "status": "pending",
               "requestedBy": "requestedBy example",
               "createdAt": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Forbidden by permission or event-scoped principal policy",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
             }
           }
         }

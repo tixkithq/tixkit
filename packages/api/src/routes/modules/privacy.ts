@@ -390,13 +390,13 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
   app.get('/privacy/requests/:requestId', async (request) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
+    ClerkAuthService.requireNoEventScope(principal, 'privacy requests');
     const { requestId } = request.params as { requestId: string };
-    const row = await privacyRepo().findById(requestId);
-    if (!row || row.tenant_id !== principal.tenantId) {
+    const row = await privacyRepo().findByIdForTenant(principal.tenantId, requestId);
+    if (!row) {
       throw new NotFoundError('PrivacyRequest', requestId);
     }
     ClerkAuthService.requireOrganizationScope(principal, row.organization_id);
-    ClerkAuthService.requireNoEventScope(principal, 'privacy requests');
     if (principal.brandIds && principal.brandIds.length > 0 && !row.brand_id) {
       throw new NotFoundError('PrivacyRequest', requestId);
     }
