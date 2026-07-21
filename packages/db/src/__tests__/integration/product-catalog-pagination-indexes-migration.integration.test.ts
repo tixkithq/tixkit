@@ -3,7 +3,7 @@ import { Migrator } from 'kysely/migration';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../../client.js';
 import { dropAllTables, TixkitMigrationProvider } from '../../migrate.js';
-import { EventResourcePaginationIndexesMigration } from '../../migrations/0096_event_resource_pagination_indexes.js';
+import { ProductCatalogPaginationIndexesMigration } from '../../migrations/0097_product_catalog_pagination_indexes.js';
 
 const driver =
   process.env.DB_INTEGRATION_DRIVER === 'mysql'
@@ -36,7 +36,7 @@ function assertDedicatedMigrationDatabase(primary: string, dedicated: string): v
     !dedicatedDatabase.pathname.endsWith('_migration_test')
   ) {
     throw new Error(
-      'Cursor-index migration proof requires a sibling database ending in _migration_test',
+      'Product-catalog index proof requires a sibling database ending in _migration_test',
     );
   }
 }
@@ -53,7 +53,6 @@ async function indexColumns(db: Database, tableName: string, indexName: string):
     `.execute(db);
     return result.rows.map((row) => row.columnName);
   }
-
   const result = await sql<{ indexdef: string }>`
     select indexdef
     from pg_indexes
@@ -67,43 +66,45 @@ async function indexColumns(db: Database, tableName: string, indexName: string):
   return columns.split(',').map((column) => column.trim().replaceAll('"', ''));
 }
 
-async function expectIndexState(db: Database, upgraded: boolean): Promise<void> {
-  const resources = [
-    {
-      tableName: 'ticket_types',
-      oldIndex: 'idx_ticket_types_event',
-      newIndex: 'idx_ticket_types_event_id',
-    },
-    {
-      tableName: 'inventory_pools',
-      oldIndex: 'idx_inventory_pools_event',
-      newIndex: 'idx_inventory_pools_event_id',
-    },
-  ] as const;
+const resources = [
+  {
+    tableName: 'product_categories',
+    indexName: 'idx_product_categories_event_id',
+    cursor: 'pcat_cursor',
+  },
+  { tableName: 'products', indexName: 'idx_products_event_id', cursor: 'prd_cursor' },
+] as const;
 
+async function expectIndexState(db: Database, present: boolean): Promise<void> {
   for (const resource of resources) {
-    await expect(indexColumns(db, resource.tableName, resource.newIndex)).resolves.toEqual(
-      upgraded ? ['event_id', 'id'] : [],
+    await expect(indexColumns(db, resource.tableName, resource.indexName)).resolves.toEqual(
+      present ? ['event_id', 'id'] : [],
     );
-    await expect(indexColumns(db, resource.tableName, resource.oldIndex)).resolves.toEqual(
-      upgraded ? [] : ['event_id'],
+  }
+  if (driver === 'mysql') {
+    await expect(
+      indexColumns(db, 'product_categories', 'product_categories_event_fk'),
+    ).resolves.toEqual(present ? [] : ['event_id']);
+    await expect(indexColumns(db, 'products', 'products_event_fk')).resolves.toEqual(
+      present ? [] : ['event_id'],
     );
+    await expect(indexColumns(db, 'products', 'products_category_fk')).resolves.toEqual([
+      'category_id',
+    ]);
   }
 }
 
 async function expectMysqlIndexUsable(
   db: Database,
-  tableName: 'inventory_pools' | 'ticket_types',
-  indexName: string,
-  cursor: string,
+  resource: (typeof resources)[number],
 ): Promise<void> {
   if (driver !== 'mysql') return;
   const result = await sql<Record<string, unknown>>`
     explain format=json
     select *
-    from ${sql.table(tableName)} force index (${sql.raw(indexName)})
-    where event_id = 'evt_cursor_index'
-      and id > ${cursor}
+    from ${sql.table(resource.tableName)} force index (${sql.raw(resource.indexName)})
+    where event_id = 'evt_product_cursor_index'
+      and id > ${resource.cursor}
     order by id asc
     limit 51
   `.execute(db);
@@ -120,7 +121,7 @@ async function expectMysqlIndexUsable(
     }
     if (!value || typeof value !== 'object') return undefined;
     const node = value as Record<string, unknown>;
-    if (node.key === indexName) return node;
+    if (node.key === resource.indexName) return node;
     for (const child of Object.values(node)) {
       const selected = findSelectedIndex(child);
       if (selected) return selected;
@@ -129,7 +130,7 @@ async function expectMysqlIndexUsable(
   }
 
   const selected = findSelectedIndex(plan);
-  expect(selected, `MySQL did not select ${indexName}`).toBeDefined();
+  expect(selected, `MySQL did not select ${resource.indexName}`).toBeDefined();
   expect(selected?.used_key_parts).toEqual(['event_id', 'id']);
 }
 
@@ -151,7 +152,7 @@ async function dropIndex(db: Database, tableName: string, indexName: string): Pr
 }
 
 (enabled ? describe.sequential : describe.skip)(
-  `event resource pagination index migration parity (real ${driver ?? 'database'})`,
+  `product-catalog pagination index migration parity (real ${driver ?? 'database'})`,
   () => {
     let db: Database;
     let lockDb: Database;
@@ -163,15 +164,15 @@ async function dropIndex(db: Database, tableName: string, indexName: string): Pr
       if (!migrationTestUrl) {
         throw new Error(
           driver === 'mysql'
-            ? 'DATABASE_URL_MYSQL_MIGRATION_TEST is required for MySQL cursor-index proof'
-            : 'DATABASE_URL_MIGRATION_TEST is required for PostgreSQL cursor-index proof',
+            ? 'DATABASE_URL_MYSQL_MIGRATION_TEST is required for MySQL product-index proof'
+            : 'DATABASE_URL_MIGRATION_TEST is required for PostgreSQL product-index proof',
         );
       }
-      assertDedicatedMigrationDatabase(primaryUrl!, migrationTestUrl!);
+      assertDedicatedMigrationDatabase(primaryUrl!, migrationTestUrl);
       previousDriver = process.env.DB_DRIVER;
       process.env.DB_DRIVER = driver!;
-      db = createDb(migrationTestUrl!);
-      lockDb = createDb(migrationTestUrl!);
+      db = createDb(migrationTestUrl);
+      lockDb = createDb(migrationTestUrl);
       let lockReady: (() => void) | undefined;
       const ready = new Promise<void>((resolve) => {
         lockReady = resolve;
@@ -185,21 +186,21 @@ async function dropIndex(db: Database, tableName: string, indexName: string): Pr
             select get_lock('tixkit-migration-test-database', 30) as acquired
           `.execute(connection);
           if (Number(acquired.rows[0]?.acquired) !== 1) {
-            throw new Error('Timed out acquiring the MySQL cursor-index migration-test lock');
+            throw new Error('Timed out acquiring the shared MySQL migration-test lock');
           }
         } else {
-          await sql`
-            select pg_advisory_lock(hashtext('tixkit-migration-test-database'))
-          `.execute(connection);
+          await sql`select pg_advisory_lock(hashtext('tixkit-migration-test-database'))`.execute(
+            connection,
+          );
         }
         lockReady?.();
         await hold;
         if (driver === 'mysql') {
           await sql`select release_lock('tixkit-migration-test-database')`.execute(connection);
         } else {
-          await sql`
-            select pg_advisory_unlock(hashtext('tixkit-migration-test-database'))
-          `.execute(connection);
+          await sql`select pg_advisory_unlock(hashtext('tixkit-migration-test-database'))`.execute(
+            connection,
+          );
         }
       });
       await Promise.race([ready, lockLifetime]);
@@ -207,7 +208,7 @@ async function dropIndex(db: Database, tableName: string, indexName: string): Pr
       const migration = await new Migrator({
         db,
         provider: new TixkitMigrationProvider(),
-      }).migrateTo('0095_permission_grant_membership_provenance');
+      }).migrateTo('0096_event_resource_pagination_indexes');
       expect(migration.error).toBeUndefined();
     }, 120_000);
 
@@ -227,117 +228,119 @@ async function dropIndex(db: Database, tableName: string, indexName: string): Pr
         .map((result) => result.reason);
       if (dropFailure !== undefined) failures.unshift(dropFailure);
       if (failures.length > 0) {
-        throw new AggregateError(failures, 'Cursor-index migration-test cleanup failed');
+        throw new AggregateError(failures, 'Product-index migration-test cleanup failed');
       }
     }, 120_000);
 
-    it('upgrades, rolls back, and reapplies without losing an event-prefix index', async () => {
+    it('upgrades, rejects drift, rolls back, repairs partial states, and reapplies', async () => {
       await expectIndexState(db, false);
 
       const migration = await new Migrator({
         db,
         provider: new TixkitMigrationProvider(),
-      }).migrateTo('0096_event_resource_pagination_indexes');
+      }).migrateTo('0097_product_catalog_pagination_indexes');
       expect(migration.error).toBeUndefined();
       expect(migration.results?.at(-1)).toMatchObject({
-        migrationName: '0096_event_resource_pagination_indexes',
+        migrationName: '0097_product_catalog_pagination_indexes',
         direction: 'Up',
         status: 'Success',
       });
       await expectIndexState(db, true);
-      await expectMysqlIndexUsable(db, 'ticket_types', 'idx_ticket_types_event_id', 'tt_cursor');
-      await expectMysqlIndexUsable(
-        db,
-        'inventory_pools',
-        'idx_inventory_pools_event_id',
-        'inv_cursor',
-      );
+      for (const resource of resources) await expectMysqlIndexUsable(db, resource);
 
-      await EventResourcePaginationIndexesMigration.up(db);
+      await ProductCatalogPaginationIndexesMigration.up(db);
       await expectIndexState(db, true);
 
-      await createIndex(db, 'ticket_types', 'idx_ticket_types_event', ['event_id']);
-      await dropIndex(db, 'ticket_types', 'idx_ticket_types_event_id');
-      await createIndex(db, 'ticket_types', 'idx_ticket_types_event_id', ['event_id']);
-      await expect(EventResourcePaginationIndexesMigration.up(db)).rejects.toThrow(
-        'expected an ordinary visible valid B-tree on [event_id, id]',
-      );
-      await dropIndex(db, 'ticket_types', 'idx_ticket_types_event_id');
-      await createIndex(db, 'ticket_types', 'idx_ticket_types_event_id', ['event_id', 'id']);
+      if (driver === 'mysql') {
+        await createIndex(db, 'products', 'products_event_fk', ['event_id', 'id']);
+        await expect(ProductCatalogPaginationIndexesMigration.up(db)).rejects.toThrow(
+          'expected an ordinary visible valid B-tree on [event_id]',
+        );
+        await expect(indexColumns(db, 'products', 'idx_products_event_id')).resolves.toEqual([
+          'event_id',
+          'id',
+        ]);
+        await expect(
+          indexColumns(db, 'product_categories', 'idx_product_categories_event_id'),
+        ).resolves.toEqual(['event_id', 'id']);
+        await dropIndex(db, 'products', 'products_event_fk');
+      }
 
       if (driver === 'mysql') {
-        await sql`
-          alter table ticket_types alter index idx_ticket_types_event_id invisible
-        `.execute(db);
+        await createIndex(db, 'products', 'products_event_fk', ['event_id']);
+      }
+      await dropIndex(db, 'products', 'idx_products_event_id');
+      await createIndex(db, 'products', 'idx_products_event_id', ['event_id']);
+      await expect(ProductCatalogPaginationIndexesMigration.up(db)).rejects.toThrow(
+        'expected an ordinary visible valid B-tree on [event_id, id]',
+      );
+      await dropIndex(db, 'products', 'idx_products_event_id');
+      await createIndex(db, 'products', 'idx_products_event_id', ['event_id', 'id']);
+
+      if (driver === 'mysql') {
+        await sql`alter table products alter index idx_products_event_id invisible`.execute(db);
       } else {
-        await dropIndex(db, 'ticket_types', 'idx_ticket_types_event_id');
+        await dropIndex(db, 'products', 'idx_products_event_id');
         await sql`
-          create index idx_ticket_types_event_id on ticket_types(event_id, id)
-          where id <> ''
+          create index idx_products_event_id on products(event_id, id) where id <> ''
         `.execute(db);
       }
-      await expect(EventResourcePaginationIndexesMigration.up(db)).rejects.toThrow(
+      await expect(ProductCatalogPaginationIndexesMigration.up(db)).rejects.toThrow(
         'expected an ordinary visible valid B-tree on [event_id, id]',
       );
       if (driver === 'mysql') {
-        await sql`
-          alter table ticket_types alter index idx_ticket_types_event_id visible
-        `.execute(db);
+        await sql`alter table products alter index idx_products_event_id visible`.execute(db);
       } else {
-        await dropIndex(db, 'ticket_types', 'idx_ticket_types_event_id');
-        await createIndex(db, 'ticket_types', 'idx_ticket_types_event_id', ['event_id', 'id']);
+        await dropIndex(db, 'products', 'idx_products_event_id');
+        await createIndex(db, 'products', 'idx_products_event_id', ['event_id', 'id']);
       }
+      await ProductCatalogPaginationIndexesMigration.up(db);
+      await expectIndexState(db, true);
 
       const rollback = await new Migrator({
         db,
         provider: new TixkitMigrationProvider(),
-      }).migrateTo('0095_permission_grant_membership_provenance');
+      }).migrateTo('0096_event_resource_pagination_indexes');
       expect(rollback.error).toBeUndefined();
       expect(rollback.results?.at(-1)).toMatchObject({
-        migrationName: '0096_event_resource_pagination_indexes',
+        migrationName: '0097_product_catalog_pagination_indexes',
         direction: 'Down',
         status: 'Success',
       });
       await expectIndexState(db, false);
-
-      await EventResourcePaginationIndexesMigration.down!(db);
+      await ProductCatalogPaginationIndexesMigration.down!(db);
       await expectIndexState(db, false);
 
-      await createIndex(db, 'ticket_types', 'idx_ticket_types_event_id', ['event_id', 'id']);
-      await dropIndex(db, 'ticket_types', 'idx_ticket_types_event');
-      await EventResourcePaginationIndexesMigration.up(db);
+      await createIndex(db, 'products', 'idx_products_event_id', ['event_id', 'id']);
+      await ProductCatalogPaginationIndexesMigration.up(db);
       await expectIndexState(db, true);
-
       const recordRecoveredUp = await new Migrator({
         db,
         provider: new TixkitMigrationProvider(),
-      }).migrateTo('0096_event_resource_pagination_indexes');
+      }).migrateTo('0097_product_catalog_pagination_indexes');
       expect(recordRecoveredUp.error).toBeUndefined();
-      expect(recordRecoveredUp.results?.at(-1)).toMatchObject({
-        migrationName: '0096_event_resource_pagination_indexes',
-        direction: 'Up',
-        status: 'Success',
-      });
       await expectIndexState(db, true);
 
       const preparePartialDown = await new Migrator({
         db,
         provider: new TixkitMigrationProvider(),
-      }).migrateTo('0095_permission_grant_membership_provenance');
+      }).migrateTo('0096_event_resource_pagination_indexes');
       expect(preparePartialDown.error).toBeUndefined();
-      await EventResourcePaginationIndexesMigration.up(db);
-      await createIndex(db, 'ticket_types', 'idx_ticket_types_event', ['event_id']);
-      await dropIndex(db, 'ticket_types', 'idx_ticket_types_event_id');
-      await EventResourcePaginationIndexesMigration.down!(db);
+      await ProductCatalogPaginationIndexesMigration.up(db);
+      if (driver === 'mysql') {
+        await createIndex(db, 'products', 'products_event_fk', ['event_id']);
+      }
+      await dropIndex(db, 'products', 'idx_products_event_id');
+      await ProductCatalogPaginationIndexesMigration.down!(db);
       await expectIndexState(db, false);
 
       const finalReapply = await new Migrator({
         db,
         provider: new TixkitMigrationProvider(),
-      }).migrateTo('0096_event_resource_pagination_indexes');
+      }).migrateTo('0097_product_catalog_pagination_indexes');
       expect(finalReapply.error).toBeUndefined();
       expect(finalReapply.results?.at(-1)).toMatchObject({
-        migrationName: '0096_event_resource_pagination_indexes',
+        migrationName: '0097_product_catalog_pagination_indexes',
         direction: 'Up',
         status: 'Success',
       });

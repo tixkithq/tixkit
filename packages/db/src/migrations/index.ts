@@ -94,3 +94,4 @@ export { PaymentAccountRefreshGenerationMigration } from './0093_payment_account
 export { ProviderAccountCleanupCommandsMigration } from './0094_provider_account_cleanup_commands.js';
 export { PermissionGrantMembershipProvenanceMigration } from './0095_permission_grant_membership_provenance.js';
 export { EventResourcePaginationIndexesMigration } from './0096_event_resource_pagination_indexes.js';
+export { ProductCatalogPaginationIndexesMigration } from './0097_product_catalog_pagination_indexes.js';

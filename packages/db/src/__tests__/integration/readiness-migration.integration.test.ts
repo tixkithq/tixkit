@@ -79,21 +79,21 @@ function assertDedicatedMigrationDatabase(primary: string, dedicated: string): v
     lockLifetime = lockDb.connection().execute(async (connection) => {
       if (driver === 'mysql') {
         const acquired = await sql<{ acquired: number | string }>`
-          select get_lock('tixkit-readiness-migration-test', 30) as acquired
+          select get_lock('tixkit-migration-test-database', 30) as acquired
         `.execute(connection);
         if (Number(acquired.rows[0]?.acquired) !== 1)
           throw new Error('Timed out acquiring the MySQL migration-test lock');
       } else {
-        await sql`select pg_advisory_lock(hashtext('tixkit-readiness-migration-test'))`.execute(
+        await sql`select pg_advisory_lock(hashtext('tixkit-migration-test-database'))`.execute(
           connection,
         );
       }
       lockReady?.();
       await hold;
       if (driver === 'mysql') {
-        await sql`select release_lock('tixkit-readiness-migration-test')`.execute(connection);
+        await sql`select release_lock('tixkit-migration-test-database')`.execute(connection);
       } else {
-        await sql`select pg_advisory_unlock(hashtext('tixkit-readiness-migration-test'))`.execute(
+        await sql`select pg_advisory_unlock(hashtext('tixkit-migration-test-database'))`.execute(
           connection,
         );
       }
