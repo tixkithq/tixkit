@@ -24,6 +24,7 @@ function resalePolicyContract(operationId: string) {
 }
 
 const updateContract = resalePolicyContract('putEventsByEventIdResalePolicy');
+const readContract = resalePolicyContract('getEventsByEventIdResalePolicy');
 
 const suffix = ulid().slice(-10).toLowerCase();
 const tenantA = `tnt_rpol_auth_a_${suffix}`;
@@ -198,6 +199,13 @@ function invokePolicy(targetEventId: string, payload: InjectOptions['payload']) 
   });
 }
 
+function invokePolicyRead(targetEventId: string) {
+  return app.inject({
+    method: readContract.method,
+    url: readContract.path.replace('{eventId}', targetEventId),
+  });
+}
+
 function eventFrom(snapshot: Awaited<ReturnType<typeof evidenceSnapshot>>, eventId: string) {
   return snapshot.events.find((event) => event.id === eventId)!;
 }
@@ -206,7 +214,7 @@ function storedPolicy(snapshot: Awaited<ReturnType<typeof evidenceSnapshot>>, ev
   return serializeResalePolicy(eventFrom(snapshot, eventId) as Record<string, unknown>);
 }
 
-describeWithIntegrationDatabase('resale policy write route authorization matrix', () => {
+describeWithIntegrationDatabase('resale policy route authorization matrix', () => {
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
     db = createDb(integrationDatabaseUrl());
@@ -305,14 +313,16 @@ describeWithIntegrationDatabase('resale policy write route authorization matrix'
     }
   });
 
-  it('binds the immutable route contract to this executable proof', () => {
-    expect(updateContract).toMatchObject({
-      authorizedControl: { status: 200 },
-      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
-      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
-      persistenceSource: 'resale-policy-route-authorization-db.integration.test.ts',
-      source: 'resale-policy-route-authorization-db.integration.test.ts',
-    });
+  it('binds both immutable route contracts to this executable proof', () => {
+    for (const contract of [readContract, updateContract]) {
+      expect(contract).toMatchObject({
+        authorizedControl: { status: 200 },
+        deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+        permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+        persistenceSource: 'resale-policy-route-authorization-db.integration.test.ts',
+        source: 'resale-policy-route-authorization-db.integration.test.ts',
+      });
+    }
     const publicSchema = openApiSpec.components.schemas.ResalePolicy;
     expect(
       openApiSpec.paths['/events/{eventId}/resale-policy'].put.requestBody.content[
@@ -326,6 +336,28 @@ describeWithIntegrationDatabase('resale policy write route authorization matrix'
         maxAbsoluteCents: { type: ['integer', 'null'], minimum: 0 },
       },
     });
+  });
+
+  it('returns the exact authorized persisted policy without mutation', async () => {
+    const payload = policyPayload('bounded');
+    await db
+      .updateTable('events')
+      .set({
+        resale_enabled: payload.enabled,
+        resale_max_multiplier: payload.maxMultiplier,
+        resale_max_absolute_cents: payload.maxAbsoluteCents,
+      })
+      .where('id', '=', eventA)
+      .execute();
+    const before = await evidenceSnapshot();
+
+    const response = await invokePolicyRead(eventA);
+
+    expect(response.statusCode, response.body).toBe(readContract.authorizedControl.status);
+    expect(response.json()).toEqual(storedPolicy(before, eventA));
+    expect(response.body).not.toContain(eventAScoped);
+    expect(response.body).not.toContain(eventB);
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
   });
 
   it('persists the exact policy with one monotonic revision and exact atomic audit', async () => {
@@ -397,16 +429,37 @@ describeWithIntegrationDatabase('resale policy write route authorization matrix'
       'NOT_FOUND',
     ],
   ] as const)(
-    'denies the %s boundary without event, revision, or audit mutation',
-    async (_boundary, makePrincipal, targetEvent, status, code) => {
+    'denies the %s boundary for read and update without event, revision, or audit mutation',
+    async (boundary, makePrincipal, targetEvent, status, code) => {
       activePrincipal = makePrincipal();
       const before = await evidenceSnapshot();
+      const targetEventId = targetEvent();
+      const eventQuery = vi.spyOn(EventRepository.prototype, 'findById');
 
-      const response = await invokePolicy(targetEvent(), policyPayload('bounded'));
-
-      expect(response.statusCode, response.body).toBe(status);
-      expect(response.json()).toMatchObject({ error: { code } });
-      await expect(evidenceSnapshot()).resolves.toEqual(before);
+      try {
+        const responses = [
+          await invokePolicyRead(targetEventId),
+          await invokePolicy(targetEventId, policyPayload('bounded')),
+        ];
+        for (const response of responses) {
+          expect(response.statusCode, response.body).toBe(status);
+          expect(response.json()).toMatchObject({ error: { code } });
+          expect(response.json()).not.toHaveProperty('enabled');
+          expect(response.json()).not.toHaveProperty('maxMultiplier');
+          expect(response.json()).not.toHaveProperty('maxAbsoluteCents');
+          for (const protectedEventId of [eventA, eventAScoped, eventB]) {
+            if (protectedEventId !== targetEventId) {
+              expect(response.body).not.toContain(protectedEventId);
+            }
+          }
+        }
+        expect(eventQuery.mock.calls).toEqual(
+          boundary === 'permission' ? [] : [[targetEventId], [targetEventId]],
+        );
+        await expect(evidenceSnapshot()).resolves.toEqual(before);
+      } finally {
+        eventQuery.mockRestore();
+      }
     },
   );
 
