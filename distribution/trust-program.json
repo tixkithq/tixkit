@@ -97,13 +97,15 @@
       "scope": "self-hosted",
       "state": "locally-proven",
       "claim": "Self-Hosted DR contracts and rehearsal tooling are locally validated; no hosted or production DR receipt is published.",
-      "lastVerified": "2026-07-15",
+      "lastVerified": "2026-07-20",
       "publicArtifacts": [
+        "distribution/hosted-production-dr-receipt.schema.json",
         "docs/public/self-hosting/backups-and-restore.mdx",
         "infra/scripts/production-backup.sh",
         "infra/scripts/production-restore.sh",
         "scripts/__tests__/dr-safety.test.mjs",
         "scripts/__tests__/production-dr.integration.test.mjs",
+        "scripts/verify-hosted-production-dr.mjs",
         "scripts/verify-production-rehearsal.mjs"
       ],
       "validationCommands": [

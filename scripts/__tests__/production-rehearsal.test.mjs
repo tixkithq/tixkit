@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -17,11 +17,25 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
+import Ajv2020 from 'ajv/dist/2020.js';
 
 const root = resolve(import.meta.dirname, '../..');
 const prove = resolve(root, 'scripts/prove-production-rehearsal.mjs');
 const verify = resolve(root, 'scripts/verify-production-rehearsal.mjs');
+const verifyHosted = resolve(root, 'scripts/verify-hosted-production-dr.mjs');
 const { writeAll } = await import('../prove-production-rehearsal.mjs');
+const { verifyHostedProductionDr } = await import('../verify-hosted-production-dr.mjs');
+const { verifyProductionRehearsal } = await import('../verify-production-rehearsal.mjs');
+const { canonicalHostedTrustJson, hostedTrustReceiptSigningBytes } =
+  await import('../lib/hosted-trust-receipt.mjs');
+const hostedProductionDrReceiptSchema = JSON.parse(
+  readFileSync(resolve(root, 'distribution/hosted-production-dr-receipt.schema.json'), 'utf8'),
+);
+const validateHostedProductionDrReceipt = new Ajv2020({
+  allErrors: true,
+  ownProperties: true,
+  strict: true,
+}).compile(hostedProductionDrReceiptSchema);
 const beforeImages = {
   api: 'ghcr.io/tixkit/tixkit-api@sha256:' + '1'.repeat(64),
   worker: 'ghcr.io/tixkit/tixkit-worker@sha256:' + '2'.repeat(64),
@@ -759,6 +773,458 @@ test('rehearsal refuses acknowledgement drift and evidence tampering', () => {
     });
     assert.notEqual(tampered.status, 0);
     assert.match(tampered.stderr, /checksum mismatch/u);
+  } finally {
+    rmSync(value.directory, { recursive: true, force: true });
+  }
+});
+
+function hostedInput(value, evidencePath) {
+  const evidenceBytes = readFileSync(evidencePath);
+  const hostedKeys = generateKeyPairSync('ed25519');
+  const hostedPublicKeyPem = hostedKeys.publicKey.export({ type: 'spki', format: 'pem' });
+  const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+  }).trim();
+  const tree = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD^{tree}'], {
+    encoding: 'utf8',
+  }).trim();
+  const receipt = {
+    $schema: 'https://tixkit.com/schemas/hosted-production-dr-receipt.schema.json',
+    schemaVersion: 1,
+    kind: 'tixkit.hosted-production-dr-receipt',
+    trustRecordId: 'dr-evidence',
+    scope: 'self-hosted',
+    source: { repository: 'tixkit/tixkit', commit, tree },
+    workflow: {
+      repository: 'tixkit/tixkit',
+      path: '.github/workflows/production-dr.yml',
+      runId: '123456789',
+      attempt: 1,
+      url: 'https://github.com/tixkit/tixkit/actions/runs/123456789',
+    },
+    artifact: {
+      kind: 'production-dr',
+      sizeBytes: evidenceBytes.byteLength,
+      sha256: createHash('sha256').update(evidenceBytes).digest('hex'),
+    },
+    validation: {
+      validator: 'scripts/verify-production-rehearsal.mjs#verifyProductionRehearsal',
+      version: 1,
+      outcome: 'passed',
+      expectationsSha256: createHash('sha256')
+        .update(readFileSync(value.expectationsPath))
+        .digest('hex'),
+    },
+    observedAt: JSON.parse(evidenceBytes).completedAt,
+    signature: { algorithm: 'Ed25519', keyId: 'hosted-dr-2026', value: '' },
+  };
+  const resign = () => {
+    receipt.signature.value = sign(
+      null,
+      hostedTrustReceiptSigningBytes(receipt),
+      hostedKeys.privateKey,
+    ).toString('base64');
+  };
+  resign();
+  return {
+    evidenceBytes,
+    signatureBytes: readFileSync(`${evidencePath}.sig`),
+    checksumBytes: readFileSync(`${evidencePath}.sha256`),
+    publicKeyBytes: readFileSync(value.publicKeyPath),
+    expectationsBytes: readFileSync(value.expectationsPath),
+    receipt,
+    keyring: {
+      schemaVersion: 1,
+      purpose: 'tixkit.hosted-trust-receipt',
+      keys: {
+        'hosted-dr-2026': {
+          algorithm: 'Ed25519',
+          publicKeyPem: hostedPublicKeyPem,
+        },
+      },
+    },
+    root,
+    now: Date.parse(receipt.observedAt),
+    resign,
+  };
+}
+
+test('hosted production DR combines semantic and receipt proof over one exact artifact', async (t) => {
+  const value = fixture('zone-loss');
+  try {
+    const evidencePath = execFileSync(process.execPath, [prove, ...proveArgs(value)], {
+      cwd: root,
+      env: value.env,
+      encoding: 'utf8',
+    }).trim();
+    const input = hostedInput(value, evidencePath);
+    assert.equal(
+      validateHostedProductionDrReceipt(input.receipt),
+      true,
+      JSON.stringify(validateHostedProductionDrReceipt.errors),
+    );
+    const result = verifyHostedProductionDr(input);
+    assert.equal(Object.isFrozen(result), true);
+    assert.deepEqual(result, {
+      eligibleForReview: true,
+      drillId: 'zone-loss-001',
+      kind: 'zone-loss',
+      sourceCommit: input.receipt.source.commit,
+      sourceTree: input.receipt.source.tree,
+      evidenceSha256: input.receipt.artifact.sha256,
+      workflowRunId: '123456789',
+      observedAt: input.receipt.observedAt,
+    });
+
+    await t.test('semantic pass cannot mask receipt signature failure', () => {
+      const changed = { ...input, receipt: structuredClone(input.receipt) };
+      changed.receipt.signature.value = `${'A'.repeat(86)}==`;
+      assert.throws(() => verifyHostedProductionDr(changed), /receipt signature is invalid/u);
+    });
+
+    await t.test('receipt pass cannot mask semantic expectations failure', () => {
+      const changed = { ...input, expectationsBytes: Buffer.from(input.expectationsBytes) };
+      const expectations = JSON.parse(changed.expectationsBytes);
+      expectations.drillId = 'substituted-drill';
+      changed.expectationsBytes = Buffer.from(JSON.stringify(expectations));
+      assert.throws(
+        () => verifyHostedProductionDr(changed),
+        /does not match the reviewed expectations/u,
+      );
+    });
+
+    await t.test('signed receipt binds the exact reviewed expectations bytes', () => {
+      const reformatted = Buffer.from(
+        `${JSON.stringify(JSON.parse(input.expectationsBytes), null, 2)}\n`,
+      );
+      assert.equal(
+        verifyProductionRehearsal({
+          evidenceBytes: input.evidenceBytes,
+          signatureBytes: input.signatureBytes,
+          checksumBytes: input.checksumBytes,
+          publicKeyBytes: input.publicKeyBytes,
+          expectationsBytes: reformatted,
+        }).verified,
+        true,
+      );
+      assert.throws(
+        () => verifyHostedProductionDr({ ...input, expectationsBytes: reformatted }),
+        /does not match the dedicated contract/u,
+      );
+    });
+
+    await t.test('receipt cannot bind different evidence bytes', () => {
+      input.receipt.artifact.sha256 = 'f'.repeat(64);
+      input.resign();
+      assert.throws(
+        () => verifyHostedProductionDr(input),
+        /does not bind the verified evidence bytes/u,
+      );
+      input.receipt.artifact.sha256 = createHash('sha256')
+        .update(input.evidenceBytes)
+        .digest('hex');
+      input.resign();
+    });
+
+    await t.test('semantic signature, checksum, and proof key substitutions fail closed', () => {
+      assert.throws(
+        () =>
+          verifyHostedProductionDr({
+            ...input,
+            signatureBytes: Buffer.from(`${'A'.repeat(86)}==`),
+          }),
+        /signature mismatch/u,
+      );
+      assert.throws(
+        () =>
+          verifyHostedProductionDr({
+            ...input,
+            checksumBytes: Buffer.from(`${'0'.repeat(64)}  evidence.json`),
+          }),
+        /checksum mismatch/u,
+      );
+      const alternate = generateKeyPairSync('ed25519').publicKey.export({
+        type: 'spki',
+        format: 'pem',
+      });
+      assert.throws(
+        () => verifyHostedProductionDr({ ...input, publicKeyBytes: Buffer.from(alternate) }),
+        /signature mismatch/u,
+      );
+    });
+
+    await t.test('receipt key confusion fails closed', () => {
+      const alternate = generateKeyPairSync('ed25519').publicKey.export({
+        type: 'spki',
+        format: 'pem',
+      });
+      const keyring = structuredClone(input.keyring);
+      keyring.keys['hosted-dr-2026'].publicKeyPem = alternate.toString();
+      assert.throws(
+        () => verifyHostedProductionDr({ ...input, keyring }),
+        /receipt signature is invalid/u,
+      );
+
+      const confusedReceipt = structuredClone(input.receipt);
+      const proofPublicKeyPem = readFileSync(value.publicKeyPath, 'utf8');
+      const confusedKeyring = {
+        schemaVersion: 1,
+        purpose: 'tixkit.hosted-trust-receipt',
+        keys: {
+          'hosted-dr-2026': { algorithm: 'Ed25519', publicKeyPem: proofPublicKeyPem },
+        },
+      };
+      confusedReceipt.signature.value = sign(
+        null,
+        hostedTrustReceiptSigningBytes(confusedReceipt),
+        readFileSync(value.privateKeyPath),
+      ).toString('base64');
+      assert.throws(
+        () =>
+          verifyHostedProductionDr({
+            ...input,
+            receipt: confusedReceipt,
+            keyring: confusedKeyring,
+          }),
+        /must use distinct signing keys/u,
+      );
+    });
+
+    await t.test('source commit and tree must match the authoritative checkout', () => {
+      for (const field of ['commit', 'tree']) {
+        input.receipt.source[field] = 'f'.repeat(40);
+        input.resign();
+        assert.throws(
+          () => verifyHostedProductionDr(input),
+          /does not bind the authoritative checkout/u,
+        );
+        input.receipt.source[field] =
+          field === 'commit'
+            ? execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+            : execFileSync('git', ['-C', root, 'rev-parse', 'HEAD^{tree}'], {
+                encoding: 'utf8',
+              }).trim();
+      }
+      input.resign();
+    });
+
+    await t.test(
+      'unrelated repositories and inherited Git or PATH substitution cannot alter source',
+      () => {
+        const sourceRoot = join(value.directory, 'authoritative-source');
+        mkdirSync(sourceRoot);
+        const git = (arguments_, options = {}) =>
+          execFileSync('/usr/bin/git', ['-C', sourceRoot, ...arguments_], {
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              GIT_NO_REPLACE_OBJECTS: options.replacements ? '0' : '1',
+            },
+          }).trim();
+        git(['init', '--quiet']);
+        writeFileSync(join(sourceRoot, 'identity.txt'), 'authoritative\n');
+        git(['add', 'identity.txt']);
+        git([
+          '-c',
+          'user.name=Tixkit Test',
+          '-c',
+          'user.email=test@tixkit.invalid',
+          'commit',
+          '-m',
+          'authoritative',
+          '--quiet',
+        ]);
+        const authoritativeCommit = git(['rev-parse', 'HEAD']);
+        const authoritativeTree = git(['rev-parse', 'HEAD^{tree}']);
+        writeFileSync(join(sourceRoot, 'identity.txt'), 'replacement\n');
+        git(['add', 'identity.txt']);
+        git([
+          '-c',
+          'user.name=Tixkit Test',
+          '-c',
+          'user.email=test@tixkit.invalid',
+          'commit',
+          '-m',
+          'replacement',
+          '--quiet',
+        ]);
+        const replacementCommit = git(['rev-parse', 'HEAD']);
+        git(['checkout', '--detach', '--quiet', authoritativeCommit]);
+        git(['replace', authoritativeCommit, replacementCommit]);
+
+        const fakeBin = join(value.directory, 'fake-bin');
+        mkdirSync(fakeBin);
+        executable(join(fakeBin, 'git'), 'printf malicious-git >&2; exit 99');
+        const originalEnvironment = {
+          GIT_DIR: process.env.GIT_DIR,
+          GIT_NO_REPLACE_OBJECTS: process.env.GIT_NO_REPLACE_OBJECTS,
+          GIT_OBJECT_DIRECTORY: process.env.GIT_OBJECT_DIRECTORY,
+          GIT_WORK_TREE: process.env.GIT_WORK_TREE,
+          PATH: process.env.PATH,
+        };
+        const mainCommit = execFileSync('/usr/bin/git', ['-C', root, 'rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+        }).trim();
+        const mainTree = execFileSync(
+          '/usr/bin/git',
+          ['-C', root, 'rev-parse', `${mainCommit}^{tree}`],
+          {
+            encoding: 'utf8',
+            env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
+          },
+        ).trim();
+        try {
+          process.env.GIT_DIR = join(value.directory, 'missing-git-dir');
+          process.env.GIT_NO_REPLACE_OBJECTS = '0';
+          process.env.GIT_OBJECT_DIRECTORY = join(value.directory, 'missing-objects');
+          process.env.GIT_WORK_TREE = join(value.directory, 'missing-worktree');
+          process.env.PATH = fakeBin;
+          input.receipt.source.commit = authoritativeCommit;
+          input.receipt.source.tree = authoritativeTree;
+          input.root = sourceRoot;
+          input.resign();
+          assert.throws(
+            () => verifyHostedProductionDr(input),
+            /must use its own repository checkout/u,
+          );
+          input.receipt.source.commit = mainCommit;
+          input.receipt.source.tree = mainTree;
+          input.root = root;
+          input.resign();
+          const protectedResult = verifyHostedProductionDr(input);
+          assert.equal(protectedResult.sourceCommit, mainCommit);
+          assert.equal(protectedResult.sourceTree, mainTree);
+        } finally {
+          for (const [name, prior] of Object.entries(originalEnvironment)) {
+            if (prior === undefined) delete process.env[name];
+            else process.env[name] = prior;
+          }
+          input.receipt.source.commit = execFileSync(
+            '/usr/bin/git',
+            ['-C', root, 'rev-parse', 'HEAD'],
+            {
+              encoding: 'utf8',
+            },
+          ).trim();
+          input.receipt.source.tree = execFileSync(
+            '/usr/bin/git',
+            ['-C', root, 'rev-parse', 'HEAD^{tree}'],
+            {
+              encoding: 'utf8',
+              env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
+            },
+          ).trim();
+          input.root = root;
+          input.resign();
+        }
+      },
+    );
+
+    await t.test('modified verifier and schema bytes cannot claim the committed source', () => {
+      for (const path of [
+        resolve(root, 'scripts/verify-hosted-production-dr.mjs'),
+        resolve(root, 'distribution/hosted-production-dr-receipt.schema.json'),
+      ]) {
+        const original = readFileSync(path);
+        try {
+          writeFileSync(path, Buffer.concat([original, Buffer.from('\n')]));
+          assert.throws(
+            () => verifyHostedProductionDr(input),
+            /verifier source must be clean and tracked/u,
+          );
+        } finally {
+          writeFileSync(path, original);
+        }
+      }
+    });
+
+    await t.test('dedicated record, artifact, workflow, and validator tuple is exact', () => {
+      const cases = [
+        ['trustRecordId', 'performance-evidence'],
+        ['artifact.kind', 'performance-capacity'],
+        ['workflow.path', '.github/workflows/performance-capacity.yml'],
+        ['validation.validator', 'scripts/performance-capacity.mjs#validateCapacityEvidence'],
+      ];
+      for (const [path, replacement] of cases) {
+        const [parent, child] = path.split('.');
+        const original = child ? input.receipt[parent][child] : input.receipt[parent];
+        if (child) input.receipt[parent][child] = replacement;
+        else input.receipt[parent] = replacement;
+        input.resign();
+        assert.throws(
+          () => verifyHostedProductionDr(input),
+          /does not match the dedicated contract/u,
+        );
+        if (child) input.receipt[parent][child] = original;
+        else input.receipt[parent] = original;
+      }
+      input.resign();
+    });
+
+    await t.test('observation must follow completion by no more than 24 hours', () => {
+      const completedAt = Date.parse(JSON.parse(input.evidenceBytes).completedAt);
+      for (const observedAt of [completedAt - 1, completedAt + 24 * 60 * 60 * 1_000 + 1]) {
+        input.receipt.observedAt = new Date(observedAt).toISOString();
+        input.now = observedAt;
+        input.resign();
+        assert.throws(
+          () => verifyHostedProductionDr(input),
+          /must follow completion within 24 hours/u,
+        );
+      }
+      input.receipt.observedAt = new Date(completedAt).toISOString();
+      input.now = completedAt;
+      input.resign();
+    });
+
+    await t.test('CLI rejects duplicate arguments and symlink indirection without writes', () => {
+      const receiptPath = join(value.directory, 'hosted-receipt.json');
+      const keyringPath = join(value.directory, 'hosted-keyring.json');
+      writeFileSync(receiptPath, `${canonicalHostedTrustJson(input.receipt)}\n`);
+      writeFileSync(keyringPath, `${canonicalHostedTrustJson(input.keyring)}\n`);
+      const args = [
+        '--evidence',
+        evidencePath,
+        '--signature',
+        `${evidencePath}.sig`,
+        '--checksum',
+        `${evidencePath}.sha256`,
+        '--public-key',
+        value.publicKeyPath,
+        '--expectations',
+        value.expectationsPath,
+        '--receipt',
+        receiptPath,
+        '--trusted-keyring',
+        keyringPath,
+      ];
+      const before = readdirSync(value.directory, { recursive: true }).sort();
+      const output = execFileSync(process.execPath, [verifyHosted, ...args], {
+        cwd: root,
+        encoding: 'utf8',
+      });
+      assert.equal(JSON.parse(output).eligibleForReview, true);
+      assert.deepEqual(readdirSync(value.directory, { recursive: true }).sort(), before);
+      const duplicate = spawnSync(
+        process.execPath,
+        [verifyHosted, ...args, '--receipt', receiptPath],
+        {
+          cwd: root,
+          encoding: 'utf8',
+        },
+      );
+      assert.notEqual(duplicate.status, 0);
+      const linked = join(value.directory, 'linked-receipt.json');
+      symlinkSync(receiptPath, linked);
+      const linkedArgs = [...args];
+      linkedArgs[linkedArgs.indexOf(receiptPath)] = linked;
+      const refused = spawnSync(process.execPath, [verifyHosted, ...linkedArgs], {
+        cwd: root,
+        encoding: 'utf8',
+      });
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /non-symlink regular file/u);
+    });
   } finally {
     rmSync(value.directory, { recursive: true, force: true });
   }

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { constants, closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
+import { readBoundedRegularFile } from './lib/hosted-trust-receipt.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const expectedAcknowledgements = {
@@ -13,45 +15,83 @@ const expectedAcknowledgements = {
   'release-upgrade-rollback': 'I authorize production release upgrade and application rollback',
 };
 
-function argument(name) {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index < 0 || !process.argv[index + 1]) throw new Error(`--${name} is required`);
-  return resolve(process.argv[index + 1]);
-}
+const inputLimits = Object.freeze({
+  evidence: 64 * 1024 * 1024,
+  signature: 1_024,
+  checksum: 1_024,
+  publicKey: 16 * 1_024,
+  expectations: 1024 * 1_024,
+});
 
-function safeRead(path) {
-  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  try {
-    const before = fstatSync(descriptor);
-    if (!before.isFile()) throw new Error(`${path} must be a regular non-symlink file`);
-    const bytes = readFileSync(descriptor);
-    const after = fstatSync(descriptor);
-    if (
-      before.dev !== after.dev ||
-      before.ino !== after.ino ||
-      before.size !== after.size ||
-      before.mtimeMs !== after.mtimeMs
-    )
-      throw new Error(`${path} changed while it was being verified`);
-    return bytes;
-  } finally {
-    closeSync(descriptor);
+const allowedArguments = new Set([
+  '--evidence',
+  '--signature',
+  '--checksum',
+  '--public-key',
+  '--expectations',
+]);
+
+function argumentsFrom(argv) {
+  if (argv.length !== allowedArguments.size * 2) {
+    throw new Error(
+      '--evidence, --signature, --checksum, --public-key, and --expectations are required exactly once',
+    );
   }
+  const values = new Map();
+  for (let index = 0; index < argv.length; index += 2) {
+    const name = argv[index];
+    const value = argv[index + 1];
+    if (!allowedArguments.has(name) || !value || value.startsWith('--') || values.has(name)) {
+      throw new Error('production rehearsal arguments are missing, duplicated, or unsupported');
+    }
+    const absolute = resolve(value);
+    values.set(name, resolve(realpathSync(dirname(absolute)), basename(absolute)));
+  }
+  return Object.fromEntries(values);
 }
 
-try {
-  const evidencePath = argument('evidence');
-  const signaturePath = argument('signature');
-  const checksumPath = argument('checksum');
-  const publicKeyPath = argument('public-key');
-  const expectationsPath = argument('expectations');
-  const evidence = safeRead(evidencePath);
-  const signature = Buffer.from(safeRead(signaturePath).toString().trim(), 'base64');
-  const checksumLine = safeRead(checksumPath).toString().trim();
+function requiredBytes(bytes, label, maxBytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.byteLength < 1 || bytes.byteLength > maxBytes) {
+    throw new Error(`${label} must contain 1-${maxBytes} bytes`);
+  }
+  return bytes;
+}
+
+export function verifyProductionRehearsal({
+  evidenceBytes,
+  signatureBytes,
+  checksumBytes,
+  publicKeyBytes,
+  expectationsBytes,
+}) {
+  const evidence = requiredBytes(evidenceBytes, 'production evidence', inputLimits.evidence);
+  const signatureText = requiredBytes(
+    signatureBytes,
+    'production evidence signature',
+    inputLimits.signature,
+  )
+    .toString()
+    .trim();
+  if (!/^[A-Za-z0-9+/]{86}==$/u.test(signatureText)) {
+    throw new Error('production evidence signature encoding is invalid');
+  }
+  const signature = Buffer.from(signatureText, 'base64');
+  if (signature.byteLength !== 64 || signature.toString('base64') !== signatureText) {
+    throw new Error('production evidence signature encoding is invalid');
+  }
+  const checksumLine = requiredBytes(
+    checksumBytes,
+    'production evidence checksum',
+    inputLimits.checksum,
+  )
+    .toString()
+    .trim();
   const digest = createHash('sha256').update(evidence).digest('hex');
   if (checksumLine !== `${digest}  evidence.json`)
     throw new Error('production evidence checksum mismatch');
-  const publicKey = createPublicKey(safeRead(publicKeyPath));
+  const publicKey = createPublicKey(
+    requiredBytes(publicKeyBytes, 'production evidence public key', inputLimits.publicKey),
+  );
   if (publicKey.asymmetricKeyType !== 'ed25519')
     throw new Error('trusted public key must be Ed25519');
   if (!verify(null, evidence, publicKey, signature))
@@ -70,7 +110,9 @@ try {
   const validate = ajv.compile(schema);
   if (!validate(proof))
     throw new Error(`invalid production evidence: ${ajv.errorsText(validate.errors)}`);
-  const expectations = JSON.parse(safeRead(expectationsPath));
+  const expectations = JSON.parse(
+    requiredBytes(expectationsBytes, 'production rehearsal expectations', inputLimits.expectations),
+  );
   const expectationsSchema = JSON.parse(
     readFileSync(resolve(root, 'infra/production/rehearsal-expectations.schema.json'), 'utf8'),
   );
@@ -190,8 +232,55 @@ try {
     throw new Error('production outage threshold exceeded');
   if (proof.measurements.recoverySeconds > proof.thresholds.maxRecoverySeconds)
     throw new Error('production recovery threshold exceeded');
-  process.stdout.write(`${evidencePath}\n`);
-} catch (error) {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
+
+  return Object.freeze({
+    verified: true,
+    drillId: proof.drillId,
+    kind: proof.kind,
+    completedAt: proof.completedAt,
+    evidenceSha256: digest,
+  });
+}
+
+export function verifyProductionRehearsalCli(argv = process.argv.slice(2)) {
+  const values = argumentsFrom(argv);
+  const evidencePath = values['--evidence'];
+  const result = verifyProductionRehearsal({
+    evidenceBytes: readBoundedRegularFile(
+      evidencePath,
+      'production evidence',
+      inputLimits.evidence,
+    ),
+    signatureBytes: readBoundedRegularFile(
+      values['--signature'],
+      'production evidence signature',
+      inputLimits.signature,
+    ),
+    checksumBytes: readBoundedRegularFile(
+      values['--checksum'],
+      'production evidence checksum',
+      inputLimits.checksum,
+    ),
+    publicKeyBytes: readBoundedRegularFile(
+      values['--public-key'],
+      'production evidence public key',
+      inputLimits.publicKey,
+    ),
+    expectationsBytes: readBoundedRegularFile(
+      values['--expectations'],
+      'production rehearsal expectations',
+      inputLimits.expectations,
+    ),
+  });
+  return Object.freeze({ ...result, evidencePath });
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  try {
+    const result = verifyProductionRehearsalCli();
+    process.stdout.write(`${result.evidencePath}\n`);
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
 }

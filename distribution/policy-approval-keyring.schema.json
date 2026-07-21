@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/policy-approval-keyring.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "purpose", "keys", "decisions"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "purpose": { "const": "tixkit.policy-approval-receipt" },
+    "keys": {
+      "type": "object",
+      "minProperties": 2,
+      "maxProperties": 32,
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+      "patternProperties": {
+        "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$": { "$ref": "#/$defs/key" }
+      },
+      "additionalProperties": false
+    },
+    "decisions": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 6,
+      "propertyNames": {
+        "enum": [
+          "data-residency",
+          "managed-sla",
+          "privacy-roles",
+          "subprocessors",
+          "version-lifecycle",
+          "vulnerability-response"
+        ]
+      },
+      "additionalProperties": { "$ref": "#/$defs/decision" }
+    }
+  },
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "required": ["id", "version", "decidedAt", "publicationAt", "revokedAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        "version": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "decidedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "publicationAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "revokedAt": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "key": {
+      "type": "object",
+      "required": ["algorithm", "publicKeyPem", "role", "validFrom", "validUntil", "revokedAt"],
+      "properties": {
+        "algorithm": { "const": "Ed25519" },
+        "publicKeyPem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^(?![\\s\\S]*PRIVATE KEY)[\\s\\S]+$"
+        },
+        "role": {
+          "enum": ["legal", "maintainer", "operations", "privacy", "product", "release", "security"]
+        },
+        "validFrom": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "validUntil": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "revokedAt": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

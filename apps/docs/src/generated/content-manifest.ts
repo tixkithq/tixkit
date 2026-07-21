@@ -642,7 +642,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   "/reference/trust": {
     sourcePath: "docs/public/reference/trust.mdx",
     frontmatter: {"title":"Trust and evidence","description":"Verify Tixkit policies, local proof, managed-service gaps, and claims that still require external evidence.","audience":["operator","developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"security","last_verified":"2026-07-16","prerequisites":[],"related":["/reference/privacy-and-retention","/reference/performance","/support"]},
-    headings: [{"id":"how-to-read-the-states","text":"How to read the states","level":2},{"id":"verify-hosted-performance-evidence","text":"Verify hosted performance evidence","level":2},{"id":"verify-release-material","text":"Verify release material","level":2}],
+    headings: [{"id":"how-to-read-the-states","text":"How to read the states","level":2},{"id":"verify-hosted-performance-evidence","text":"Verify hosted performance evidence","level":2},{"id":"verify-a-policy-publication-decision","text":"Verify a policy publication decision","level":2},{"id":"verify-release-material","text":"Verify release material","level":2}],
     load: () => import("../../../../docs/public/reference/trust.mdx"),
   },
   "/reference/webhook-events": {

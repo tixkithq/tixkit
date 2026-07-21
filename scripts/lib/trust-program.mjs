@@ -127,11 +127,13 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
   'data-residency': [[], []],
   'dr-evidence': [
     [
+      'distribution/hosted-production-dr-receipt.schema.json',
       'docs/public/self-hosting/backups-and-restore.mdx',
       'infra/scripts/production-backup.sh',
       'infra/scripts/production-restore.sh',
       'scripts/__tests__/dr-safety.test.mjs',
       'scripts/__tests__/production-dr.integration.test.mjs',
+      'scripts/verify-hosted-production-dr.mjs',
       'scripts/verify-production-rehearsal.mjs',
     ],
     [
