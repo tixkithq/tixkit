@@ -62,6 +62,7 @@ if (
   throw new Error('packed agent action contracts did not expose current typed action validation');
 
 let mutation = process.argv[2] || 'none';
+const conformanceTarget = process.argv[3] || 'platform-api';
 const actionId = `act_${'a'.repeat(48)}`;
 const approvalId = `apr_${'b'.repeat(48)}`;
 const executionId = `exec_${'c'.repeat(48)}`;
@@ -392,10 +393,29 @@ const execute = async (request) => {
       principal: {
         id: agentPrincipalId,
         tenantId: initialTarget.tenantId,
+        kind: conformanceTarget === 'self-hosted' ? 'self_hosted' : 'third_party',
         sponsorPrincipalId: 'sponsor_primary',
+        capabilities: [
+          'events.read',
+          'reports.read',
+          'readiness.read',
+          'events.prepare',
+          'content.prepare',
+          'campaigns.prepare',
+          'events.execute',
+        ],
+        maximumAutonomy: 'execute_with_approval',
+        protocolVersion: '2026-07-22',
+        state: 'active',
+        registeredAt: '2026-07-14T11:00:00.000Z',
       },
-      authentication: { grantType: 'client_credentials' },
+      authentication: {
+        grantType: 'client_credentials',
+        scope: 'agent.invoke',
+        productPermissions: [],
+      },
       delegationRequired: true,
+      supportedProtocolVersion: '2026-07-22',
     });
   if (request.path === '/v1/agent/events') {
     eventCalls += 1;
@@ -787,6 +807,7 @@ const execute = async (request) => {
 };
 
 const contractInput = {
+  conformanceTarget,
   apiVersion: '2026-09-01',
   sponsorAccessToken: 'sponsor_token',
   agentClientId: `tk_agent_${'e'.repeat(48)}`,

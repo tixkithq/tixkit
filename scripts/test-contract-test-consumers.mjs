@@ -165,6 +165,7 @@ try {
     join(temp, 'agent-platform-invalid.json'),
     JSON.stringify({
       baseUrl: 'http://127.0.0.1:9',
+      conformanceTarget: 'invalid',
       apiVersion: 'latest',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
@@ -202,6 +203,7 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
+      conformanceTarget: 'platform-api',
       apiVersion: '2026-09-01',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
@@ -317,7 +319,18 @@ try {
         `Packed agent-platform ${mutation} did not prove exact event-update execution replay`,
       );
     if (mutation === 'none') {
-      if (packedOutput.result.ok !== true)
+      if (
+        packedOutput.result.ok !== true ||
+        JSON.stringify(packedOutput.result.evidence) !==
+          JSON.stringify({
+            profile: 'agent-platform',
+            conformanceTarget: 'platform-api',
+            apiVersion: '2026-09-01',
+            agentProtocolVersion: '2026-07-22',
+            agentPlatformProtocolVersion: '2026-07-27',
+            principalKind: 'third_party',
+          })
+      )
         throw new Error(
           `Packed agent-platform happy path failed: ${JSON.stringify(packedOutput.result)}`,
         );
@@ -338,6 +351,27 @@ try {
     )
       throw new Error(`Packed agent-platform ${mutation} did not fail closed`);
   }
+  const packedSelfHosted = JSON.parse(
+    execFileSync('bun', ['run', 'packed-agent-platform-consumer.mjs', 'none', 'self-hosted'], {
+      cwd: temp,
+      encoding: 'utf8',
+    }),
+  );
+  if (
+    packedSelfHosted.result.ok !== true ||
+    JSON.stringify(packedSelfHosted.result.evidence) !==
+      JSON.stringify({
+        profile: 'agent-platform',
+        conformanceTarget: 'self-hosted',
+        apiVersion: '2026-09-01',
+        agentProtocolVersion: '2026-07-22',
+        agentPlatformProtocolVersion: '2026-07-27',
+        principalKind: 'self_hosted',
+      })
+  )
+    throw new Error(
+      `Packed Self-Hosted agent-platform evidence mismatch: ${JSON.stringify(packedSelfHosted.result)}`,
+    );
   await writeFile(
     join(temp, 'sdk-wire.mjs'),
     `import { TixkitClient } from '@tixkit/js';

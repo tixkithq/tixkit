@@ -751,12 +751,28 @@ describe('third-party contract profiles', () => {
       | undefined;
     let eventUpdatePrepareCall = 0;
     let eventUpdateExecutionCall = 0;
+    let oauthMutation: 'token' | 'token_type' | 'scope' | undefined;
+    let sessionPrincipalKind: 'third_party' | 'self_hosted' = 'third_party';
+    let sessionMutation:
+      | 'protocol'
+      | 'capability'
+      | 'autonomy'
+      | 'permissions'
+      | 'permissions_shape'
+      | 'permissions_nonarray'
+      | 'scope'
+      | 'grant'
+      | 'state'
+      | 'delegation'
+      | 'supported_protocol'
+      | undefined;
     const requests: Array<{
       path: string;
       body?: unknown;
       headers: Record<string, string>;
     }> = [];
     const contractInput = {
+      conformanceTarget: 'platform-api' as const,
       apiVersion: '2026-09-01',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: `tk_agent_${'e'.repeat(48)}`,
@@ -778,20 +794,49 @@ describe('third-party contract profiles', () => {
         });
         if (request.path === '/v1/oauth/token')
           return response(200, {
-            access_token: 'agent_access_token',
-            token_type: 'Bearer',
+            access_token: oauthMutation === 'token' ? ' ' : 'agent_access_token',
+            token_type: oauthMutation === 'token_type' ? 'bearer' : 'Bearer',
             expires_in: 600,
-            scope: 'agent.invoke',
+            scope: oauthMutation === 'scope' ? 'events.read' : 'agent.invoke',
           });
         if (request.path === '/v1/agent/session')
           return response(200, {
             principal: {
               id: agentPrincipalId,
               tenantId: 'tenant_primary',
+              kind: sessionPrincipalKind,
               sponsorPrincipalId: 'sponsor_primary',
+              capabilities: [
+                'events.read',
+                'reports.read',
+                'readiness.read',
+                'events.prepare',
+                'content.prepare',
+                'campaigns.prepare',
+                ...(sessionMutation === 'capability' ? [] : ['events.execute']),
+              ],
+              maximumAutonomy: sessionMutation === 'autonomy' ? 'prepare' : 'execute_with_approval',
+              protocolVersion: sessionMutation === 'protocol' ? '2026-01-01' : '2026-07-22',
+              state: sessionMutation === 'state' ? 'suspended' : 'active',
+              registeredAt: '2026-07-14T11:00:00.000Z',
             },
-            authentication: { grantType: 'client_credentials' },
-            delegationRequired: true,
+            authentication: {
+              grantType: sessionMutation === 'grant' ? 'authorization_code' : 'client_credentials',
+              scope: sessionMutation === 'scope' ? 'events.read' : 'agent.invoke',
+              ...(sessionMutation === 'permissions_shape'
+                ? {}
+                : {
+                    productPermissions:
+                      sessionMutation === 'permissions'
+                        ? ['events:publish']
+                        : sessionMutation === 'permissions_nonarray'
+                          ? 'events:publish'
+                          : [],
+                  }),
+            },
+            delegationRequired: sessionMutation !== 'delegation',
+            supportedProtocolVersion:
+              sessionMutation === 'supported_protocol' ? '2026-01-01' : '2026-07-22',
           });
         if (request.path === '/v1/agent/events') {
           eventReadCall += 1;
@@ -1312,7 +1357,18 @@ describe('third-party contract profiles', () => {
       },
     } as const;
     const output = await runAgentPlatformContract(contractInput);
-    expect(output).toEqual({ ok: true, findings: [] });
+    expect(output).toEqual({
+      ok: true,
+      findings: [],
+      evidence: {
+        profile: 'agent-platform',
+        conformanceTarget: 'platform-api',
+        apiVersion: '2026-09-01',
+        agentProtocolVersion: '2026-07-22',
+        agentPlatformProtocolVersion: '2026-07-27',
+        principalKind: 'third_party',
+      },
+    });
     expect(requests.filter((request) => request.path === '/v1/agent/events')).toHaveLength(2);
     expect(requests.filter((request) => request.path === '/v1/agent/reports')).toHaveLength(2);
     expect(
@@ -1409,6 +1465,67 @@ describe('third-party contract profiles', () => {
     )!;
     expect(executionRequest.body).toEqual({ approvalId, actionDigest });
     expect(executionRequest.body).not.toHaveProperty('planSha256');
+
+    sessionPrincipalKind = 'self_hosted';
+    const selfHosted = await runAgentPlatformContract({
+      ...contractInput,
+      conformanceTarget: 'self-hosted',
+    });
+    expect(selfHosted.evidence).toMatchObject({
+      conformanceTarget: 'self-hosted',
+      principalKind: 'self_hosted',
+    });
+    sessionPrincipalKind = 'third_party';
+
+    const eventRequestsBeforeSessionFailures = requests.filter(
+      (request) => request.path === '/v1/agent/events',
+    ).length;
+    const crossTarget = await runAgentPlatformContract({
+      ...contractInput,
+      conformanceTarget: 'self-hosted',
+    });
+    expect(crossTarget.findings.map((finding) => finding.code)).toEqual([
+      'AGENT_PLATFORM_SESSION_SCHEMA',
+    ]);
+    const sessionRequestsBeforeOauthFailures = requests.filter(
+      (request) => request.path === '/v1/agent/session',
+    ).length;
+    for (const mutation of ['token', 'token_type', 'scope'] as const) {
+      oauthMutation = mutation;
+      const malformedOauth = await runAgentPlatformContract(contractInput);
+      expect(
+        malformedOauth.findings.map((finding) => finding.code),
+        mutation,
+      ).toEqual(['AGENT_PLATFORM_OAUTH_SCHEMA']);
+    }
+    oauthMutation = undefined;
+    expect(requests.filter((request) => request.path === '/v1/agent/session')).toHaveLength(
+      sessionRequestsBeforeOauthFailures,
+    );
+    for (const mutation of [
+      'protocol',
+      'capability',
+      'autonomy',
+      'permissions',
+      'permissions_shape',
+      'permissions_nonarray',
+      'scope',
+      'grant',
+      'state',
+      'delegation',
+      'supported_protocol',
+    ] as const) {
+      sessionMutation = mutation;
+      const malformedSession = await runAgentPlatformContract(contractInput);
+      expect(
+        malformedSession.findings.map((finding) => finding.code),
+        mutation,
+      ).toEqual(['AGENT_PLATFORM_SESSION_SCHEMA']);
+    }
+    sessionMutation = undefined;
+    expect(requests.filter((request) => request.path === '/v1/agent/events')).toHaveLength(
+      eventRequestsBeforeSessionFailures,
+    );
 
     for (const mutation of [
       'agent',
@@ -1679,6 +1796,7 @@ describe('third-party contract profiles', () => {
   it('rejects malformed agent-platform input before sending credentials', async () => {
     const executed = vi.fn();
     const output = await runAgentPlatformContract({
+      conformanceTarget: 'invalid' as never,
       apiVersion: 'latest',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: 'agent_client',
@@ -1691,6 +1809,22 @@ describe('third-party contract profiles', () => {
       execute: executed,
     });
     expect(output.findings.map((finding) => finding.code)).toEqual(['AGENT_PLATFORM_INPUT']);
+    expect(executed).not.toHaveBeenCalled();
+
+    const invalidTarget = await runAgentPlatformContract({
+      conformanceTarget: 'managed-cloud' as never,
+      apiVersion: '2026-09-01',
+      sponsorAccessToken: 'sponsor_token',
+      agentClientId: 'agent_client',
+      agentClientSecret: 'agent_secret',
+      delegationGrantId: 'delegation_primary',
+      resourceId: 'event_primary',
+      campaignEmailTemplateKey: 'event-announcement',
+      planId: 'plan_conformance_valid',
+      idempotencyPrefix: 'agent.conformance.valid',
+      execute: executed,
+    });
+    expect(invalidTarget.findings.map((finding) => finding.code)).toEqual(['AGENT_PLATFORM_INPUT']);
     expect(executed).not.toHaveBeenCalled();
   });
 });

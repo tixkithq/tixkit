@@ -75,6 +75,7 @@ if (profile === 'sdk-consumer' && fixture && typeof fixture === 'object' && 'bas
 if (profile === 'agent-platform' && fixture && typeof fixture === 'object') {
   const live = fixture as unknown as {
     baseUrl: string;
+    conformanceTarget: 'platform-api' | 'self-hosted';
     apiVersion: string;
     sponsorAccessTokenEnv: string;
     agentClientId: string;

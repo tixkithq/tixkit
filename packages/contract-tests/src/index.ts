@@ -17,6 +17,7 @@ import {
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
   validateAgentEventUpdatePreview,
+  validateAgentPrincipal,
   validateAgentReportReadResult,
   validateAgentReadinessReadResult,
   type AgentAction,
@@ -30,11 +31,24 @@ import {
   type AgentEventUpdatePreview,
   type AgentReportReadResult,
   type AgentReadinessReadResult,
+  type AgentPrincipal,
 } from '@tixkit/agent-protocol';
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
 export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-09-01' as const;
+export type AgentPlatformConformanceTarget = 'platform-api' | 'self-hosted';
+export type AgentPlatformContractEvidence = {
+  profile: 'agent-platform';
+  conformanceTarget: AgentPlatformConformanceTarget;
+  apiVersion: typeof AGENT_PLATFORM_CONTRACT_API_VERSION;
+  agentProtocolVersion: typeof AGENT_PROTOCOL_VERSION;
+  agentPlatformProtocolVersion: typeof AGENT_PLATFORM_PROTOCOL_VERSION;
+  principalKind: 'third_party' | 'self_hosted';
+};
+export type AgentPlatformContractResult = ContractResult & {
+  evidence?: AgentPlatformContractEvidence;
+};
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -50,6 +64,7 @@ export type AgentPlatformContractResponse = {
 };
 
 export interface AgentPlatformContractInput {
+  conformanceTarget: AgentPlatformConformanceTarget;
   apiVersion: string;
   sponsorAccessToken: string;
   agentClientId: string;
@@ -478,9 +493,10 @@ function objectBody(value: unknown): Record<string, unknown> | undefined {
 
 export async function runAgentPlatformContract(
   input: AgentPlatformContractInput,
-): Promise<ContractResult> {
+): Promise<AgentPlatformContractResult> {
   const findings: ContractFinding[] = [];
   if (
+    (input.conformanceTarget !== 'platform-api' && input.conformanceTarget !== 'self-hosted') ||
     input.apiVersion !== AGENT_PLATFORM_CONTRACT_API_VERSION ||
     !input.sponsorAccessToken ||
     !input.agentClientId ||
@@ -560,7 +576,13 @@ export async function runAgentPlatformContract(
     200,
   );
   const accessToken = objectBody(oauth?.body)?.access_token;
-  if (typeof accessToken !== 'string') {
+  const oauthBody = objectBody(oauth?.body);
+  if (
+    typeof accessToken !== 'string' ||
+    !/^[A-Za-z0-9._~+/-]+=*$/u.test(accessToken) ||
+    oauthBody?.token_type !== 'Bearer' ||
+    oauthBody.scope !== 'agent.invoke'
+  ) {
     findings.push({
       code: 'AGENT_PLATFORM_OAUTH_SCHEMA',
       message: 'OAuth response is invalid.',
@@ -573,13 +595,39 @@ export async function runAgentPlatformContract(
     200,
   );
   const session = objectBody(sessionResponse?.body);
-  const principal = objectBody(session?.principal);
+  const principalBody = objectBody(session?.principal);
+  const authentication = objectBody(session?.authentication);
+  const requiredCapabilities = [
+    'events.read',
+    'reports.read',
+    'readiness.read',
+    'events.prepare',
+    'content.prepare',
+    'campaigns.prepare',
+    'events.execute',
+  ] as const;
+  const expectedPrincipalKind =
+    input.conformanceTarget === 'platform-api' ? 'third_party' : 'self_hosted';
+  let principal: AgentPrincipal | undefined;
+  try {
+    principal = principalBody as unknown as AgentPrincipal;
+    validateAgentPrincipal(principal);
+  } catch {
+    principal = undefined;
+  }
   if (
-    typeof principal?.id !== 'string' ||
-    typeof principal.tenantId !== 'string' ||
-    typeof principal.sponsorPrincipalId !== 'string' ||
-    objectBody(session?.authentication)?.grantType !== 'client_credentials' ||
-    session?.delegationRequired !== true
+    !principal ||
+    principal.kind !== expectedPrincipalKind ||
+    principal.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    principal.state !== 'active' ||
+    principal.maximumAutonomy !== 'execute_with_approval' ||
+    requiredCapabilities.some((capability) => !principal?.capabilities.includes(capability)) ||
+    authentication?.grantType !== 'client_credentials' ||
+    authentication.scope !== 'agent.invoke' ||
+    !Array.isArray(authentication.productPermissions) ||
+    authentication.productPermissions.length !== 0 ||
+    session?.delegationRequired !== true ||
+    session.supportedProtocolVersion !== AGENT_PROTOCOL_VERSION
   ) {
     findings.push({
       code: 'AGENT_PLATFORM_SESSION_SCHEMA',
@@ -1674,7 +1722,19 @@ export async function runAgentPlatformContract(
       code: 'AGENT_PLATFORM_AUDIT_SCHEMA',
       message: 'Execution audit evidence is incomplete or not plan-bound.',
     });
-  return result(findings);
+  if (findings.length > 0) return result(findings);
+  return {
+    ok: true,
+    findings: [],
+    evidence: {
+      profile: 'agent-platform',
+      conformanceTarget: input.conformanceTarget,
+      apiVersion: AGENT_PLATFORM_CONTRACT_API_VERSION,
+      agentProtocolVersion: AGENT_PROTOCOL_VERSION,
+      agentPlatformProtocolVersion: AGENT_PLATFORM_PROTOCOL_VERSION,
+      principalKind: expectedPrincipalKind,
+    },
+  };
 }
 
 function assertResult(value: ContractResult): void {

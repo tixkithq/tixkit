@@ -41,13 +41,14 @@ Profiles run locally or in CI and return structured findings; assertion helpers 
 
 The CLI accepts a profile name and sanitized JSON fixture, for example `tixkit-contract-tests webhook-consumer fixture.json`.
 
-The live `agent-platform` profile validates direct `event.read`, aggregate-only `report.read`, `event.prepare`, `content.prepare`, `campaign.prepare` and `readiness.read` results plus the shared `event.publish` and approved `event.update` execution boundaries: client-credential authentication, explicit agent identity, tenant, idempotency, version and digest binding, consent/suppression and untrusted-content boundaries, canonical result and exact-replay evidence, rejection of approval or execution for direct-only actions, typed action preparation, canonical plan persistence, sponsor approval bound to immutable digests, idempotent execution, terminal plan evidence, and plan-bound audit inspection.
+The live `agent-platform` profile validates direct `event.read`, aggregate-only `report.read`, `event.prepare`, `content.prepare`, `campaign.prepare` and `readiness.read` results plus the shared `event.publish` and approved `event.update` execution boundaries: client-credential authentication, explicit agent identity, tenant, idempotency, version and digest binding, consent/suppression and untrusted-content boundaries, canonical result and exact-replay evidence, rejection of approval or execution for direct-only actions, typed action preparation, canonical plan persistence, sponsor approval bound to immutable digests, idempotent execution, terminal plan evidence, and plan-bound audit inspection. The required `conformanceTarget` binds a `platform-api` run to a `third_party` principal and a `self-hosted` run to a `self_hosted` principal; successful output includes only the selected target, API/protocol versions and principal kind as non-sensitive evidence.
 
 It publishes the selected event. Run it only in an isolated private-beta or Self-Hosted test tenant with an unpublished, disposable event that is ready to publish. Never target a production event. Put only environment-variable names in the fixture:
 
 ```json
 {
   "baseUrl": "https://sandbox.example.test",
+  "conformanceTarget": "platform-api",
   "apiVersion": "2026-09-01",
   "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
   "agentClientId": "tk_agent_example",
