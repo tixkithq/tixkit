@@ -498,6 +498,30 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
 
 function createDelete(table: string, tableState: Record<string, unknown>) {
   const filters: Array<[string, string, unknown]> = [];
+  const deleteRows = async () => {
+    const rows = (tableState[table] ?? []) as Record<string, unknown>[];
+    const shouldDelete = (row: Record<string, unknown>) =>
+      filters.every(([column, op, value]) => {
+        const rowValue = getMockColumnValue(row, column);
+        if (op === '=') return mockValuesEqual(rowValue, value);
+        if (op === 'is') return value === null ? rowValue === null : rowValue === value;
+        return false;
+      });
+    const deletedRows = rows.filter(shouldDelete);
+    tableState[table] = rows.filter((row) => !shouldDelete(row));
+    if (table === 'discount_redemptions') {
+      const discountRows = (tableState.discount_codes ?? []) as Record<string, unknown>[];
+      for (const deletedRow of deletedRows) {
+        const discount = discountRows.find((row) =>
+          mockValuesEqual(row.id, deletedRow.discount_code_id),
+        );
+        if (discount) {
+          discount.uses_count = Math.max(0, Number(discount.uses_count ?? 0) - 1);
+        }
+      }
+    }
+    return { numDeletedRows: BigInt(deletedRows.length) };
+  };
   const query = {
     where: (...args: unknown[]) => {
       if (typeof args[0] === 'string' && typeof args[1] === 'string') {
@@ -506,32 +530,11 @@ function createDelete(table: string, tableState: Record<string, unknown>) {
       return query;
     },
     async execute() {
-      const rows = (tableState[table] ?? []) as Record<string, unknown>[];
-      const shouldDelete = (row: Record<string, unknown>) =>
-        filters.every(([column, op, value]) => {
-          const rowValue = getMockColumnValue(row, column);
-          if (op === '=') return mockValuesEqual(rowValue, value);
-          if (op === 'is') return value === null ? rowValue === null : rowValue === value;
-          return false;
-        });
-      const deletedRows = rows.filter(shouldDelete);
-      tableState[table] = rows.filter((row) => !shouldDelete(row));
-      if (table === 'discount_redemptions') {
-        const discountRows = (tableState.discount_codes ?? []) as Record<string, unknown>[];
-        for (const deletedRow of deletedRows) {
-          const discount = discountRows.find((row) =>
-            mockValuesEqual(row.id, deletedRow.discount_code_id),
-          );
-          if (discount) {
-            discount.uses_count = Math.max(0, Number(discount.uses_count ?? 0) - 1);
-          }
-        }
-      }
+      return [await deleteRows()];
     },
+    executeTakeFirst: deleteRows,
   };
-  return {
-    where: query.where,
-  };
+  return query;
 }
 
 function makePrincipal(overrides: Partial<Principal> = {}): Principal {
@@ -8138,7 +8141,7 @@ describe('custom questions CRUD', () => {
     const app = await setupApp(questionRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'DELETE', url: '/questions/q_1' });
     expect(res.statusCode).toBe(204);
-    expect((tables.questions as Array<Record<string, unknown>>)[0].status).toBe('hidden');
+    expect(tables.questions).toMatchObject([{ id: 'q_1', status: 'hidden' }]);
     await app.close();
   });
 
@@ -8150,6 +8153,7 @@ describe('custom questions CRUD', () => {
     const app = await setupApp(questionRoutes, makePrincipal(), tables);
     const res = await app.inject({ method: 'DELETE', url: '/questions/q_1' });
     expect(res.statusCode).toBe(204);
+    expect(tables.questions).toEqual([]);
     await app.close();
   });
 });
