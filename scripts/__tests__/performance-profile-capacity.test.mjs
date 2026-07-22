@@ -21,12 +21,15 @@ import {
 import { canonicalJson, sha256 } from '../performance-evidence.mjs';
 import {
   createSupportedProfileCapacityEvidence,
+  createLegacySupportedProfileCapacityEvidence,
+  createSupportedProfileCapacityFailureEvidence,
   createTargetBinding,
   createTopologyFingerprint,
   deploymentManifest,
   main,
   validateSupportedProfileCapacityConfig,
   verifySupportedProfileCapacityEvidence,
+  verifySupportedProfileCapacityFailureEvidence,
   verifySupportedProfileCapacityEligibility,
 } from '../performance-profile-capacity.mjs';
 import schema from '../performance-profile-capacity.schema.json' with { type: 'json' };
@@ -105,7 +108,11 @@ function publicReleaseManifest(commit = sourceCommit) {
   };
 }
 
-function rawSamples(profile, releaseManifest = publicReleaseManifest()) {
+function rawSamples(
+  profile,
+  releaseManifest = publicReleaseManifest(),
+  saturationConcurrency = 128,
+) {
   const count = profile.workload.concurrencyPoints.length * profile.workload.samplesPerPoint;
   const intervalMs = (profile.workload.minimumDurationSeconds * 1000) / count;
   const firstStartedAt = now - profile.workload.minimumDurationSeconds * 1000 - 60_000;
@@ -113,9 +120,11 @@ function rawSamples(profile, releaseManifest = publicReleaseManifest()) {
   return profile.workload.concurrencyPoints.flatMap((concurrency) =>
     Array.from({ length: profile.workload.samplesPerPoint }, () => {
       sequence += 1;
-      const saturation = concurrency === 128;
-      const successes = Math.min(profile.workload.inventory, concurrency);
+      const saturation = concurrency === saturationConcurrency;
       const platformFailures = saturation ? 1 : 0;
+      const successes =
+        Math.min(profile.workload.inventory, concurrency) -
+        (saturation && concurrency <= profile.workload.inventory ? platformFailures : 0);
       const expectedInventoryDeclines = concurrency - successes - platformFailures;
       const startedAt = new Date(firstStartedAt + (sequence - 1) * intervalMs).toISOString();
       const completedAt = new Date(firstStartedAt + sequence * intervalMs).toISOString();
@@ -547,7 +556,7 @@ test('capacity claim requires adjacent saturation and complete fail-closed sampl
         ...base,
         capacityClaim: capacityClaim(32, 128),
       }),
-    /adjacent tested saturation/u,
+    /does not match derived measurements/u,
   );
   assert.throws(
     () =>
@@ -573,23 +582,15 @@ test('capacity claim requires adjacent saturation and complete fail-closed sampl
     /fresh unique fixture identity/u,
   );
   const noSaturation = base.rawSamples.map((sample) =>
-    Buffer.from(
-      sample
-        .toString()
-        .replace('"platformFailures":1', '"platformFailures":0')
-        .replace('"successfulReservationP95Ms":2500', '"successfulReservationP95Ms":500')
-        .replace('"expectedInventoryDeclines":63', '"expectedInventoryDeclines":64'),
-    ),
+    mutateRawSample(sample, ({ metrics }) => {
+      metrics.expectedInventoryDeclines += metrics.platformFailures;
+      metrics.platformFailures = 0;
+      metrics.successfulReservationP95Ms = 500;
+    }),
   );
-  assert.throws(
-    () =>
-      createSupportedProfileCapacityEvidence({
-        ...base,
-        rawSamples: noSaturation,
-        capacityClaim: capacityClaim(),
-      }),
-    /did not exhibit/u,
-  );
+  const noClaim = createSupportedProfileCapacityEvidence({ ...base, rawSamples: noSaturation });
+  assert.equal(noClaim.capacityClaim, null);
+  assert.equal(noClaim.capacityAssessment.reason, 'saturation-not-observed');
   const prematureDecline = [...base.rawSamples];
   prematureDecline[0] = Buffer.from(
     prematureDecline[0]
@@ -883,4 +884,256 @@ test('canonical hosted artifact contains no raw secrets or trust escalation fiel
   assert.equal(text.includes('trustState'), false);
   assert.equal(text.includes('proven'), false);
   assert.equal(canonicalHostedTrustJson(keyring).includes('PRIVATE KEY'), false);
+});
+
+function failureEvidenceFixture(
+  profileId = 'compact',
+  config = committedConfig,
+  root = repositoryRoot,
+  commit = sourceCommit,
+  gitTree = 'b'.repeat(40),
+) {
+  const profile = config.profiles.find(({ id }) => id === profileId);
+  const releaseManifest = publicReleaseManifest(commit);
+  const releaseManifestBytes = Buffer.from(`${canonicalJson(releaseManifest)}\n`);
+  const descriptor = {
+    schemaVersion: 'tixkit-supported-profile-observed-topology-v1',
+    observation: { targetBinding },
+  };
+  const failureTopologyFingerprint = createTopologyFingerprint(descriptor);
+  const rawSamplesForFailure = rawSamples(profile, releaseManifest).map((sample) =>
+    mutateRawSample(sample, (value) => {
+      value.runtime.topologyFingerprint = failureTopologyFingerprint;
+    }),
+  );
+  const runtime = {
+    images: Object.fromEntries(
+      releaseManifest.core.images.map(({ name, digest }) => [name, digest]),
+    ),
+    topologyFingerprint: failureTopologyFingerprint,
+    targetBinding,
+  };
+  const runtimeBytes = Buffer.from(`${canonicalJson(runtime)}\n`);
+  const runtimeDescriptorBytes = Buffer.from(`${canonicalJson(descriptor)}\n`);
+  const proofFiles = [
+    {
+      path: 'fixture-service-artifact.json',
+      bytes: Buffer.from(`${canonicalJson({ kind: 'fixture', version: 1 })}\n`),
+    },
+    {
+      path: 'runtime-placement.json',
+      bytes: Buffer.from(`${canonicalJson({ kind: 'placement', version: 1 })}\n`),
+    },
+  ];
+  const evidence = createSupportedProfileCapacityFailureEvidence({
+    config,
+    root,
+    profileId,
+    sourceCommit: commit,
+    gitTree,
+    releaseManifest,
+    releaseManifestBytes,
+    rawSamples: rawSamplesForFailure,
+    topologyFingerprint: failureTopologyFingerprint,
+    targetBinding,
+    runtimeBytes,
+    runtimeDescriptorBytes,
+    proofFiles,
+    reason: 'workload-execution-failed',
+    errorSha256: sha256('safe failure reason'),
+  });
+  return {
+    evidence,
+    evidenceBytes: Buffer.from(`${canonicalJson(evidence)}\n`),
+    releaseManifest,
+    releaseManifestBytes,
+    rawSamples: rawSamplesForFailure,
+    runtimeBytes,
+    runtimeDescriptorBytes,
+    proofFiles,
+  };
+}
+
+test('derives adjacent claims and explicit no-claim results from validated measurements', () => {
+  const profile = committedConfig.profiles[0];
+  const releaseManifest = publicReleaseManifest();
+  const create = (samples) =>
+    createSupportedProfileCapacityEvidence({
+      ...creationInput(profile),
+      rawSamples: samples,
+    });
+  for (const [saturationConcurrency, maxPublishableConcurrency] of [
+    [32, 16],
+    [64, 32],
+    [128, 64],
+  ]) {
+    const evidence = create(rawSamples(profile, releaseManifest, saturationConcurrency));
+    assert.equal(evidence.capacityAssessment.status, 'claim');
+    assert.deepEqual(evidence.capacityClaim, {
+      surface: 'api-checkout-reservation',
+      dependencyScope: 'runtime-topology-bound-dependencies-not-independently-characterized',
+      hostCapacity: 'not-characterized',
+      maxPublishableConcurrency,
+      saturationObservedAtConcurrency: saturationConcurrency,
+    });
+  }
+  const firstPointFailure = create(rawSamples(profile, releaseManifest, 16));
+  assert.equal(firstPointFailure.capacityClaim, null);
+  assert.equal(firstPointFailure.capacityAssessment.reason, 'first-point-objective-failed');
+  const noSaturation = create(rawSamples(profile, releaseManifest, -1));
+  assert.equal(noSaturation.capacityClaim, null);
+  assert.equal(noSaturation.capacityAssessment.reason, 'saturation-not-observed');
+  const mixed = rawSamples(profile, releaseManifest, 128);
+  mixed[6] = mutateRawSample(mixed[6], ({ metrics }) => {
+    metrics.successes -= 1;
+    metrics.finalHeld = metrics.successes;
+    metrics.platformFailures += 1;
+  });
+  assert.equal(create(mixed).capacityClaim.maxPublishableConcurrency, 32);
+  const malformed = rawSamples(profile, releaseManifest, 128);
+  malformed[0] = mutateRawSample(malformed[0], ({ metrics }) => {
+    metrics.successfulReservationP95Ms = -1;
+  });
+  assert.throws(() => create(malformed), /finite and non-negative/u);
+});
+
+test('eligibility rejects signed no-claim evidence', () => {
+  const fixture = gitRepositoryFixture();
+  const profile = fixture.config.profiles[0];
+  const raw = rawSamples(profile, fixture.releaseManifest, -1);
+  const evidence = createSupportedProfileCapacityEvidence({
+    ...creationInput(profile, fixture.config, fixture.root, fixture.commit, fixture.gitTree),
+    rawSamples: raw,
+  });
+  const evidenceBytes = Buffer.from(`${canonicalJson(evidence)}\n`);
+  assert.throws(
+    () =>
+      verify(
+        {
+          ...fixture,
+          evidence,
+          evidenceBytes,
+          samples: raw,
+          receipt: signedReceipt(evidenceBytes, (receipt) => {
+            receipt.source.commit = fixture.commit;
+            receipt.source.tree = fixture.gitTree;
+          }),
+        },
+        fixture.config,
+        fixture.root,
+      ),
+    /no-claim capacity evidence is not eligible/u,
+  );
+});
+
+test('failure verifier checksum-binds committed revision, runtime, proofs, and completed raw samples', () => {
+  const repository = gitRepositoryFixture();
+  const fixture = failureEvidenceFixture(
+    'compact',
+    repository.config,
+    repository.root,
+    repository.commit,
+    repository.gitTree,
+  );
+  const input = {
+    config: repository.config,
+    root: repository.root,
+    evidence: fixture.evidence,
+    evidenceBytes: fixture.evidenceBytes,
+    releaseManifest: fixture.releaseManifest,
+    releaseManifestBytes: fixture.releaseManifestBytes,
+    rawSamples: fixture.rawSamples,
+    runtimeBytes: fixture.runtimeBytes,
+    runtimeDescriptorBytes: fixture.runtimeDescriptorBytes,
+    proofFiles: fixture.proofFiles,
+  };
+  assert.equal(verifySupportedProfileCapacityFailureEvidence(input).outcome, 'failure');
+  assert.throws(
+    () =>
+      createSupportedProfileCapacityFailureEvidence({
+        config: repository.config,
+        root: repository.root,
+        profileId: 'compact',
+        sourceCommit: '0'.repeat(40),
+        gitTree: repository.gitTree,
+        releaseManifest: fixture.releaseManifest,
+        releaseManifestBytes: fixture.releaseManifestBytes,
+        rawSamples: fixture.rawSamples,
+        topologyFingerprint: fixture.evidence.topologyFingerprint,
+        targetBinding: fixture.evidence.targetBinding,
+        runtimeBytes: fixture.runtimeBytes,
+        runtimeDescriptorBytes: fixture.runtimeDescriptorBytes,
+        proofFiles: fixture.proofFiles,
+        reason: 'workload-execution-failed',
+        errorSha256: sha256('safe failure reason'),
+      }),
+    /does not bind the exact committed Git config and tree/u,
+  );
+  const rawSubstitution = { ...input, rawSamples: [...input.rawSamples] };
+  rawSubstitution.rawSamples[0] = mutateRawSample(rawSubstitution.rawSamples[0], (sample) => {
+    sample.metrics.successfulReservationP95Ms += 1;
+  });
+  assert.throws(
+    () => verifySupportedProfileCapacityFailureEvidence(rawSubstitution),
+    /does not match config, runtime, proofs, or raw samples/u,
+  );
+  const badConfig = structuredClone(repository.config);
+  badConfig.profiles[0].workload.maximumP95Ms += 1;
+  assert.throws(
+    () => verifySupportedProfileCapacityFailureEvidence({ ...input, config: badConfig }),
+    /does not match the committed canonical config/u,
+  );
+  const badEvidence = structuredClone(fixture.evidence);
+  badEvidence.sourceCommit = '0'.repeat(40);
+  assert.throws(
+    () =>
+      verifySupportedProfileCapacityFailureEvidence({
+        ...input,
+        evidence: badEvidence,
+        evidenceBytes: Buffer.from(`${canonicalJson(badEvidence)}\n`),
+      }),
+    /does not bind the exact committed Git config and tree/u,
+  );
+});
+
+test('retains semantic verification for immutable legacy v2 claim evidence', () => {
+  const fixture = gitRepositoryFixture();
+  const profile = fixture.config.profiles[0];
+  const evidence = createLegacySupportedProfileCapacityEvidence({
+    ...creationInput(profile, fixture.config, fixture.root, fixture.commit, fixture.gitTree),
+    rawSamples: fixture.samples,
+    capacityClaim: capacityClaim(),
+  });
+  const evidenceBytes = Buffer.from(`${canonicalJson(evidence)}\n`);
+  assert.equal(evidence.schemaVersion, 'tixkit-supported-profile-capacity-evidence-v2');
+  assert.equal(
+    verifySupportedProfileCapacityEvidence({
+      config: fixture.config,
+      root: fixture.root,
+      evidence,
+      evidenceBytes,
+      rawSamples: fixture.samples,
+      releaseManifest: fixture.releaseManifest,
+      releaseManifestBytes: fixture.releaseManifestBytes,
+    }).validated,
+    true,
+  );
+  const receipt = signedReceipt(evidenceBytes, (candidate) => {
+    candidate.source.commit = fixture.commit;
+    candidate.source.tree = fixture.gitTree;
+  });
+  assert.equal(
+    verify(
+      {
+        ...fixture,
+        evidence,
+        evidenceBytes,
+        samples: fixture.samples,
+        receipt,
+      },
+      fixture.config,
+      fixture.root,
+    ).eligibleForReview,
+    true,
+  );
 });

@@ -14,12 +14,16 @@ import { canonicalJson, sha256 } from './performance-evidence.mjs';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_VERSION = 'tixkit-supported-profile-capacity-config-v2';
 const CONFIG_SCOPE = 'supported-profile-capacity-eligibility';
-const EVIDENCE_VERSION = 'tixkit-supported-profile-capacity-evidence-v2';
+const LEGACY_EVIDENCE_VERSION = 'tixkit-supported-profile-capacity-evidence-v2';
+const EVIDENCE_VERSION = 'tixkit-supported-profile-capacity-evidence-v3';
 const EVIDENCE_SCOPE = 'supported-profile-capacity-characterization';
 export const TOPOLOGY_FINGERPRINT_VERSION = 'tixkit-supported-profile-topology-v1';
 const MAX_DEPLOYMENT_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_SAMPLE_BYTES = 64 * 1024;
 const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+const MAX_RUNTIME_EVIDENCE_BYTES = 1024 * 1024;
+const MAX_FAILURE_PROOF_FILES = 32;
+const MAX_FAILURE_PROOF_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_RELEASE_MANIFEST_BYTES = 1024 * 1024;
 const MAX_EXTERNAL_HA_OBSERVATION_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_EXTERNAL_HA_VALIDITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -696,6 +700,7 @@ function evidencePayload({
   capacityClaim,
   topologyFingerprint,
   targetBinding,
+  legacy = false,
 }) {
   if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) {
     throw new Error('supported-profile evidence requires an exact 40-character Git SHA');
@@ -762,45 +767,66 @@ function evidencePayload({
     throw new Error('supported-profile active load duration is below the committed minimum');
   }
   const activeLoadSeconds = activeLoadMs / 1000;
-  const maxConcurrency = capacityClaim?.maxPublishableConcurrency;
-  const saturationConcurrency = capacityClaim?.saturationObservedAtConcurrency;
-  const points = profile.workload.concurrencyPoints;
-  if (
-    !Number.isSafeInteger(maxConcurrency) ||
-    !Number.isSafeInteger(saturationConcurrency) ||
-    !points.includes(maxConcurrency) ||
-    !points.includes(saturationConcurrency) ||
-    points.indexOf(saturationConcurrency) !== points.indexOf(maxConcurrency) + 1 ||
-    capacityClaim?.surface !== 'api-checkout-reservation' ||
-    capacityClaim?.dependencyScope !==
-      'runtime-topology-bound-dependencies-not-independently-characterized' ||
-    capacityClaim?.hostCapacity !== 'not-characterized'
-  ) {
-    throw new Error('supported-profile capacity claim must bind adjacent tested saturation points');
-  }
-  for (const entry of samples) {
+  let capacityAssessment;
+  let resolvedCapacityClaim;
+  if (legacy) {
+    const maxConcurrency = capacityClaim?.maxPublishableConcurrency;
+    const saturationConcurrency = capacityClaim?.saturationObservedAtConcurrency;
+    const points = profile.workload.concurrencyPoints;
     if (
-      entry.concurrency <= maxConcurrency &&
-      (entry.metrics.platformFailures !== 0 ||
-        entry.metrics.successfulReservationP95Ms > profile.workload.maximumP95Ms)
+      !Number.isSafeInteger(maxConcurrency) ||
+      !Number.isSafeInteger(saturationConcurrency) ||
+      !points.includes(maxConcurrency) ||
+      !points.includes(saturationConcurrency) ||
+      points.indexOf(saturationConcurrency) !== points.indexOf(maxConcurrency) + 1 ||
+      capacityClaim?.surface !== 'api-checkout-reservation' ||
+      capacityClaim?.dependencyScope !==
+        'runtime-topology-bound-dependencies-not-independently-characterized' ||
+      capacityClaim?.hostCapacity !== 'not-characterized'
     ) {
-      throw new Error('publishable supported-profile sample violated its objective candidate');
+      throw new Error(
+        'supported-profile capacity claim must bind adjacent tested saturation points',
+      );
     }
+    for (const entry of samples) {
+      if (
+        entry.concurrency <= maxConcurrency &&
+        (entry.metrics.platformFailures !== 0 ||
+          entry.metrics.successfulReservationP95Ms > profile.workload.maximumP95Ms)
+      ) {
+        throw new Error('publishable supported-profile sample violated its objective candidate');
+      }
+    }
+    const saturationSamples = samples.filter(
+      ({ concurrency }) => concurrency === saturationConcurrency,
+    );
+    if (
+      saturationSamples.every(
+        ({ metrics }) =>
+          metrics.platformFailures === 0 &&
+          metrics.successfulReservationP95Ms <= profile.workload.maximumP95Ms,
+      )
+    ) {
+      throw new Error(
+        'supported-profile saturation point did not exhibit a bounded failure signal',
+      );
+    }
+    resolvedCapacityClaim = capacityClaim;
+  } else {
+    const assessment = deriveCapacityAssessment(profile, samples);
+    if (
+      capacityClaim !== undefined &&
+      canonicalJson(capacityClaim) !== canonicalJson(assessment.capacityClaim)
+    ) {
+      throw new Error(
+        'supported-profile supplied capacity claim does not match derived measurements',
+      );
+    }
+    capacityAssessment = assessment.capacityAssessment;
+    resolvedCapacityClaim = assessment.capacityClaim;
   }
-  const saturationSamples = samples.filter(
-    ({ concurrency }) => concurrency === saturationConcurrency,
-  );
-  if (
-    saturationSamples.every(
-      ({ metrics }) =>
-        metrics.platformFailures === 0 &&
-        metrics.successfulReservationP95Ms <= profile.workload.maximumP95Ms,
-    )
-  ) {
-    throw new Error('supported-profile saturation point did not exhibit a bounded failure signal');
-  }
-  return {
-    schemaVersion: EVIDENCE_VERSION,
+  const payload = {
+    schemaVersion: legacy ? LEGACY_EVIDENCE_VERSION : EVIDENCE_VERSION,
     claimScope: EVIDENCE_SCOPE,
     denials: [...EVIDENCE_DENIALS],
     integrityModel: 'checksums-plus-hosted-Ed25519-receipt',
@@ -821,8 +847,68 @@ function evidencePayload({
     durationSeconds,
     activeLoadSeconds,
     samples,
-    capacityClaim,
+    capacityClaim: resolvedCapacityClaim,
   };
+  if (!legacy) payload.capacityAssessment = capacityAssessment;
+  return payload;
+}
+
+function objectiveSatisfied(profile, sample) {
+  return (
+    sample.metrics.platformFailures === 0 &&
+    sample.metrics.successfulReservationP95Ms <= profile.workload.maximumP95Ms
+  );
+}
+
+export function deriveCapacityAssessment(profile, samples) {
+  const points = profile?.workload?.concurrencyPoints;
+  if (!Array.isArray(points) || !Array.isArray(samples)) {
+    throw new Error('supported-profile capacity assessment requires validated profile samples');
+  }
+  const failingPointIndex = points.findIndex((concurrency) =>
+    samples.some(
+      (sample) => sample.concurrency === concurrency && !objectiveSatisfied(profile, sample),
+    ),
+  );
+  if (failingPointIndex === -1) {
+    return Object.freeze({
+      capacityAssessment: Object.freeze({
+        status: 'no-claim',
+        reason: 'saturation-not-observed',
+        evaluatedConcurrencyPoints: [...points],
+        objectiveViolatingConcurrency: null,
+      }),
+      capacityClaim: null,
+    });
+  }
+  const objectiveViolatingConcurrency = points[failingPointIndex];
+  if (failingPointIndex === 0) {
+    return Object.freeze({
+      capacityAssessment: Object.freeze({
+        status: 'no-claim',
+        reason: 'first-point-objective-failed',
+        evaluatedConcurrencyPoints: [...points],
+        objectiveViolatingConcurrency,
+      }),
+      capacityClaim: null,
+    });
+  }
+  const maxPublishableConcurrency = points[failingPointIndex - 1];
+  return Object.freeze({
+    capacityAssessment: Object.freeze({
+      status: 'claim',
+      reason: 'saturation-observed',
+      evaluatedConcurrencyPoints: [...points],
+      objectiveViolatingConcurrency,
+    }),
+    capacityClaim: Object.freeze({
+      surface: 'api-checkout-reservation',
+      dependencyScope: 'runtime-topology-bound-dependencies-not-independently-characterized',
+      hostCapacity: 'not-characterized',
+      maxPublishableConcurrency,
+      saturationObservedAtConcurrency: objectiveViolatingConcurrency,
+    }),
+  });
 }
 
 export function createSupportedProfileCapacityEvidence(input) {
@@ -833,6 +919,233 @@ export function createSupportedProfileCapacityEvidence(input) {
   const evidence = { ...payload, evidenceSha256: sha256(canonicalJson(payload)) };
   schemaViolation(evidence, 'supported-profile capacity evidence');
   return evidence;
+}
+
+export function createLegacySupportedProfileCapacityEvidence(input) {
+  validateSupportedProfileCapacityConfig(input.config, { root: input.root });
+  const profile = input.config.profiles.find(({ id }) => id === input.profileId);
+  if (!profile) throw new Error('legacy supported-profile capacity profile is absent from config');
+  const payload = evidencePayload({ ...input, profile, legacy: true });
+  return { ...payload, evidenceSha256: sha256(canonicalJson(payload)) };
+}
+
+function completedFailureSamples({ profile, rawSamples }) {
+  const maximumSamples =
+    profile.workload.concurrencyPoints.length * profile.workload.samplesPerPoint;
+  if (!Array.isArray(rawSamples) || rawSamples.length > maximumSamples) {
+    throw new Error('supported-profile failure evidence has too many completed raw samples');
+  }
+  return rawSamples.map((rawSample, index) => {
+    const raw = Buffer.from(rawSample);
+    canonicalInput(raw, `supported-profile failure raw sample ${index + 1}`, MAX_SAMPLE_BYTES);
+    return { sequence: index + 1, rawSha256: sha256(raw) };
+  });
+}
+
+function failureProofs(proofFiles) {
+  if (
+    !Array.isArray(proofFiles) ||
+    proofFiles.length < 1 ||
+    proofFiles.length > MAX_FAILURE_PROOF_FILES
+  ) {
+    throw new Error('supported-profile failure evidence requires bounded proof files');
+  }
+  const paths = new Set();
+  return proofFiles
+    .map((entry) => {
+      if (
+        !entry ||
+        typeof entry !== 'object' ||
+        !/^[a-z0-9][a-z0-9._-]{0,127}\.json$/u.test(entry.path ?? '') ||
+        paths.has(entry.path)
+      ) {
+        throw new Error('supported-profile failure proof path is invalid');
+      }
+      paths.add(entry.path);
+      const value = canonicalInput(
+        entry.bytes,
+        `supported-profile failure proof ${entry.path}`,
+        MAX_FAILURE_PROOF_FILE_BYTES,
+      );
+      return { path: entry.path, sha256: sha256(canonicalJson(value)) };
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function failureRuntime({
+  runtimeBytes,
+  runtimeDescriptorBytes,
+  releaseImages,
+  topologyFingerprint,
+  targetBinding,
+}) {
+  const runtime = canonicalInput(
+    runtimeBytes,
+    'supported-profile failure runtime',
+    MAX_RUNTIME_EVIDENCE_BYTES,
+  );
+  const descriptor = canonicalInput(
+    runtimeDescriptorBytes,
+    'supported-profile failure runtime descriptor',
+    MAX_RUNTIME_EVIDENCE_BYTES,
+  );
+  if (
+    !runtime ||
+    typeof runtime !== 'object' ||
+    Array.isArray(runtime) ||
+    canonicalJson(runtime.images) !== canonicalJson(releaseImages) ||
+    canonicalJson(runtime.topologyFingerprint) !== canonicalJson(topologyFingerprint) ||
+    canonicalJson(runtime.targetBinding) !== canonicalJson(targetBinding) ||
+    !descriptor ||
+    typeof descriptor !== 'object' ||
+    Array.isArray(descriptor) ||
+    descriptor.schemaVersion !== 'tixkit-supported-profile-observed-topology-v1' ||
+    canonicalJson(descriptor.observation?.targetBinding) !== canonicalJson(targetBinding) ||
+    canonicalJson(createTopologyFingerprint(descriptor)) !== canonicalJson(topologyFingerprint)
+  ) {
+    throw new Error(
+      'supported-profile failure runtime evidence does not bind the observed topology',
+    );
+  }
+  return {
+    runtimeSha256: sha256(Buffer.from(runtimeBytes)),
+    runtimeDescriptorSha256: sha256(Buffer.from(runtimeDescriptorBytes)),
+  };
+}
+
+function failureEvidencePayload({
+  config,
+  profile,
+  sourceCommit,
+  gitTree,
+  releaseManifest,
+  releaseManifestBytes,
+  rawSamples,
+  topologyFingerprint,
+  targetBinding,
+  runtimeBytes,
+  runtimeDescriptorBytes,
+  proofFiles,
+  reason,
+  errorSha256,
+}) {
+  if (!['workload-execution-failed', 'evidence-validation-failed'].includes(reason)) {
+    throw new Error('supported-profile failure reason is not classified');
+  }
+  if (!/^[a-f0-9]{40}$/u.test(sourceCommit) || !/^[a-f0-9]{40}$/u.test(gitTree)) {
+    throw new Error('supported-profile failure evidence requires exact Git identities');
+  }
+  if (!/^[a-f0-9]{64}$/u.test(errorSha256 ?? '')) {
+    throw new Error('supported-profile failure evidence requires a redacted error checksum');
+  }
+  const release = validateReleaseManifest(releaseManifest, releaseManifestBytes, sourceCommit);
+  const frozenTopologyFingerprint = validateTopologyFingerprint(topologyFingerprint);
+  const frozenTargetBinding = validateTargetBinding(targetBinding);
+  const runtime = failureRuntime({
+    runtimeBytes,
+    runtimeDescriptorBytes,
+    releaseImages: release.images,
+    topologyFingerprint: frozenTopologyFingerprint,
+    targetBinding: frozenTargetBinding,
+  });
+  return {
+    schemaVersion: EVIDENCE_VERSION,
+    claimScope: EVIDENCE_SCOPE,
+    denials: [...EVIDENCE_DENIALS],
+    integrityModel: 'checksums-plus-hosted-Ed25519-receipt',
+    outcome: 'failure',
+    reason,
+    sourceCommit,
+    gitTree,
+    configSha256: sha256(canonicalJson(config)),
+    releaseManifestSha256: release.sha256,
+    images: release.images,
+    profile: profile.id,
+    deploymentManifestSha256: profile.deployment.manifestSha256,
+    database: profile.database,
+    topologyFingerprint: frozenTopologyFingerprint,
+    targetBinding: frozenTargetBinding,
+    runtime,
+    proofs: failureProofs(proofFiles),
+    samples: completedFailureSamples({ profile, rawSamples }),
+    errorSha256,
+  };
+}
+
+export function createSupportedProfileCapacityFailureEvidence(input) {
+  const repository = committedEligibilityContext(input.root, input.config);
+  if (
+    input.sourceCommit !== repository.sourceCommit ||
+    input.gitTree !== repository.gitTree ||
+    sha256(canonicalJson(input.config)) !== repository.configSha256
+  ) {
+    throw new Error(
+      'capacity failure evidence does not bind the exact committed Git config and tree',
+    );
+  }
+  const profile = repository.config.profiles.find(({ id }) => id === input.profileId);
+  if (!profile) throw new Error('supported-profile failure profile is absent from config');
+  const payload = failureEvidencePayload({ ...input, config: repository.config, profile });
+  const evidence = { ...payload, evidenceSha256: sha256(canonicalJson(payload)) };
+  schemaViolation(evidence, 'supported-profile capacity failure evidence');
+  return evidence;
+}
+
+export function verifySupportedProfileCapacityFailureEvidence(input) {
+  const repository = committedEligibilityContext(input.root, input.config);
+  if (
+    input.evidence?.sourceCommit !== repository.sourceCommit ||
+    input.evidence?.gitTree !== repository.gitTree ||
+    input.evidence?.configSha256 !== repository.configSha256
+  ) {
+    throw new Error(
+      'capacity failure evidence does not bind the exact committed Git config and tree',
+    );
+  }
+  validateSupportedProfileCapacityConfig(input.config, { root: input.root });
+  schemaViolation(input.evidence, 'supported-profile capacity failure evidence');
+  const evidenceBytes = Buffer.from(input.evidenceBytes);
+  if (evidenceBytes.length < 1 || evidenceBytes.length > MAX_EVIDENCE_BYTES) {
+    throw new Error('supported-profile capacity failure evidence exceeds bounded size');
+  }
+  if (!evidenceBytes.equals(Buffer.from(`${canonicalJson(input.evidence)}\n`))) {
+    throw new Error(
+      'supported-profile capacity failure evidence bytes must be canonical and exact',
+    );
+  }
+  if (input.evidence.outcome !== 'failure') {
+    throw new Error('supported-profile failure verifier requires a failure envelope');
+  }
+  const profile = input.config.profiles.find(({ id }) => id === input.evidence.profile);
+  const payload = failureEvidencePayload({
+    config: input.config,
+    profile,
+    sourceCommit: input.evidence.sourceCommit,
+    gitTree: input.evidence.gitTree,
+    releaseManifest: input.releaseManifest,
+    releaseManifestBytes: input.releaseManifestBytes,
+    rawSamples: input.rawSamples,
+    topologyFingerprint: input.evidence.topologyFingerprint,
+    targetBinding: input.evidence.targetBinding,
+    runtimeBytes: input.runtimeBytes,
+    runtimeDescriptorBytes: input.runtimeDescriptorBytes,
+    proofFiles: input.proofFiles,
+    reason: input.evidence.reason,
+    errorSha256: input.evidence.errorSha256,
+  });
+  const expected = { ...payload, evidenceSha256: sha256(canonicalJson(payload)) };
+  if (canonicalJson(expected) !== canonicalJson(input.evidence)) {
+    throw new Error(
+      'supported-profile failure evidence does not match config, runtime, proofs, or raw samples',
+    );
+  }
+  return Object.freeze({
+    validated: true,
+    outcome: 'failure',
+    profile: input.evidence.profile,
+    sourceCommit: input.evidence.sourceCommit,
+    evidenceSha256: input.evidence.evidenceSha256,
+  });
 }
 
 function canonicalUtcTimestamp(date, label) {
@@ -900,7 +1213,6 @@ export function verifySupportedProfileCapacityEvidence(input) {
     throw new Error('trusted-single-host evidence cannot establish supported-profile capacity');
   }
   validateSupportedProfileCapacityConfig(input.config, { root: input.root });
-  schemaViolation(input.evidence, 'supported-profile capacity evidence');
   const evidenceBytes = Buffer.from(input.evidenceBytes);
   if (evidenceBytes.length < 1 || evidenceBytes.length > MAX_EVIDENCE_BYTES) {
     throw new Error('supported-profile capacity evidence exceeds bounded size');
@@ -909,6 +1221,8 @@ export function verifySupportedProfileCapacityEvidence(input) {
   if (!evidenceBytes.equals(canonicalBytes)) {
     throw new Error('supported-profile capacity evidence bytes must be canonical and exact');
   }
+  const legacy = input.evidence?.schemaVersion === LEGACY_EVIDENCE_VERSION;
+  if (!legacy) schemaViolation(input.evidence, 'supported-profile capacity evidence');
   const profile = input.config.profiles.find(({ id }) => id === input.evidence.profile);
   const expectedPayload = evidencePayload({
     config: input.config,
@@ -921,6 +1235,7 @@ export function verifySupportedProfileCapacityEvidence(input) {
     capacityClaim: input.evidence.capacityClaim,
     topologyFingerprint: input.evidence.topologyFingerprint,
     targetBinding: input.evidence.targetBinding,
+    legacy,
   });
   const expected = {
     ...expectedPayload,
@@ -1021,6 +1336,12 @@ export function verifySupportedProfileCapacityEligibility(input) {
     ...input,
     config: repository.config,
   });
+  if (
+    input.evidence.schemaVersion !== LEGACY_EVIDENCE_VERSION &&
+    (input.evidence.capacityAssessment?.status !== 'claim' || input.evidence.capacityClaim === null)
+  ) {
+    throw new Error('no-claim capacity evidence is not eligible for review');
+  }
   const receipt = verifyHostedTrustReceipt({
     receipt: input.receipt,
     artifactBytes: Buffer.from(input.evidenceBytes),

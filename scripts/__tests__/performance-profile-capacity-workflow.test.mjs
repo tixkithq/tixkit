@@ -717,6 +717,7 @@ test('workload aborts oversized and deadline-stalled response streams', async ()
 });
 
 test('protected workflow fails closed before load and keeps external proof explicit', () => {
+  assert.doesNotThrow(() => parseYaml(workflow));
   const invocation = workflow.indexOf('Reject an unreviewed invocation');
   const attestation = workflow.indexOf('Download and attest the immutable public release manifest');
   const setup = workflow.indexOf('uses: ./.github/actions/setup-js');
@@ -780,4 +781,14 @@ test('protected workflow fails closed before load and keeps external proof expli
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(workflow, /schedule:/u);
   assert.match(workflow, /independent signing and review/u);
+  assert.match(workflow, /if: \$\{\{ always\(\) \}\}/u);
+  assert.match(workflow, /capacityAssessment\.status!=='claim'/u);
+  assert.match(
+    workflow,
+    /createSupportedProfileCapacityFailureEvidence\(\{root:process\.cwd\(\),config/u,
+  );
+  assert.match(workflow, /createSupportedProfileCapacityFailureEvidence/u);
+  assert.match(workflow, /runtimeDescriptorBytes/u);
+  assert.match(workflow, /proofFiles/u);
+  assert.doesNotMatch(workflow, /maxPublishableConcurrency:64/u);
 });

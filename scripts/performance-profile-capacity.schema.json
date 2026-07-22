@@ -1,7 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.tixkit.com/performance/supported-profile-capacity-v2.json",
-  "oneOf": [{ "$ref": "#/$defs/config" }, { "$ref": "#/$defs/evidence" }],
+  "$id": "https://schemas.tixkit.com/performance/supported-profile-capacity-v3.json",
+  "oneOf": [
+    { "$ref": "#/$defs/config" },
+    { "$ref": "#/$defs/evidence" },
+    { "$ref": "#/$defs/failureEvidence" }
+  ],
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
@@ -16,7 +20,10 @@
           "minItems": 1,
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^(?:infra/compact|infra/helm/tixkit)/" }
+          "items": {
+            "type": "string",
+            "pattern": "^(?:infra/compact|infra/helm/tixkit)/"
+          }
         },
         "manifestSha256": { "$ref": "#/$defs/sha256" }
       }
@@ -27,7 +34,9 @@
       "required": ["engine", "topology"],
       "properties": {
         "engine": { "enum": ["postgresql", "mysql"] },
-        "topology": { "enum": ["bundled-single-instance", "external-high-availability"] }
+        "topology": {
+          "enum": ["bundled-single-instance", "external-high-availability"]
+        }
       }
     },
     "componentResources": {
@@ -36,8 +45,16 @@
       "required": ["replicas", "cpuQuotaMillis", "memoryLimitMiB"],
       "properties": {
         "replicas": { "type": "integer", "minimum": 1, "maximum": 1000 },
-        "cpuQuotaMillis": { "type": "integer", "minimum": 1, "maximum": 1000000 },
-        "memoryLimitMiB": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+        "cpuQuotaMillis": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "memoryLimitMiB": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        }
       }
     },
     "resources": {
@@ -72,8 +89,16 @@
           "items": { "type": "integer", "minimum": 1, "maximum": 1000000 }
         },
         "samplesPerPoint": { "type": "integer", "minimum": 3, "maximum": 100 },
-        "minimumDurationSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
-        "maximumP95Ms": { "type": "number", "exclusiveMinimum": 0, "maximum": 60000 },
+        "minimumDurationSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "maximumP95Ms": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 60000
+        },
         "requireZeroPlatformFailures": { "const": true }
       }
     },
@@ -94,8 +119,12 @@
       "additionalProperties": false,
       "required": ["$schema", "schemaVersion", "claimScope", "denials", "profiles"],
       "properties": {
-        "$schema": { "const": "./scripts/performance-profile-capacity.schema.json" },
-        "schemaVersion": { "const": "tixkit-supported-profile-capacity-config-v2" },
+        "$schema": {
+          "const": "./scripts/performance-profile-capacity.schema.json"
+        },
+        "schemaVersion": {
+          "const": "tixkit-supported-profile-capacity-config-v2"
+        },
         "claimScope": { "const": "supported-profile-capacity-eligibility" },
         "denials": {
           "const": [
@@ -228,8 +257,16 @@
       "required": ["replicas", "cpuQuotaMillis", "memoryLimitMiB", "imageDigest"],
       "properties": {
         "replicas": { "type": "integer", "minimum": 1, "maximum": 1000 },
-        "cpuQuotaMillis": { "type": "integer", "minimum": 1, "maximum": 1000000 },
-        "memoryLimitMiB": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "cpuQuotaMillis": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "memoryLimitMiB": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
         "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
       }
     },
@@ -258,12 +295,17 @@
         "durationSeconds",
         "activeLoadSeconds",
         "samples",
+        "capacityAssessment",
         "capacityClaim",
         "evidenceSha256"
       ],
       "properties": {
-        "schemaVersion": { "const": "tixkit-supported-profile-capacity-evidence-v2" },
-        "claimScope": { "const": "supported-profile-capacity-characterization" },
+        "schemaVersion": {
+          "const": "tixkit-supported-profile-capacity-evidence-v3"
+        },
+        "claimScope": {
+          "const": "supported-profile-capacity-characterization"
+        },
         "denials": {
           "const": [
             "Cloud capacity",
@@ -297,34 +339,234 @@
         "workloadSha256": { "$ref": "#/$defs/sha256" },
         "startedAt": { "type": "string", "format": "date-time" },
         "completedAt": { "type": "string", "format": "date-time" },
-        "durationSeconds": { "type": "integer", "minimum": 1, "maximum": 604800 },
-        "activeLoadSeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 604800 },
+        "durationSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "activeLoadSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 604800
+        },
         "samples": {
           "type": "array",
           "minItems": 9,
           "maxItems": 10000,
           "items": { "$ref": "#/$defs/sample" }
         },
-        "capacityClaim": {
+        "capacityAssessment": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "surface",
-            "dependencyScope",
-            "hostCapacity",
-            "maxPublishableConcurrency",
-            "saturationObservedAtConcurrency"
+            "status",
+            "reason",
+            "evaluatedConcurrencyPoints",
+            "objectiveViolatingConcurrency"
           ],
           "properties": {
-            "surface": { "const": "api-checkout-reservation" },
-            "dependencyScope": {
-              "const": "runtime-topology-bound-dependencies-not-independently-characterized"
+            "status": { "enum": ["claim", "no-claim"] },
+            "reason": {
+              "enum": [
+                "saturation-observed",
+                "first-point-objective-failed",
+                "saturation-not-observed"
+              ]
             },
-            "hostCapacity": { "const": "not-characterized" },
-            "maxPublishableConcurrency": { "type": "integer", "minimum": 1 },
-            "saturationObservedAtConcurrency": { "type": "integer", "minimum": 1 }
+            "evaluatedConcurrencyPoints": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+            },
+            "objectiveViolatingConcurrency": {
+              "type": ["integer", "null"],
+              "minimum": 1,
+              "maximum": 1000000
+            }
           }
         },
+        "capacityClaim": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "surface",
+                "dependencyScope",
+                "hostCapacity",
+                "maxPublishableConcurrency",
+                "saturationObservedAtConcurrency"
+              ],
+              "properties": {
+                "surface": { "const": "api-checkout-reservation" },
+                "dependencyScope": {
+                  "const": "runtime-topology-bound-dependencies-not-independently-characterized"
+                },
+                "hostCapacity": { "const": "not-characterized" },
+                "maxPublishableConcurrency": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "saturationObservedAtConcurrency": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          ]
+        },
+        "evidenceSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "capacityAssessment": {
+                "type": "object",
+                "properties": { "status": { "const": "claim" } }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "capacityAssessment": {
+                "type": "object",
+                "properties": {
+                  "reason": { "const": "saturation-observed" },
+                  "objectiveViolatingConcurrency": { "type": "integer" }
+                }
+              },
+              "capacityClaim": { "type": "object" }
+            }
+          },
+          "else": {
+            "properties": {
+              "capacityAssessment": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "enum": ["first-point-objective-failed", "saturation-not-observed"]
+                  }
+                }
+              },
+              "capacityClaim": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "failureEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "claimScope",
+        "denials",
+        "integrityModel",
+        "outcome",
+        "reason",
+        "sourceCommit",
+        "gitTree",
+        "configSha256",
+        "releaseManifestSha256",
+        "images",
+        "profile",
+        "deploymentManifestSha256",
+        "database",
+        "topologyFingerprint",
+        "targetBinding",
+        "runtime",
+        "proofs",
+        "samples",
+        "errorSha256",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "tixkit-supported-profile-capacity-evidence-v3"
+        },
+        "claimScope": {
+          "const": "supported-profile-capacity-characterization"
+        },
+        "denials": {
+          "const": [
+            "Cloud capacity",
+            "SLA or SLO attainment",
+            "soak stability",
+            "fault tolerance",
+            "worker, frontend, provider, Temporal, Redis, object-storage or host capacity",
+            "relational database and dependency capacity are not independently characterized"
+          ]
+        },
+        "integrityModel": { "const": "checksums-plus-hosted-Ed25519-receipt" },
+        "outcome": { "const": "failure" },
+        "reason": {
+          "enum": ["workload-execution-failed", "evidence-validation-failed"]
+        },
+        "sourceCommit": { "$ref": "#/$defs/gitSha" },
+        "gitTree": { "$ref": "#/$defs/gitSha" },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "releaseManifestSha256": { "$ref": "#/$defs/sha256" },
+        "images": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["api", "worker"],
+          "properties": {
+            "api": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "worker": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          }
+        },
+        "profile": { "enum": ["compact", "production"] },
+        "deploymentManifestSha256": { "$ref": "#/$defs/sha256" },
+        "database": { "$ref": "#/$defs/database" },
+        "topologyFingerprint": { "$ref": "#/$defs/topologyFingerprint" },
+        "targetBinding": { "$ref": "#/$defs/targetBinding" },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runtimeSha256", "runtimeDescriptorSha256"],
+          "properties": {
+            "runtimeSha256": { "$ref": "#/$defs/sha256" },
+            "runtimeDescriptorSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "proofs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,127}\\.json$"
+              },
+              "sha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "samples": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sequence", "rawSha256"],
+            "properties": {
+              "sequence": { "type": "integer", "minimum": 1 },
+              "rawSha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "errorSha256": { "$ref": "#/$defs/sha256" },
         "evidenceSha256": { "$ref": "#/$defs/sha256" }
       }
     }
