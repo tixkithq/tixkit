@@ -105,6 +105,11 @@ export type AppContext = {
     stage: 'after_lock' | 'before_lock';
     organizationId: string;
   }) => void | Promise<void>;
+  brandUpdateCheckpoint?: (input: {
+    stage: 'after_account_lock' | 'after_brand_lock' | 'before_brand_lock';
+    brandId: string;
+    paymentAccountId?: string | null;
+  }) => void | Promise<void>;
   eventOccurrenceCheckpoint?: (input: {
     stage: 'before_transaction';
     operation: 'create' | 'update';

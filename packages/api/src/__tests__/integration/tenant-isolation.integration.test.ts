@@ -229,9 +229,13 @@ function createMockDb(tables: Tables = {}): unknown {
     updateTable: createUpdate,
     insertInto: createInsert,
     deleteFrom: (table: string) => createDelete(table, tables),
-    transaction: () => ({
-      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(db),
-    }),
+    transaction: () => {
+      const transaction = {
+        execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(db),
+        setIsolationLevel: () => transaction,
+      };
+      return transaction;
+    },
     destroy: vi.fn(),
   };
   return db;
@@ -1922,7 +1926,7 @@ describe('cross-tenant denial', () => {
       url: '/brands/brd_1',
       payload: { paymentAccountId: 'pa_1' },
     });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(400);
     await app.close();
   });
 

@@ -432,6 +432,18 @@ async function executeOrganizationUpdateWithRetry<T>(operation: () => Promise<T>
   throw new Error('ORGANIZATION_UPDATE_TRANSACTION_RETRY_EXHAUSTED');
 }
 
+async function executeBrandUpdateWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const maximumAttempts = 3;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableOrganizationUpdateConflict(error) || attempt === maximumAttempts) throw error;
+    }
+  }
+  throw new Error('BRAND_UPDATE_TRANSACTION_RETRY_EXHAUSTED');
+}
+
 function organizationAuditSnapshot(row: Record<string, unknown>) {
   const organization = serializeOrganization(row);
   return {
@@ -450,6 +462,41 @@ function organizationUpdateAuditDiff(
 ) {
   const changedFields = (
     ['name', 'slug', 'clerkOrganizationId', 'boxOfficeSettings', 'eventDefaults'] as const
+  ).filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]));
+  return { before, after, changedFields, noOp: changedFields.length === 0 };
+}
+
+function brandAuditSnapshot(row: Record<string, unknown>) {
+  const brand = serializeBrand(row);
+  return {
+    id: brand.id,
+    organizationId: brand.organizationId,
+    name: brand.name,
+    slug: brand.slug,
+    status: brand.status,
+    theme: brand.theme,
+    paymentAccountId: brand.paymentAccountId ?? null,
+    supportUrl: brand.supportUrl ?? null,
+    legalUrls: brand.legalUrls,
+    whiteLabel: brand.whiteLabel,
+  };
+}
+
+function brandUpdateAuditDiff(
+  before: ReturnType<typeof brandAuditSnapshot>,
+  after: ReturnType<typeof brandAuditSnapshot>,
+) {
+  const changedFields = (
+    [
+      'name',
+      'slug',
+      'status',
+      'theme',
+      'paymentAccountId',
+      'supportUrl',
+      'legalUrls',
+      'whiteLabel',
+    ] as const
   ).filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]));
   return { before, after, changedFields, noOp: changedFields.length === 0 };
 }
@@ -1499,10 +1546,13 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.patch('/brands/:brandId', async (request) => {
     const principal = request.principal!;
     const { brandId } = request.params as { brandId: string };
-    const body = parseBody(updateBrandSchema, request.body);
+    const rawBody = request.body;
     const isPaymentAccountBindingOnly =
-      Object.keys(body).length === 1 &&
-      Object.prototype.hasOwnProperty.call(body, 'paymentAccountId');
+      rawBody !== null &&
+      typeof rawBody === 'object' &&
+      !Array.isArray(rawBody) &&
+      Object.keys(rawBody).length === 1 &&
+      Object.prototype.hasOwnProperty.call(rawBody, 'paymentAccountId');
 
     if (isPaymentAccountBindingOnly) {
       requireAnyPermission(principal, ['settings.write', 'billing.write']);
@@ -1510,65 +1560,130 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       ClerkAuthService.requirePermission(principal, 'settings.write');
     }
     ClerkAuthService.requireNoEventScope(principal, 'brand settings');
-
-    const brandRepo = new BrandRepository(db);
-    const brand = await brandRepo.findById(brandId);
-    if (!brand) throw new ValidationError('Brand not found');
-    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
-    ClerkAuthService.requireBrandScope(principal, brandId);
-    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-
-    // Validate payment account belongs to the same tenant and organization
-    // before binding it to the brand. Prevents cross-tenant/cross-org binding.
-    if (body.paymentAccountId !== undefined && body.paymentAccountId !== null) {
-      const paymentAccount = await new PaymentAccountRepository(db).findById(
-        body.paymentAccountId as string,
-      );
-      if (!paymentAccount) {
-        throw new ValidationError('Payment account not found');
-      }
-      ClerkAuthService.requireResourceTenant(
-        principal,
-        paymentAccount,
-        'PaymentAccount',
-        paymentAccount.id,
-      );
-      if (paymentAccount.organization_id !== brand.organization_id) {
-        throw new ValidationError("Payment account does not belong to the brand's organization");
-      }
+    const body = parseBody(updateBrandSchema, rawBody);
+    const paymentAccountBindingId =
+      body.paymentAccountId !== undefined && body.paymentAccountId !== null
+        ? body.paymentAccountId
+        : undefined;
+    const brandPreflight = await db
+      .selectFrom('brands')
+      .selectAll()
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', brandId)
+      .executeTakeFirst();
+    if (!brandPreflight) throw new NotFoundError('Brand', 'concealed');
+    try {
+      ClerkAuthService.requireResourceTenant(principal, brandPreflight, 'Brand', brandId);
+      ClerkAuthService.requireBrandScope(principal, brandId);
+      ClerkAuthService.requireOrganizationScope(principal, brandPreflight.organization_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('Brand', 'concealed');
+      throw error;
     }
+    if (paymentAccountBindingId) {
+      const accountPreflight = await db
+        .selectFrom('payment_accounts')
+        .select('id')
+        .where('tenant_id', '=', principal.tenantId)
+        .where('id', '=', paymentAccountBindingId)
+        .executeTakeFirst();
+      if (!accountPreflight) throw new ValidationError('Payment account not found');
+    }
+    const updated = await executeBrandUpdateWithRetry(() =>
+      db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (trx) => {
+          const transactionDb = trx as Database;
+          await app.context.brandUpdateCheckpoint?.({
+            stage: 'before_brand_lock',
+            brandId,
+            ...(body.paymentAccountId !== undefined
+              ? { paymentAccountId: body.paymentAccountId }
+              : {}),
+          });
+          const brand = await trx
+            .selectFrom('brands')
+            .selectAll()
+            .where('tenant_id', '=', principal.tenantId)
+            .where('id', '=', brandId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!brand) throw new NotFoundError('Brand', 'concealed');
+          await app.context.brandUpdateCheckpoint?.({
+            stage: 'after_brand_lock',
+            brandId,
+            ...(body.paymentAccountId !== undefined
+              ? { paymentAccountId: body.paymentAccountId }
+              : {}),
+          });
+          try {
+            ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+            ClerkAuthService.requireBrandScope(principal, brandId);
+            ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+          } catch (error) {
+            if (error instanceof NotFoundError) throw new NotFoundError('Brand', 'concealed');
+            throw error;
+          }
 
-    const updated = await brandRepo.update(brandId, {
-      ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
-      ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
-      ...(typeof body.status === 'string' ? { status: body.status } : {}),
-      ...(body.theme !== undefined ? { theme: JSON.stringify(body.theme) } : {}),
-      ...(body.supportUrl !== undefined ? { support_url: body.supportUrl } : {}),
-      ...(body.whiteLabel !== undefined ? { white_label: Boolean(body.whiteLabel) } : {}),
-      ...(body.legalUrls !== undefined ? { legal_urls: JSON.stringify(body.legalUrls) } : {}),
-      ...(body.paymentAccountId !== undefined
-        ? { payment_account_id: body.paymentAccountId ?? null }
-        : {}),
-    });
-    await writeAuditLog(audit(), request, principal, {
-      action: 'brand.updated',
-      organizationId: brand.organization_id,
-      brandId,
-      resourceType: 'Brand',
-      resourceId: brandId,
-      diffSummary: {
-        ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
-        ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
-        ...(typeof body.status === 'string' ? { status: body.status } : {}),
-        ...(body.theme !== undefined ? { theme: body.theme } : {}),
-        ...(body.supportUrl !== undefined ? { supportUrl: body.supportUrl } : {}),
-        ...(body.whiteLabel !== undefined ? { whiteLabel: Boolean(body.whiteLabel) } : {}),
-        ...(body.legalUrls !== undefined ? { legalUrls: body.legalUrls } : {}),
-        ...(body.paymentAccountId !== undefined
-          ? { paymentAccountId: body.paymentAccountId ?? null }
-          : {}),
-      },
-    });
+          if (paymentAccountBindingId) {
+            const paymentAccount = await trx
+              .selectFrom('payment_accounts')
+              .selectAll()
+              .where('tenant_id', '=', principal.tenantId)
+              .where('id', '=', paymentAccountBindingId)
+              .forUpdate()
+              .executeTakeFirst();
+            if (!paymentAccount) throw new ValidationError('Payment account not found');
+            ClerkAuthService.requireResourceTenant(
+              principal,
+              paymentAccount,
+              'PaymentAccount',
+              paymentAccount.id,
+            );
+            if (paymentAccount.organization_id !== brand.organization_id) {
+              throw new ValidationError(
+                "Payment account does not belong to the brand's organization",
+              );
+            }
+            await app.context.brandUpdateCheckpoint?.({
+              stage: 'after_account_lock',
+              brandId,
+              paymentAccountId: paymentAccountBindingId,
+            });
+          }
+
+          const before = brandAuditSnapshot(brand as unknown as Record<string, unknown>);
+          const updated = await new BrandRepository(transactionDb).update(brandId, {
+            ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
+            ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
+            ...(typeof body.status === 'string' ? { status: body.status } : {}),
+            ...(body.theme !== undefined ? { theme: JSON.stringify(body.theme) } : {}),
+            ...(body.supportUrl !== undefined ? { support_url: body.supportUrl } : {}),
+            ...(body.whiteLabel !== undefined ? { white_label: Boolean(body.whiteLabel) } : {}),
+            ...(body.legalUrls !== undefined ? { legal_urls: JSON.stringify(body.legalUrls) } : {}),
+            ...(body.paymentAccountId !== undefined
+              ? { payment_account_id: body.paymentAccountId ?? null }
+              : {}),
+          });
+          const after = brandAuditSnapshot(updated as unknown as Record<string, unknown>);
+          await writeAuditLog(
+            new AuditLogRepository(transactionDb),
+            request,
+            principal,
+            {
+              action: 'brand.updated',
+              organizationId: brand.organization_id,
+              brandId,
+              resourceType: 'Brand',
+              resourceId: brandId,
+              diffSummary: brandUpdateAuditDiff(before, after),
+            },
+            { failClosed: true },
+          );
+          return updated;
+        }),
+    );
     return serializeBrand(updated);
   });
 

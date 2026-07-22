@@ -42,6 +42,7 @@ import {
   MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORGANIZATION_BILLING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  BRAND_UPDATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORGANIZATION_UPDATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   PORTABLE_REBINDING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -147,6 +148,7 @@ describe('API route access inventory (C-123)', () => {
     expect(BRAND_SENDER_IDENTITY_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(ORGANIZATION_BILLING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(ORGANIZATION_UPDATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
+    expect(BRAND_UPDATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(SAVED_VENUE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(4);
@@ -191,7 +193,7 @@ describe('API route access inventory (C-123)', () => {
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(163);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(164);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -216,10 +218,10 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(163);
-    expect(uncoveredAuthenticatedRoutes).toHaveLength(80);
+    expect(coveredRoutes).toHaveLength(164);
+    expect(uncoveredAuthenticatedRoutes).toHaveLength(79);
     expect(inventory.routes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(
-      702,
+      707,
     );
     expect(
       inventory.routes
@@ -231,7 +233,7 @@ describe('API route access inventory (C-123)', () => {
       .flatMap((route) => route.negativeAuthorizationEvidence)
       .filter((evidence) => evidence.denialKind === 'policy')
       .map((evidence) => JSON.stringify(evidence.condition));
-    expect(policyConditions).toHaveLength(101);
+    expect(policyConditions).toHaveLength(102);
     expect(
       policyConditions.filter(
         (condition) =>
@@ -257,7 +259,7 @@ describe('API route access inventory (C-123)', () => {
             value: 'no-event-scope',
           }),
       ),
-    ).toHaveLength(9);
+    ).toHaveLength(10);
     expect(
       inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,
     ).toEqual([]);
