@@ -2020,7 +2020,10 @@ export const EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     ] as const
   ).map(([path, operationId]) =>
     denialContract({
-      authorizedControl: { required: true, status: operationId === 'getExportsByExportIdDownload' ? 302 : 200 },
+      authorizedControl: {
+        required: true,
+        status: operationId === 'getExportsByExportIdDownload' ? 302 : 200,
+      },
       denialResponse: { code: 'NOT_FOUND', status: 404 },
       deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
       method: 'GET',

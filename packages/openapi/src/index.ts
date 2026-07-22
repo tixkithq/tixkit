@@ -17828,7 +17828,7 @@ const rawOpenApiSpec = {
         operationId: 'getExportsByExportId',
         summary: 'Get export job status',
         description:
-          'Requires reports.read plus the conditional permission selected by the export job\'s stored type.',
+          "Requires reports.read plus the conditional permission selected by the export job's stored type.",
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': {
           base: ['reports.read'],
@@ -17883,7 +17883,7 @@ const rawOpenApiSpec = {
         operationId: 'getExportsByExportIdEvents',
         summary: 'Stream export job events (Server-Sent Events)',
         description:
-          'Requires reports.read plus the conditional permission selected by the export job\'s stored type.',
+          "Requires reports.read plus the conditional permission selected by the export job's stored type.",
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': {
           base: ['reports.read'],
@@ -17950,7 +17950,7 @@ const rawOpenApiSpec = {
         operationId: 'getExportsByExportIdDownload',
         summary: 'Download a completed export file',
         description:
-          'Requires reports.read plus the conditional permission selected by the export job\'s stored type.',
+          "Requires reports.read plus the conditional permission selected by the export job's stored type.",
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': {
           base: ['reports.read'],
