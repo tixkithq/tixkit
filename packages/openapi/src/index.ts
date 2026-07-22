@@ -17661,8 +17661,20 @@ const rawOpenApiSpec = {
         },
       },
       delete: {
+        operationId: 'deleteQuestionsByQuestionId',
         summary: 'Delete a custom question',
+        description:
+          'Requires events.write. Inaccessible questions are normalized to Question not found.',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['events.write'],
+        parameters: [
+          {
+            name: 'questionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '204': { description: 'Question deleted' },
           '401': {
@@ -17683,6 +17695,14 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Question not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description: 'Question has active conditional dependents',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },

@@ -136,6 +136,15 @@ export type AppContext = {
     stage: 'before_transaction';
     eventId: string;
   }) => void | Promise<void>;
+  questionDeleteCheckpoint?: (input: {
+    stage: 'before_transaction' | 'before_audit';
+    questionId: string;
+  }) => void | Promise<void>;
+  checkoutQuestionPersistenceCheckpoint?: (input: {
+    stage: 'before_transaction';
+    flow: 'box_office' | 'primary' | 'resale';
+    eventId: string;
+  }) => void | Promise<void>;
   waitlistSettingsCheckpoint?: (input: {
     stage: 'before_transaction';
     eventId: string;

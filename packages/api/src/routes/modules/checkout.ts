@@ -405,6 +405,64 @@ export function normalizeAttendeeFieldsForCartItems(
   return { items: normalizedItems, attendeeFieldsByTicketType };
 }
 
+function assertCurrentCheckoutAnswers(
+  questions: Question[],
+  answers: Record<string, unknown>,
+  context: string,
+): void {
+  const activeQuestionIds = new Set(questions.map((question) => question.id));
+  for (const questionId of Object.keys(answers)) {
+    if (!activeQuestionIds.has(questionId)) {
+      throw new ValidationError(`${context} references a question that is no longer available`);
+    }
+  }
+  assertValidAnswers(questions, answers, context);
+}
+
+/**
+ * Checkout answers are stored as JSON, so an event-row lock is the shared
+ * serialization point with question deletion. Revalidate after acquiring the
+ * lock: a question removed between initial form validation and persistence
+ * must reject the stale checkout rather than leave a dangling answer behind.
+ */
+async function lockEventAndRevalidateCheckoutAnswers(
+  database: Database,
+  eventId: string,
+  cart: CartInput,
+): Promise<void> {
+  const event = await database
+    .selectFrom('events')
+    .select(['id'])
+    .where('id', '=', eventId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!event) throw new NotFoundError('Event', eventId);
+
+  const questions = toVisibleDomainQuestions(
+    (await database
+      .selectFrom('questions')
+      .selectAll()
+      .where('event_id', '=', eventId)
+      .execute()) as QuestionRow[],
+  );
+  assertCurrentCheckoutAnswers(
+    applicableQuestions(questions, 'buyer'),
+    cart.buyerFields ?? {},
+    'Buyer question',
+  );
+  for (const [ticketTypeId, answerSets] of Object.entries(cart.attendeeFields ?? {})) {
+    const itemQuestions = applicableQuestions(questions, 'attendee', ticketTypeId);
+    for (const answers of answerSets) {
+      if (!answers || typeof answers !== 'object' || Array.isArray(answers)) continue;
+      assertCurrentCheckoutAnswers(
+        itemQuestions,
+        answers as Record<string, unknown>,
+        'Attendee question',
+      );
+    }
+  }
+}
+
 async function claimCheckoutUploadArtifacts(
   db: Database,
   tenantId: string,
@@ -1312,7 +1370,6 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               `Box-office tender amount ${body.amountCents} does not match server total ${quote.totalCents}`,
             );
           }
-          const sessionRepo = new CheckoutSessionRepository(db);
           let sessionCreated = false;
           let shouldCompensate = true;
           let workflowStarted = false;
@@ -1321,20 +1378,28 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               items: reservationItems,
               checkoutSessionId: sessionId,
             });
-            const session = await sessionRepo.create({
-              id: sessionId,
-              tenantId: event.tenant_id,
+            await app.context.checkoutQuestionPersistenceCheckpoint?.({
+              stage: 'before_transaction',
+              flow: 'box_office',
               eventId,
-              brandId: event.brand_id,
-              holdId: reservation.primaryHoldId,
-              currency: quote.currency,
-              cart: cart as Record<string, unknown>,
-              buyer: (body.buyer as Record<string, unknown>) ?? {},
-              quote: quote as Record<string, unknown>,
-              expiresAt: reservation.expiresAt,
-              idempotencyKey,
-              successUrl: undefined,
-              cancelUrl: undefined,
+            });
+            const session = await db.transaction().execute(async (trx) => {
+              await lockEventAndRevalidateCheckoutAnswers(trx, eventId, cart);
+              return new CheckoutSessionRepository(trx).create({
+                id: sessionId,
+                tenantId: event.tenant_id,
+                eventId,
+                brandId: event.brand_id,
+                holdId: reservation.primaryHoldId,
+                currency: quote.currency,
+                cart: cart as Record<string, unknown>,
+                buyer: (body.buyer as Record<string, unknown>) ?? {},
+                quote: quote as Record<string, unknown>,
+                expiresAt: reservation.expiresAt,
+                idempotencyKey,
+                successUrl: undefined,
+                cancelUrl: undefined,
+              });
             });
             sessionCreated = true;
             await claimCheckoutUploadArtifacts(db, event.tenant_id, eventId, cart, sessionId);
@@ -1628,7 +1693,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           };
           let sessionCreated = false;
           try {
+            await app.context.checkoutQuestionPersistenceCheckpoint?.({
+              stage: 'before_transaction',
+              flow: 'resale',
+              eventId: body.eventId,
+            });
             const session = await db.transaction().execute(async (trx) => {
+              await lockEventAndRevalidateCheckoutAnswers(trx, body.eventId, cart);
               const reserved = await new TicketListingRepository(trx).reserveForCheckout({
                 tenantId: event.tenant_id,
                 listingId,
@@ -1991,7 +2062,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             });
           }
 
+          await app.context.checkoutQuestionPersistenceCheckpoint?.({
+            stage: 'before_transaction',
+            flow: 'primary',
+            eventId: body.eventId,
+          });
           const session = await db.transaction().execute(async (trx) => {
+            await lockEventAndRevalidateCheckoutAnswers(trx, body.eventId, cart);
             await reserveCheckoutDiscount({
               db: trx,
               eventId: body.eventId,

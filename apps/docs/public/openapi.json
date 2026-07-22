@@ -36650,10 +36650,25 @@
         ]
       },
       "delete": {
+        "operationId": "deleteQuestionsByQuestionId",
         "summary": "Delete a custom question",
+        "description": "Requires events.write. Inaccessible questions are normalized to Question not found.",
         "security": [
           {
             "BearerAuth": []
+          }
+        ],
+        "x-required-permissions": [
+          "events.write"
+        ],
+        "parameters": [
+          {
+            "name": "questionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -36710,19 +36725,25 @@
                 }
               }
             }
-          }
-        },
-        "parameters": [
-          {
-            "name": "questionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+          },
+          "409": {
+            "description": "Question has active conditional dependents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
             }
           }
-        ],
-        "operationId": "deleteQuestionsByQuestionId",
+        },
         "tags": [
           "Platform"
         ]

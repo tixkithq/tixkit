@@ -65,9 +65,13 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     return event;
   };
 
-  const loadScopedTicketType = async (eventId: string, ticketTypeId?: string | null) => {
+  const loadScopedTicketType = async (
+    database: Database,
+    eventId: string,
+    ticketTypeId?: string | null,
+  ) => {
     if (!ticketTypeId) return;
-    const ticketType = await db
+    const ticketType = await database
       .selectFrom('ticket_types')
       .selectAll()
       .where('id', '=', ticketTypeId)
@@ -78,11 +82,12 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
   };
 
   const requireConditionalReference = async (
+    database: Database,
     eventId: string,
     conditionalVisibility?: { field: string } | null,
   ) => {
     if (!conditionalVisibility) return;
-    const source = await db
+    const source = await database
       .selectFrom('questions')
       .selectAll()
       .where('id', '=', conditionalVisibility.field)
@@ -96,13 +101,15 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
   };
 
   const requireNoActiveConditionalDependents = async (
+    database: Database,
     eventId: string,
     sourceQuestionId: string,
   ) => {
-    const questions = await db
+    const questions = await database
       .selectFrom('questions')
       .selectAll()
       .where('event_id', '=', eventId)
+      .forUpdate()
       .execute();
     const dependent = questions.find(
       (candidate) =>
@@ -125,9 +132,6 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-    await loadScopedTicketType(eventId, body.ticketTypeId);
-    await requireConditionalReference(eventId, body.conditionalVisibility);
-
     const isConsentField = body.type === 'waiver' ? true : (body.isConsentField ?? false);
     const consentVersion = isConsentField ? (body.consentVersion ?? '1') : null;
     const options = normalizeOptions(body.options);
@@ -144,37 +148,54 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
 
     const id = `q_${ulid()}`;
     const now = new Date();
-    const insertQuestion = db.insertInto('questions').values({
-      id,
-      event_id: eventId,
-      ticket_type_id: body.ticketTypeId ?? null,
-      type: body.type,
-      label: body.label,
-      description: body.description ?? null,
-      required: body.required ?? false,
-      applies_to: body.appliesTo ?? 'attendee',
-      options: options ? JSON.stringify(options) : null,
-      placeholder: body.placeholder ?? null,
-      validation_pattern: body.validationPattern ?? null,
-      conditional_visibility: body.conditionalVisibility
-        ? JSON.stringify(body.conditionalVisibility)
-        : null,
-      sort_order: body.sortOrder ?? 0,
-      is_consent_field: isConsentField,
-      consent_text: body.consentText ?? null,
-      consent_version: consentVersion,
-      created_at: now,
-      updated_at: now,
+    const question = await db.transaction().execute(async (trx) => {
+      const lockedEvent = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', eventId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!lockedEvent) throw new NotFoundError('Event', eventId);
+      requireEventAccess(principal, lockedEvent, eventId);
+      await loadScopedTicketType(trx, eventId, body.ticketTypeId);
+      await requireConditionalReference(trx, eventId, body.conditionalVisibility);
+      const insertQuestion = trx.insertInto('questions').values({
+        id,
+        event_id: eventId,
+        ticket_type_id: body.ticketTypeId ?? null,
+        type: body.type,
+        label: body.label,
+        description: body.description ?? null,
+        required: body.required ?? false,
+        applies_to: body.appliesTo ?? 'attendee',
+        options: options ? JSON.stringify(options) : null,
+        placeholder: body.placeholder ?? null,
+        validation_pattern: body.validationPattern ?? null,
+        conditional_visibility: body.conditionalVisibility
+          ? JSON.stringify(body.conditionalVisibility)
+          : null,
+        sort_order: body.sortOrder ?? 0,
+        is_consent_field: isConsentField,
+        consent_text: body.consentText ?? null,
+        consent_version: consentVersion,
+        created_at: now,
+        updated_at: now,
+      });
+      const created =
+        getDriver() === 'postgres'
+          ? await insertQuestion.returningAll().executeTakeFirstOrThrow()
+          : await insertQuestion
+              .execute()
+              .then(() =>
+                trx
+                  .selectFrom('questions')
+                  .selectAll()
+                  .where('id', '=', id)
+                  .executeTakeFirstOrThrow(),
+              );
+      await bumpEventPublicRevision(trx, eventId, now);
+      return created;
     });
-    const question =
-      getDriver() === 'postgres'
-        ? await insertQuestion.returningAll().executeTakeFirstOrThrow()
-        : await insertQuestion
-            .execute()
-            .then(() =>
-              db.selectFrom('questions').selectAll().where('id', '=', id).executeTakeFirstOrThrow(),
-            );
-    await bumpEventPublicRevision(db, eventId, now);
 
     return reply.status(201).send(serializeQuestion(question));
   });
@@ -355,8 +376,8 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
       throw new ValidationError('Changing consent text requires a new consent version');
     }
 
-    await loadScopedTicketType(question.event_id, finalTicketTypeId);
-    await requireConditionalReference(question.event_id, finalConditionalVisibility);
+    await loadScopedTicketType(db, question.event_id, finalTicketTypeId);
+    await requireConditionalReference(db, question.event_id, finalConditionalVisibility);
     assertQuestionDefinition({
       id: questionId,
       type: finalType,
@@ -405,13 +426,47 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     if (body.consentVersion !== undefined) updateData.consent_version = body.consentVersion;
     updateData.updated_at = new Date();
 
-    const updated = await db
-      .updateTable('questions')
-      .set(updateData)
-      .where('id', '=', questionId)
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    await bumpEventPublicRevision(db, question.event_id, updateData.updated_at as Date);
+    const updateQuestion = async (database: Database, eventId: string) =>
+      database
+        .updateTable('questions')
+        .set(updateData)
+        .where('id', '=', questionId)
+        .where('event_id', '=', eventId)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+    let updated: Record<string, unknown>;
+    if (body.conditionalVisibility !== undefined) {
+      updated = await db.transaction().execute(async (trx) => {
+        const lockedEvent = await trx
+          .selectFrom('events')
+          .selectAll()
+          .where('id', '=', question.event_id)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!lockedEvent) throw new NotFoundError('Question', questionId);
+        const lockedQuestion = await trx
+          .selectFrom('questions')
+          .selectAll()
+          .where('id', '=', questionId)
+          .where('event_id', '=', question.event_id)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!lockedQuestion) throw new NotFoundError('Question', questionId);
+        try {
+          requireEventAccess(principal, lockedEvent, lockedQuestion.event_id);
+        } catch (error) {
+          if (error instanceof NotFoundError) throw new NotFoundError('Question', questionId);
+          throw error;
+        }
+        await requireConditionalReference(trx, lockedQuestion.event_id, finalConditionalVisibility);
+        const result = await updateQuestion(trx, lockedQuestion.event_id);
+        await bumpEventPublicRevision(trx, lockedQuestion.event_id, updateData.updated_at as Date);
+        return result;
+      });
+    } else {
+      updated = await updateQuestion(db, question.event_id);
+      await bumpEventPublicRevision(db, question.event_id, updateData.updated_at as Date);
+    }
 
     return serializeQuestion(updated);
   });
@@ -420,35 +475,87 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
     const { questionId } = request.params as { questionId: string };
-    const question = await db
+    await app.context.questionDeleteCheckpoint?.({ stage: 'before_transaction', questionId });
+    const candidate = await db
       .selectFrom('questions')
-      .selectAll()
+      .select(['event_id'])
       .where('id', '=', questionId)
       .executeTakeFirst();
-    if (!question) throw new NotFoundError('Question', questionId);
-    const event = await loadEvent(question.event_id);
-    requireEventAccess(principal, event, question.event_id);
-    await requireNoActiveConditionalDependents(question.event_id, questionId);
+    if (!candidate) throw new NotFoundError('Question', questionId);
 
-    const hasHistoricalAnswers = await questionHasHistoricalAnswers(
-      db,
-      question.event_id,
-      questionId,
-    );
-    if (hasHistoricalAnswers) {
-      const softDeleteData = softDeleteQuestionData(question);
-      if (!softDeleteData) {
-        throw new ConflictError(
-          'Question has historical answers and cannot be hard deleted until question hiding is supported by the schema',
-        );
+    await db.transaction().execute(async (trx) => {
+      const event = await trx
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', candidate.event_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!event) throw new NotFoundError('Question', questionId);
+      const question = await trx
+        .selectFrom('questions')
+        .selectAll()
+        .where('id', '=', questionId)
+        .where('event_id', '=', candidate.event_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!question) throw new NotFoundError('Question', questionId);
+      try {
+        requireEventAccess(principal, event, question.event_id);
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('Question', questionId);
+        throw error;
       }
-      await db.updateTable('questions').set(softDeleteData).where('id', '=', questionId).execute();
-      await bumpEventPublicRevision(db, question.event_id);
-      return reply.status(204).send();
-    }
 
-    await db.deleteFrom('questions').where('id', '=', questionId).execute();
-    await bumpEventPublicRevision(db, question.event_id);
+      await requireNoActiveConditionalDependents(trx, question.event_id, questionId);
+      const hasHistoricalAnswers = await questionHasHistoricalAnswers(
+        trx,
+        question.event_id,
+        questionId,
+      );
+      const revision = new Date();
+      if (hasHistoricalAnswers) {
+        const softDeleteData = softDeleteQuestionData(question);
+        if (!softDeleteData) {
+          throw new ConflictError(
+            'Question has historical answers and cannot be hard deleted until question hiding is supported by the schema',
+          );
+        }
+        const result = await trx
+          .updateTable('questions')
+          .set(softDeleteData)
+          .where('id', '=', questionId)
+          .where('event_id', '=', question.event_id)
+          .executeTakeFirst();
+        if (Number(result.numUpdatedRows) !== 1) throw new NotFoundError('Question', questionId);
+      } else {
+        const result = await trx
+          .deleteFrom('questions')
+          .where('id', '=', questionId)
+          .where('event_id', '=', question.event_id)
+          .executeTakeFirst();
+        if (Number(result.numDeletedRows) !== 1) throw new NotFoundError('Question', questionId);
+      }
+      await bumpEventPublicRevision(trx, question.event_id, revision);
+      await app.context.questionDeleteCheckpoint?.({ stage: 'before_audit', questionId });
+      await writeAuditLog(
+        new AuditLogRepository(trx),
+        request,
+        principal,
+        {
+          action: 'event.question.deleted',
+          organizationId: event.organization_id,
+          brandId: event.brand_id,
+          resourceType: 'Question',
+          resourceId: questionId,
+          diffSummary: {
+            deletion: hasHistoricalAnswers ? 'soft' : 'hard',
+            eventId: question.event_id,
+          },
+        },
+        { failClosed: true },
+      );
+    });
+
     return reply.status(204).send();
   });
 };
@@ -496,27 +603,21 @@ async function questionHasHistoricalAnswers(
 ): Promise<boolean> {
   const attendees = await db
     .selectFrom('attendees')
-    .selectAll()
+    .select(['custom_answers'])
     .where('event_id', '=', eventId)
+    .forUpdate()
     .execute();
-  if (
-    attendees.some(
-      (attendee) =>
-        attendee.event_id === eventId &&
-        containsQuestionAnswer(attendee.custom_answers, questionId),
-    )
-  ) {
+  if (attendees.some((attendee) => containsQuestionAnswer(attendee.custom_answers, questionId))) {
     return true;
   }
 
   const checkoutSessions = await db
     .selectFrom('checkout_sessions')
-    .selectAll()
+    .select(['cart'])
     .where('event_id', '=', eventId)
+    .forUpdate()
     .execute();
-  return checkoutSessions.some(
-    (session) => session.event_id === eventId && containsQuestionAnswer(session.cart, questionId),
-  );
+  return checkoutSessions.some((session) => containsQuestionAnswer(session.cart, questionId));
 }
 
 function containsQuestionAnswer(value: unknown, questionId: string): boolean {

@@ -20386,13 +20386,15 @@ export const apiReferenceOperations = [
       "Platform"
     ],
     "summary": "Delete a custom question",
-    "description": "",
+    "description": "Requires events.write. Inaccessible questions are normalized to Question not found.",
     "security": [
       {
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "events.write"
+    ],
     "parameters": [
       {
         "name": "questionId",
@@ -20444,6 +20446,23 @@ export const apiReferenceOperations = [
       },
       "404": {
         "description": "Question not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Question has active conditional dependents",
         "content": {
           "application/json": {
             "schema": {

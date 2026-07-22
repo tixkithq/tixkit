@@ -10,6 +10,7 @@ import { checkInRoutes } from '../../routes/modules/checkin.js';
 import { eventRoutes } from '../../routes/modules/events.js';
 import { publicRoutes } from '../../routes/modules/public.js';
 import { orderRoutes } from '../../routes/modules/orders.js';
+import { questionRoutes } from '../../routes/modules/questions.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import { QrService } from '../../services/qr.js';
 import {
@@ -53,6 +54,7 @@ function resaleListingPayload(priceCents: number, expiresAt?: string) {
 let db: Database;
 let app: FastifyInstance;
 let previousDbDriver: string | undefined;
+let checkoutQuestionPersistenceCheckpoint: AppContext['checkoutQuestionPersistenceCheckpoint'];
 
 function deferred() {
   let resolve!: () => void;
@@ -125,6 +127,9 @@ async function setupRouteApp(
       authenticateLocalDev: vi.fn(async () => ({ principal })),
     },
     temporalClient: { startRefund: vi.fn() },
+    checkoutQuestionPersistenceCheckpoint: (
+      input: Parameters<NonNullable<AppContext['checkoutQuestionPersistenceCheckpoint']>>[0],
+    ) => checkoutQuestionPersistenceCheckpoint?.(input),
   } as unknown as AppContext);
   registerErrorHandler(routeApp);
   routeApp.addHook('onRequest', async (request) => {
@@ -135,6 +140,7 @@ async function setupRouteApp(
   await routeApp.register(eventRoutes);
   await routeApp.register(publicRoutes);
   await routeApp.register(checkoutRoutes);
+  await routeApp.register(questionRoutes);
   await routeApp.register(orderRoutes);
   return routeApp;
 }
@@ -545,6 +551,7 @@ describeWithIntegrationDatabase(
     }, 120_000);
 
     beforeEach(async () => {
+      checkoutQuestionPersistenceCheckpoint = undefined;
       await resetListings(db);
     });
 
@@ -1160,6 +1167,83 @@ describeWithIntegrationDatabase(
       });
       expect(publicList.statusCode).toBe(200);
       expect(publicList.json().items).toHaveLength(0);
+    });
+
+    it('rejects a resale checkout whose answer-bearing cart becomes stale before persistence', async () => {
+      const questionId = `q_resale_delete_race_${RUN_ID}`;
+      const now = new Date();
+      await db
+        .insertInto('questions')
+        .values({
+          id: questionId,
+          event_id: EVENT_ID,
+          ticket_type_id: null,
+          type: 'text',
+          label: 'Resale checkout race question',
+          description: null,
+          required: false,
+          applies_to: 'buyer',
+          options: null,
+          placeholder: null,
+          validation_pattern: null,
+          conditional_visibility: null,
+          status: 'active',
+          is_hidden: false,
+          hidden_at: null,
+          deleted_at: null,
+          sort_order: 0,
+          is_consent_field: false,
+          consent_text: null,
+          consent_version: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const created = await app.inject({
+        method: 'POST',
+        url: `/tickets/${TICKET_ID}/resale-listings`,
+        headers: { 'Idempotency-Key': `resale_delete_race_listing_${RUN_ID}` },
+        payload: resaleListingPayload(5500),
+      });
+      expect(created.statusCode).toBe(201);
+      const enteredPersistence = deferred();
+      const releasePersistence = deferred();
+      checkoutQuestionPersistenceCheckpoint = async (input) => {
+        if (input.flow !== 'resale' || input.eventId !== EVENT_ID) return;
+        enteredPersistence.resolve();
+        await releasePersistence.promise;
+      };
+      const checkout = app.inject({
+        method: 'POST',
+        url: '/checkout/sessions',
+        headers: { 'Idempotency-Key': `resale_delete_race_checkout_${RUN_ID}` },
+        payload: {
+          eventId: EVENT_ID,
+          items: [{ resaleListingId: created.json().id, quantity: 1 }],
+          resaleTermsAcceptance: CURRENT_RESALE_TERMS_ACCEPTANCE,
+          buyer: {
+            email: 'resale-delete-race@example.com',
+            firstName: 'Race',
+            lastName: 'Buyer',
+          },
+          buyerFields: { [questionId]: 'will become stale' },
+        },
+      });
+      await enteredPersistence.promise;
+      const deleted = await app.inject({ method: 'DELETE', url: `/questions/${questionId}` });
+      expect(deleted.statusCode, deleted.body).toBe(204);
+      releasePersistence.resolve();
+      const response = await checkout;
+      expect(response.statusCode, response.body).toBe(400);
+      expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+      const persistedCarts = await db
+        .selectFrom('checkout_sessions')
+        .select('cart')
+        .where('event_id', '=', EVENT_ID)
+        .execute();
+      expect(
+        persistedCarts.some((session) => JSON.stringify(session.cart).includes(questionId)),
+      ).toBe(false);
     });
 
     it('retains the resale occurrence when revalidating age eligibility', async () => {

@@ -127,6 +127,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'question-reorder-route-authorization-db.integration.test.ts'),
   ],
   [
+    'question-delete-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'question-delete-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'marketing-integration-route-authorization-db.integration.test.ts',
     resolve(
       import.meta.dirname,
@@ -585,6 +589,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['postEventsByEventIdQuestionsReorder'], {
     source: 'question-reorder-route-authorization-db.integration.test.ts',
     persistenceSource: 'question-reorder-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['deleteQuestionsByQuestionId'], {
+    source: 'question-delete-route-authorization-db.integration.test.ts',
+    persistenceSource: 'question-delete-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['postEventsByEventIdWaitlistByEntryIdOffer'], {
     source: 'waitlist-offer-route-authorization-db.integration.test.ts',

@@ -178,6 +178,7 @@ function createQuestionMutationDb(rows: QuestionRow[]) {
   const createQuery = (table: string) => {
     const whereCalls: unknown[][] = [];
     const query = {
+      select: () => query,
       selectAll: () => query,
       where: (...args: unknown[]) => {
         whereCalls.push(args);
@@ -185,6 +186,7 @@ function createQuestionMutationDb(rows: QuestionRow[]) {
       },
       orderBy: () => query,
       limit: () => query,
+      forUpdate: () => query,
       async executeTakeFirst() {
         if (table === 'events') {
           return whereCalls.some((call) => call[0] === 'id' && call[2] === event.id)
@@ -264,6 +266,9 @@ function createQuestionMutationDb(rows: QuestionRow[]) {
       };
       return deletion;
     },
+    transaction: () => ({
+      execute: async (fn: (trx: typeof mockDb) => Promise<unknown>) => fn(mockDb),
+    }),
   };
 
   return { mockDb, deletedQuestionIds, updatedQuestionIds, insertedQuestions };

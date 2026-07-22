@@ -77,6 +77,22 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
 }
 
 describe('openApiSpec', () => {
+  it('documents question deletion access, path parameters, and conflicts', () => {
+    const operation = openApiSpec.paths['/questions/{questionId}'].delete;
+
+    expect(operation.operationId).toBe('deleteQuestionsByQuestionId');
+    expect(operation.security).toEqual([{ BearerAuth: [] }]);
+    expect(operation['x-required-permissions']).toEqual(['events.write']);
+    expect(operation.parameters).toContainEqual({
+      name: 'questionId',
+      in: 'path',
+      required: true,
+      schema: { type: 'string' },
+    });
+    for (const status of ['403', '404', '409'] as const)
+      expect(operation.responses[status]).toBeDefined();
+  });
+
   it('documents export lifecycle operations, access, and required path parameters', () => {
     const exportsPath = openApiSpec.paths['/exports'];
     const status = openApiSpec.paths['/exports/{exportId}'].get;
