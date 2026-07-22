@@ -162,6 +162,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'billing-route-authorization-db.integration.test.ts'),
   ],
   [
+    'organization-update-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'organization-update-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'bootstrap-context-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'bootstrap-context-route-authorization-db.integration.test.ts'),
   ],
@@ -727,6 +731,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   }),
   ...evidenceBindings(['getOrganizationsByOrganizationIdMembers'], {
     source: 'organization-member-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['patchOrganizationsByOrganizationId'], {
+    source: 'organization-update-route-authorization-db.integration.test.ts',
+    persistenceSource: 'organization-update-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(
     [

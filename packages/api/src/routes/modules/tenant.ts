@@ -119,6 +119,7 @@ async function requireOrganizationScopedPermission(
   principal: Principal,
   organizationId: string,
   permission: Permission,
+  options?: { lock?: boolean },
 ): Promise<void> {
   ClerkAuthService.requirePermission(principal, permission);
   ClerkAuthService.requireOrganizationScope(principal, organizationId);
@@ -126,7 +127,7 @@ async function requireOrganizationScopedPermission(
   if (principal.type !== 'user') {
     throw new ForbiddenError('This organization-wide operation requires a user principal');
   }
-  const grant = await db
+  let grantQuery = db
     .selectFrom('permission_grants')
     .select('id')
     .where('tenant_id', '=', principal.tenantId)
@@ -134,8 +135,9 @@ async function requireOrganizationScopedPermission(
     .where('principal_id', '=', principal.id)
     .where('permission', '=', permission)
     .where('scope_type', '=', 'organization')
-    .where('scope_id', '=', organizationId)
-    .executeTakeFirst();
+    .where('scope_id', '=', organizationId);
+  if (options?.lock) grantQuery = grantQuery.forUpdate();
+  const grant = await grantQuery.executeTakeFirst();
   if (grant) return;
   // Legacy/unscoped principals have no resource filters and are organization-wide.
   // For mixed multi-org principals, the exact DB grant above is authoritative.
@@ -386,6 +388,70 @@ function isDuplicateInsert(error: unknown): boolean {
       mssqlDuplicateInsertErrorNumbers.has(mssqlNumber)) ||
     /duplicate|unique/i.test(record.message ?? '')
   );
+}
+
+function isRetryableOrganizationUpdateConflict(error: unknown): boolean {
+  const pending: unknown[] = [error];
+  const visited = new Set<object>();
+  while (pending.length > 0 && visited.size < 20) {
+    const current = pending.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) continue;
+    visited.add(current);
+    const databaseError = current as {
+      cause?: unknown;
+      code?: string;
+      errno?: number;
+      number?: number;
+      originalError?: unknown;
+    };
+    if (
+      databaseError.code === '40001' ||
+      databaseError.code === '40P01' ||
+      databaseError.code === 'ER_LOCK_DEADLOCK' ||
+      databaseError.code === 'ER_LOCK_WAIT_TIMEOUT' ||
+      databaseError.errno === 1213 ||
+      databaseError.errno === 1205 ||
+      databaseError.number === 1205
+    ) {
+      return true;
+    }
+    pending.push(databaseError.cause, databaseError.originalError);
+  }
+  return false;
+}
+
+async function executeOrganizationUpdateWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const maximumAttempts = 3;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableOrganizationUpdateConflict(error) || attempt === maximumAttempts) throw error;
+    }
+  }
+  throw new Error('ORGANIZATION_UPDATE_TRANSACTION_RETRY_EXHAUSTED');
+}
+
+function organizationAuditSnapshot(row: Record<string, unknown>) {
+  const organization = serializeOrganization(row);
+  return {
+    id: organization.id,
+    name: organization.name,
+    slug: organization.slug,
+    clerkOrganizationId: organization.clerkOrganizationId ?? null,
+    boxOfficeSettings: organization.boxOfficeSettings,
+    eventDefaults: organization.eventDefaults,
+  };
+}
+
+function organizationUpdateAuditDiff(
+  before: ReturnType<typeof organizationAuditSnapshot>,
+  after: ReturnType<typeof organizationAuditSnapshot>,
+) {
+  const changedFields = (
+    ['name', 'slug', 'clerkOrganizationId', 'boxOfficeSettings', 'eventDefaults'] as const
+  ).filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]));
+  return { before, after, changedFields, noOp: changedFields.length === 0 };
 }
 
 async function requireUniqueClerkOrganizationId(
@@ -735,50 +801,103 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/organizations/:organizationId', async (request) => {
     const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'settings.write');
+    if (principal.type !== 'user') {
+      throw new ForbiddenError('Organization updates require a user principal');
+    }
     const { organizationId } = request.params as { organizationId: string };
-    const current = await new OrganizationRepository(db).findById(organizationId);
-    if (!current) throw new ValidationError('Organization not found');
-    ClerkAuthService.requireResourceTenant(principal, current, 'Organization', organizationId);
-    await requireOrganizationScopedPermission(db, principal, organizationId, 'settings.write');
-
-    const body = parseBody(updateOrganizationSchema, request.body);
-    await requireUniqueClerkOrganizationId(db, body.clerkOrganizationId, organizationId);
-    let updated;
     try {
-      updated = await db.transaction().execute(async (trx) => {
-        await trx
-          .selectFrom('organizations')
-          .select('id')
-          .where('id', '=', organizationId)
-          .where('tenant_id', '=', principal.tenantId)
-          .forUpdate()
-          .executeTakeFirstOrThrow();
-        if (body.eventDefaults?.defaultVenueId) {
-          const defaultVenue = await trx
-            .selectFrom('venues')
-            .select('id')
-            .where('id', '=', body.eventDefaults.defaultVenueId)
-            .where('tenant_id', '=', principal.tenantId)
-            .where('organization_id', '=', organizationId)
-            .forUpdate()
-            .executeTakeFirst();
-          if (!defaultVenue)
-            throw new ValidationError('Default venue must belong to this workspace');
-        }
-        return new OrganizationRepository(trx as typeof db).update(organizationId, {
-          ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
-          ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
-          ...(body.clerkOrganizationId !== undefined
-            ? { clerk_organization_id: body.clerkOrganizationId }
-            : {}),
-          ...(body.boxOfficeSettings !== undefined
-            ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
-            : {}),
-          ...(body.eventDefaults !== undefined
-            ? { event_defaults: JSON.stringify(body.eventDefaults) }
-            : {}),
-        });
-      });
+      ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('Organization', 'concealed');
+      throw error;
+    }
+    const body = parseBody(updateOrganizationSchema, request.body);
+    try {
+      const updated = await executeOrganizationUpdateWithRetry(() =>
+        db
+          .transaction()
+          .setIsolationLevel('serializable')
+          .execute(async (trx) => {
+            const transactionDb = trx as Database;
+            await app.context.organizationUpdateCheckpoint?.({
+              stage: 'before_lock',
+              organizationId,
+            });
+            const current = await trx
+              .selectFrom('organizations')
+              .selectAll()
+              .where('id', '=', organizationId)
+              .where('tenant_id', '=', principal.tenantId)
+              .forUpdate()
+              .executeTakeFirst();
+            if (!current) throw new NotFoundError('Organization', 'concealed');
+            await app.context.organizationUpdateCheckpoint?.({
+              stage: 'after_lock',
+              organizationId,
+            });
+            ClerkAuthService.requireResourceTenant(
+              principal,
+              current,
+              'Organization',
+              organizationId,
+            );
+            await requireOrganizationScopedPermission(
+              transactionDb,
+              principal,
+              organizationId,
+              'settings.write',
+              { lock: true },
+            );
+            await requireUniqueClerkOrganizationId(
+              transactionDb,
+              body.clerkOrganizationId,
+              organizationId,
+            );
+            const before = organizationAuditSnapshot(current as unknown as Record<string, unknown>);
+            if (body.eventDefaults?.defaultVenueId) {
+              const defaultVenue = await trx
+                .selectFrom('venues')
+                .select('id')
+                .where('id', '=', body.eventDefaults.defaultVenueId)
+                .where('tenant_id', '=', principal.tenantId)
+                .where('organization_id', '=', organizationId)
+                .forUpdate()
+                .executeTakeFirst();
+              if (!defaultVenue)
+                throw new ValidationError('Default venue must belong to this workspace');
+            }
+            const updated = await new OrganizationRepository(transactionDb).update(organizationId, {
+              ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
+              ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
+              ...(body.clerkOrganizationId !== undefined
+                ? { clerk_organization_id: body.clerkOrganizationId }
+                : {}),
+              ...(body.boxOfficeSettings !== undefined
+                ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
+                : {}),
+              ...(body.eventDefaults !== undefined
+                ? { event_defaults: JSON.stringify(body.eventDefaults) }
+                : {}),
+            });
+            const after = organizationAuditSnapshot(updated as unknown as Record<string, unknown>);
+            await writeAuditLog(
+              new AuditLogRepository(transactionDb),
+              request,
+              principal,
+              {
+                action: 'organization.updated',
+                organizationId,
+                resourceType: 'Organization',
+                resourceId: organizationId,
+                diffSummary: organizationUpdateAuditDiff(before, after),
+              },
+              { failClosed: true },
+            );
+            return updated;
+          }),
+      );
+      return serializeOrganization(updated);
     } catch (err) {
       if (isDuplicateInsert(err)) {
         throw new ValidationError(
@@ -787,24 +906,6 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       }
       throw err;
     }
-    await writeAuditLog(audit(), request, principal, {
-      action: 'organization.updated',
-      organizationId,
-      resourceType: 'Organization',
-      resourceId: organizationId,
-      diffSummary: {
-        ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
-        ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
-        ...(body.clerkOrganizationId !== undefined
-          ? { clerkOrganizationId: body.clerkOrganizationId }
-          : {}),
-        ...(body.boxOfficeSettings !== undefined
-          ? { boxOfficeSettings: body.boxOfficeSettings }
-          : {}),
-        ...(body.eventDefaults !== undefined ? { eventDefaults: body.eventDefaults } : {}),
-      },
-    });
-    return serializeOrganization(updated);
   });
 
   app.get('/organizations/:organizationId/members', async (request) => {

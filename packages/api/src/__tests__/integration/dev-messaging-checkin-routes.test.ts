@@ -480,14 +480,16 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
     };
   }
 
+  const transaction = {
+    setIsolationLevel: () => transaction,
+    execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(transactionDb),
+  };
   const mockDb: Record<string, unknown> = {
     selectFrom: createQuery,
     updateTable: createUpdate,
     insertInto: createInsert,
     deleteFrom: (table: string) => createDelete(table, tableState),
-    transaction: () => ({
-      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(transactionDb),
-    }),
+    transaction: () => transaction,
     destroy: vi.fn(),
   };
   const transactionDb = { ...mockDb, isTransaction: true };
@@ -1170,6 +1172,7 @@ describe('brand domain creation', () => {
           updated_at: new Date(),
         },
       ],
+      audit_logs: [] as Record<string, unknown>[],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1186,6 +1189,7 @@ describe('brand domain creation', () => {
       error: 'Bad Request',
       message: 'Clerk organization ID is already assigned to another organization',
     });
+    expect(tables.audit_logs ?? []).toHaveLength(0);
     await app.close();
   });
 
@@ -1215,6 +1219,7 @@ describe('brand domain creation', () => {
           updated_at: new Date(),
         },
       ],
+      audit_logs: [] as Record<string, unknown>[],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1229,6 +1234,7 @@ describe('brand domain creation', () => {
       error: 'Bad Request',
       message: 'Clerk organization ID is already assigned to another organization',
     });
+    expect(tables.audit_logs ?? []).toHaveLength(0);
     await app.close();
   });
 
@@ -1252,6 +1258,7 @@ describe('brand domain creation', () => {
           updated_at: new Date(),
         },
       ],
+      audit_logs: [] as Record<string, unknown>[],
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables);
     const res = await app.inject({
@@ -1287,6 +1294,19 @@ describe('brand domain creation', () => {
         receiptMode: 'both',
       }),
     );
+    expect(tables.audit_logs).toHaveLength(1);
+    expect(tables.audit_logs[0]).toMatchObject({
+      action: 'organization.updated',
+      organization_id: 'org_1',
+      resource_type: 'Organization',
+      resource_id: 'org_1',
+    });
+    expect(JSON.parse(String(tables.audit_logs[0].diff_summary))).toMatchObject({
+      before: expect.objectContaining({ name: 'Old Org', slug: 'old-org' }),
+      after: expect.objectContaining({ name: 'New Org', slug: 'new-org' }),
+      changedFields: expect.arrayContaining(['name', 'slug', 'boxOfficeSettings']),
+      noOp: false,
+    });
     await app.close();
   });
 

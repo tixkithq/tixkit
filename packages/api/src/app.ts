@@ -101,6 +101,10 @@ export type AppContext = {
     operation: 'create' | 'update' | 'delete';
     venueId?: string;
   }) => void | Promise<void>;
+  organizationUpdateCheckpoint?: (input: {
+    stage: 'after_lock' | 'before_lock';
+    organizationId: string;
+  }) => void | Promise<void>;
   eventOccurrenceCheckpoint?: (input: {
     stage: 'before_transaction';
     operation: 'create' | 'update';
