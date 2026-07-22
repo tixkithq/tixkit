@@ -1300,7 +1300,20 @@ describe('tenant settings list permission gates', () => {
     const app = await setupApp(
       tenantRoutes,
       makePrincipal({ organizationIds: ['org_1'], scopes: ['settings.write'] }),
-      { organizations: [organizationRow({ id: 'org_1' })] },
+      {
+        organizations: [organizationRow({ id: 'org_1' })],
+        permission_grants: [
+          {
+            id: 'pgr_brand_create_1',
+            tenant_id: 'tnt_1',
+            principal_type: 'user',
+            principal_id: 'usr_1',
+            permission: 'settings.write',
+            scope_type: 'organization',
+            scope_id: 'org_1',
+          },
+        ],
+      },
     );
     const res = await app.inject({
       method: 'POST',

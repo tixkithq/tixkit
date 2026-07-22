@@ -170,6 +170,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'brand-update-route-authorization-db.integration.test.ts'),
   ],
   [
+    'brand-create-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'brand-create-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'brand-domain-create-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'brand-domain-create-route-authorization-db.integration.test.ts'),
   ],
@@ -436,6 +440,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['patchBrandsByBrandId'], {
     source: 'brand-update-route-authorization-db.integration.test.ts',
     persistenceSource: 'brand-update-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postBrands'], {
+    source: 'brand-create-route-authorization-db.integration.test.ts',
+    persistenceSource: 'brand-create-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['postBrandsByBrandIdDomains'], {
     source: 'brand-domain-create-route-authorization-db.integration.test.ts',
@@ -796,6 +804,7 @@ const knownPermissions = new Set<string>(ALL_PERMISSIONS);
 const credentialOnlyOperations = new Set(['getAgentSession', 'getMe']);
 const delegatedAuthorizationGuards = new Set([
   'requireAnyPermission',
+  'requireBrandCreationPrincipal',
   'requireBootstrapEventScope',
   'loadAuthorizedEventForUpdate',
   'loadScopedExportJob',
@@ -862,6 +871,7 @@ const eventScopeGuards = new Set([
 ]);
 const organizationWideScopeGuards = new Set([
   'report',
+  'requireBrandCreationPrincipal',
   'requireHumanAgentAdministrator',
   'requireMigrationPermission',
   'requireOrganizationWideOAuthApplicationPrincipal',

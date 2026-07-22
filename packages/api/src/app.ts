@@ -110,6 +110,11 @@ export type AppContext = {
     brandId: string;
     paymentAccountId?: string | null;
   }) => void | Promise<void>;
+  brandCreateCheckpoint?: (input: {
+    stage: 'before_organization_lock' | 'after_organization_lock' | 'before_brand_insert';
+    organizationId: string;
+    slug: string;
+  }) => void | Promise<void>;
   brandDomainCreateCheckpoint?: (input: {
     stage: 'after_brand_lock' | 'before_brand_lock' | 'before_domain_insert';
     brandId: string;

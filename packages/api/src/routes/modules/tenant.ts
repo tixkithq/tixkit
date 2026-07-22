@@ -445,6 +445,18 @@ async function executeBrandUpdateWithRetry<T>(operation: () => Promise<T>): Prom
   throw new Error('BRAND_UPDATE_TRANSACTION_RETRY_EXHAUSTED');
 }
 
+async function executeBrandCreateWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const maximumAttempts = 3;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableOrganizationUpdateConflict(error) || attempt === maximumAttempts) throw error;
+    }
+  }
+  throw new Error('BRAND_CREATE_TRANSACTION_RETRY_EXHAUSTED');
+}
+
 function organizationAuditSnapshot(row: Record<string, unknown>) {
   const organization = serializeOrganization(row);
   return {
@@ -500,6 +512,84 @@ function brandUpdateAuditDiff(
     ] as const
   ).filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]));
   return { before, after, changedFields, noOp: changedFields.length === 0 };
+}
+
+function brandCreateAuditSnapshot(row: Record<string, unknown>) {
+  const brand = serializeBrand(row);
+  // Themes may contain arbitrary presentation data. They are intentionally not
+  // copied into an audit record, where a future theme extension could otherwise
+  // persist provider credentials or other user-entered secrets.
+  return {
+    id: brand.id,
+    organizationId: brand.organizationId,
+    name: brand.name,
+    slug: brand.slug,
+    status: brand.status,
+    whiteLabel: brand.whiteLabel,
+    emailIdentityId: brand.emailIdentityId ?? null,
+    smsIdentityId: brand.smsIdentityId ?? null,
+    paymentAccountId: brand.paymentAccountId ?? null,
+    supportUrl: brand.supportUrl ?? null,
+    legalUrls: brand.legalUrls,
+  };
+}
+
+function createBrandOrganizationIdFromRawBody(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const organizationId = (body as Record<string, unknown>).organizationId;
+  return typeof organizationId === 'string' && organizationId.trim() !== ''
+    ? organizationId.trim()
+    : null;
+}
+
+async function requireConcealedBrandCreationOrganization(
+  db: Database,
+  principal: Principal,
+  organizationId: string,
+): Promise<void> {
+  const organization = await db
+    .selectFrom('organizations')
+    .selectAll()
+    .where('tenant_id', '=', principal.tenantId)
+    .where('id', '=', organizationId)
+    .executeTakeFirst();
+  if (!organization) throw new NotFoundError('Organization', 'concealed');
+  try {
+    ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
+    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    await requireStrictBrandCreationOrganizationPermission(db, principal, organizationId);
+  } catch (error) {
+    if (error instanceof NotFoundError) throw new NotFoundError('Organization', 'concealed');
+    throw error;
+  }
+}
+
+async function requireStrictBrandCreationOrganizationPermission(
+  db: Database,
+  principal: Principal,
+  organizationId: string,
+  options?: { lock?: boolean },
+): Promise<void> {
+  ClerkAuthService.requirePermission(principal, 'settings.write');
+  ClerkAuthService.requireOrganizationScope(principal, organizationId);
+  if (principal.type === 'system') return;
+  if (principal.type !== 'user') {
+    throw new ForbiddenError('Brand creation requires a user or system principal');
+  }
+  let query = db
+    .selectFrom('permission_grants')
+    .select('id')
+    .where('tenant_id', '=', principal.tenantId)
+    .where('principal_type', '=', 'user')
+    .where('principal_id', '=', principal.id)
+    .where('permission', '=', 'settings.write')
+    .where('scope_type', '=', 'organization')
+    .where('scope_id', '=', organizationId);
+  if (options?.lock) query = query.forUpdate();
+  if (await query.executeTakeFirst()) return;
+  throw new ForbiddenError(
+    'An active organization settings.write grant is required for brand creation',
+  );
 }
 
 async function requireUniqueClerkOrganizationId(
@@ -1506,40 +1596,99 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
     requireBrandCreationPrincipal(principal);
+    const organizationId = createBrandOrganizationIdFromRawBody(request.body);
+    // An absent or non-string discriminator is a schema error for an already
+    // authorized caller; do not turn malformed input into a resource lookup.
+    if (organizationId) {
+      await requireConcealedBrandCreationOrganization(db, principal, organizationId);
+    }
     const body = parseBody(createBrandSchema, request.body);
+    // Parse normalization is not an authorization decision. Re-run the scoped
+    // preflight against the canonical parsed discriminator before mutating.
+    await requireConcealedBrandCreationOrganization(db, principal, body.organizationId);
 
-    const organization = await new OrganizationRepository(db).findById(body.organizationId);
-    if (!organization) throw new ValidationError('Organization not found');
-    ClerkAuthService.requireResourceTenant(
-      principal,
-      organization,
-      'Organization',
-      body.organizationId,
+    const brand = await executeBrandCreateWithRetry(() =>
+      db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (trx) => {
+          const transactionDb = trx as Database;
+          await app.context.brandCreateCheckpoint?.({
+            stage: 'before_organization_lock',
+            organizationId: body.organizationId,
+            slug: body.slug.trim(),
+          });
+          const organization = await trx
+            .selectFrom('organizations')
+            .selectAll()
+            .where('tenant_id', '=', principal.tenantId)
+            .where('id', '=', body.organizationId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!organization) throw new NotFoundError('Organization', 'concealed');
+          await app.context.brandCreateCheckpoint?.({
+            stage: 'after_organization_lock',
+            organizationId: body.organizationId,
+            slug: body.slug.trim(),
+          });
+          try {
+            ClerkAuthService.requirePermission(principal, 'settings.write');
+            requireBrandCreationPrincipal(principal);
+            ClerkAuthService.requireResourceTenant(
+              principal,
+              organization,
+              'Organization',
+              body.organizationId,
+            );
+            ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+            await requireStrictBrandCreationOrganizationPermission(
+              transactionDb,
+              principal,
+              body.organizationId,
+              { lock: true },
+            );
+          } catch (error) {
+            if (error instanceof NotFoundError)
+              throw new NotFoundError('Organization', 'concealed');
+            throw error;
+          }
+          await app.context.brandCreateCheckpoint?.({
+            stage: 'before_brand_insert',
+            organizationId: body.organizationId,
+            slug: body.slug.trim(),
+          });
+          let created;
+          try {
+            created = await new BrandRepository(transactionDb).create({
+              tenantId: principal.tenantId,
+              organizationId: body.organizationId,
+              name: body.name,
+              slug: body.slug,
+              theme: body.theme,
+              whiteLabel: body.whiteLabel,
+            });
+          } catch (error) {
+            if (isDuplicateInsert(error)) throw new ConflictError('Brand slug is already in use');
+            throw error;
+          }
+          const after = brandCreateAuditSnapshot(created as unknown as Record<string, unknown>);
+          await writeAuditLog(
+            new AuditLogRepository(transactionDb),
+            request,
+            principal,
+            {
+              action: 'brand.created',
+              organizationId: body.organizationId,
+              brandId: created.id,
+              resourceType: 'Brand',
+              resourceId: created.id,
+              diffSummary: { after },
+            },
+            { failClosed: true },
+          );
+          return created;
+        }),
     );
-    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-
-    const brandRepo = new BrandRepository(db);
-    const brand = await brandRepo.create({
-      tenantId: principal.tenantId,
-      organizationId: body.organizationId,
-      name: body.name,
-      slug: body.slug,
-      theme: body.theme,
-      whiteLabel: body.whiteLabel,
-    });
-
-    await writeAuditLog(audit(), request, principal, {
-      action: 'brand.created',
-      organizationId: body.organizationId,
-      brandId: brand.id,
-      resourceType: 'Brand',
-      resourceId: brand.id,
-      diffSummary: {
-        name: body.name,
-        slug: body.slug,
-        organizationId: body.organizationId,
-      },
-    });
 
     return reply.status(201).send(serializeBrand(brand));
   });

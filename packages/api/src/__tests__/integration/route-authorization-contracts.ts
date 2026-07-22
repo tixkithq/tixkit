@@ -818,6 +818,25 @@ export const BRAND_UPDATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const BRAND_CREATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'POST',
+    operationId: 'postBrands',
+    path: '/brands',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyDeniedBoundaries: ['brand', 'event'],
+    persistenceSource: 'brand-create-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'brand-create-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const BRAND_DOMAIN_CREATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 201 },
@@ -2356,6 +2375,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...ORGANIZATION_BILLING_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_UPDATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BRAND_UPDATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...BRAND_CREATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BRAND_DOMAIN_CREATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...BOOTSTRAP_CONTEXT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...AUDIT_LOG_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
