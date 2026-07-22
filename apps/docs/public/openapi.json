@@ -98,6 +98,16 @@
       }
     },
     "parameters": {
+      "ExportId": {
+        "name": "exportId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "Export job identifier"
+      },
       "IdempotencyKey": {
         "name": "Idempotency-Key",
         "in": "header",
@@ -36852,11 +36862,15 @@
     },
     "/exports": {
       "post": {
+        "operationId": "postExports",
         "summary": "Queue export (Idempotency-Key required)",
         "description": "Requires reports.read plus a type-specific read permission: attendees exports require attendees.read; orders, sales, and tax exports require orders.read; tickets and scan_logs exports require checkins.read.",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
           }
         ],
         "x-required-permissions": {
@@ -36999,9 +37013,25 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Event not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
           }
         },
-        "operationId": "postExports",
         "tags": [
           "Reports and exports"
         ]
@@ -37009,10 +37039,53 @@
     },
     "/exports/{exportId}": {
       "get": {
+        "operationId": "getExportsByExportId",
         "summary": "Get export job status",
+        "description": "Requires reports.read plus the conditional permission selected by the export job's stored type.",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "x-required-permissions": {
+          "base": [
+            "reports.read"
+          ],
+          "byType": {
+            "attendees": [
+              "attendees.read"
+            ],
+            "orders": [
+              "orders.read"
+            ],
+            "sales": [
+              "orders.read"
+            ],
+            "tax": [
+              "orders.read"
+            ],
+            "tickets": [
+              "checkins.read"
+            ],
+            "scan_logs": [
+              "checkins.read"
+            ]
+          }
+        },
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
           }
         ],
         "responses": {
@@ -37085,17 +37158,6 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "exportId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "operationId": "getExportsByExportId",
         "tags": [
           "Reports and exports"
         ]
@@ -37103,12 +37165,42 @@
     },
     "/exports/{exportId}/events": {
       "get": {
+        "operationId": "getExportsByExportIdEvents",
         "summary": "Stream export job events (Server-Sent Events)",
+        "description": "Requires reports.read plus the conditional permission selected by the export job's stored type.",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
           }
         ],
+        "x-required-permissions": {
+          "base": [
+            "reports.read"
+          ],
+          "byType": {
+            "attendees": [
+              "attendees.read"
+            ],
+            "orders": [
+              "orders.read"
+            ],
+            "sales": [
+              "orders.read"
+            ],
+            "tax": [
+              "orders.read"
+            ],
+            "tickets": [
+              "checkins.read"
+            ],
+            "scan_logs": [
+              "checkins.read"
+            ]
+          }
+        },
         "parameters": [
           {
             "name": "exportId",
@@ -37117,6 +37209,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
           },
           {
             "name": "Last-Event-ID",
@@ -37192,7 +37287,6 @@
             }
           }
         },
-        "operationId": "getExportsByExportIdEvents",
         "tags": [
           "Reports and exports"
         ]
@@ -37200,10 +37294,53 @@
     },
     "/exports/{exportId}/download": {
       "get": {
+        "operationId": "getExportsByExportIdDownload",
         "summary": "Download a completed export file",
+        "description": "Requires reports.read plus the conditional permission selected by the export job's stored type.",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "x-required-permissions": {
+          "base": [
+            "reports.read"
+          ],
+          "byType": {
+            "attendees": [
+              "attendees.read"
+            ],
+            "orders": [
+              "orders.read"
+            ],
+            "sales": [
+              "orders.read"
+            ],
+            "tax": [
+              "orders.read"
+            ],
+            "tickets": [
+              "checkins.read"
+            ],
+            "scan_logs": [
+              "checkins.read"
+            ]
+          }
+        },
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ExportId"
           }
         ],
         "responses": {
@@ -37279,17 +37416,6 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "exportId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "operationId": "getExportsByExportIdDownload",
         "tags": [
           "Reports and exports"
         ]

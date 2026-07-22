@@ -77,6 +77,35 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
 }
 
 describe('openApiSpec', () => {
+  it('documents export lifecycle operations, access, and required path parameters', () => {
+    const exportsPath = openApiSpec.paths['/exports'];
+    const status = openApiSpec.paths['/exports/{exportId}'].get;
+    const events = openApiSpec.paths['/exports/{exportId}/events'].get;
+    const download = openApiSpec.paths['/exports/{exportId}/download'].get;
+
+    expect(exportsPath.post.operationId).toBe('postExports');
+    expect(exportsPath.post.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+    expect(exportsPath.post.responses['404']).toBeDefined();
+    for (const operation of [status, events, download]) {
+      expect(operation.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+      expect(operation['x-required-permissions']).toMatchObject({
+        base: ['reports.read'],
+        byType: { attendees: ['attendees.read'], tickets: ['checkins.read'] },
+      });
+      expect(operation.responses['403']).toBeDefined();
+      expect(operation.responses['404']).toBeDefined();
+      expect(operation.parameters).toContainEqual({ $ref: '#/components/parameters/ExportId' });
+    }
+    expect(status.operationId).toBe('getExportsByExportId');
+    expect(events.operationId).toBe('getExportsByExportIdEvents');
+    expect(download.operationId).toBe('getExportsByExportIdDownload');
+    expect(openApiSpec.components.parameters.ExportId).toMatchObject({
+      in: 'path',
+      name: 'exportId',
+      required: true,
+    });
+  });
+
   it('keeps waitlist settings strict and aligned with the runtime bounds', () => {
     const settings = openApiSpec.components.schemas.WaitlistSettings;
 

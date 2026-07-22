@@ -24,7 +24,7 @@ export type RouteAuthorizationDenialContract = Readonly<{
   }>[];
   authorizedControl: Readonly<{
     required: true;
-    status: 200 | 201 | 202 | 204 | 410;
+    status: 200 | 201 | 202 | 204 | 302 | 410;
   }>;
   denialResponse: Readonly<{
     code: 'NOT_FOUND';
@@ -1998,6 +1998,42 @@ export const PRIVACY_REQUEST_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.
   }),
 ]);
 
+export const EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 202 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+    method: 'POST',
+    operationId: 'postExports',
+    path: '/exports',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'export-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'export-route-authorization-db.integration.test.ts',
+  }),
+  ...(
+    [
+      ['/exports/{exportId}', 'getExportsByExportId'],
+      ['/exports/{exportId}/events', 'getExportsByExportIdEvents'],
+      ['/exports/{exportId}/download', 'getExportsByExportIdDownload'],
+    ] as const
+  ).map(([path, operationId]) =>
+    denialContract({
+      authorizedControl: { required: true, status: operationId === 'getExportsByExportIdDownload' ? 302 : 200 },
+      denialResponse: { code: 'NOT_FOUND', status: 404 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      method: 'GET',
+      operationId,
+      path,
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      resourceParameters: ['exportId'],
+      sideEffectAssertions: [],
+      source: 'export-route-authorization-db.integration.test.ts',
+    }),
+  ),
+]);
+
 export const SHORT_LINK_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 200 },
@@ -2258,6 +2294,7 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...PRIVACY_ERASURE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PRIVACY_EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PRIVACY_REQUEST_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...SHORT_LINK_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

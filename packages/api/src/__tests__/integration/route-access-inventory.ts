@@ -65,7 +65,7 @@ export type RouteAccessInventory = {
 };
 
 export type NegativeAuthorizationEvidence = {
-  authorizedControlStatus: 200 | 201 | 202 | 204 | 410;
+  authorizedControlStatus: 200 | 201 | 202 | 204 | 302 | 410;
   boundary: AuthorizationBoundary;
   condition:
     | Readonly<{
@@ -144,6 +144,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
   [
     'event-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'event-route-authorization-db.integration.test.ts'),
+  ],
+  [
+    'export-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'export-route-authorization-db.integration.test.ts'),
   ],
   [
     'tenant-list-route-authorization-db.integration.test.ts',
@@ -355,6 +359,14 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'short-link-route-authorization-db.integration.test.ts',
     persistenceSource: 'short-link-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(['postExports'], {
+    source: 'export-route-authorization-db.integration.test.ts',
+    persistenceSource: 'export-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(
+    ['getExportsByExportId', 'getExportsByExportIdEvents', 'getExportsByExportIdDownload'],
+    { source: 'export-route-authorization-db.integration.test.ts' },
+  ),
   ...evidenceBindings(['getShortLinks', 'getShortLinksByIdClicks'], {
     source: 'short-link-route-authorization-db.integration.test.ts',
   }),
@@ -752,6 +764,7 @@ const delegatedAuthorizationGuards = new Set([
   'requireAnyPermission',
   'requireBootstrapEventScope',
   'loadAuthorizedEventForUpdate',
+  'loadScopedExportJob',
   'withCredentialCreationResources',
   'assertEventIds',
   'filterManageableScopedCredentialRows',
@@ -765,6 +778,7 @@ const delegatedAuthorizationGuards = new Set([
   'loadAuthorizedCampaign',
   'loadAuthorizedDocument',
   'loadAuthorizedEvent',
+  'loadScopedExportJob',
   'loadAuthorizedBulkSyncJob',
   'loadSettlementScope',
   'report',
@@ -802,6 +816,7 @@ const eventScopeGuards = new Set([
   'loadCampaignProviderEventItems',
   'loadAuthorizedCampaign',
   'loadAuthorizedEvent',
+  'loadScopedExportJob',
   'loadAuthorizedBulkSyncJob',
   'loadSettlementScope',
   'requireEventAccess',
@@ -945,6 +960,16 @@ const delegatedPermissionContracts = new Map<
       permissions: ['attendees.read', 'checkins.read', 'orders.read'],
     },
   ],
+  ...['getExportsByExportId', 'getExportsByExportIdEvents', 'getExportsByExportIdDownload'].map(
+    (operationId) =>
+      [
+        operationId,
+        {
+          guard: 'loadScopedExportJob',
+          permissions: ['attendees.read', 'checkins.read', 'orders.read'],
+        },
+      ] as const,
+  ),
 ]);
 const enforcingPermissionCalls = new Set([
   'ClerkAuthService.requireAnyPermission',

@@ -22,6 +22,7 @@ import {
   EVENT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   EVENT_MEDIA_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_ADAPTER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_JOB_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   MIGRATION_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -166,6 +167,7 @@ describe('API route access inventory (C-123)', () => {
     expect(API_KEY_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
     expect(OAUTH_APPLICATION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
     expect(SCANNER_DEVICE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
+    expect(EXPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(4);
     expect(SHORT_LINK_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(3);
     expect(ATTENDEE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
     expect(CHECK_IN_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
@@ -183,7 +185,7 @@ describe('API route access inventory (C-123)', () => {
     expect(WEBHOOK_TEST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AGENT_ACTION_EXECUTION_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(1);
     expect(AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(7);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(155);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(159);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -208,9 +210,9 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(155);
+    expect(coveredRoutes).toHaveLength(159);
     expect(inventory.routes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(
-      663,
+      683,
     );
     expect(
       inventory.routes

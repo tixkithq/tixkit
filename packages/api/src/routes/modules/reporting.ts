@@ -234,10 +234,24 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (exportJob.event_id) {
-      const event = await loadEvent(exportJob.event_id);
-      requireReportEventAccess(principal, event, exportJob.event_id);
+      // Do not use the general event repository here: export-job authorization must not
+      // disclose a foreign event, organization, or brand through an error message.
+      const event = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', exportJob.event_id)
+        .where('tenant_id', '=', principal.tenantId)
+        .executeTakeFirst();
+      if (!event) throw new NotFoundError('ExportJob', exportId);
+      try {
+        requireReportEventAccess(principal, event, exportJob.event_id);
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('ExportJob', exportId);
+        throw error;
+      }
     }
 
+    requireExportTypePermission(principal, exportJob.type);
     return exportJob;
   };
 
@@ -728,7 +742,12 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     if (body.eventId) {
       const event = await loadEvent(body.eventId);
-      requireReportEventAccess(principal, event, body.eventId);
+      try {
+        requireReportEventAccess(principal, event, body.eventId);
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('Event', body.eventId);
+        throw error;
+      }
     }
 
     const requestHash = hashRequest({

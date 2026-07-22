@@ -20611,6 +20611,9 @@ export const apiReferenceOperations = [
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
     "requiredPermissions": {
@@ -20753,6 +20756,23 @@ export const apiReferenceOperations = [
             }
           }
         }
+      },
+      "404": {
+        "description": "Event not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -20764,13 +20784,40 @@ export const apiReferenceOperations = [
       "Reports and exports"
     ],
     "summary": "Get export job status",
-    "description": "",
+    "description": "Requires reports.read plus the conditional permission selected by the export job's stored type.",
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": {
+      "base": [
+        "reports.read"
+      ],
+      "byType": {
+        "attendees": [
+          "attendees.read"
+        ],
+        "orders": [
+          "orders.read"
+        ],
+        "sales": [
+          "orders.read"
+        ],
+        "tax": [
+          "orders.read"
+        ],
+        "tickets": [
+          "checkins.read"
+        ],
+        "scan_logs": [
+          "checkins.read"
+        ]
+      }
+    },
     "parameters": [
       {
         "name": "exportId",
@@ -20779,6 +20826,9 @@ export const apiReferenceOperations = [
         "schema": {
           "type": "string"
         }
+      },
+      {
+        "$ref": "#/components/parameters/ExportId"
       }
     ],
     "requestBody": null,
@@ -20861,13 +20911,40 @@ export const apiReferenceOperations = [
       "Reports and exports"
     ],
     "summary": "Stream export job events (Server-Sent Events)",
-    "description": "",
+    "description": "Requires reports.read plus the conditional permission selected by the export job's stored type.",
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": {
+      "base": [
+        "reports.read"
+      ],
+      "byType": {
+        "attendees": [
+          "attendees.read"
+        ],
+        "orders": [
+          "orders.read"
+        ],
+        "sales": [
+          "orders.read"
+        ],
+        "tax": [
+          "orders.read"
+        ],
+        "tickets": [
+          "checkins.read"
+        ],
+        "scan_logs": [
+          "checkins.read"
+        ]
+      }
+    },
     "parameters": [
       {
         "name": "exportId",
@@ -20876,6 +20953,9 @@ export const apiReferenceOperations = [
         "schema": {
           "type": "string"
         }
+      },
+      {
+        "$ref": "#/components/parameters/ExportId"
       },
       {
         "name": "Last-Event-ID",
@@ -20961,13 +21041,40 @@ export const apiReferenceOperations = [
       "Reports and exports"
     ],
     "summary": "Download a completed export file",
-    "description": "",
+    "description": "Requires reports.read plus the conditional permission selected by the export job's stored type.",
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": {
+      "base": [
+        "reports.read"
+      ],
+      "byType": {
+        "attendees": [
+          "attendees.read"
+        ],
+        "orders": [
+          "orders.read"
+        ],
+        "sales": [
+          "orders.read"
+        ],
+        "tax": [
+          "orders.read"
+        ],
+        "tickets": [
+          "checkins.read"
+        ],
+        "scan_logs": [
+          "checkins.read"
+        ]
+      }
+    },
     "parameters": [
       {
         "name": "exportId",
@@ -20976,6 +21083,9 @@ export const apiReferenceOperations = [
         "schema": {
           "type": "string"
         }
+      },
+      {
+        "$ref": "#/components/parameters/ExportId"
       }
     ],
     "requestBody": null,

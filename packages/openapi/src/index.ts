@@ -687,6 +687,13 @@ const rawOpenApiSpec = {
       },
     },
     parameters: {
+      ExportId: {
+        name: 'exportId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string', minLength: 1 },
+        description: 'Export job identifier',
+      },
       IdempotencyKey: {
         name: 'Idempotency-Key',
         in: 'header',
@@ -17735,10 +17742,11 @@ const rawOpenApiSpec = {
     },
     '/exports': {
       post: {
+        operationId: 'postExports',
         summary: 'Queue export (Idempotency-Key required)',
         description:
           'Requires reports.read plus a type-specific read permission: attendees exports require attendees.read; orders, sales, and tax exports require orders.read; tickets and scan_logs exports require checkins.read.',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': {
           base: ['reports.read'],
           byType: {
@@ -17804,13 +17812,36 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '404': {
+            description: 'Event not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
     '/exports/{exportId}': {
       get: {
+        operationId: 'getExportsByExportId',
         summary: 'Get export job status',
-        security: [{ BearerAuth: [] }],
+        description:
+          'Requires reports.read plus the conditional permission selected by the export job\'s stored type.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': {
+          base: ['reports.read'],
+          byType: {
+            attendees: ['attendees.read'],
+            orders: ['orders.read'],
+            sales: ['orders.read'],
+            tax: ['orders.read'],
+            tickets: ['checkins.read'],
+            scan_logs: ['checkins.read'],
+          },
+        },
+        parameters: [{ $ref: '#/components/parameters/ExportId' }],
         responses: {
           '200': {
             description: 'Export job status',
@@ -17849,9 +17880,24 @@ const rawOpenApiSpec = {
     },
     '/exports/{exportId}/events': {
       get: {
+        operationId: 'getExportsByExportIdEvents',
         summary: 'Stream export job events (Server-Sent Events)',
-        security: [{ BearerAuth: [] }],
+        description:
+          'Requires reports.read plus the conditional permission selected by the export job\'s stored type.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': {
+          base: ['reports.read'],
+          byType: {
+            attendees: ['attendees.read'],
+            orders: ['orders.read'],
+            sales: ['orders.read'],
+            tax: ['orders.read'],
+            tickets: ['checkins.read'],
+            scan_logs: ['checkins.read'],
+          },
+        },
         parameters: [
+          { $ref: '#/components/parameters/ExportId' },
           {
             name: 'Last-Event-ID',
             in: 'header',
@@ -17901,8 +17947,23 @@ const rawOpenApiSpec = {
     },
     '/exports/{exportId}/download': {
       get: {
+        operationId: 'getExportsByExportIdDownload',
         summary: 'Download a completed export file',
-        security: [{ BearerAuth: [] }],
+        description:
+          'Requires reports.read plus the conditional permission selected by the export job\'s stored type.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': {
+          base: ['reports.read'],
+          byType: {
+            attendees: ['attendees.read'],
+            orders: ['orders.read'],
+            sales: ['orders.read'],
+            tax: ['orders.read'],
+            tickets: ['checkins.read'],
+            scan_logs: ['checkins.read'],
+          },
+        },
+        parameters: [{ $ref: '#/components/parameters/ExportId' }],
         responses: {
           '302': { description: 'Redirect to the signed export file URL' },
           '401': {
