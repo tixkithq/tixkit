@@ -4863,13 +4863,15 @@ export const apiReferenceOperations = [
       "Products"
     ],
     "summary": "Update product",
-    "description": "",
+    "description": "Requires `tickets.write`. The product and its event must be within the caller tenant, organization, brand, and event scope.",
     "security": [
       {
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "tickets.write"
+    ],
     "parameters": [
       {
         "name": "productId",
@@ -4885,27 +4887,32 @@ export const apiReferenceOperations = [
       "content": {
         "application/json": {
           "schema": {
+            "additionalProperties": false,
             "type": "object",
             "properties": {
               "name": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "description": {
                 "type": "string",
                 "nullable": true
               },
               "priceCents": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0
               },
               "currency": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
               },
               "categoryId": {
                 "type": "string",
                 "nullable": true
               },
               "maxPerOrder": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1
               },
               "availableFrom": {
                 "type": "string",
@@ -4932,7 +4939,7 @@ export const apiReferenceOperations = [
           "example": {
             "name": "name example",
             "description": "description example",
-            "priceCents": 1,
+            "priceCents": 0,
             "currency": "USD"
           }
         }
@@ -4955,6 +4962,40 @@ export const apiReferenceOperations = [
               "maxPerOrder": 1,
               "status": "active",
               "sortOrder": 1
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Missing tickets.write permission",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Product not found or outside the caller scope",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
             }
           }
         }

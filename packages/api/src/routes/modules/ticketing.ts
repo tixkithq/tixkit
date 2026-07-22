@@ -1519,15 +1519,18 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const existing = await repo.findById(productId);
     if (!existing) throw new NotFoundError('Product', productId);
 
-    const event = await loadEvent(existing.event_id);
-    requireEventAccess(principal, event, existing.event_id);
-
-    if (body.categoryId) {
-      const category = await new ProductCategoryRepository(db).findById(body.categoryId);
-      if (!category || category.event_id !== existing.event_id) {
-        throw new NotFoundError('ProductCategory', body.categoryId);
-      }
+    try {
+      const event = await loadEvent(existing.event_id);
+      requireEventAccess(principal, event, existing.event_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('Product', productId);
+      throw error;
     }
+    await app.context.productConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'product_update',
+      eventId: existing.event_id,
+    });
 
     const updateData = pickAllowedFields(
       body,
@@ -1557,7 +1560,73 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     if (updateData.available_until)
       updateData.available_until = new Date(updateData.available_until as string);
 
-    return serializeProduct(await repo.update(productId, updateData));
+    const updated = await db.transaction().execute(async (transaction) => {
+      await app.context.productConfigurationCheckpoint?.({
+        stage: 'before_lock',
+        operation: 'product_update',
+        eventId: existing.event_id,
+      });
+      const event = await transaction
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', existing.event_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!event) throw new NotFoundError('Product', productId);
+
+      const product = await transaction
+        .selectFrom('products')
+        .selectAll()
+        .where('id', '=', productId)
+        .where('event_id', '=', existing.event_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!product) throw new NotFoundError('Product', productId);
+      try {
+        requireEventAccess(principal, event, product.event_id);
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('Product', productId);
+        throw error;
+      }
+
+      if (body.categoryId !== undefined && body.categoryId !== null) {
+        const category = await transaction
+          .selectFrom('product_categories')
+          .selectAll()
+          .where('id', '=', body.categoryId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!category || category.event_id !== product.event_id) {
+          throw new NotFoundError('ProductCategory', body.categoryId);
+        }
+      }
+      await app.context.productConfigurationCheckpoint?.({
+        stage: 'after_lock',
+        operation: 'product_update',
+        eventId: product.event_id,
+      });
+
+      const before = serializeProduct(product);
+      const saved = await new ProductRepository(transaction).update(productId, updateData);
+      const after = serializeProduct(saved);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'product.updated',
+          organizationId: event.organization_id,
+          brandId: event.brand_id,
+          resourceType: 'Product',
+          resourceId: productId,
+          diffSummary: { eventId: product.event_id, before, after },
+        },
+        { failClosed: true },
+      );
+      return after;
+    });
+
+    return updated;
   });
 
   app.get('/events/:eventId/availability', async (request) => {

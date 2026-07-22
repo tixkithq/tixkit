@@ -1788,6 +1788,25 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/events/{eventId}/product-categories']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/products']).toBeDefined();
     expect(openApiSpec.paths['/products/{productId}']).toBeDefined();
+    expect(openApiSpec.paths['/products/{productId}'].patch).toMatchObject({
+      operationId: 'patchProductsByProductId',
+      'x-required-permissions': ['tickets.write'],
+    });
+    expect(
+      openApiSpec.paths['/products/{productId}'].patch.requestBody.content['application/json']
+        .schema,
+    ).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        name: { minLength: 1 },
+        priceCents: { minimum: 0 },
+        currency: { pattern: '^[A-Z]{3}$' },
+        maxPerOrder: { minimum: 1 },
+        categoryId: { nullable: true },
+        availableFrom: { nullable: true },
+        availableUntil: { nullable: true },
+      },
+    });
     expect(openApiSpec.paths['/events/{eventId}/ticket-types/batch']).toBeDefined();
     expect(openApiSpec.paths['/ticket-types/{ticketTypeId}/batch']).toBeDefined();
     expect(openApiSpec.paths['/ticket-types/{ticketTypeId}/access-rules']).toBeDefined();

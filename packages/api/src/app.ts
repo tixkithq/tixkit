@@ -119,8 +119,8 @@ export type AppContext = {
     eventId: string;
   }) => void | Promise<void>;
   productConfigurationCheckpoint?: (input: {
-    stage: 'before_transaction';
-    operation: 'product_category_create' | 'product_create';
+    stage: 'after_lock' | 'before_lock' | 'before_transaction';
+    operation: 'product_category_create' | 'product_create' | 'product_update';
     eventId: string;
   }) => void | Promise<void>;
   resalePolicyCheckpoint?: (input: {

@@ -11048,21 +11048,34 @@ const rawOpenApiSpec = {
     },
     '/products/{productId}': {
       patch: {
+        operationId: 'patchProductsByProductId',
         summary: 'Update product',
+        description:
+          'Requires `tickets.write`. The product and its event must be within the caller tenant, organization, brand, and event scope.',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['tickets.write'],
+        parameters: [
+          {
+            name: 'productId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
+                additionalProperties: false,
                 type: 'object',
                 properties: {
-                  name: { type: 'string' },
+                  name: { type: 'string', minLength: 1 },
                   description: { type: 'string', nullable: true },
-                  priceCents: { type: 'integer' },
-                  currency: { type: 'string' },
+                  priceCents: { type: 'integer', minimum: 0 },
+                  currency: { type: 'string', pattern: '^[A-Z]{3}$' },
                   categoryId: { type: 'string', nullable: true },
-                  maxPerOrder: { type: 'integer' },
+                  maxPerOrder: { type: 'integer', minimum: 1 },
                   availableFrom: {
                     type: 'string',
                     format: 'date-time',
@@ -11087,6 +11100,18 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: { $ref: '#/components/schemas/Product' },
               },
+            },
+          },
+          '403': {
+            description: 'Missing tickets.write permission',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Product not found or outside the caller scope',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
             },
           },
         },

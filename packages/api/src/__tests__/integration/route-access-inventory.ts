@@ -562,6 +562,7 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'getEventsByEventIdProducts',
       'postEventsByEventIdProductCategories',
       'postEventsByEventIdProducts',
+      'patchProductsByProductId',
     ],
     {
       source: 'product-catalog-route-authorization-db.integration.test.ts',

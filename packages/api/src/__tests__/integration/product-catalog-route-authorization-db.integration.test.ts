@@ -32,6 +32,7 @@ function productCatalogContract(operationId: string) {
 
 const categoryContract = productCatalogContract('postEventsByEventIdProductCategories');
 const productContract = productCatalogContract('postEventsByEventIdProducts');
+const productPatchContract = productCatalogContract('patchProductsByProductId');
 const categoryReadContract = productCatalogContract('getEventsByEventIdProductCategories');
 const productReadContract = productCatalogContract('getEventsByEventIdProducts');
 
@@ -61,15 +62,61 @@ let productA: string;
 let productAScoped: string;
 let productB: string;
 
-type ProductConfigurationOperation = 'product_category_create' | 'product_create';
+type ProductConfigurationOperation =
+  | 'product_category_create'
+  | 'product_create'
+  | 'product_update';
 
 const productConfigurationCheckpoint = vi.fn(
   async (_input: {
-    stage: 'before_transaction';
+    stage: 'after_lock' | 'before_lock' | 'before_transaction';
     operation: ProductConfigurationOperation;
     eventId: string;
   }) => undefined,
 );
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function isNowaitLockError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
+    const record = current as { cause?: unknown; code?: unknown; errno?: unknown };
+    if (record.code === '55P03' || record.code === 'ER_LOCK_NOWAIT' || record.errno === 3572) {
+      return true;
+    }
+    current = record.cause;
+  }
+  return false;
+}
+
+async function waitForEventWriteLock(database: Database, eventId: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- NOWAIT polling proves the production writer owns the event lock.
+      await database.transaction().execute(async (transaction) => {
+        await transaction
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', eventId)
+          .forUpdate()
+          .noWait()
+          .executeTakeFirstOrThrow();
+      });
+    } catch (error) {
+      if (isNowaitLockError(error)) return;
+      throw error;
+    }
+    // eslint-disable-next-line no-await-in-loop -- bounded wait for the production writer to acquire the lock.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out waiting for event ${eventId} write lock`);
+}
 
 async function insertTenant(id: string, name: string): Promise<void> {
   const now = new Date('2026-07-17T12:00:00.000Z');
@@ -175,6 +222,10 @@ function auditDiff(value: unknown): Record<string, unknown> {
   return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
 }
 
+function jsonValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function revisionMillis(value: Date | string | null): number {
   expect(value).not.toBeNull();
   return value instanceof Date ? value.getTime() : new Date(value!).getTime();
@@ -184,7 +235,7 @@ async function clearProductCatalogEvidence(): Promise<void> {
   await db
     .deleteFrom('audit_logs')
     .where('actor_id', '=', actorId)
-    .where('action', 'in', ['product_category.created', 'product.created'])
+    .where('action', 'in', ['product_category.created', 'product.created', 'product.updated'])
     .execute();
   await db.deleteFrom('products').where('event_id', 'in', [eventA, eventAScoped, eventB]).execute();
   await db
@@ -226,7 +277,7 @@ async function evidenceSnapshot() {
       .selectFrom('audit_logs')
       .selectAll()
       .where('actor_id', '=', actorId)
-      .where('action', 'in', ['product_category.created', 'product.created'])
+      .where('action', 'in', ['product_category.created', 'product.created', 'product.updated'])
       .orderBy('id')
       .execute(),
   ]);
@@ -286,6 +337,17 @@ function invokeProduct(targetEventId: string, targetCategoryId: string, name?: s
   });
 }
 
+function invokeProductPatch(
+  targetProductId: string,
+  payload: Record<string, unknown> = { name: 'Updated catalog product' },
+) {
+  return app.inject({
+    method: productPatchContract.method,
+    url: productPatchContract.path.replace('{productId}', targetProductId),
+    payload,
+  });
+}
+
 function eventFrom(snapshot: Awaited<ReturnType<typeof evidenceSnapshot>>, eventId: string) {
   return snapshot.events.find((event) => event.id === eventId)!;
 }
@@ -307,7 +369,8 @@ function expectEventDelta(
 function expectExactAudit(
   audit: Awaited<ReturnType<typeof evidenceSnapshot>>['audits'][number],
   expected: {
-    action: 'product_category.created' | 'product.created';
+    action: 'product_category.created' | 'product.created' | 'product.updated';
+    before?: unknown;
     after: unknown;
     resourceId: string;
     resourceType: 'ProductCategory' | 'Product';
@@ -322,7 +385,11 @@ function expectExactAudit(
     resource_type: expected.resourceType,
     resource_id: expected.resourceId,
   });
-  expect(auditDiff(audit.diff_summary)).toEqual({ eventId: eventA, after: expected.after });
+  expect(auditDiff(audit.diff_summary)).toEqual({
+    eventId: eventA,
+    ...(expected.before === undefined ? {} : { before: expected.before }),
+    after: expected.after,
+  });
 }
 
 describeWithIntegrationDatabase('product catalog write route authorization matrix', () => {
@@ -369,7 +436,7 @@ describeWithIntegrationDatabase('product catalog write route authorization matri
     app.decorate('context', {
       db,
       productConfigurationCheckpoint: (input: {
-        stage: 'before_transaction';
+        stage: 'after_lock' | 'before_lock' | 'before_transaction';
         operation: ProductConfigurationOperation;
         eventId: string;
       }) => productConfigurationCheckpoint(input),
@@ -428,7 +495,7 @@ describeWithIntegrationDatabase('product catalog write route authorization matri
     }
   });
 
-  it('binds all four immutable route contracts to this executable proof', () => {
+  it('binds all five immutable route contracts to this executable proof', () => {
     for (const contract of [categoryReadContract, productReadContract]) {
       expect(contract).toMatchObject({
         authorizedControl: { status: 200 },
@@ -445,6 +512,12 @@ describeWithIntegrationDatabase('product catalog write route authorization matri
         source: 'product-catalog-route-authorization-db.integration.test.ts',
       });
     }
+    expect(productPatchContract).toMatchObject({
+      authorizedControl: { status: 200 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      source: 'product-catalog-route-authorization-db.integration.test.ts',
+    });
   });
 
   it('returns exact two-page event-scoped category and product collections', async () => {
@@ -771,6 +844,302 @@ describeWithIntegrationDatabase('product catalog write route authorization matri
       resourceId: createdProduct.id,
       resourceType: 'Product',
     });
+  });
+
+  it('updates a product atomically with a public revision and exact before-and-after audit', async () => {
+    const before = await evidenceSnapshot();
+    const beforeProduct = jsonValue(
+      serializeProduct(
+        before.products.find((product) => product.id === productA) as Record<string, unknown>,
+      ),
+    );
+    const response = await invokeProductPatch(productA, {
+      name: 'Updated catalog product',
+      description: null,
+      priceCents: 9_876,
+      currency: 'GBP',
+      categoryId: null,
+      maxPerOrder: 8,
+      availableFrom: '2027-07-01T13:15:30.000Z',
+      availableUntil: '2027-08-31T22:45:15.000Z',
+      status: 'inactive',
+      sortOrder: 29,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const updated = response.json();
+    expect(updated).toMatchObject({
+      id: productA,
+      eventId: eventA,
+      name: 'Updated catalog product',
+      priceCents: 9_876,
+      currency: 'GBP',
+      maxPerOrder: 8,
+      availableFrom: '2027-07-01T13:15:30.000Z',
+      availableUntil: '2027-08-31T22:45:15.000Z',
+      status: 'inactive',
+      sortOrder: 29,
+    });
+    expect(updated).not.toHaveProperty('description');
+    expect(updated).not.toHaveProperty('categoryId');
+
+    const after = await evidenceSnapshot();
+    expectEventDelta(before, after, eventA, 1);
+    expect(
+      jsonValue(
+        serializeProduct(
+          after.products.find((product) => product.id === productA) as Record<string, unknown>,
+        ),
+      ),
+    ).toEqual(updated);
+    expect(after.audits).toHaveLength(1);
+    expectExactAudit(after.audits[0]!, {
+      action: 'product.updated',
+      before: beforeProduct,
+      after: updated,
+      resourceId: productA,
+      resourceType: 'Product',
+    });
+  });
+
+  it.each([
+    ['permission', () => ({ ...basePrincipal, scopes: [] }), () => productA, 403],
+    ['tenant', () => basePrincipal, () => productB, 404],
+    [
+      'organization',
+      () => ({ ...basePrincipal, organizationIds: [organizationA] }),
+      () => productAScoped,
+      404,
+    ],
+    [
+      'brand',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA],
+      }),
+      () => productAScoped,
+      404,
+    ],
+    [
+      'event',
+      () => ({
+        ...basePrincipal,
+        organizationIds: [organizationA, organizationAScoped],
+        brandIds: [brandA, brandAScoped],
+        eventIds: [eventA],
+      }),
+      () => productAScoped,
+      404,
+    ],
+  ] as const)(
+    'denies the %s boundary for product updates without checkpoint or persistence side effects',
+    async (_boundary, makePrincipal, targetProduct, status) => {
+      activePrincipal = makePrincipal();
+      const before = await evidenceSnapshot();
+      const response = await invokeProductPatch(targetProduct(), {
+        name: 'Forbidden catalog update',
+      });
+      expect(response.statusCode, response.body).toBe(status);
+      expect(response.json()).toMatchObject({
+        error: { code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND' },
+      });
+      const target = targetProduct();
+      if (status === 404) {
+        expect(response.json()).toMatchObject({
+          error: {
+            message: `Product not found: ${target}`,
+            details: { resource: 'Product', id: target },
+          },
+        });
+      }
+      for (const concealedProductId of [productAScoped, productB]) {
+        if (concealedProductId !== target) {
+          expect(response.body).not.toContain(concealedProductId);
+        }
+      }
+      expect(response.body).not.toContain('Scoped baseline');
+      expect(response.body).not.toContain('Foreign baseline');
+      expect(productConfigurationCheckpoint).not.toHaveBeenCalled();
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    },
+  );
+
+  it('rejects a category from another event without mutating the product, revision, or audit', async () => {
+    const before = await evidenceSnapshot();
+    const response = await invokeProductPatch(productA, { categoryId: categoryAScoped });
+    expect(response.statusCode, response.body).toBe(404);
+    expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+  });
+
+  it.each([
+    [
+      'product',
+      async () => {
+        await db
+          .updateTable('products')
+          .set({ event_id: eventAScoped })
+          .where('id', '=', productA)
+          .execute();
+      },
+    ],
+    [
+      'category',
+      async () => {
+        await db
+          .updateTable('product_categories')
+          .set({ event_id: eventAScoped })
+          .where('id', '=', categoryA)
+          .execute();
+      },
+    ],
+    [
+      'event scope',
+      async () => {
+        await db
+          .updateTable('events')
+          .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+          .where('id', '=', eventA)
+          .execute();
+      },
+    ],
+  ] as const)(
+    'fails closed when the requested %s is reparented at the deterministic checkpoint',
+    async (_resource, reparent) => {
+      let checkpointSnapshot: Awaited<ReturnType<typeof evidenceSnapshot>> | undefined;
+      productConfigurationCheckpoint.mockImplementationOnce(async () => {
+        await reparent();
+        checkpointSnapshot = await evidenceSnapshot();
+      });
+
+      try {
+        const response = await invokeProductPatch(productA, {
+          name: 'Race catalog update',
+          categoryId: categoryA,
+        });
+        expect(response.statusCode, response.body).toBe(404);
+        if (_resource === 'category') {
+          expect(response.json()).toMatchObject({
+            error: {
+              code: 'NOT_FOUND',
+              message: `ProductCategory not found: ${categoryA}`,
+              details: { resource: 'ProductCategory', id: categoryA },
+            },
+          });
+        } else {
+          expect(response.json()).toMatchObject({
+            error: {
+              code: 'NOT_FOUND',
+              message: `Product not found: ${productA}`,
+              details: { resource: 'Product', id: productA },
+            },
+          });
+        }
+        expect(checkpointSnapshot).toBeDefined();
+        await expect(evidenceSnapshot()).resolves.toEqual(checkpointSnapshot);
+      } finally {
+        if (_resource === 'event scope') {
+          await db
+            .updateTable('events')
+            .set({ organization_id: organizationA, brand_id: brandA })
+            .where('id', '=', eventA)
+            .execute();
+        }
+      }
+    },
+  );
+
+  it('rolls back product, public revision, and audit when its required audit write fails', async () => {
+    const before = await evidenceSnapshot();
+    const failure = vi
+      .spyOn(AuditLogRepository.prototype, 'create')
+      .mockRejectedValueOnce(new Error('injected product update audit failure'));
+    try {
+      const response = await invokeProductPatch(productA, {
+        name: 'Audit rollback catalog update',
+      });
+      expect(response.statusCode, response.body).toBe(500);
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  it('serializes concurrent product updates into exact +2 public revision and audit evidence', async () => {
+    const before = await evidenceSnapshot();
+    const firstAfterLock = deferred();
+    const secondBeforeLock = deferred();
+    const releaseFirst = deferred();
+    let afterLockCount = 0;
+    let beforeLockCount = 0;
+    let secondCompleted = false;
+    productConfigurationCheckpoint.mockImplementation(async (input) => {
+      if (input.operation !== 'product_update') return;
+      if (input.stage === 'before_lock') {
+        beforeLockCount += 1;
+        if (beforeLockCount === 2) secondBeforeLock.resolve();
+        return;
+      }
+      if (input.stage === 'before_transaction') return;
+      afterLockCount += 1;
+      if (afterLockCount === 1) {
+        firstAfterLock.resolve();
+        await releaseFirst.promise;
+      }
+    });
+
+    const firstRequest = invokeProductPatch(productA, { name: 'Concurrent catalog update one' });
+    await firstAfterLock.promise;
+    const secondRequest = invokeProductPatch(productA, {
+      name: 'Concurrent catalog update two',
+    }).finally(() => {
+      secondCompleted = true;
+    });
+    await secondBeforeLock.promise;
+    await waitForEventWriteLock(db, eventA);
+    expect(afterLockCount).toBe(1);
+    expect(secondCompleted).toBe(false);
+    releaseFirst.resolve();
+    const [first, second] = await Promise.all([firstRequest, secondRequest]);
+    expect([first.statusCode, second.statusCode], `${first.body}\n${second.body}`).toEqual([
+      200, 200,
+    ]);
+
+    const after = await evidenceSnapshot();
+    expectEventDelta(before, after, eventA, 2);
+    expect(after.audits).toHaveLength(2);
+    const auditsByName = new Map(
+      after.audits.map((audit) => {
+        const diff = auditDiff(audit.diff_summary);
+        return [(diff.after as Record<string, unknown>).name, diff] as const;
+      }),
+    );
+    const firstAudit = auditsByName.get('Concurrent catalog update one');
+    const secondAudit = auditsByName.get('Concurrent catalog update two');
+    if (!firstAudit || !secondAudit) {
+      throw new Error('Expected both concurrent product update audit records');
+    }
+    expect(firstAudit.before).toEqual(
+      jsonValue(
+        serializeProduct(
+          before.products.find((product) => product.id === productA) as Record<string, unknown>,
+        ),
+      ),
+    );
+    expect((firstAudit.after as Record<string, unknown>).name).toBe(
+      'Concurrent catalog update one',
+    );
+    expect(secondAudit.before).toEqual(firstAudit.after);
+    expect((secondAudit.after as Record<string, unknown>).name).toBe(
+      'Concurrent catalog update two',
+    );
+    expect(
+      jsonValue(
+        serializeProduct(
+          after.products.find((product) => product.id === productA) as Record<string, unknown>,
+        ),
+      ),
+    ).toEqual(secondAudit.after);
   });
 
   it(`uses the selected ${integrationDatabaseDriver()} integration driver`, () => {
