@@ -4051,13 +4051,15 @@ export const apiReferenceOperations = [
       "Ticket types"
     ],
     "summary": "Update ticket type",
-    "description": "",
+    "description": "Requires `tickets.write`. The ticket type, inventory pool, and event occurrence are all constrained to the caller-authorized event.",
     "security": [
       {
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "tickets.write"
+    ],
     "parameters": [
       {
         "name": "ticketTypeId",
@@ -4074,9 +4076,11 @@ export const apiReferenceOperations = [
         "application/json": {
           "schema": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
               "name": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "description": {
                 "type": "string"
@@ -4108,13 +4112,16 @@ export const apiReferenceOperations = [
                 ]
               },
               "currency": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
               },
               "priceCents": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0
               },
               "minimumPriceCents": {
                 "type": "integer",
+                "minimum": 0,
                 "nullable": true
               },
               "salesStartAt": {
@@ -4128,13 +4135,19 @@ export const apiReferenceOperations = [
                 "nullable": true
               },
               "minPerOrder": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1
               },
               "maxPerOrder": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1
               },
               "inventoryPoolId": {
                 "type": "string"
+              },
+              "eventOccurrenceId": {
+                "type": "string",
+                "nullable": true
               },
               "requiresAccessCode": {
                 "type": "boolean"
@@ -4171,6 +4184,57 @@ export const apiReferenceOperations = [
               "kind": "free",
               "currency": "USD",
               "priceCents": 1
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Ticket type cannot move inventory pools after holds, orders, tickets, or waitlist entries exist; stale checkout mappings must be refreshed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Forbidden",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Ticket type, inventory pool, or event occurrence not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
             }
           }
         }

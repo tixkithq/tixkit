@@ -108,14 +108,15 @@ export type AppContext = {
     occurrenceId?: string;
   }) => void | Promise<void>;
   ticketConfigurationCheckpoint?: (input: {
-    stage: 'before_transaction';
+    stage: 'after_lock' | 'before_lock' | 'before_transaction';
     operation:
       | 'access_rule_create'
       | 'access_rule_delete'
       | 'access_rule_list'
       | 'inventory_pool_create'
       | 'ticket_type_create'
-      | 'ticket_type_batch_create';
+      | 'ticket_type_batch_create'
+      | 'ticket_type_update';
     eventId: string;
   }) => void | Promise<void>;
   productConfigurationCheckpoint?: (input: {

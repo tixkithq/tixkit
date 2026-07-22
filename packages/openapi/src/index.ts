@@ -10745,16 +10745,29 @@ const rawOpenApiSpec = {
     },
     '/ticket-types/{ticketTypeId}': {
       patch: {
+        operationId: 'patchTicketTypesByTicketTypeId',
         summary: 'Update ticket type',
+        description:
+          'Requires `tickets.write`. The ticket type, inventory pool, and event occurrence are all constrained to the caller-authorized event.',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['tickets.write'],
+        parameters: [
+          {
+            name: 'ticketTypeId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
+                additionalProperties: false,
                 properties: {
-                  name: { type: 'string' },
+                  name: { type: 'string', minLength: 1 },
                   description: { type: 'string' },
                   kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
                   status: {
@@ -10765,9 +10778,9 @@ const rawOpenApiSpec = {
                     type: 'string',
                     enum: ['public', 'hidden', 'locked'],
                   },
-                  currency: { type: 'string' },
-                  priceCents: { type: 'integer' },
-                  minimumPriceCents: { type: 'integer', nullable: true },
+                  currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+                  priceCents: { type: 'integer', minimum: 0 },
+                  minimumPriceCents: { type: 'integer', minimum: 0, nullable: true },
                   salesStartAt: {
                     type: 'string',
                     format: 'date-time',
@@ -10778,9 +10791,10 @@ const rawOpenApiSpec = {
                     format: 'date-time',
                     nullable: true,
                   },
-                  minPerOrder: { type: 'integer' },
-                  maxPerOrder: { type: 'integer' },
+                  minPerOrder: { type: 'integer', minimum: 1 },
+                  maxPerOrder: { type: 'integer', minimum: 1 },
                   inventoryPoolId: { type: 'string' },
+                  eventOccurrenceId: { type: 'string', nullable: true },
                   requiresAccessCode: { type: 'boolean' },
                   accessCodeHint: { type: 'string', nullable: true },
                   sortOrder: { type: 'integer' },
@@ -10795,6 +10809,31 @@ const rawOpenApiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/TicketType' },
+              },
+            },
+          },
+          '400': {
+            description:
+              'Ticket type cannot move inventory pools after holds, orders, tickets, or waitlist entries exist; stale checkout mappings must be refreshed.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description: 'Ticket type, inventory pool, or event occurrence not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },

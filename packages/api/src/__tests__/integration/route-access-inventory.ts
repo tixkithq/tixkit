@@ -400,6 +400,7 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       'postEventsByEventIdInventoryPools',
       'postEventsByEventIdTicketTypes',
       'postEventsByEventIdTicketTypesBatch',
+      'patchTicketTypesByTicketTypeId',
       'postTicketTypesByTicketTypeIdAccessRules',
       'deleteAccessRulesByAccessRuleId',
     ],

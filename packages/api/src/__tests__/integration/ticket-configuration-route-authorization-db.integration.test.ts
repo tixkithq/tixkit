@@ -18,6 +18,7 @@ import {
   serializeInventoryPool,
   serializeTicketType,
 } from '../../http/contracts.js';
+import { InventoryService } from '../../services/inventory.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import {
   describeWithIntegrationDatabase,
@@ -41,6 +42,7 @@ function ticketConfigurationContract(operationId: string) {
 const poolContract = ticketConfigurationContract('postEventsByEventIdInventoryPools');
 const ticketContract = ticketConfigurationContract('postEventsByEventIdTicketTypes');
 const batchContract = ticketConfigurationContract('postEventsByEventIdTicketTypesBatch');
+const ticketUpdateContract = ticketConfigurationContract('patchTicketTypesByTicketTypeId');
 const poolReadContract = ticketConfigurationContract('getEventsByEventIdInventoryPools');
 const ticketReadContract = ticketConfigurationContract('getEventsByEventIdTicketTypes');
 const listAccessRulesContract = ticketConfigurationContract(
@@ -83,11 +85,12 @@ type TicketConfigurationOperation =
   | 'access_rule_list'
   | 'inventory_pool_create'
   | 'ticket_type_create'
-  | 'ticket_type_batch_create';
+  | 'ticket_type_batch_create'
+  | 'ticket_type_update';
 
 const ticketConfigurationCheckpoint = vi.fn(
   async (_input: {
-    stage: 'before_transaction';
+    stage: 'after_lock' | 'before_lock' | 'before_transaction';
     operation: TicketConfigurationOperation;
     eventId: string;
   }) => undefined,
@@ -220,6 +223,62 @@ async function seedAccessRuleFixture(
   return { accessRule, ticketType };
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function isNowaitLockError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
+    const record = current as { cause?: unknown; code?: unknown; errno?: unknown };
+    if (record.code === '55P03' || record.code === 'ER_LOCK_NOWAIT' || record.errno === 3572) {
+      return true;
+    }
+    current = record.cause;
+  }
+  return false;
+}
+
+async function expectPoolWriteLocked(poolId: string): Promise<void> {
+  try {
+    await db.transaction().execute(async (transaction) => {
+      await transaction
+        .selectFrom('inventory_pools')
+        .select('id')
+        .where('id', '=', poolId)
+        .forUpdate()
+        .noWait()
+        .executeTakeFirstOrThrow();
+    });
+  } catch (error) {
+    if (isNowaitLockError(error)) return;
+    throw error;
+  }
+  throw new Error(`Expected inventory pool ${poolId} to be locked`);
+}
+
+async function expectOccurrenceWriteLocked(occurrenceId: string): Promise<void> {
+  try {
+    await db.transaction().execute(async (transaction) => {
+      await transaction
+        .selectFrom('event_occurrences')
+        .select('id')
+        .where('id', '=', occurrenceId)
+        .forUpdate()
+        .noWait()
+        .executeTakeFirstOrThrow();
+    });
+  } catch (error) {
+    if (isNowaitLockError(error)) return;
+    throw error;
+  }
+  throw new Error(`Expected event occurrence ${occurrenceId} to be locked`);
+}
+
 function auditDiff(value: unknown): Record<string, unknown> {
   return (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>;
 }
@@ -231,12 +290,28 @@ function revisionMillis(value: Date | string | null): number {
 
 async function clearTicketConfigurationEvidence(): Promise<void> {
   await db
+    .deleteFrom('checkout_holds')
+    .where(
+      'ticket_type_id',
+      'in',
+      db
+        .selectFrom('ticket_types')
+        .select('id')
+        .where('event_id', 'in', [eventA, eventAScoped, eventB]),
+    )
+    .execute();
+  await db
+    .deleteFrom('checkout_sessions')
+    .where('event_id', 'in', [eventA, eventAScoped, eventB])
+    .execute();
+  await db
     .deleteFrom('audit_logs')
     .where('actor_id', '=', actorId)
     .where('action', 'in', [
       'inventory_pool.created',
       'ticket_type.created',
       'ticket_type.batch_created',
+      'ticket_type.updated',
     ])
     .execute();
   await db
@@ -320,6 +395,7 @@ async function evidenceSnapshot() {
         'inventory_pool.created',
         'ticket_type.created',
         'ticket_type.batch_created',
+        'ticket_type.updated',
       ])
       .orderBy('id')
       .execute(),
@@ -443,6 +519,55 @@ function invokeBatchWithNewPool(targetEventId: string, eventOccurrenceId: string
     method: batchContract.method,
     url: batchContract.path.replace('{eventId}', targetEventId),
     payload: batchPayloadWithNewPool(eventOccurrenceId, name),
+  });
+}
+
+function ticketUpdatePayload(inventoryPoolId: string, eventOccurrenceId: string) {
+  return {
+    name: 'Updated ticket type',
+    description: 'Updated ticket type description',
+    kind: 'donation' as const,
+    status: 'paused' as const,
+    visibility: 'hidden' as const,
+    currency: 'USD',
+    priceCents: 5300,
+    minimumPriceCents: 2100,
+    salesStartAt: '2027-02-10T10:00:00.000Z',
+    salesEndAt: '2027-03-10T20:00:00.000Z',
+    minPerOrder: 3,
+    maxPerOrder: 9,
+    inventoryPoolId,
+    eventOccurrenceId,
+    requiresAccessCode: false,
+    accessCodeHint: null,
+    sortOrder: 7,
+  };
+}
+
+function invokeTicketUpdate(
+  ticketTypeId: string,
+  inventoryPoolId: string,
+  eventOccurrenceId: string,
+) {
+  return app.inject({
+    method: ticketUpdateContract.method,
+    url: ticketUpdateContract.path.replace('{ticketTypeId}', ticketTypeId),
+    payload: ticketUpdatePayload(inventoryPoolId, eventOccurrenceId),
+  });
+}
+
+function expectTicketTypeConcealed(
+  response: Awaited<ReturnType<typeof invokeTicketUpdate>>,
+  ticketTypeId: string,
+): void {
+  expect(response.statusCode, response.body).toBe(404);
+  expect(response.json()).toEqual({
+    error: {
+      code: 'NOT_FOUND',
+      details: { id: ticketTypeId, resource: 'TicketType' },
+      message: `TicketType not found: ${ticketTypeId}`,
+      requestId: expect.any(String),
+    },
   });
 }
 
@@ -579,7 +704,7 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
     app.decorate('context', {
       db,
       ticketConfigurationCheckpoint: (input: {
-        stage: 'before_transaction';
+        stage: 'after_lock' | 'before_lock' | 'before_transaction';
         operation: TicketConfigurationOperation;
         eventId: string;
       }) => ticketConfigurationCheckpoint(input),
@@ -650,6 +775,7 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
       poolContract,
       ticketContract,
       batchContract,
+      ticketUpdateContract,
       listAccessRulesContract,
       createAccessRuleContract,
       deleteAccessRuleContract,
@@ -1038,6 +1164,384 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
     },
   );
 
+  it('updates every ticket-type field with scoped related records, one revision, and exact audit evidence', async () => {
+    const ticket = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Complete ticket-type update',
+    );
+    const updatePool = await seedPool(eventA, 'Updated ticket pool');
+    const updateOccurrence = await seedOccurrence(eventA, 'Updated ticket occurrence');
+    const before = await evidenceSnapshot();
+    const beforeTicket = serializeTicketType(
+      before.ticketTypes.find((row) => row.id === ticket.ticketType.id) as Record<string, unknown>,
+    );
+
+    const response = await invokeTicketUpdate(ticket.ticketType.id, updatePool, updateOccurrence);
+    expect(response.statusCode, response.body).toBe(200);
+    const updated = response.json();
+    const after = await evidenceSnapshot();
+    expectEventDelta(before, after, eventA, 1);
+    expect(
+      serializeTicketType(
+        after.ticketTypes.find((row) => row.id === ticket.ticketType.id) as Record<string, unknown>,
+      ),
+    ).toEqual(updated);
+    const { accessCodeHint: _accessCodeHint, ...expectedUpdated } = ticketUpdatePayload(
+      updatePool,
+      updateOccurrence,
+    );
+    expect(updated).toMatchObject(expectedUpdated);
+    expect(
+      after.ticketTypes.find((row) => row.id === ticket.ticketType.id)?.access_code_hint,
+    ).toBeNull();
+    expect(ticketConfigurationCheckpoint).toHaveBeenNthCalledWith(1, {
+      stage: 'before_transaction',
+      operation: 'ticket_type_update',
+      eventId: eventA,
+    });
+    expect(ticketConfigurationCheckpoint).toHaveBeenNthCalledWith(2, {
+      stage: 'before_lock',
+      operation: 'ticket_type_update',
+      eventId: eventA,
+    });
+    expect(ticketConfigurationCheckpoint).toHaveBeenNthCalledWith(3, {
+      stage: 'after_lock',
+      operation: 'ticket_type_update',
+      eventId: eventA,
+    });
+    const audit = after.audits.find((row) => row.resource_id === ticket.ticketType.id)!;
+    expect(audit).toMatchObject({
+      tenant_id: tenantA,
+      organization_id: organizationA,
+      brand_id: brandA,
+      actor_id: actorId,
+      action: 'ticket_type.updated',
+      resource_type: 'TicketType',
+      resource_id: ticket.ticketType.id,
+    });
+    expect(auditDiff(audit.diff_summary)).toEqual({
+      eventId: eventA,
+      before: beforeTicket,
+      after: updated,
+    });
+  });
+
+  it('rejects foreign ticket-type pool and occurrence reassignment without partial persistence', async () => {
+    const ticket = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Foreign ticket-type update',
+    );
+    const before = await evidenceSnapshot();
+    const responses = [
+      await invokeTicketUpdate(ticket.ticketType.id, poolAScoped, occurrenceA),
+      await invokeTicketUpdate(ticket.ticketType.id, poolA, occurrenceAScoped),
+    ];
+    for (const response of responses) {
+      expect(response.statusCode, response.body).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    }
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+  });
+
+  it('rolls back ticket-type update and revision when its audit write fails, then permits a clean retry', async () => {
+    const ticket = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Audit rollback ticket-type update',
+    );
+    const before = await evidenceSnapshot();
+    const failure = vi
+      .spyOn(AuditLogRepository.prototype, 'create')
+      .mockRejectedValueOnce(new Error('injected ticket-type update audit failure'));
+    try {
+      const failed = await invokeTicketUpdate(ticket.ticketType.id, poolA, occurrenceA);
+      expect(failed.statusCode, failed.body).toBe(500);
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    } finally {
+      failure.mockRestore();
+    }
+
+    const retry = await invokeTicketUpdate(ticket.ticketType.id, poolA, occurrenceA);
+    expect(retry.statusCode, retry.body).toBe(200);
+    const after = await evidenceSnapshot();
+    expectEventDelta(before, after, eventA, 1);
+    expect(after.audits).toHaveLength(1);
+    expect(after.audits[0]?.action).toBe('ticket_type.updated');
+  });
+
+  it('serializes a reservation-first pool reassignment race without a stale mapping or deadlock', async () => {
+    const ticket = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Reservation-first update',
+    );
+    const replacementPool = await seedPool(eventA, 'Reservation-first replacement pool');
+    const checkoutSessionId = `cs_${ulid()}`;
+    const reservationLocked = deferred();
+    const releaseReservation = deferred();
+    const updateAtBeforeLock = deferred();
+    const releaseUpdateBeforeLock = deferred();
+    let patchReachedAfterLock = false;
+    ticketConfigurationCheckpoint.mockImplementation(async (input) => {
+      if (input.stage === 'after_lock') {
+        patchReachedAfterLock = true;
+        return;
+      }
+      if (input.stage === 'before_lock') {
+        expect(input).toEqual({
+          stage: 'before_lock',
+          operation: 'ticket_type_update',
+          eventId: eventA,
+        });
+        updateAtBeforeLock.resolve();
+        await releaseUpdateBeforeLock.promise;
+      }
+    });
+    const inventory = new InventoryService(db, async (input) => {
+      if (input.stage !== 'after_ticket_type_locks') return;
+      expect(input).toEqual({ stage: 'after_ticket_type_locks', checkoutSessionId });
+      reservationLocked.resolve();
+      await releaseReservation.promise;
+    });
+
+    const reservation = inventory.reserveCart({
+      items: [
+        {
+          inventoryPoolId: poolA,
+          ticketTypeId: ticket.ticketType.id,
+          occurrenceId: occurrenceA,
+          quantity: 1,
+        },
+      ],
+      checkoutSessionId,
+    });
+    await reservationLocked.promise;
+    const update = invokeTicketUpdate(ticket.ticketType.id, replacementPool, occurrenceA);
+    await updateAtBeforeLock.promise;
+    await expectPoolWriteLocked(poolA);
+    releaseUpdateBeforeLock.resolve();
+    await expectOccurrenceWriteLocked(occurrenceA);
+    expect(patchReachedAfterLock).toBe(false);
+    releaseReservation.resolve();
+
+    await expect(reservation).resolves.toMatchObject({ primaryHoldId: expect.any(String) });
+    const updateResponse = await update;
+    expect(updateResponse.statusCode, updateResponse.body).toBe(400);
+    expect(updateResponse.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    const current = await new TicketTypeRepository(db).findById(ticket.ticketType.id);
+    expect(current?.inventory_pool_id).toBe(poolA);
+    const holds = await db
+      .selectFrom('checkout_holds')
+      .select(['inventory_pool_id', 'ticket_type_id', 'event_occurrence_id'])
+      .where('checkout_session_id', '=', checkoutSessionId)
+      .execute();
+    expect(holds).toEqual([
+      {
+        inventory_pool_id: poolA,
+        ticket_type_id: ticket.ticketType.id,
+        event_occurrence_id: occurrenceA,
+      },
+    ]);
+  });
+
+  it('rejects a stale reservation after a pool reassignment commits without creating a hold', async () => {
+    const ticket = await seedAccessRuleFixture(eventA, poolA, occurrenceA, 'Patch-first update');
+    const replacementPool = await seedPool(eventA, 'Patch-first replacement pool');
+    const checkoutSessionId = `cs_${ulid()}`;
+    const patchLocked = deferred();
+    const releasePatch = deferred();
+    ticketConfigurationCheckpoint.mockImplementation(async (input) => {
+      if (input.stage !== 'after_lock') return;
+      expect(input).toEqual({
+        stage: 'after_lock',
+        operation: 'ticket_type_update',
+        eventId: eventA,
+      });
+      patchLocked.resolve();
+      await releasePatch.promise;
+    });
+
+    const update = invokeTicketUpdate(ticket.ticketType.id, replacementPool, occurrenceA);
+    await patchLocked.promise;
+    const reservationAtBeforePoolLocks = deferred();
+    const releaseReservationBeforePoolLocks = deferred();
+    let reservationReachedTicketTypeLocks = false;
+    const reservation = new InventoryService(db, async (input) => {
+      if (input.stage === 'after_ticket_type_locks') {
+        reservationReachedTicketTypeLocks = true;
+        return;
+      }
+      expect(input).toEqual({ stage: 'before_pool_locks', checkoutSessionId });
+      reservationAtBeforePoolLocks.resolve();
+      await releaseReservationBeforePoolLocks.promise;
+    }).reserveCart({
+      items: [
+        {
+          inventoryPoolId: poolA,
+          ticketTypeId: ticket.ticketType.id,
+          occurrenceId: occurrenceA,
+          quantity: 1,
+        },
+      ],
+      checkoutSessionId,
+    });
+    await reservationAtBeforePoolLocks.promise;
+    await expectPoolWriteLocked(replacementPool);
+    expect(reservationReachedTicketTypeLocks).toBe(false);
+    releaseReservationBeforePoolLocks.resolve();
+    await expectOccurrenceWriteLocked(occurrenceA);
+    expect(reservationReachedTicketTypeLocks).toBe(false);
+    releasePatch.resolve();
+
+    const updateResponse = await update;
+    expect(updateResponse.statusCode, updateResponse.body).toBe(200);
+    await expect(reservation).rejects.toThrow('inventory configuration changed');
+    const current = await new TicketTypeRepository(db).findById(ticket.ticketType.id);
+    expect(current?.inventory_pool_id).toBe(replacementPool);
+    const holds = await db
+      .selectFrom('checkout_holds')
+      .select('id')
+      .where('checkout_session_id', '=', checkoutSessionId)
+      .execute();
+    expect(holds).toEqual([]);
+  });
+
+  it('serializes same-pool and occurrence reservation/update contention without a timeout', async () => {
+    const ticket = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Same mapping contention',
+    );
+    const checkoutSessionId = `cs_${ulid()}`;
+    const reservationLocked = deferred();
+    const releaseReservation = deferred();
+    const inventory = new InventoryService(db, async (input) => {
+      // The reservation hook runs twice; only the post-ticket lock stage is
+      // used to establish contention with the PATCH route.
+      if (input.stage !== 'after_ticket_type_locks') return;
+      reservationLocked.resolve();
+      await releaseReservation.promise;
+    });
+    const reservation = inventory.reserveCart({
+      items: [
+        {
+          inventoryPoolId: poolA,
+          ticketTypeId: ticket.ticketType.id,
+          occurrenceId: occurrenceA,
+          quantity: 1,
+        },
+      ],
+      checkoutSessionId,
+    });
+    await reservationLocked.promise;
+    const update = invokeTicketUpdate(ticket.ticketType.id, poolA, occurrenceA);
+    releaseReservation.resolve();
+    await expect(reservation).resolves.toMatchObject({ primaryHoldId: expect.any(String) });
+    const updateResponse = await update;
+    expect(updateResponse.statusCode, updateResponse.body).toBe(200);
+  });
+
+  it.each([
+    [
+      'tenant reparent',
+      async (_ticketTypeId: string) => {
+        await db
+          .updateTable('events')
+          .set({ tenant_id: tenantB })
+          .where('id', '=', eventA)
+          .execute();
+      },
+      async () => {
+        await db
+          .updateTable('events')
+          .set({ tenant_id: tenantA })
+          .where('id', '=', eventA)
+          .execute();
+      },
+    ],
+    [
+      'ticket event reparent',
+      async (ticketTypeId: string) => {
+        await db
+          .updateTable('ticket_types')
+          .set({ event_id: eventAScoped })
+          .where('id', '=', ticketTypeId)
+          .execute();
+      },
+      async (ticketTypeId: string) => {
+        await db
+          .updateTable('ticket_types')
+          .set({ event_id: eventA })
+          .where('id', '=', ticketTypeId)
+          .execute();
+      },
+    ],
+  ] as const)('conceals a ticket type after a commit-time %s', async (_case, reparent, restore) => {
+    const ticket = await seedAccessRuleFixture(eventA, poolA, occurrenceA, `Reparent ${_case}`);
+    let checkpointSnapshot: Awaited<ReturnType<typeof evidenceSnapshot>> | undefined;
+    ticketConfigurationCheckpoint.mockImplementationOnce(async (input) => {
+      expect(input).toEqual({
+        stage: 'before_transaction',
+        operation: 'ticket_type_update',
+        eventId: eventA,
+      });
+      await reparent(ticket.ticketType.id);
+      checkpointSnapshot = await evidenceSnapshot();
+    });
+
+    try {
+      const response = await invokeTicketUpdate(ticket.ticketType.id, poolA, occurrenceA);
+      expectTicketTypeConcealed(response, ticket.ticketType.id);
+      expect(checkpointSnapshot).toBeDefined();
+      await expect(evidenceSnapshot()).resolves.toEqual(checkpointSnapshot);
+    } finally {
+      await restore(ticket.ticketType.id);
+    }
+  });
+
+  it('rechecks ticket-type scope after a checkpoint reparent and conceals the ticket type', async () => {
+    const ticket = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Reparent ticket-type update',
+    );
+    let checkpointSnapshot: Awaited<ReturnType<typeof evidenceSnapshot>> | undefined;
+    ticketConfigurationCheckpoint.mockImplementationOnce(async (input) => {
+      expect(input).toEqual({
+        stage: 'before_transaction',
+        operation: 'ticket_type_update',
+        eventId: eventA,
+      });
+      await db
+        .updateTable('events')
+        .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+        .where('id', '=', eventA)
+        .execute();
+      checkpointSnapshot = await evidenceSnapshot();
+    });
+
+    try {
+      const response = await invokeTicketUpdate(ticket.ticketType.id, poolA, occurrenceA);
+      expectTicketTypeConcealed(response, ticket.ticketType.id);
+      expect(checkpointSnapshot).toBeDefined();
+      await expect(evidenceSnapshot()).resolves.toEqual(checkpointSnapshot);
+    } finally {
+      await db
+        .updateTable('events')
+        .set({ organization_id: organizationA, brand_id: brandA })
+        .where('id', '=', eventA)
+        .execute();
+    }
+  });
+
   it.each([
     [
       'list',
@@ -1131,7 +1635,7 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
       'NOT_FOUND',
     ],
   ] as const)(
-    'denies the %s boundary for both reads and all three writes with exact snapshots',
+    'denies the %s boundary for both reads and all four writes with exact snapshots',
     async (_boundary, makePrincipal, targetEvent, status, code) => {
       activePrincipal = makePrincipal();
       const eventId = targetEvent();
@@ -1143,6 +1647,12 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
           : eventId === eventAScoped
             ? occurrenceAScoped
             : occurrenceB;
+      const targetTicket = await seedAccessRuleFixture(
+        eventId,
+        targetPool,
+        targetOccurrence,
+        `Forbidden ${_boundary} ticket-type update`,
+      );
       const before = await evidenceSnapshot();
       const poolQuery = vi.spyOn(InventoryPoolRepository.prototype, 'findByEvent');
       const ticketQuery = vi.spyOn(TicketTypeRepository.prototype, 'findByEvent');
@@ -1164,6 +1674,7 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
             targetOccurrence,
             'Forbidden batch ticket',
           ),
+          await invokeTicketUpdate(targetTicket.ticketType.id, targetPool, targetOccurrence),
         ];
         for (const response of responses) {
           expect(response.statusCode, response.body).toBe(status);
@@ -1172,6 +1683,11 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
           expect(response.body).not.toContain('Allowed ticket pool');
           expect(response.body).not.toContain('Scoped ticket pool');
           expect(response.body).not.toContain('Foreign ticket pool');
+        }
+        if (status === 404) {
+          expectTicketTypeConcealed(responses.at(-1)!, targetTicket.ticketType.id);
+        } else {
+          expect(ticketConfigurationCheckpoint).not.toHaveBeenCalled();
         }
         await expect(evidenceSnapshot()).resolves.toEqual(before);
       } finally {

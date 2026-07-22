@@ -39,6 +39,12 @@ type Ticket = {
   status: string;
 };
 
+type TicketType = {
+  id: string;
+  inventory_pool_id: string;
+  event_occurrence_id: string | null;
+};
+
 class MockTable {
   selectExecutions = 0;
 
@@ -209,17 +215,20 @@ function createMockDb() {
   const holds = new Map<string, Hold>();
   const occurrences = new Map<string, Occurrence>();
   const tickets = new Map<string, Ticket>();
+  const ticketTypes = new Map<string, TicketType>();
 
   const poolTable = new MockTable(pools);
   const holdTable = new MockTable(holds);
   const occurrenceTable = new MockTable(occurrences);
   const ticketTable = new MockTable(tickets);
+  const ticketTypeTable = new MockTable(ticketTypes);
 
   const tableFor = (table: string): MockTable => {
     if (table === 'inventory_pools') return poolTable;
     if (table === 'checkout_holds') return holdTable;
     if (table === 'event_occurrences') return occurrenceTable;
     if (table === 'tickets') return ticketTable;
+    if (table === 'ticket_types') return ticketTypeTable;
     throw new Error(`unsupported mock table ${table}`);
   };
 
@@ -245,6 +254,9 @@ function createMockDb() {
           [...occurrences.entries()].map(([id, row]) => [id, { ...row }]),
         );
         const ticketSnapshot = new Map([...tickets.entries()].map(([id, row]) => [id, { ...row }]));
+        const ticketTypeSnapshot = new Map(
+          [...ticketTypes.entries()].map(([id, row]) => [id, { ...row }]),
+        );
         try {
           return await fn(baseApi);
         } catch (err) {
@@ -256,6 +268,8 @@ function createMockDb() {
           for (const [id, row] of occurrenceSnapshot) occurrences.set(id, row);
           tickets.clear();
           for (const [id, row] of ticketSnapshot) tickets.set(id, row);
+          ticketTypes.clear();
+          for (const [id, row] of ticketTypeSnapshot) ticketTypes.set(id, row);
           throw err;
         }
       },
@@ -270,6 +284,10 @@ function createMockDb() {
       hold_ttl_seconds: 300,
       ...p,
     } as Pool);
+  }
+
+  function addTicketType(ticketType: TicketType) {
+    ticketTypes.set(ticketType.id, ticketType);
   }
 
   function addHold(h: Partial<Hold> & { id: string }) {
@@ -305,6 +323,7 @@ function createMockDb() {
   return {
     db,
     addPool,
+    addTicketType,
     addHold,
     addOccurrence,
     addTicket,
@@ -332,6 +351,7 @@ describe('InventoryService', () => {
   describe('reserveCart', () => {
     it('reserves inventory for a single-item cart', async () => {
       mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addTicketType({ id: 'tt_1', inventory_pool_id: 'pool_1', event_occurrence_id: null });
 
       const result = await service.reserveCart({
         items: [{ inventoryPoolId: 'pool_1', ticketTypeId: 'tt_1', quantity: 2 }],
@@ -350,6 +370,7 @@ describe('InventoryService', () => {
         sold_count: 0,
         hold_ttl_seconds: 45,
       });
+      mock.addTicketType({ id: 'tt_1', inventory_pool_id: 'pool_1', event_occurrence_id: null });
       const startedAt = Date.now();
 
       const result = await service.reserveCart({
@@ -376,6 +397,8 @@ describe('InventoryService', () => {
 
     it('aggregates quantity per pool across multiple ticket types', async () => {
       mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addTicketType({ id: 'tt_1', inventory_pool_id: 'pool_1', event_occurrence_id: null });
+      mock.addTicketType({ id: 'tt_2', inventory_pool_id: 'pool_1', event_occurrence_id: null });
 
       const result = await service.reserveCart({
         items: [
@@ -426,6 +449,7 @@ describe('InventoryService', () => {
 
     it('excludes stale active holds without synchronously rewriting their status', async () => {
       mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addTicketType({ id: 'tt_1', inventory_pool_id: 'pool_1', event_occurrence_id: null });
       mock.addHold({
         id: 'hld_stale',
         inventory_pool_id: 'pool_1',
@@ -470,6 +494,11 @@ describe('InventoryService', () => {
     it('persists occurrence ids on hold rows', async () => {
       mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
       mock.addOccurrence({ id: 'occ_1', capacity: 10 });
+      mock.addTicketType({
+        id: 'tt_1',
+        inventory_pool_id: 'pool_1',
+        event_occurrence_id: 'occ_1',
+      });
 
       const result = await service.reserveCart({
         items: [
@@ -481,6 +510,27 @@ describe('InventoryService', () => {
       expect(result.holds[0].occurrenceId).toBe('occ_1');
       const hold = mock.getHold(result.holds[0].holdId)!;
       expect(hold.event_occurrence_id).toBe('occ_1');
+    });
+
+    it('rejects a stale ticket-type pool or occurrence mapping before any hold is inserted', async () => {
+      mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addPool({ id: 'pool_2', total_capacity: 10, sold_count: 0 });
+      mock.addOccurrence({ id: 'occ_1', capacity: 10 });
+      mock.addTicketType({
+        id: 'tt_1',
+        inventory_pool_id: 'pool_2',
+        event_occurrence_id: 'occ_1',
+      });
+
+      await expect(
+        service.reserveCart({
+          items: [
+            { inventoryPoolId: 'pool_1', ticketTypeId: 'tt_1', occurrenceId: 'occ_1', quantity: 1 },
+          ],
+          checkoutSessionId: 'cs_1',
+        }),
+      ).rejects.toThrow('inventory configuration changed');
+      expect(mock.holds.size).toBe(0);
     });
 
     it('rejects reservations that exceed occurrence capacity while pool capacity remains', async () => {

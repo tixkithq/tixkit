@@ -48,7 +48,13 @@ const emptyAvailability = (): InventoryAvailability => ({
 });
 
 export class InventoryService {
-  constructor(private db: Database) {}
+  constructor(
+    private db: Database,
+    private readonly reservationCheckpoint?: (input: {
+      stage: 'after_ticket_type_locks' | 'before_pool_locks';
+      checkoutSessionId: string;
+    }) => void | Promise<void>,
+  ) {}
 
   /**
    * Atomically reserves inventory for an entire cart, locking each distinct
@@ -94,6 +100,11 @@ export class InventoryService {
       const holds: CartReservationResult['holds'] = [];
       let earliestExpiry: Date | null = null;
       const expiresAtByPool = new Map<string, Date>();
+
+      await this.reservationCheckpoint?.({
+        stage: 'before_pool_locks',
+        checkoutSessionId: input.checkoutSessionId,
+      });
 
       // Lock pools in a deterministic order to avoid deadlocks.
       // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array gives deterministic lock order without mutating shared input.
@@ -204,6 +215,45 @@ export class InventoryService {
           }
         }
       }
+
+      // Ticket-type configuration changes use the same global lock order as
+      // reservations: pools, then occurrences, then ticket types. Re-read each
+      // ticket type while locked so a cart can never create a hold against a
+      // stale pool or occurrence mapping after an organizer edit commits.
+      const ticketTypeIds = [...new Set(input.items.map((item) => item.ticketTypeId))].sort();
+      const ticketTypesById = new Map<
+        string,
+        { id: string; inventory_pool_id: string; event_occurrence_id: string | null }
+      >();
+      for (const ticketTypeId of ticketTypeIds) {
+        // eslint-disable-next-line no-await-in-loop -- ticket types are locked sequentially in deterministic order after their pool and occurrence locks.
+        const ticketType = await trx
+          .selectFrom('ticket_types')
+          .select(['id', 'inventory_pool_id', 'event_occurrence_id'])
+          .where('id', '=', ticketTypeId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!ticketType) {
+          throw new ValidationError(`Ticket type ${ticketTypeId} is not available`);
+        }
+        ticketTypesById.set(ticketType.id, ticketType);
+      }
+      for (const item of input.items) {
+        const ticketType = ticketTypesById.get(item.ticketTypeId)!;
+        const requestedOccurrenceId = item.occurrenceId ?? null;
+        if (
+          ticketType.inventory_pool_id !== item.inventoryPoolId ||
+          ticketType.event_occurrence_id !== requestedOccurrenceId
+        ) {
+          throw new ValidationError(
+            `Ticket type ${item.ticketTypeId} inventory configuration changed; refresh the cart and try again`,
+          );
+        }
+      }
+      await this.reservationCheckpoint?.({
+        stage: 'after_ticket_type_locks',
+        checkoutSessionId: input.checkoutSessionId,
+      });
 
       for (const poolId of poolIds) {
         const expiresAt = expiresAtByPool.get(poolId)!;

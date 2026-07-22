@@ -1808,6 +1808,38 @@ describe('openApiSpec', () => {
       },
     });
     expect(openApiSpec.paths['/events/{eventId}/ticket-types/batch']).toBeDefined();
+    expect(openApiSpec.paths['/ticket-types/{ticketTypeId}'].patch).toMatchObject({
+      operationId: 'patchTicketTypesByTicketTypeId',
+      'x-required-permissions': ['tickets.write'],
+      parameters: [expect.objectContaining({ in: 'path', name: 'ticketTypeId', required: true })],
+    });
+    expect(openApiSpec.paths['/ticket-types/{ticketTypeId}'].patch.description).toContain(
+      'tickets.write',
+    );
+    expect(
+      openApiSpec.paths['/ticket-types/{ticketTypeId}'].patch.requestBody.content[
+        'application/json'
+      ].schema,
+    ).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        name: { minLength: 1 },
+        currency: { pattern: '^[A-Z]{3}$' },
+        priceCents: { minimum: 0 },
+        minimumPriceCents: { minimum: 0, nullable: true },
+        minPerOrder: { minimum: 1 },
+        maxPerOrder: { minimum: 1 },
+        eventOccurrenceId: { nullable: true, type: 'string' },
+      },
+    });
+    expect(openApiSpec.paths['/ticket-types/{ticketTypeId}'].patch.responses).toMatchObject({
+      400: expect.anything(),
+      403: expect.anything(),
+      404: expect.anything(),
+    });
+    expect(
+      openApiSpec.paths['/ticket-types/{ticketTypeId}'].patch.responses[400].description,
+    ).toContain('holds');
     expect(openApiSpec.paths['/ticket-types/{ticketTypeId}/batch']).toBeDefined();
     expect(openApiSpec.paths['/ticket-types/{ticketTypeId}/access-rules']).toBeDefined();
     expect(openApiSpec.paths['/access-rules/{accessRuleId}']).toBeDefined();

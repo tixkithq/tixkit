@@ -339,7 +339,7 @@ export function serializeTicketType(row: Record<string, unknown>) {
     maxPerOrder: row.max_per_order,
     inventoryPoolId: row.inventory_pool_id,
     sortOrder: row.sort_order,
-    requiresAccessCode: row.requires_access_code,
+    requiresAccessCode: Boolean(row.requires_access_code),
     accessCodeHint: row.access_code_hint ?? undefined,
     eventOccurrenceId: row.event_occurrence_id ?? undefined,
     createdAt: toIso(row.created_at as Date | string),

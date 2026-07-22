@@ -941,8 +941,20 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const repo = new TicketTypeRepository(db);
     const existing = await repo.findById(ticketTypeId);
     if (!existing) throw new NotFoundError('TicketType', ticketTypeId);
-    const event = await loadEvent(existing.event_id);
-    requireEventAccess(principal, event, existing.event_id);
+
+    try {
+      const event = await loadEvent(existing.event_id);
+      requireEventAccess(principal, event, existing.event_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+      throw error;
+    }
+    await app.context.ticketConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'ticket_type_update',
+      eventId: existing.event_id,
+    });
+
     const updateData = pickAllowedFields(
       body,
       [
@@ -982,31 +994,46 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       updateData.sales_start_at = new Date(updateData.sales_start_at as string);
     if (updateData.sales_end_at)
       updateData.sales_end_at = new Date(updateData.sales_end_at as string);
-    if (updateData.inventory_pool_id) {
-      const pool = await new InventoryPoolRepository(db).findById(
-        updateData.inventory_pool_id as string,
-      );
-      if (!pool || pool.event_id !== existing.event_id) {
-        throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
-      }
-      await assertInventoryPoolReassignmentAllowed(db, {
-        ticketTypeId,
-        currentInventoryPoolId: existing.inventory_pool_id,
-        nextInventoryPoolId: updateData.inventory_pool_id,
-      });
-    }
-    if ('event_occurrence_id' in updateData) {
-      await validateEventOccurrence(
-        existing.event_id,
-        updateData.event_occurrence_id as string | null,
-      );
-    }
+
     return db.transaction().execute(async (transaction) => {
-      const currentEvent = await loadAuthorizedEventForUpdate(
-        transaction,
-        principal,
-        existing.event_id,
-      );
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'before_lock',
+        operation: 'ticket_type_update',
+        eventId: existing.event_id,
+      });
+      const currentEvent = await transaction
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', existing.event_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentEvent) throw new NotFoundError('TicketType', ticketTypeId);
+      if (updateData.inventory_pool_id) {
+        const inventoryPoolId = updateData.inventory_pool_id as string;
+        const pool = await transaction
+          .selectFrom('inventory_pools')
+          .selectAll()
+          .where('id', '=', inventoryPoolId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!pool || pool.event_id !== currentEvent.id) {
+          throw new NotFoundError('InventoryPool', inventoryPoolId);
+        }
+      }
+      if ('event_occurrence_id' in updateData) {
+        const occurrenceId = updateData.event_occurrence_id as string | null;
+        if (occurrenceId) {
+          const occurrence = await transaction
+            .selectFrom('event_occurrences')
+            .selectAll()
+            .where('id', '=', occurrenceId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!occurrence || occurrence.event_id !== currentEvent.id) {
+            throw new NotFoundError('EventOccurrence', occurrenceId);
+          }
+        }
+      }
       const currentTicketType = await transaction
         .selectFrom('ticket_types')
         .selectAll()
@@ -1016,33 +1043,42 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       if (!currentTicketType || currentTicketType.event_id !== currentEvent.id) {
         throw new NotFoundError('TicketType', ticketTypeId);
       }
+      try {
+        requireEventAccess(principal, currentEvent, currentTicketType.event_id);
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+        throw error;
+      }
       if (updateData.inventory_pool_id) {
-        const pool = await new InventoryPoolRepository(transaction).findById(
-          updateData.inventory_pool_id as string,
-        );
-        if (!pool || pool.event_id !== currentEvent.id) {
-          throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
-        }
         await assertInventoryPoolReassignmentAllowed(transaction, {
           ticketTypeId,
           currentInventoryPoolId: currentTicketType.inventory_pool_id,
           nextInventoryPoolId: updateData.inventory_pool_id,
         });
       }
-      if ('event_occurrence_id' in updateData) {
-        const occurrenceId = updateData.event_occurrence_id as string | null;
-        if (occurrenceId) {
-          const occurrence = await new EventOccurrenceRepository(transaction).findById(
-            occurrenceId,
-          );
-          if (!occurrence || occurrence.event_id !== currentEvent.id) {
-            throw new NotFoundError('EventOccurrence', occurrenceId);
-          }
-        }
-      }
-      return serializeTicketType(
-        await new TicketTypeRepository(transaction).update(ticketTypeId, updateData),
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'after_lock',
+        operation: 'ticket_type_update',
+        eventId: currentTicketType.event_id,
+      });
+      const before = serializeTicketType(currentTicketType);
+      const saved = await new TicketTypeRepository(transaction).update(ticketTypeId, updateData);
+      const after = serializeTicketType(saved);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'ticket_type.updated',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'TicketType',
+          resourceId: ticketTypeId,
+          diffSummary: { eventId: currentTicketType.event_id, before, after },
+        },
+        { failClosed: true },
       );
+      return after;
     });
   });
 
