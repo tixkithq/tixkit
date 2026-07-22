@@ -50,6 +50,7 @@ import {
   type ProviderTelemetryEvent,
 } from '@tixkit/provider-clients';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
+import { ulid } from 'ulid';
 
 type PaymentAccountRow = {
   id: string;
@@ -1692,23 +1693,144 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'settings.write');
     ClerkAuthService.requireNoEventScope(principal, 'brand domains');
     const { brandId } = request.params as { brandId: string };
-    const body = parseBody(addBrandDomainSchema, request.body);
+    const brandPreflight = await db
+      .selectFrom('brands')
+      .selectAll()
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', brandId)
+      .executeTakeFirst();
+    if (!brandPreflight) throw new NotFoundError('Brand', 'concealed');
+    try {
+      ClerkAuthService.requireResourceTenant(principal, brandPreflight, 'Brand', brandId);
+      ClerkAuthService.requireBrandScope(principal, brandId);
+      ClerkAuthService.requireOrganizationScope(principal, brandPreflight.organization_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('Brand', 'concealed');
+      throw error;
+    }
 
-    const brandRepo = new BrandRepository(db);
-    const brand = await brandRepo.findById(brandId);
-    if (!brand) throw new ValidationError('Brand not found');
-    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
-    ClerkAuthService.requireBrandScope(principal, brandId);
-    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-    const domain = await brandRepo.addDomain(brandId, body.domain, body.isPrimary);
-    await writeAuditLog(audit(), request, principal, {
-      action: 'brand_domain.created',
-      organizationId: brand.organization_id,
-      brandId,
-      resourceType: 'Brand',
-      resourceId: brandId,
-      diffSummary: { domain: body.domain, isPrimary: body.isPrimary },
-    });
+    // Do not parse the request until permissions and the addressed Brand are authorized.
+    // That keeps malformed payloads from becoming an authorization/resource oracle.
+    const body = parseBody(addBrandDomainSchema, request.body);
+    const domain = await executeBrandUpdateWithRetry(() =>
+      db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (trx) => {
+          const transactionDb = trx as Database;
+          await app.context.brandDomainCreateCheckpoint?.({
+            stage: 'before_brand_lock',
+            brandId,
+            domain: body.domain,
+          });
+          const brand = await trx
+            .selectFrom('brands')
+            .selectAll()
+            .where('tenant_id', '=', principal.tenantId)
+            .where('id', '=', brandId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!brand) throw new NotFoundError('Brand', 'concealed');
+          await app.context.brandDomainCreateCheckpoint?.({
+            stage: 'after_brand_lock',
+            brandId,
+            domain: body.domain,
+          });
+          ClerkAuthService.requirePermission(principal, 'settings.write');
+          ClerkAuthService.requireNoEventScope(principal, 'brand domains');
+          try {
+            ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+            ClerkAuthService.requireBrandScope(principal, brandId);
+            ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
+          } catch (error) {
+            if (error instanceof NotFoundError) throw new NotFoundError('Brand', 'concealed');
+            throw error;
+          }
+
+          // This lookup deliberately exposes no owning Brand. The unique index remains
+          // authoritative under concurrent inserts; its error is normalized below.
+          const existingDomain = await trx
+            .selectFrom('brand_domains')
+            .select('id')
+            .where('domain', '=', body.domain)
+            .executeTakeFirst();
+          if (existingDomain) throw new ConflictError('Domain is already assigned');
+
+          await app.context.brandDomainCreateCheckpoint?.({
+            stage: 'before_domain_insert',
+            brandId,
+            domain: body.domain,
+          });
+          const demotedPrimaries = body.isPrimary
+            ? await trx
+                .selectFrom('brand_domains')
+                .select(['id', 'domain'])
+                .where('brand_id', '=', brandId)
+                .where('is_primary', '=', true)
+                .orderBy('id')
+                .execute()
+            : [];
+          if (body.isPrimary) {
+            await trx
+              .updateTable('brand_domains')
+              .set({ is_primary: false, updated_at: new Date() })
+              .where('brand_id', '=', brandId)
+              .where('is_primary', '=', true)
+              .execute();
+          }
+          const id = `bdom_${ulid()}`;
+          const now = new Date();
+          try {
+            await trx
+              .insertInto('brand_domains')
+              .values({
+                id,
+                brand_id: brandId,
+                domain: body.domain,
+                is_primary: body.isPrimary ?? false,
+                is_verified: false,
+                ssl_status: 'pending',
+                created_at: now,
+                updated_at: now,
+              })
+              .execute();
+          } catch (error) {
+            if (isDuplicateInsert(error)) throw new ConflictError('Domain is already assigned');
+            throw error;
+          }
+          const persisted = await trx
+            .selectFrom('brand_domains')
+            .selectAll()
+            .where('id', '=', id)
+            .executeTakeFirst();
+          if (!persisted) throw new Error('BRAND_DOMAIN_INSERT_NOT_PERSISTED');
+          await writeAuditLog(
+            new AuditLogRepository(transactionDb),
+            request,
+            principal,
+            {
+              action: 'brand_domain.created',
+              organizationId: brand.organization_id,
+              brandId,
+              resourceType: 'BrandDomain',
+              resourceId: id,
+              diffSummary: {
+                after: {
+                  brandId,
+                  domain: persisted.domain,
+                  isPrimary: boolValue(persisted.is_primary),
+                  demotedPrimaries: demotedPrimaries.map((primary) => ({
+                    id: primary.id,
+                    domain: primary.domain,
+                  })),
+                },
+              },
+            },
+            { failClosed: true },
+          );
+          return persisted;
+        }),
+    );
     return reply.status(201).send(serializeBrandDomain(domain));
   });
 

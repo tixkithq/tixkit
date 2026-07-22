@@ -170,6 +170,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'brand-update-route-authorization-db.integration.test.ts'),
   ],
   [
+    'brand-domain-create-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'brand-domain-create-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'bootstrap-context-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'bootstrap-context-route-authorization-db.integration.test.ts'),
   ],
@@ -432,6 +436,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['patchBrandsByBrandId'], {
     source: 'brand-update-route-authorization-db.integration.test.ts',
     persistenceSource: 'brand-update-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postBrandsByBrandIdDomains'], {
+    source: 'brand-domain-create-route-authorization-db.integration.test.ts',
+    persistenceSource: 'brand-domain-create-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(['getBootstrapContext'], {
     source: 'bootstrap-context-route-authorization-db.integration.test.ts',

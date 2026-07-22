@@ -110,6 +110,11 @@ export type AppContext = {
     brandId: string;
     paymentAccountId?: string | null;
   }) => void | Promise<void>;
+  brandDomainCreateCheckpoint?: (input: {
+    stage: 'after_brand_lock' | 'before_brand_lock' | 'before_domain_insert';
+    brandId: string;
+    domain: string;
+  }) => void | Promise<void>;
   eventOccurrenceCheckpoint?: (input: {
     stage: 'before_transaction';
     operation: 'create' | 'update';
