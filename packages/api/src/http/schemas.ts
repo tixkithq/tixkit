@@ -750,8 +750,8 @@ export const updateTicketTypeSchema = z
 export const createAccessRuleSchema = z
   .object({
     type: z.enum(['code', 'email_domain']),
-    value: z.string().min(1),
-    maxUses: z.number().int().positive().nullable().optional(),
+    value: z.string().min(1).max(255),
+    maxUses: z.number().int().positive().max(2_147_483_647).nullable().optional(),
     expiresAt: iso8601Schema.nullable().optional(),
   })
   .strict();

@@ -278,6 +278,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-09-02 strict ticket-type batch updates',
         routeId: 'apiMigration20260901To20260902',
       },
+      {
+        label: 'Adopt 2026-09-03 redacted access-rule reads',
+        routeId: 'apiMigration20260902To20260903',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

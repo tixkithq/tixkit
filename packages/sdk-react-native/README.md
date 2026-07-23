@@ -10,7 +10,7 @@ React Native 0.73+ applications and Expo-compatible integrations.
 
 ## Status
 
-Public SDK at version 0.1.0 and API version `2026-09-02`; pre-1.0 exports may evolve with release notes.
+Public SDK at version 0.1.0 and API version `2026-09-03`; pre-1.0 exports may evolve with release notes.
 
 Resale writes require the exact `2026-07-16` terms acceptance. Settlement helpers replace provider-delegated listing completion.
 
@@ -44,7 +44,7 @@ bun run --filter @tixkit/react-native typecheck && bun run --filter @tixkit/reac
 
 ## Compatibility
 
-Tracks API version `2026-09-02`; framework peer versions and subpath exports are the compatibility boundary.
+Tracks API version `2026-09-03`; framework peer versions and subpath exports are the compatibility boundary.
 
 ## Related guides
 

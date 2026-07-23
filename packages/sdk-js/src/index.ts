@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-09-02';
+export const TIXKIT_API_VERSION = '2026-09-03';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -694,6 +694,14 @@ export type AccessRule = {
   updatedAt?: string;
 };
 
+/**
+ * Access-rule metadata returned by listAccessRules. The service never discloses
+ * credential values from this read surface; value is always '[redacted]'.
+ */
+export type AccessRuleMetadata = Omit<AccessRule, 'value'> & {
+  value: '[redacted]';
+};
+
 export type InventoryPool = {
   id: string;
   eventId: string;
@@ -714,7 +722,9 @@ export type CreateInventoryPoolInput = {
 
 export type CreateAccessRuleInput = {
   type: AccessRule['type'];
+  /** 1–255 characters. */
   value: string;
+  /** A positive 32-bit integer when supplied. */
   maxUses?: number | null;
   expiresAt?: string | null;
 };
@@ -4672,7 +4682,7 @@ class TicketTypeResource {
       body: input,
     });
   }
-  async listAccessRules(ticketTypeId: string): Promise<PageResult<AccessRule>> {
+  async listAccessRules(ticketTypeId: string): Promise<PageResult<AccessRuleMetadata>> {
     return this.client.request('GET', `/ticket-types/${ticketTypeId}/access-rules`);
   }
   async createAccessRule(ticketTypeId: string, input: CreateAccessRuleInput): Promise<AccessRule> {

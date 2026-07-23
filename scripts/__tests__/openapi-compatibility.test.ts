@@ -425,6 +425,110 @@ describe('OpenAPI compatibility', () => {
     );
   });
 
+  it('treats an inline schema and an equivalent local schema reference as semantically identical', () => {
+    const accessRule = {
+      type: 'object',
+      additionalProperties: true,
+      required: ['value', 'maxUses'],
+      properties: {
+        value: { type: 'string', minLength: 1, maxLength: 255 },
+        maxUses: { type: 'integer', minimum: 1, maximum: 2_147_483_647 },
+      },
+    };
+    const previous = structuredClone(base);
+    previous.components.schemas.AccessRule = accessRule;
+    previous.paths['/things'].post.responses['201'].content['application/json'].schema =
+      structuredClone(accessRule);
+    const current = structuredClone(previous);
+    current.paths['/things'].post.responses['201'].content['application/json'].schema = {
+      $ref: '#/components/schemas/AccessRule',
+    };
+
+    expect(compareOpenApi(previous as never, current as never)).toEqual([]);
+  });
+
+  it('dereferences local access-rule schemas before reporting stricter constraints', () => {
+    const inlineAccessRule = {
+      type: 'object',
+      additionalProperties: true,
+      required: ['value', 'maxUses'],
+      properties: {
+        value: { type: 'string', minLength: 1, maxLength: 255 },
+        maxUses: { type: 'integer', minimum: 1, maximum: 2_147_483_647 },
+      },
+    };
+    const previous = structuredClone(base);
+    previous.paths['/things'].post.responses['201'].content['application/json'].schema =
+      inlineAccessRule;
+    const current = structuredClone(previous);
+    current.components.schemas.AccessRule = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['value', 'maxUses'],
+      properties: {
+        value: { type: 'string', minLength: 2, maxLength: 64 },
+        maxUses: { type: 'integer', minimum: 2, maximum: 100 },
+      },
+    };
+    current.paths['/things'].post.responses['201'].content['application/json'].schema = {
+      $ref: '#/components/schemas/AccessRule',
+    };
+
+    const path = 'POST /things.responses.201.content.application/json.schema';
+    const changes = compareOpenApi(previous as never, current as never);
+    expect(changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'breaking',
+          category: 'constraint-minLength',
+          path: `${path}.properties.value`,
+        }),
+        expect.objectContaining({
+          severity: 'breaking',
+          category: 'constraint-maxLength',
+          path: `${path}.properties.value`,
+        }),
+        expect.objectContaining({
+          severity: 'breaking',
+          category: 'constraint-minimum',
+          path: `${path}.properties.maxUses`,
+        }),
+        expect.objectContaining({
+          severity: 'breaking',
+          category: 'constraint-maximum',
+          path: `${path}.properties.maxUses`,
+        }),
+        expect.objectContaining({
+          severity: 'breaking',
+          category: 'additional-properties-closed',
+          path,
+        }),
+      ]),
+    );
+    expect(changes).not.toContainEqual(
+      expect.objectContaining({ category: 'property-removed', path: `${path}.properties.value` }),
+    );
+  });
+
+  it.each([
+    [{ $ref: '#/components/schemas/Missing' }, 'schema-reference-missing'],
+    [{ $ref: '#/components/schemas/Cycle' }, 'schema-reference-cyclic'],
+    [{ $ref: 'https://example.test/schema.json' }, 'schema-reference-unsupported'],
+  ])('fails closed for an unsafe schema reference', (schema, category) => {
+    const previous = structuredClone(base);
+    const current = structuredClone(base);
+    current.paths['/things'].post.responses['201'].content['application/json'].schema = schema;
+    current.components.schemas.Cycle = { $ref: '#/components/schemas/Cycle' };
+
+    expect(compareOpenApi(previous as never, current as never)).toContainEqual(
+      expect.objectContaining({
+        severity: 'breaking',
+        category,
+        path: 'POST /things.responses.201.content.application/json.schema',
+      }),
+    );
+  });
+
   it('accepts an additive response union that retains the prior schema reference', () => {
     const current = structuredClone(base);
     current.paths['/things'].post.responses['201'].content['application/json'].schema = {
@@ -493,6 +597,19 @@ describe('OpenAPI compatibility', () => {
     expect(compareOpenApi(previous as never, current as never)).toContainEqual(
       expect.objectContaining({ severity: 'breaking', category }),
     );
+  });
+
+  it('reports an introduced enum once without misclassifying it as an expansion', () => {
+    const previous = { components: { schemas: { Value: { type: 'string' } } }, paths: {} };
+    const current = {
+      components: { schemas: { Value: { type: 'string', enum: ['redacted'] } } },
+      paths: {},
+    };
+    const changes = compareOpenApi(previous as never, current as never);
+
+    expect(changes.filter((change) => change.path === 'components.schemas.Value')).toEqual([
+      expect.objectContaining({ severity: 'breaking', category: 'enum-introduced' }),
+    ]);
   });
 
   it.each([

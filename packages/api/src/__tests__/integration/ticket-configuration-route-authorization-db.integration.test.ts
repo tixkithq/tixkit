@@ -102,7 +102,14 @@ async function insertTenant(id: string, name: string): Promise<void> {
   const now = new Date('2026-07-17T12:00:00.000Z');
   await db
     .insertInto('tenants')
-    .values({ id, name, status: 'active', plan: 'test', created_at: now, updated_at: now })
+    .values({
+      id,
+      name,
+      status: 'active',
+      plan: 'test',
+      created_at: now,
+      updated_at: now,
+    })
     .execute();
 }
 
@@ -234,7 +241,11 @@ function deferred<T = void>() {
 function isNowaitLockError(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
-    const record = current as { cause?: unknown; code?: unknown; errno?: unknown };
+    const record = current as {
+      cause?: unknown;
+      code?: unknown;
+      errno?: unknown;
+    };
     if (record.code === '55P03' || record.code === 'ER_LOCK_NOWAIT' || record.errno === 3572) {
       return true;
     }
@@ -290,6 +301,10 @@ function revisionMillis(value: Date | string | null): number {
 
 async function clearTicketConfigurationEvidence(): Promise<void> {
   await db
+    .deleteFrom('access_rule_redemptions')
+    .where('event_id', 'in', [eventA, eventAScoped, eventB])
+    .execute();
+  await db
     .deleteFrom('checkout_holds')
     .where(
       'ticket_type_id',
@@ -312,6 +327,8 @@ async function clearTicketConfigurationEvidence(): Promise<void> {
       'ticket_type.created',
       'ticket_type.batch_created',
       'ticket_type.updated',
+      'access_rule.created',
+      'access_rule.deleted',
     ])
     .execute();
   await db
@@ -396,6 +413,8 @@ async function evidenceSnapshot() {
         'ticket_type.created',
         'ticket_type.batch_created',
         'ticket_type.updated',
+        'access_rule.created',
+        'access_rule.deleted',
       ])
       .orderBy('id')
       .execute(),
@@ -718,7 +737,9 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
       metrics: {
         metrics: {
           onboardingEvents: { inc: onboardingEventsInc },
-          onboardingMilestoneDuration: { observe: onboardingMilestoneDurationObserve },
+          onboardingMilestoneDuration: {
+            observe: onboardingMilestoneDurationObserve,
+          },
         },
       },
     } as unknown as FastifyInstance['observability']);
@@ -910,10 +931,16 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
     const listed = await invokeListAccessRules(fixture.ticketType.id);
     expect(listed.statusCode, listed.body).toBe(200);
     expect(listed.json()).toEqual({
-      items: [serializeAccessRule(fixture.accessRule as Record<string, unknown>)],
+      items: [
+        {
+          ...serializeAccessRule(fixture.accessRule as Record<string, unknown>),
+          value: '[redacted]',
+        },
+      ],
       nextCursor: null,
       hasMore: false,
     });
+    expect(listed.body).not.toContain(`${fixture.ticketType.name}-initial-code`);
 
     const created = await invokeCreateAccessRule(fixture.ticketType.id);
     expect(created.statusCode, created.body).toBe(201);
@@ -930,7 +957,449 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
     expect(after.accessRules.find((rule) => rule.id === fixture.accessRule.id)).toBeUndefined();
     expect(after.accessRules.find((rule) => rule.id === created.json().id)).toBeDefined();
     expect(after.ticketTypes).toEqual(before.ticketTypes);
-    expect(after.audits).toEqual(before.audits);
+    expectEventDelta(before, after, eventA, 2);
+    expect(after.audits).toHaveLength(2);
+    const createAudit = after.audits.find((audit) => audit.action === 'access_rule.created')!;
+    const deleteAudit = after.audits.find((audit) => audit.action === 'access_rule.deleted')!;
+    expect(createAudit).toMatchObject({
+      tenant_id: tenantA,
+      organization_id: organizationA,
+      brand_id: brandA,
+      actor_id: actorId,
+      resource_type: 'AccessRule',
+      resource_id: created.json().id,
+    });
+    expect(auditDiff(createAudit.diff_summary)).toEqual({
+      eventId: eventA,
+      accessRuleId: created.json().id,
+      accessRuleType: 'code',
+      accessRuleCount: 2,
+    });
+    expect(deleteAudit).toMatchObject({
+      tenant_id: tenantA,
+      organization_id: organizationA,
+      brand_id: brandA,
+      actor_id: actorId,
+      resource_type: 'AccessRule',
+      resource_id: fixture.accessRule.id,
+    });
+    expect(auditDiff(deleteAudit.diff_summary)).toEqual({
+      eventId: eventA,
+      accessRuleId: fixture.accessRule.id,
+      accessRuleType: 'code',
+      accessRuleCount: 1,
+    });
+    expect(JSON.stringify(after.audits)).not.toContain('SECOND-ACCESS-CODE');
+    expect(JSON.stringify(after.audits)).not.toContain(`${fixture.ticketType.name}-initial-code`);
+  });
+
+  it('authorizes access-rule creation before parsing an invalid payload', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventAScoped,
+      poolAScoped,
+      occurrenceAScoped,
+      'Unauthorized malformed access rule',
+    );
+    const before = await evidenceSnapshot();
+    activePrincipal = { ...basePrincipal, scopes: [] };
+
+    const response = await app.inject({
+      method: createAccessRuleContract.method,
+      url: createAccessRuleContract.path.replace('{ticketTypeId}', fixture.ticketType.id),
+      payload: { type: 'unsupported', value: 42 },
+    });
+
+    expect(response.statusCode, response.body).toBe(403);
+    expect(response.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+  });
+
+  it('enforces the access-rule cap and normalizes exact duplicate create races to one winner', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Capped and concurrent access rules',
+    );
+    const capRows = Array.from({ length: 498 }, (_, index) => ({
+      id: `acr_${ulid()}`,
+      ticket_type_id: fixture.ticketType.id,
+      type: 'code',
+      value: `cap-${index}`,
+      max_uses: null,
+      uses_count: 0,
+      expires_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }));
+    await db.insertInto('access_rules').values(capRows).execute();
+    const beforeCap = await evidenceSnapshot();
+    const boundary = await invokeCreateAccessRule(fixture.ticketType.id, 'CAP-BOUNDARY');
+    expect(boundary.statusCode, boundary.body).toBe(201);
+    const afterBoundary = await evidenceSnapshot();
+    expect(
+      afterBoundary.accessRules.filter((rule) => rule.ticket_type_id === fixture.ticketType.id),
+    ).toHaveLength(500);
+    expectEventDelta(beforeCap, afterBoundary, eventA, 1);
+    const capped = await invokeCreateAccessRule(fixture.ticketType.id, 'CAP-OVERFLOW');
+    expect(capped.statusCode, capped.body).toBe(400);
+    expect(capped.json()).toMatchObject({
+      error: { code: 'VALIDATION_ERROR' },
+    });
+    await expect(evidenceSnapshot()).resolves.toEqual(afterBoundary);
+
+    await db
+      .deleteFrom('access_rules')
+      .where('ticket_type_id', '=', fixture.ticketType.id)
+      .execute();
+    await new AccessRuleRepository(db).create({
+      ticketTypeId: fixture.ticketType.id,
+      type: 'code',
+      value: 'initial-race-rule',
+    });
+    const beforeRace = await evidenceSnapshot();
+    const [first, second] = await Promise.all([
+      invokeCreateAccessRule(fixture.ticketType.id, 'RACE-RULE'),
+      invokeCreateAccessRule(fixture.ticketType.id, 'RACE-RULE'),
+    ]);
+    expect([first.statusCode, second.statusCode].sort()).toEqual([201, 400]);
+    const afterRace = await evidenceSnapshot();
+    expect(
+      afterRace.accessRules.filter((rule) => rule.ticket_type_id === fixture.ticketType.id),
+    ).toHaveLength(2);
+    expectEventDelta(beforeRace, afterRace, eventA, 1);
+    expect(afterRace.audits).toHaveLength(beforeRace.audits.length + 1);
+  });
+
+  it('keeps code credentials case-sensitive while normalizing surrounding whitespace', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Case-sensitive access rules',
+    );
+    const before = await evidenceSnapshot();
+
+    const upper = await invokeCreateAccessRule(fixture.ticketType.id, 'CASE-RULE');
+    const lower = await invokeCreateAccessRule(fixture.ticketType.id, 'case-rule');
+    const whitespaceDuplicate = await invokeCreateAccessRule(fixture.ticketType.id, ' CASE-RULE ');
+
+    expect(upper.statusCode, upper.body).toBe(201);
+    expect(lower.statusCode, lower.body).toBe(201);
+    expect(whitespaceDuplicate.statusCode, whitespaceDuplicate.body).toBe(400);
+    const after = await evidenceSnapshot();
+    expect(
+      after.accessRules
+        .filter((rule) => rule.ticket_type_id === fixture.ticketType.id)
+        .map((rule) => rule.value),
+    ).toEqual(expect.arrayContaining(['CASE-RULE', 'case-rule']));
+    expectEventDelta(before, after, eventA, 2);
+    expect(after.audits).toHaveLength(2);
+  });
+
+  it('rolls back access-rule creation when its required audit write fails', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Access-rule audit rollback',
+    );
+    const before = await evidenceSnapshot();
+    const failure = vi
+      .spyOn(AuditLogRepository.prototype, 'create')
+      .mockRejectedValueOnce(new Error('injected access-rule audit failure'));
+    try {
+      const response = await invokeCreateAccessRule(fixture.ticketType.id, 'AUDIT-MUST-ROLL-BACK');
+      expect(response.statusCode, response.body).toBe(500);
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  it('refuses to delete an access rule while its ticket type has an active checkout hold', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Active-hold access rule',
+    );
+    await new InventoryService(db).reserveCart({
+      checkoutSessionId: `cs_${ulid()}`,
+      requiredAccessRules: [
+        { accessRuleId: fixture.accessRule.id, ticketTypeId: fixture.ticketType.id },
+      ],
+      items: [
+        {
+          inventoryPoolId: poolA,
+          ticketTypeId: fixture.ticketType.id,
+          occurrenceId: occurrenceA,
+          quantity: 1,
+        },
+      ],
+    });
+    const before = await evidenceSnapshot();
+
+    const response = await invokeDeleteAccessRule(fixture.accessRule.id);
+
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+    expect(await new AccessRuleRepository(db).findByTicketType(fixture.ticketType.id)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: fixture.accessRule.id })]),
+    );
+  });
+
+  it('fails a required-rule reservation after deletion without writing a hold or checkout-session reference', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Deleted required access rule',
+    );
+    const sessionId = `cs_${ulid()}`;
+    const deleted = await invokeDeleteAccessRule(fixture.accessRule.id);
+    expect(deleted.statusCode, deleted.body).toBe(204);
+
+    await expect(
+      new InventoryService(db).reserveCart({
+        checkoutSessionId: sessionId,
+        requiredAccessRules: [
+          { accessRuleId: fixture.accessRule.id, ticketTypeId: fixture.ticketType.id },
+        ],
+        items: [
+          {
+            inventoryPoolId: poolA,
+            ticketTypeId: fixture.ticketType.id,
+            occurrenceId: occurrenceA,
+            quantity: 1,
+          },
+        ],
+      }),
+    ).rejects.toThrow('changed; refresh the cart and try again');
+    await expect(
+      db
+        .selectFrom('checkout_holds')
+        .select('id')
+        .where('checkout_session_id', '=', sessionId)
+        .execute(),
+    ).resolves.toEqual([]);
+    await expect(
+      db.selectFrom('checkout_sessions').select('id').where('id', '=', sessionId).execute(),
+    ).resolves.toEqual([]);
+  });
+
+  it('serializes concurrent access-rule deletion and required-rule reservation in either order', async () => {
+    const reserve = (
+      fixture: Awaited<ReturnType<typeof seedAccessRuleFixture>>,
+      sessionId: string,
+      checkpoint?: ConstructorParameters<typeof InventoryService>[1],
+    ) =>
+      new InventoryService(db, checkpoint).reserveCart({
+        checkoutSessionId: sessionId,
+        requiredAccessRules: [
+          { accessRuleId: fixture.accessRule.id, ticketTypeId: fixture.ticketType.id },
+        ],
+        items: [
+          {
+            inventoryPoolId: poolA,
+            ticketTypeId: fixture.ticketType.id,
+            occurrenceId: occurrenceA,
+            quantity: 1,
+          },
+        ],
+      });
+
+    const deleteFirst = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Delete-first access rule race',
+    );
+    const deletionLocked = deferred();
+    const releaseDeletion = deferred();
+    ticketConfigurationCheckpoint.mockImplementation(async (input) => {
+      if (input.operation !== 'access_rule_delete' || input.stage !== 'after_lock') return;
+      deletionLocked.resolve();
+      await releaseDeletion.promise;
+    });
+    const deletion = invokeDeleteAccessRule(deleteFirst.accessRule.id);
+    await deletionLocked.promise;
+    const reservationStarted = deferred();
+    const deleteFirstSessionId = `cs_${ulid()}`;
+    const staleReservation = reserve(deleteFirst, deleteFirstSessionId, async (input) => {
+      if (input.stage === 'before_pool_locks') reservationStarted.resolve();
+    });
+    await reservationStarted.promise;
+    releaseDeletion.resolve();
+    const deleted = await deletion;
+    expect(deleted.statusCode, deleted.body).toBe(204);
+    await expect(staleReservation).rejects.toThrow('changed; refresh the cart and try again');
+    await expect(
+      db
+        .selectFrom('checkout_holds')
+        .select('id')
+        .where('checkout_session_id', '=', deleteFirstSessionId)
+        .execute(),
+    ).resolves.toEqual([]);
+
+    ticketConfigurationCheckpoint.mockReset();
+    const reservationFirst = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Reservation-first access rule race',
+    );
+    const reservationLocked = deferred();
+    const releaseReservation = deferred();
+    const reservationFirstSessionId = `cs_${ulid()}`;
+    const winningReservation = reserve(
+      reservationFirst,
+      reservationFirstSessionId,
+      async (input) => {
+        if (input.stage !== 'after_ticket_type_locks') return;
+        reservationLocked.resolve();
+        await releaseReservation.promise;
+      },
+    );
+    await reservationLocked.promise;
+    const deletionStarted = deferred();
+    ticketConfigurationCheckpoint.mockImplementation(async (input) => {
+      if (input.operation === 'access_rule_delete' && input.stage === 'before_lock') {
+        deletionStarted.resolve();
+      }
+    });
+    const blockedDeletion = invokeDeleteAccessRule(reservationFirst.accessRule.id);
+    await deletionStarted.promise;
+    releaseReservation.resolve();
+    await expect(winningReservation).resolves.toMatchObject({ primaryHoldId: expect.any(String) });
+    const conflicted = await blockedDeletion;
+    expect(conflicted.statusCode, conflicted.body).toBe(409);
+    expect(conflicted.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+    expect(
+      await new AccessRuleRepository(db).findByTicketType(reservationFirst.ticketType.id),
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: reservationFirst.accessRule.id })]),
+    );
+  });
+
+  it('rejects redeemed access-rule deletion with a conflict and preserves persistent state', async () => {
+    const fixture = await seedAccessRuleFixture(eventA, poolA, occurrenceA, 'Redeemed access rule');
+    const sessionId = `cs_${ulid()}`;
+    const now = new Date();
+    await db
+      .insertInto('checkout_sessions')
+      .values({
+        id: sessionId,
+        tenant_id: tenantA,
+        event_id: eventA,
+        brand_id: brandA,
+        status: 'open',
+        hold_id: `hld_${ulid()}`,
+        currency: 'USD',
+        cart: '{}',
+        buyer: '{}',
+        quote: '{}',
+        payment_intent_id: null,
+        order_id: null,
+        success_url: null,
+        cancel_url: null,
+        expires_at: new Date(now.getTime() + 60_000),
+        idempotency_key: `idem_${ulid()}`,
+        client_token: `token_${ulid()}`,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('access_rule_redemptions')
+      .values({
+        id: `ared_${ulid()}`,
+        access_rule_id: fixture.accessRule.id,
+        ticket_type_id: fixture.ticketType.id,
+        event_id: eventA,
+        checkout_session_id: sessionId,
+        order_id: null,
+        tenant_id: tenantA,
+        created_at: now,
+      })
+      .execute();
+    const before = await evidenceSnapshot();
+
+    const response = await invokeDeleteAccessRule(fixture.accessRule.id);
+
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+    await expect(evidenceSnapshot()).resolves.toEqual(before);
+    await expect(
+      db
+        .selectFrom('access_rule_redemptions')
+        .select('id')
+        .where('access_rule_id', '=', fixture.accessRule.id)
+        .execute(),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('rolls back access-rule deletion when its required audit write fails, then permits a clean retry', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventA,
+      poolA,
+      occurrenceA,
+      'Access-rule deletion audit rollback',
+    );
+    const before = await evidenceSnapshot();
+    const failure = vi
+      .spyOn(AuditLogRepository.prototype, 'create')
+      .mockRejectedValueOnce(new Error('injected access-rule deletion audit failure'));
+    try {
+      const failed = await invokeDeleteAccessRule(fixture.accessRule.id);
+      expect(failed.statusCode, failed.body).toBe(500);
+      await expect(evidenceSnapshot()).resolves.toEqual(before);
+    } finally {
+      failure.mockRestore();
+    }
+
+    const retried = await invokeDeleteAccessRule(fixture.accessRule.id);
+    expect(retried.statusCode, retried.body).toBe(204);
+    const after = await evidenceSnapshot();
+    expectEventDelta(before, after, eventA, 1);
+    expect(after.audits).toHaveLength(1);
+    expect(after.audits[0]?.action).toBe('access_rule.deleted');
+  });
+
+  it('returns exact concealed TicketType and AccessRule bodies for scoped access-rule denials', async () => {
+    const fixture = await seedAccessRuleFixture(
+      eventAScoped,
+      poolAScoped,
+      occurrenceAScoped,
+      'Concealed access rule',
+    );
+    activePrincipal = { ...basePrincipal, eventIds: [eventA] };
+    const ticketTypeResponses = [
+      await invokeListAccessRules(fixture.ticketType.id),
+      await invokeCreateAccessRule(fixture.ticketType.id, 'CONCEALED-CODE'),
+    ];
+    for (const response of ticketTypeResponses) {
+      expect(response.statusCode, response.body).toBe(404);
+      expect(response.json()).toEqual({
+        error: {
+          code: 'NOT_FOUND',
+          details: { id: fixture.ticketType.id, resource: 'TicketType' },
+          message: `TicketType not found: ${fixture.ticketType.id}`,
+          requestId: expect.any(String),
+        },
+      });
+    }
+    const ruleResponse = await invokeDeleteAccessRule(fixture.accessRule.id);
+    expect(ruleResponse.statusCode, ruleResponse.body).toBe(404);
+    expect(ruleResponse.json()).toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        details: { id: fixture.accessRule.id, resource: 'AccessRule' },
+        message: `AccessRule not found: ${fixture.accessRule.id}`,
+        requestId: expect.any(String),
+      },
+    });
   });
 
   it('denies access-rule permission failures without changing persistent state', async () => {
@@ -999,7 +1468,9 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         await invokeDeleteAccessRule(fixture.accessRule.id),
       ]) {
         expect(response.statusCode, response.body).toBe(404);
-        expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+        expect(response.json()).toMatchObject({
+          error: { code: 'NOT_FOUND' },
+        });
       }
       await expect(evidenceSnapshot()).resolves.toEqual(before);
     },
@@ -1086,7 +1557,10 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         organizationId: organizationA,
         resourceId: existingBatch.ticketType.id,
         resourceType: 'TicketType',
-        after: { ...redactBatchAccessRules(existingBatch), inventoryPool: null },
+        after: {
+          ...redactBatchAccessRules(existingBatch),
+          inventoryPool: null,
+        },
         eventId: eventA,
       },
     );
@@ -1119,7 +1593,10 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         organizationId: organizationA,
         resourceId: newPoolBatch.ticketType.id,
         resourceType: 'TicketType',
-        after: { ...redactBatchAccessRules(newPoolBatch), inventoryPool: serializedBatchPool },
+        after: {
+          ...redactBatchAccessRules(newPoolBatch),
+          inventoryPool: serializedBatchPool,
+        },
         eventId: eventA,
       },
     );
@@ -1326,7 +1803,10 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
     });
     const inventory = new InventoryService(db, async (input) => {
       if (input.stage !== 'after_ticket_type_locks') return;
-      expect(input).toEqual({ stage: 'after_ticket_type_locks', checkoutSessionId });
+      expect(input).toEqual({
+        stage: 'after_ticket_type_locks',
+        checkoutSessionId,
+      });
       reservationLocked.resolve();
       await releaseReservation.promise;
     });
@@ -1351,10 +1831,14 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
     expect(patchReachedAfterLock).toBe(false);
     releaseReservation.resolve();
 
-    await expect(reservation).resolves.toMatchObject({ primaryHoldId: expect.any(String) });
+    await expect(reservation).resolves.toMatchObject({
+      primaryHoldId: expect.any(String),
+    });
     const updateResponse = await update;
     expect(updateResponse.statusCode, updateResponse.body).toBe(400);
-    expect(updateResponse.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    expect(updateResponse.json()).toMatchObject({
+      error: { code: 'VALIDATION_ERROR' },
+    });
     const current = await new TicketTypeRepository(db).findById(ticket.ticketType.id);
     expect(current?.inventory_pool_id).toBe(poolA);
     const holds = await db
@@ -1398,7 +1882,10 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         reservationReachedTicketTypeLocks = true;
         return;
       }
-      expect(input).toEqual({ stage: 'before_pool_locks', checkoutSessionId });
+      expect(input).toEqual({
+        stage: 'before_pool_locks',
+        checkoutSessionId,
+      });
       reservationAtBeforePoolLocks.resolve();
       await releaseReservationBeforePoolLocks.promise;
     }).reserveCart({
@@ -1464,7 +1951,9 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
     await reservationLocked.promise;
     const update = invokeTicketUpdate(ticket.ticketType.id, poolA, occurrenceA);
     releaseReservation.resolve();
-    await expect(reservation).resolves.toMatchObject({ primaryHoldId: expect.any(String) });
+    await expect(reservation).resolves.toMatchObject({
+      primaryHoldId: expect.any(String),
+    });
     const updateResponse = await update;
     expect(updateResponse.statusCode, updateResponse.body).toBe(200);
   });
@@ -1600,7 +2089,10 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         });
         await db
           .updateTable('events')
-          .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+          .set({
+            organization_id: organizationAScoped,
+            brand_id: brandAScoped,
+          })
           .where('id', '=', eventA)
           .execute();
         checkpointSnapshot = await evidenceSnapshot();
@@ -1609,7 +2101,9 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
       try {
         const response = await invoke(fixture);
         expect(response.statusCode, response.body).toBe(404);
-        expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+        expect(response.json()).toMatchObject({
+          error: { code: 'NOT_FOUND' },
+        });
         expect(checkpointSnapshot).toBeDefined();
         await expect(evidenceSnapshot()).resolves.toEqual(checkpointSnapshot);
       } finally {
@@ -1753,7 +2247,10 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
       ticketConfigurationCheckpoint.mockImplementationOnce(async () => {
         await db
           .updateTable('events')
-          .set({ organization_id: organizationAScoped, brand_id: brandAScoped })
+          .set({
+            organization_id: organizationAScoped,
+            brand_id: brandAScoped,
+          })
           .where('id', '=', eventA)
           .execute();
         checkpointSnapshot = await evidenceSnapshot();
@@ -1762,7 +2259,9 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
       try {
         const response = await invoke();
         expect(response.statusCode).toBe(404);
-        expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+        expect(response.json()).toMatchObject({
+          error: { code: 'NOT_FOUND' },
+        });
         expect(checkpointSnapshot).toBeDefined();
         await expect(evidenceSnapshot()).resolves.toEqual(checkpointSnapshot);
       } finally {
@@ -1884,7 +2383,9 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         );
         expect(auditedResponses).toEqual(expect.arrayContaining(redactedResponses));
         for (const response of responseBodies) {
-          for (const rule of response.accessRules as Array<{ value: string }>) {
+          for (const rule of response.accessRules as Array<{
+            value: string;
+          }>) {
             expect(JSON.stringify(auditAfters)).not.toContain(rule.value);
           }
         }

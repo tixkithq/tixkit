@@ -26,6 +26,11 @@ export type CartReservationResult = {
   expiresAt: Date;
 };
 
+export type RequiredAccessRule = {
+  accessRuleId: string;
+  ticketTypeId: string;
+};
+
 export type InventoryAvailability = {
   total: number;
   sold: number;
@@ -68,6 +73,7 @@ export class InventoryService {
     items: CartReservationItem[];
     checkoutSessionId: string;
     holdTtlSeconds?: number;
+    requiredAccessRules?: RequiredAccessRule[];
   }): Promise<CartReservationResult> {
     if (input.items.length === 0) {
       throw new InventoryExhaustedError('cart', 0, 0);
@@ -247,6 +253,33 @@ export class InventoryService {
         ) {
           throw new ValidationError(
             `Ticket type ${item.ticketTypeId} inventory configuration changed; refresh the cart and try again`,
+          );
+        }
+      }
+      const requiredAccessRules = [...(input.requiredAccessRules ?? [])].sort((left, right) =>
+        `${left.ticketTypeId}:${left.accessRuleId}`.localeCompare(
+          `${right.ticketTypeId}:${right.accessRuleId}`,
+        ),
+      );
+      for (const requirement of requiredAccessRules) {
+        if (!ticketTypesById.has(requirement.ticketTypeId)) {
+          throw new ValidationError(
+            `Access rule ${requirement.accessRuleId} does not belong to a reserved ticket type`,
+          );
+        }
+        // Access-rule deletion locks the ticket type before the rule as well. The shared
+        // order makes checkout either retain a live credential or fail before creating a hold.
+        // eslint-disable-next-line no-await-in-loop -- credentials are locked sequentially in deterministic order.
+        const accessRule = await trx
+          .selectFrom('access_rules')
+          .select('id')
+          .where('id', '=', requirement.accessRuleId)
+          .where('ticket_type_id', '=', requirement.ticketTypeId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!accessRule) {
+          throw new ValidationError(
+            `Access rule ${requirement.accessRuleId} changed; refresh the cart and try again`,
           );
         }
       }

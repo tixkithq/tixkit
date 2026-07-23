@@ -171,8 +171,8 @@ func (s *TicketTypesService) UpdateBatchTyped(ctx context.Context, ticketTypeID 
 	return &out, err
 }
 
-func (s *TicketTypesService) ListAccessRules(ctx context.Context, ticketTypeID string) (*Page[AccessRule], error) {
-	var out Page[AccessRule]
+func (s *TicketTypesService) ListAccessRules(ctx context.Context, ticketTypeID string) (*Page[AccessRuleMetadata], error) {
+	var out Page[AccessRuleMetadata]
 	err := s.client.request(ctx, http.MethodGet, "/ticket-types/"+escape(ticketTypeID)+"/access-rules", nil, &out)
 	return &out, err
 }

@@ -1,0 +1,25 @@
+---
+title: Migrate API 2026-09-02 to 2026-09-03
+description: Adopt redacted access-rule reads and stricter access-rule mutation metadata.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-22
+prerequisites:
+  - /reference/api-versions
+related:
+  - /reference/api
+---
+
+API `2026-09-03` makes the `GET /ticket-types/{ticketTypeId}/access-rules` response a credential-safe metadata surface. Each returned rule now has `value: "[redacted]"`; clients must never treat list output as a reusable access code or email-domain value. Use the original organizer-managed value only at creation time, and retain it only in an appropriate credential store if a product workflow genuinely requires it.
+
+This is a breaking response-contract change. JavaScript `listAccessRules` now returns `PageResult<AccessRuleMetadata>` and Go `ListAccessRules` now returns `Page[AccessRuleMetadata]`. The metadata type makes the fixed marker explicit. `createAccessRule` and ticket-type batch mutation responses retain the full `AccessRule` value because they are `tickets.write` operations that return the value submitted by the caller.
+
+All three access-rule operations now declare bearer or API-key authentication and their exact required permission: `events.read` for the redacted list, and `tickets.write` for create and delete. Empty path IDs, unknown mutation fields, values outside 1–255 characters, and `maxUses` outside the positive signed 32-bit range are rejected. A ticket type retains at most 500 rules. Duplicate normalized values are rejected without a partial write.
+
+Delete requests now fail with `409` when an access rule has already been redeemed or its ticket type has an active checkout hold. Refresh the organizer configuration or wait for the active checkout to settle; do not retry a delete by assuming an error left the rule absent. Scope-denied ticket types and rules remain concealed as `404`.
+
+The local `2026-09-03` artifact is an approval-gated, nonpublishable dirty-tree candidate. It is not evidence that a public release has been published or that a hosted service has adopted the contract.

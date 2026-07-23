@@ -142,6 +142,78 @@ describe('openApiSpec', () => {
       });
   });
 
+  it('documents redacted access-rule reads and scoped access-rule mutations', () => {
+    const list = openApiSpec.paths['/ticket-types/{ticketTypeId}/access-rules'].get;
+    const create = openApiSpec.paths['/ticket-types/{ticketTypeId}/access-rules'].post;
+    const remove = openApiSpec.paths['/access-rules/{accessRuleId}'].delete;
+    const metadata = openApiSpec.components.schemas.AccessRuleMetadata;
+    const createSchema = openApiSpec.components.schemas.AccessRuleCreate;
+
+    expect(metadata.description).toContain('never disclosed');
+    expect(metadata.properties.value).toEqual({
+      type: 'string',
+      enum: ['[redacted]'],
+      description: 'Fixed redaction marker; never the access-code or domain value.',
+    });
+    expect(openApiSpec.components.schemas.AccessRulePage).toMatchObject({
+      description: expect.stringContaining('redacted'),
+      properties: {
+        items: {
+          items: { $ref: '#/components/schemas/AccessRuleMetadata' },
+        },
+      },
+    });
+    expect(createSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        value: { type: 'string', minLength: 1, maxLength: 255 },
+        maxUses: {
+          type: ['integer', 'null'],
+          minimum: 1,
+          maximum: 2_147_483_647,
+        },
+      },
+    });
+
+    const operations = [
+      [list, 'ticketTypeId', 'events.read'],
+      [create, 'ticketTypeId', 'tickets.write'],
+      [remove, 'accessRuleId', 'tickets.write'],
+    ] as const;
+    for (const [operation, parameterName, permission] of operations) {
+      expect(operation.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+      expect(operation['x-required-permissions']).toEqual([permission]);
+      expect(operation.parameters).toContainEqual({
+        name: parameterName,
+        in: 'path',
+        required: true,
+        schema: { type: 'string', minLength: 1 },
+      });
+      for (const status of ['401', '403', '404'] as const) {
+        expect(operation.responses[status].content['application/json'].schema).toEqual({
+          $ref: '#/components/schemas/ApiError',
+        });
+      }
+    }
+    expect('400' in list.responses).toBe(false);
+    expect('409' in list.responses).toBe(false);
+    expect(create.responses['400'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/ApiError',
+    });
+    expect('409' in create.responses).toBe(false);
+    expect('400' in remove.responses).toBe(false);
+    expect(remove.responses['409']).toMatchObject({
+      description: expect.stringContaining('active checkout hold'),
+      content: {
+        'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+      },
+    });
+    expect(create.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/AccessRuleCreate',
+    });
+  });
+
   it('documents question deletion access, path parameters, and conflicts', () => {
     const operation = openApiSpec.paths['/questions/{questionId}'].delete;
 
@@ -275,7 +347,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-09-02');
+    expect(openApiSpec.info.version).toBe('2026-09-03');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1484,7 +1556,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-09-02');
+    expect(openApiSpec.info.version).toBe('2026-09-03');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',

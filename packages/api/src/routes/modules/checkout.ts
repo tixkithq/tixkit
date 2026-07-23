@@ -1377,6 +1377,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             const reservation = await inventoryService.reserveCart({
               items: reservationItems,
               checkoutSessionId: sessionId,
+              requiredAccessRules: cart.accessRuleRedemptions,
             });
             await app.context.checkoutQuestionPersistenceCheckpoint?.({
               stage: 'before_transaction',
@@ -2048,6 +2049,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               ? await inventoryService.reserveCart({
                   items: reservationItems,
                   checkoutSessionId: sessionId,
+                  requiredAccessRules: cart.accessRuleRedemptions,
                 })
               : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
 

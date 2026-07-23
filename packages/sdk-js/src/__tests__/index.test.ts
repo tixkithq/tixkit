@@ -42,6 +42,8 @@ import {
   type MarketingIntegrationProvider,
   type MarketingIntegration,
   type PublicMarketingIntegration,
+  type AccessRule,
+  type AccessRuleMetadata,
   type TypedUpdateTicketTypeBatchInput,
   type UpdateTicketTypeBatchInput,
 } from '../index.js';
@@ -3197,7 +3199,35 @@ describe('TixkitClient new resource methods', () => {
     );
   });
 
-  it('ticketTypes access-rule methods send typed requests', async () => {
+  it('ticketTypes listAccessRules returns redacted metadata while mutations retain full rules', async () => {
+    const fm = mockFetch(200, {
+      items: [
+        {
+          id: 'acr_1',
+          ticketTypeId: 'tt_1',
+          type: 'code',
+          value: '[redacted]',
+          usesCount: 0,
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const page = await c.ticketTypes.listAccessRules('tt_1');
+    const metadata: AccessRuleMetadata = page.items[0]!;
+
+    expect(metadata.value).toBe('[redacted]');
+    expect(getCall(fm).url).toBe('https://api.test/v1/ticket-types/tt_1/access-rules');
+    expect(getCall(fm).method).toBe('GET');
+  });
+
+  it('ticketTypes access-rule mutations send and return full credential rules', async () => {
     const fm = mockFetch(201, {
       id: 'acr_1',
       ticketTypeId: 'tt_1',
@@ -3210,11 +3240,12 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.ticketTypes.createAccessRule('tt_1', {
+    const created: AccessRule = await c.ticketTypes.createAccessRule('tt_1', {
       type: 'code',
       value: 'VIP123',
       maxUses: 5,
     });
+    expect(created.value).toBe('VIP123');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/ticket-types/tt_1/access-rules');
     expect(call.method).toBe('POST');
@@ -4105,7 +4136,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-09-02',
+        'X-Tixkit-Version': '2026-09-03',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

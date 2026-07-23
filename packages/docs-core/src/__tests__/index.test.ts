@@ -101,7 +101,7 @@ describe('@tixkit/docs-core', () => {
       expect(entry.packageName).toBeTruthy();
       expect(entry.demoPath).toBeTruthy();
       expect(docRoutes[entry.docRouteId]).toBeTruthy();
-      expect(entry.apiVersion).toBe('2026-09-02');
+      expect(entry.apiVersion).toBe('2026-09-03');
     }
   });
 });

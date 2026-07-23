@@ -204,7 +204,7 @@ try {
     JSON.stringify({
       baseUrl: 'http://api.example.test',
       conformanceTarget: 'platform-api',
-      apiVersion: '2026-09-02',
+      apiVersion: '2026-09-03',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
@@ -325,7 +325,7 @@ try {
           JSON.stringify({
             profile: 'agent-platform',
             conformanceTarget: 'platform-api',
-            apiVersion: '2026-09-02',
+            apiVersion: '2026-09-03',
             agentProtocolVersion: '2026-07-22',
             agentPlatformProtocolVersion: '2026-07-27',
             principalKind: 'third_party',
@@ -363,7 +363,7 @@ try {
       JSON.stringify({
         profile: 'agent-platform',
         conformanceTarget: 'self-hosted',
-        apiVersion: '2026-09-02',
+        apiVersion: '2026-09-03',
         agentProtocolVersion: '2026-07-22',
         agentPlatformProtocolVersion: '2026-07-27',
         principalKind: 'self_hosted',

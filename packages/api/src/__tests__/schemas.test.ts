@@ -385,6 +385,16 @@ describe('API mutation schema drift guards', () => {
     expect(() => parseBody(createAccessRuleSchema, { type: 'code', value: '' })).toThrow(
       ValidationError,
     );
+    expect(() =>
+      parseBody(createAccessRuleSchema, { type: 'code', value: 'x'.repeat(256) }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      parseBody(createAccessRuleSchema, {
+        type: 'code',
+        value: 'VIP123',
+        maxUses: 2_147_483_648,
+      }),
+    ).toThrow(ValidationError);
   });
 
   it('validates atomic ticket type batch payloads', () => {

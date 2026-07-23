@@ -1,0 +1,186 @@
+{
+  "from": "2026-09-02",
+  "to": "2026-09-03",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 22,
+    "compatible": 7
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "constraint-maxLength",
+      "path": "POST /events/{eventId}/ticket-types/batch.requestBody.content.application/json.schema.properties.accessRules.items.properties.value",
+      "message": "maxLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maximum",
+      "path": "POST /events/{eventId}/ticket-types/batch.requestBody.content.application/json.schema.properties.accessRules.items.properties.maxUses",
+      "message": "maximum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maxLength",
+      "path": "PATCH /ticket-types/{ticketTypeId}/batch.requestBody.content.application/json.schema.properties.accessRules.items.properties.value",
+      "message": "maxLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maximum",
+      "path": "PATCH /ticket-types/{ticketTypeId}/batch.requestBody.content.application/json.schema.properties.accessRules.items.properties.maxUses",
+      "message": "maximum became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /ticket-types/{ticketTypeId}/access-rules",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /ticket-types/{ticketTypeId}/access-rules",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "GET /ticket-types/{ticketTypeId}/access-rules.parameters.path:ticketTypeId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-$ref",
+      "path": "GET /ticket-types/{ticketTypeId}/access-rules.responses.200.content.application/json.schema.properties.items.items",
+      "message": "$ref changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "enum-introduced",
+      "path": "GET /ticket-types/{ticketTypeId}/access-rules.responses.200.content.application/json.schema.properties.items.items.properties.value",
+      "message": "An enum constraint was introduced."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules.parameters.path:ticketTypeId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules.requestBody.content.application/json.schema.properties.value",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maxLength",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules.requestBody.content.application/json.schema.properties.value",
+      "message": "maxLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules.requestBody.content.application/json.schema.properties.maxUses",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maximum",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules.requestBody.content.application/json.schema.properties.maxUses",
+      "message": "maximum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "additional-properties-closed",
+      "path": "POST /ticket-types/{ticketTypeId}/access-rules.requestBody.content.application/json.schema",
+      "message": "Additional properties are no longer accepted."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "DELETE /access-rules/{accessRuleId}",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "DELETE /access-rules/{accessRuleId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "DELETE /access-rules/{accessRuleId}.parameters.path:accessRuleId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-$ref",
+      "path": "components.schemas.AccessRulePage.properties.items.items",
+      "message": "$ref changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "enum-introduced",
+      "path": "components.schemas.AccessRulePage.properties.items.items.properties.value",
+      "message": "An enum constraint was introduced."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maxLength",
+      "path": "components.schemas.CreateTicketTypeBatch.properties.accessRules.items.properties.value",
+      "message": "maxLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maximum",
+      "path": "components.schemas.CreateTicketTypeBatch.properties.accessRules.items.properties.maxUses",
+      "message": "maximum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maxLength",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.accessRules.items.properties.value",
+      "message": "maxLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maximum",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.accessRules.items.properties.maxUses",
+      "message": "maximum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maxLength",
+      "path": "components.schemas.AccessRuleCreate.properties.value",
+      "message": "maxLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maximum",
+      "path": "components.schemas.AccessRuleCreate.properties.maxUses",
+      "message": "maximum became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AccessRuleMetadata",
+      "message": "A named schema was added."
+    }
+  ]
+}

@@ -644,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-09-02',
+    version: '2026-09-03',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -3562,12 +3562,35 @@ const rawOpenApiSpec = {
         },
         required: ['id', 'ticketTypeId', 'type', 'value', 'usesCount'],
       },
+      AccessRuleMetadata: {
+        type: 'object',
+        description:
+          'Access-rule metadata visible to principals with events.read. The credential value is never disclosed; value is the fixed redaction marker.',
+        properties: {
+          id: { type: 'string' },
+          ticketTypeId: { type: 'string' },
+          type: { type: 'string', enum: ['code', 'email_domain'] },
+          value: {
+            type: 'string',
+            enum: ['[redacted]'],
+            description: 'Fixed redaction marker; never the access-code or domain value.',
+          },
+          maxUses: { type: 'integer' },
+          usesCount: { type: 'integer' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'ticketTypeId', 'type', 'value', 'usesCount'],
+      },
       AccessRulePage: {
         type: 'object',
+        description:
+          'A page of redacted access-rule metadata; credential values are never returned.',
         properties: {
           items: {
             type: 'array',
-            items: { $ref: '#/components/schemas/AccessRule' },
+            items: { $ref: '#/components/schemas/AccessRuleMetadata' },
           },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
@@ -3691,8 +3714,8 @@ const rawOpenApiSpec = {
         additionalProperties: false,
         properties: {
           type: { type: 'string', enum: ['code', 'email_domain'] },
-          value: { type: 'string', minLength: 1 },
-          maxUses: { type: ['integer', 'null'], minimum: 1 },
+          value: { type: 'string', minLength: 1, maxLength: 255 },
+          maxUses: { type: ['integer', 'null'], minimum: 1, maximum: 2_147_483_647 },
           expiresAt: { type: ['string', 'null'], format: 'date-time' },
         },
         required: ['type', 'value'],
@@ -6119,7 +6142,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-09-02, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-09-03, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6166,7 +6189,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-09-02, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-09-03, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6273,7 +6296,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-09-02 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-09-03 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6310,7 +6333,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-09-02 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-09-03 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8596,7 +8619,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-09-02 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-09-03 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8653,7 +8676,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-09-02 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-09-03 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -10927,7 +10950,18 @@ const rawOpenApiSpec = {
     '/ticket-types/{ticketTypeId}/access-rules': {
       get: {
         summary: 'List access rules for a ticket type',
-        security: [{ BearerAuth: [] }],
+        description:
+          'Requires `events.read`. Returns metadata only: credential values are always the `[redacted]` marker.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.read'],
+        parameters: [
+          {
+            name: 'ticketTypeId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
         responses: {
           '200': {
             description: 'Access rules',
@@ -10937,28 +10971,53 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '401': {
+            description: 'Authentication required',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Missing events.read permission',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description:
+              'Ticket type not found or outside the authorized tenant, organization, brand, or event scope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
       post: {
         summary: 'Create access rule for a ticket type',
-        security: [{ BearerAuth: [] }],
+        description:
+          'Requires `tickets.write`. Access-rule values are accepted only for creation; duplicate normalized values and more than 500 persisted rules are rejected.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['tickets.write'],
+        parameters: [
+          {
+            name: 'ticketTypeId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
-                type: 'object',
-                properties: {
-                  type: { type: 'string', enum: ['code', 'email_domain'] },
-                  value: { type: 'string' },
-                  maxUses: { type: 'integer', nullable: true },
-                  expiresAt: {
-                    type: 'string',
-                    format: 'date-time',
-                    nullable: true,
-                  },
-                },
-                required: ['type', 'value'],
+                $ref: '#/components/schemas/AccessRuleCreate',
               },
             },
           },
@@ -10972,14 +11031,94 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '400': {
+            description:
+              'Invalid access-rule input, a duplicate normalized rule, or more than 500 persisted rules',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '401': {
+            description: 'Authentication required',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Missing tickets.write permission',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description:
+              'Ticket type not found or outside the authorized tenant, organization, brand, or event scope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
     '/access-rules/{accessRuleId}': {
       delete: {
         summary: 'Delete access rule',
-        security: [{ BearerAuth: [] }],
-        responses: { '204': { description: 'Access rule deleted' } },
+        description:
+          'Requires `tickets.write`. Deletion is rejected after a redemption or while an active checkout hold exists for the ticket type.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['tickets.write'],
+        parameters: [
+          {
+            name: 'accessRuleId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
+        responses: {
+          '204': { description: 'Access rule deleted' },
+          '401': {
+            description: 'Authentication required',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Missing tickets.write permission',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description:
+              'Access rule not found or outside the authorized tenant, organization, brand, or event scope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description: 'The rule has redemptions or its ticket type has an active checkout hold',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/events/{eventId}/inventory-pools': {

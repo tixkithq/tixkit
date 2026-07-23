@@ -387,9 +387,32 @@ type AccessRule struct {
 	UpdatedAt    string `json:"updatedAt,omitempty"`
 }
 
+// RedactedAccessRuleValue is the only value returned by ListAccessRules. It is
+// a marker, never an access credential or email-domain rule value.
+type RedactedAccessRuleValue string
+
+const AccessRuleValueRedacted RedactedAccessRuleValue = "[redacted]"
+
+// AccessRuleMetadata is the non-secret read representation returned by
+// ListAccessRules. CreateAccessRule and ticket-type batch mutations continue to
+// return AccessRule, including the submitted credential value.
+type AccessRuleMetadata struct {
+	ID           string                  `json:"id"`
+	TicketTypeID string                  `json:"ticketTypeId,omitempty"`
+	Type         string                  `json:"type"`
+	Value        RedactedAccessRuleValue `json:"value"`
+	MaxUses      int                     `json:"maxUses,omitempty"`
+	UsesCount    int                     `json:"usesCount,omitempty"`
+	ExpiresAt    string                  `json:"expiresAt,omitempty"`
+	CreatedAt    string                  `json:"createdAt,omitempty"`
+	UpdatedAt    string                  `json:"updatedAt,omitempty"`
+}
+
 type CreateAccessRuleRequest struct {
-	Type      string `json:"type"`
-	Value     string `json:"value"`
+	Type string `json:"type"`
+	// Value must contain 1–255 characters.
+	Value string `json:"value"`
+	// MaxUses must be a positive 32-bit integer when supplied.
 	MaxUses   int    `json:"maxUses,omitempty"`
 	ExpiresAt string `json:"expiresAt,omitempty"`
 }

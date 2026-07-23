@@ -71,7 +71,7 @@ function accessRuleKey(rule: { type: string; value: string }): string {
   const value =
     rule.type === 'email_domain'
       ? normalizeEmailDomainAccessRuleValue(rule.value)
-      : rule.value.trim().toLowerCase();
+      : rule.value.trim();
   return `${rule.type}:${value}`;
 }
 
@@ -123,6 +123,10 @@ function normalizeAccessRules(rules: AccessRuleInput[] = []): NormalizedAccessRu
     keys.add(key);
   }
   return normalized;
+}
+
+function serializeAccessRuleMetadata(row: Record<string, unknown>) {
+  return { ...serializeAccessRule(row), value: '[redacted]' };
 }
 
 async function assertInventoryPoolReassignmentAllowed(
@@ -211,7 +215,10 @@ function requireIdempotencyKey(request: FastifyRequest, action: string, maxLengt
 }
 
 function requireNoLiveResaleCheckoutReservation(
-  listing: { reserved_checkout_session_id?: string | null; reserved_until?: Date | string | null },
+  listing: {
+    reserved_checkout_session_id?: string | null;
+    reserved_until?: Date | string | null;
+  },
   listingId: string,
   now: Date,
 ) {
@@ -343,7 +350,10 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
-    await app.context.resalePolicyCheckpoint?.({ stage: 'before_transaction', eventId });
+    await app.context.resalePolicyCheckpoint?.({
+      stage: 'before_transaction',
+      eventId,
+    });
 
     return db.transaction().execute(async (transaction) => {
       const currentEvent = await loadAuthorizedEventForUpdate(transaction, principal, eventId);
@@ -1363,7 +1373,12 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const ticketType = await repo.findById(ticketTypeId);
     if (!ticketType) throw new NotFoundError('TicketType', ticketTypeId);
     const event = await loadEvent(ticketType.event_id);
-    requireEventAccess(principal, event, ticketType.event_id);
+    try {
+      requireEventAccess(principal, event, ticketType.event_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+      throw error;
+    }
     await app.context.ticketConfigurationCheckpoint?.({
       stage: 'before_transaction',
       operation: 'access_rule_list',
@@ -1371,11 +1386,17 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     });
 
     return db.transaction().execute(async (transaction) => {
-      const currentEvent = await loadAuthorizedEventForUpdate(
-        transaction,
-        principal,
-        ticketType.event_id,
-      );
+      let currentEvent;
+      try {
+        currentEvent = await loadAuthorizedEventForUpdate(
+          transaction,
+          principal,
+          ticketType.event_id,
+        );
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+        throw error;
+      }
       const currentTicketType = await transaction
         .selectFrom('ticket_types')
         .select(['id', 'event_id'])
@@ -1387,7 +1408,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       }
       const rows = await new AccessRuleRepository(transaction).findByTicketType(ticketTypeId);
       return {
-        items: rows.map((row) => serializeAccessRule(row)),
+        // `events.read` is intentionally weaker than ticket configuration access. Rule
+        // values are credentials, so the read surface exposes metadata only.
+        items: rows.map((row) => serializeAccessRuleMetadata(row)),
         nextCursor: null,
         hasMore: false,
       };
@@ -1398,41 +1421,116 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketTypeId } = request.params as { ticketTypeId: string };
+    const scopedTicketType = await db
+      .selectFrom('ticket_types')
+      .innerJoin('events', 'events.id', 'ticket_types.event_id')
+      .select([
+        'ticket_types.event_id as event_id',
+        'events.tenant_id',
+        'events.organization_id',
+        'events.brand_id',
+      ])
+      .where('ticket_types.id', '=', ticketTypeId)
+      .where('events.tenant_id', '=', principal.tenantId)
+      .executeTakeFirst();
+    if (!scopedTicketType) throw new NotFoundError('TicketType', ticketTypeId);
+    try {
+      requireEventAccess(principal, scopedTicketType, scopedTicketType.event_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+      throw error;
+    }
+    // Establish the resource boundary before inspecting untrusted rule values. This keeps
+    // authorization failures concealed and avoids parsing attacker-controlled payloads for
+    // resources the principal cannot access.
     const body = parseBody(createAccessRuleSchema, request.body);
     const [accessRuleInput] = normalizeAccessRules([body]);
-    const repo = new TicketTypeRepository(db);
-    const ticketType = await repo.findById(ticketTypeId);
-    if (!ticketType) throw new NotFoundError('TicketType', ticketTypeId);
-    const event = await loadEvent(ticketType.event_id);
-    requireEventAccess(principal, event, ticketType.event_id);
     await app.context.ticketConfigurationCheckpoint?.({
       stage: 'before_transaction',
       operation: 'access_rule_create',
-      eventId: ticketType.event_id,
+      eventId: scopedTicketType.event_id,
     });
 
     const accessRule = await db.transaction().execute(async (transaction) => {
-      const currentEvent = await loadAuthorizedEventForUpdate(
-        transaction,
-        principal,
-        ticketType.event_id,
-      );
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'before_lock',
+        operation: 'access_rule_create',
+        eventId: scopedTicketType.event_id,
+      });
+      let currentEvent;
+      try {
+        currentEvent = await loadAuthorizedEventForUpdate(
+          transaction,
+          principal,
+          scopedTicketType.event_id,
+        );
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+        throw error;
+      }
       const currentTicketType = await transaction
         .selectFrom('ticket_types')
-        .select(['id', 'event_id'])
+        .selectAll()
         .where('id', '=', ticketTypeId)
         .forUpdate()
         .executeTakeFirst();
       if (!currentTicketType || currentTicketType.event_id !== currentEvent.id) {
         throw new NotFoundError('TicketType', ticketTypeId);
       }
-      return new AccessRuleRepository(transaction).create({
-        ticketTypeId,
-        type: accessRuleInput.type,
-        value: accessRuleInput.value,
-        maxUses: accessRuleInput.maxUses ?? undefined,
-        expiresAt: accessRuleInput.expiresAt ? new Date(accessRuleInput.expiresAt) : undefined,
+      const currentRules = await transaction
+        .selectFrom('access_rules')
+        .selectAll()
+        .where('ticket_type_id', '=', ticketTypeId)
+        .orderBy('id', 'asc')
+        .forUpdate()
+        .execute();
+      if (currentRules.length >= MAX_ACCESS_RULES_PER_TICKET_TYPE) {
+        throw new ValidationError(
+          `A ticket type may have at most ${MAX_ACCESS_RULES_PER_TICKET_TYPE} access rules`,
+        );
+      }
+      if (currentRules.some((rule) => accessRuleKey(rule) === accessRuleKey(accessRuleInput))) {
+        throw new ValidationError('Access rule already exists');
+      }
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'after_lock',
+        operation: 'access_rule_create',
+        eventId: currentEvent.id,
       });
+      let created;
+      try {
+        created = await new AccessRuleRepository(transaction).create({
+          ticketTypeId,
+          type: accessRuleInput.type,
+          value: accessRuleInput.value,
+          maxUses: accessRuleInput.maxUses ?? undefined,
+          expiresAt: accessRuleInput.expiresAt ? new Date(accessRuleInput.expiresAt) : undefined,
+        });
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new ValidationError('Access rule already exists');
+        throw error;
+      }
+      await bumpEventPublicRevision(transaction, currentEvent.id);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'access_rule.created',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'AccessRule',
+          resourceId: created.id,
+          diffSummary: {
+            eventId: currentEvent.id,
+            accessRuleId: created.id,
+            accessRuleType: created.type,
+            accessRuleCount: currentRules.length + 1,
+          },
+        },
+        { failClosed: true },
+      );
+      return created;
     });
     return reply.status(201).send(serializeAccessRule(accessRule));
   });
@@ -1444,12 +1542,19 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const rule = await db
       .selectFrom('access_rules')
       .innerJoin('ticket_types', 'ticket_types.id', 'access_rules.ticket_type_id')
+      .innerJoin('events', 'events.id', 'ticket_types.event_id')
       .select(['access_rules.id as id', 'ticket_types.event_id as event_id'])
       .where('access_rules.id', '=', accessRuleId)
+      .where('events.tenant_id', '=', principal.tenantId)
       .executeTakeFirst();
     if (!rule) throw new NotFoundError('AccessRule', accessRuleId);
     const event = await loadEvent(rule.event_id);
-    requireEventAccess(principal, event, rule.event_id);
+    try {
+      requireEventAccess(principal, event, rule.event_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('AccessRule', accessRuleId);
+      throw error;
+    }
     await app.context.ticketConfigurationCheckpoint?.({
       stage: 'before_transaction',
       operation: 'access_rule_delete',
@@ -1457,22 +1562,104 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     });
 
     await db.transaction().execute(async (transaction) => {
-      const currentEvent = await loadAuthorizedEventForUpdate(
-        transaction,
-        principal,
-        rule.event_id,
-      );
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'before_lock',
+        operation: 'access_rule_delete',
+        eventId: rule.event_id,
+      });
+      let currentEvent;
+      try {
+        currentEvent = await loadAuthorizedEventForUpdate(transaction, principal, rule.event_id);
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('AccessRule', accessRuleId);
+        throw error;
+      }
       const currentRule = await transaction
         .selectFrom('access_rules')
         .innerJoin('ticket_types', 'ticket_types.id', 'access_rules.ticket_type_id')
-        .select(['access_rules.id as id', 'ticket_types.event_id as event_id'])
+        .select([
+          'access_rules.id as id',
+          'access_rules.ticket_type_id as ticket_type_id',
+          'ticket_types.event_id as event_id',
+        ])
         .where('access_rules.id', '=', accessRuleId)
-        .forUpdate()
+        .where('ticket_types.event_id', '=', currentEvent.id)
         .executeTakeFirst();
-      if (!currentRule || currentRule.event_id !== currentEvent.id) {
+      if (!currentRule) {
         throw new NotFoundError('AccessRule', accessRuleId);
       }
+      const currentTicketType = await transaction
+        .selectFrom('ticket_types')
+        .select(['id', 'event_id'])
+        .where('id', '=', currentRule.ticket_type_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentTicketType || currentTicketType.event_id !== currentEvent.id) {
+        throw new NotFoundError('AccessRule', accessRuleId);
+      }
+      const lockedRule = await transaction
+        .selectFrom('access_rules')
+        .select(['id', 'type'])
+        .where('id', '=', accessRuleId)
+        .where('ticket_type_id', '=', currentTicketType.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!lockedRule) throw new NotFoundError('AccessRule', accessRuleId);
+      const lockedRuleCount = await transaction
+        .selectFrom('access_rules')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('ticket_type_id', '=', currentTicketType.id)
+        .executeTakeFirstOrThrow();
+      const redemption = await transaction
+        .selectFrom('access_rule_redemptions')
+        .select('id')
+        .where('access_rule_id', '=', accessRuleId)
+        .orderBy('id', 'asc')
+        .forUpdate()
+        .limit(1)
+        .executeTakeFirst();
+      if (redemption) {
+        throw new ConflictError('Access rule cannot be deleted after it has been redeemed');
+      }
+      const activeHold = await transaction
+        .selectFrom('checkout_holds')
+        .select('id')
+        .where('ticket_type_id', '=', currentTicketType.id)
+        .where('status', '=', 'active')
+        .where('expires_at', '>', new Date())
+        .orderBy('id', 'asc')
+        .forUpdate()
+        .limit(1)
+        .executeTakeFirst();
+      if (activeHold) {
+        throw new ConflictError('Access rule cannot be deleted while active checkout holds exist');
+      }
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'after_lock',
+        operation: 'access_rule_delete',
+        eventId: currentEvent.id,
+      });
       await new AccessRuleRepository(transaction).delete(accessRuleId);
+      await bumpEventPublicRevision(transaction, currentEvent.id);
+      await writeAuditLog(
+        new AuditLogRepository(transaction),
+        request,
+        principal,
+        {
+          action: 'access_rule.deleted',
+          organizationId: currentEvent.organization_id,
+          brandId: currentEvent.brand_id,
+          resourceType: 'AccessRule',
+          resourceId: accessRuleId,
+          diffSummary: {
+            eventId: currentEvent.id,
+            accessRuleId,
+            accessRuleType: lockedRule.type,
+            accessRuleCount: Number(lockedRuleCount.count) - 1,
+          },
+        },
+        { failClosed: true },
+      );
     });
     return reply.status(204).send();
   });

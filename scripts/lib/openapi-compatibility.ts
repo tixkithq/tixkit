@@ -26,20 +26,90 @@ const acceptedTypes = (schema: Record<string, Json>): string[] => {
 const acceptsNull = (schema: Record<string, Json>): boolean =>
   explicitTypes(schema).length === 0 || acceptedTypes(schema).includes('null');
 
+type ReferenceResolution =
+  | { ok: true; schema: Record<string, Json> }
+  | { ok: false; reason: 'missing' | 'cyclic' | 'unsupported' };
+
+type ComparisonContext = {
+  previousDocument: Record<string, Json>;
+  currentDocument: Record<string, Json>;
+};
+
+function resolveSchemaReference(document: Record<string, Json>, value: Json): ReferenceResolution {
+  let schema = object(value);
+  const visited = new Set<string>();
+  while ('$ref' in schema) {
+    const reference = schema.$ref;
+    if (typeof reference !== 'string' || !reference.startsWith('#/components/schemas/'))
+      return { ok: false, reason: 'unsupported' };
+    const siblingKeys = Object.keys(schema).filter(
+      (key) =>
+        !['$ref', 'title', 'description', 'deprecated', 'default', 'examples', 'example'].includes(
+          key,
+        ),
+    );
+    if (siblingKeys.length > 0) return { ok: false, reason: 'unsupported' };
+    if (visited.has(reference)) return { ok: false, reason: 'cyclic' };
+    visited.add(reference);
+    const name = reference.slice(21).replaceAll('~1', '/').replaceAll('~0', '~');
+    const targetValue = object(object(document.components).schemas)[name];
+    if (targetValue === undefined) return { ok: false, reason: 'missing' };
+    if (!targetValue || typeof targetValue !== 'object' || Array.isArray(targetValue))
+      return { ok: false, reason: 'unsupported' };
+    schema = object(targetValue);
+  }
+  return { ok: true, schema };
+}
+
 function compareSchema(
   previous: Json,
   current: Json,
   path: string,
   changes: OpenApiChange[],
+  context: ComparisonContext,
 ): void {
-  const before = object(previous);
-  const after = object(current);
-  const priorReference = typeof before.$ref === 'string' ? before.$ref : undefined;
+  const rawBefore = object(previous);
+  const rawAfter = object(current);
+  const priorReference = typeof rawBefore.$ref === 'string' ? rawBefore.$ref : undefined;
+  const currentReference = typeof rawAfter.$ref === 'string' ? rawAfter.$ref : undefined;
+  if (
+    priorReference !== undefined &&
+    currentReference !== undefined &&
+    priorReference !== currentReference
+  )
+    changes.push({
+      severity: 'breaking',
+      category: 'schema-$ref',
+      path,
+      message: '$ref changed.',
+    });
+  const beforeResolution = resolveSchemaReference(context.previousDocument, previous);
+  const afterResolution = resolveSchemaReference(context.currentDocument, current);
+  if (!beforeResolution.ok) {
+    changes.push({
+      severity: 'breaking',
+      category: `schema-reference-${beforeResolution.reason}`,
+      path,
+      message: `Schema reference could not be safely resolved (${beforeResolution.reason}).`,
+    });
+    return;
+  }
+  if (!afterResolution.ok) {
+    changes.push({
+      severity: 'breaking',
+      category: `schema-reference-${afterResolution.reason}`,
+      path,
+      message: `Schema reference could not be safely resolved (${afterResolution.reason}).`,
+    });
+    return;
+  }
+  const before = beforeResolution.schema;
+  const after = afterResolution.schema;
   const referenceWidened =
     priorReference !== undefined &&
-    array(after.anyOf).some((entry) => object(entry).$ref === priorReference);
-  const priorAnyOf = array(before.anyOf);
-  const currentAnyOf = array(after.anyOf);
+    array(rawAfter.anyOf).some((entry) => object(entry).$ref === priorReference);
+  const priorAnyOf = array(rawBefore.anyOf);
+  const currentAnyOf = array(rawAfter.anyOf);
   const anyOfWidened =
     priorAnyOf.length > 0 &&
     currentAnyOf.length >= priorAnyOf.length &&
@@ -49,6 +119,9 @@ function compareSchema(
   const beforeConstType =
     before.const === null ? 'null' : before.const === undefined ? undefined : typeof before.const;
   for (const key of ['type', 'format', 'const', '$ref', 'pattern']) {
+    if (key === '$ref') {
+      continue;
+    }
     const inferredConstType =
       key === 'type' && before.type === undefined && beforeConstType === after.type;
     const equivalentAcceptedTypes =
@@ -57,7 +130,6 @@ function compareSchema(
       explicitTypes(after).length > 0 &&
       stable(acceptedTypes(before)) === stable(acceptedTypes(after));
     if (
-      !(key === '$ref' && referenceWidened) &&
       after[key] !== undefined &&
       !inferredConstType &&
       !equivalentAcceptedTypes &&
@@ -84,6 +156,7 @@ function compareSchema(
       path,
       message: 'Every prior anyOf branch remains accepted and new alternatives were added.',
     });
+  if (referenceWidened || anyOfWidened) return;
   if (before.nullable === true && !acceptsNull(after))
     changes.push({
       severity: 'breaking',
@@ -145,7 +218,8 @@ function compareSchema(
       String,
     ),
   );
-  if (!beforeEnum.length && afterEnum.size)
+  const enumIntroduced = beforeEnum.length === 0 && afterEnum.size > 0;
+  if (enumIntroduced)
     changes.push({
       severity: 'breaking',
       category: 'enum-introduced',
@@ -161,18 +235,20 @@ function compareSchema(
         message: `Enum value ${value} was removed.`,
       });
   }
-  const beforeEnumSet = new Set(beforeEnum);
-  for (const value of afterEnum) {
-    if (!beforeEnumSet.has(value))
-      changes.push({
-        severity:
-          path.includes('.parameters.') || path.includes('.requestBody.')
-            ? 'compatible'
-            : 'breaking',
-        category: 'enum-expanded',
-        path,
-        message: `Enum value ${value} was added.`,
-      });
+  if (!enumIntroduced) {
+    const beforeEnumSet = new Set(beforeEnum);
+    for (const value of afterEnum) {
+      if (!beforeEnumSet.has(value))
+        changes.push({
+          severity:
+            path.includes('.parameters.') || path.includes('.requestBody.')
+              ? 'compatible'
+              : 'breaking',
+          category: 'enum-expanded',
+          path,
+          message: `Enum value ${value} was added.`,
+        });
+    }
   }
   if (before.uniqueItems !== true && after.uniqueItems === true)
     changes.push({
@@ -202,7 +278,8 @@ function compareSchema(
         path: `${path}.properties.${name}`,
         message: 'A property was removed.',
       });
-    else compareSchema(schema, afterProperties[name]!, `${path}.properties.${name}`, changes);
+    else
+      compareSchema(schema, afterProperties[name]!, `${path}.properties.${name}`, changes, context);
   }
   for (const name of Object.keys(afterProperties)) {
     if (!(name in beforeProperties))
@@ -214,7 +291,7 @@ function compareSchema(
       });
   }
   if (before.items && after.items)
-    compareSchema(before.items, after.items, `${path}.items`, changes);
+    compareSchema(before.items, after.items, `${path}.items`, changes, context);
   if (
     stable(before.additionalProperties) !== stable(after.additionalProperties) &&
     after.additionalProperties === false
@@ -232,6 +309,7 @@ function compareContent(
   current: Json | undefined,
   path: string,
   changes: OpenApiChange[],
+  context: ComparisonContext,
 ): void {
   const before = object(previous);
   const after = object(current);
@@ -250,6 +328,7 @@ function compareContent(
       object(after[mediaType]).schema ?? {},
       `${path}.${mediaType}.schema`,
       changes,
+      context,
     );
   }
   for (const mediaType of Object.keys(after))
@@ -319,6 +398,10 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
   const changes: OpenApiChange[] = [];
   const before = object(previous);
   const after = object(current);
+  const context: ComparisonContext = {
+    previousDocument: before,
+    currentDocument: after,
+  };
   const beforePaths = object(before.paths);
   const afterPaths = object(after.paths);
   for (const [route, previousItemValue] of Object.entries(beforePaths)) {
@@ -422,6 +505,7 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
             parameter.schema ?? {},
             `${operationPath}.parameters.${key}`,
             changes,
+            context,
           );
         }
       }
@@ -457,6 +541,7 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
         newBody.content,
         `${operationPath}.requestBody.content`,
         changes,
+        context,
       );
       for (const [status, response] of Object.entries(oldResponses))
         if (newResponses[status])
@@ -465,6 +550,7 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
             object(newResponses[status]).content,
             `${operationPath}.responses.${status}.content`,
             changes,
+            context,
           );
     }
   }
@@ -490,7 +576,7 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
         path: `components.schemas.${name}`,
         message: 'Named schema was removed.',
       });
-    else compareSchema(schema, afterSchemas[name]!, `components.schemas.${name}`, changes);
+    else compareSchema(schema, afterSchemas[name]!, `components.schemas.${name}`, changes, context);
   }
   for (const name of Object.keys(afterSchemas))
     if (!(name in beforeSchemas))

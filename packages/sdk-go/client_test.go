@@ -49,6 +49,41 @@ func TestRequestBuildsHeadersPathAndQuery(t *testing.T) {
 	}
 }
 
+func TestListAccessRulesReturnsRedactedMetadata(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/v1/ticket-types/tt_1/access-rules" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(Page[AccessRuleMetadata]{
+			Items: []AccessRuleMetadata{{
+				ID:           "acr_1",
+				TicketTypeID: "tt_1",
+				Type:         "code",
+				Value:        AccessRuleValueRedacted,
+				UsesCount:    0,
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	page, err := client.TicketTypes.ListAccessRules(context.Background(), "tt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("items = %#v", page.Items)
+	}
+	if page.Items[0].Value != AccessRuleValueRedacted {
+		t.Fatalf("value = %q, want redaction marker", page.Items[0].Value)
+	}
+}
+
 func TestTicketTypeBatchUpdateNullableFieldsPreserveOmitSetAndClear(t *testing.T) {
 	t.Parallel()
 
