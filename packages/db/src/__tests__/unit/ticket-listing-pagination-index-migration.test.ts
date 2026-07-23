@@ -9,10 +9,10 @@ const source = readFileSync(
 );
 
 describe('TicketListingPaginationIndexMigration', () => {
-  it('is the final registered migration', async () => {
+  it('remains registered immediately before the ticket-type hot-path migration', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0098_ticket_listing_pagination_index');
+    expect(Object.keys(migrations).at(-1)).toBe('0099_ticket_type_batch_hot_path_indexes');
     expect(migrations['0098_ticket_listing_pagination_index']).toBe(
       TicketListingPaginationIndexMigration,
     );

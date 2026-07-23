@@ -5,7 +5,7 @@ import { PermissionGrantMembershipProvenanceMigration } from '../../migrations/0
 describe('PermissionGrantMembershipProvenanceMigration', () => {
   it('remains registered before the current additive index migrations', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
-    expect(Object.keys(migrations).at(-1)).toBe('0098_ticket_listing_pagination_index');
+    expect(Object.keys(migrations).at(-1)).toBe('0099_ticket_type_batch_hot_path_indexes');
     expect(migrations['0095_permission_grant_membership_provenance']).toBe(
       PermissionGrantMembershipProvenanceMigration,
     );
