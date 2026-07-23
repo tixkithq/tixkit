@@ -137,6 +137,27 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ),
   ...(
     [
+      ['/events/{eventId}/reports/tax', 'getEventsByEventIdReportsTax'],
+      ['/events/{eventId}/reports/attendance', 'getEventsByEventIdReportsAttendance'],
+      ['/events/{eventId}/reports/promo', 'getEventsByEventIdReportsPromo'],
+      ['/events/{eventId}/reports/conversion', 'getEventsByEventIdReportsConversion'],
+    ] as const
+  ).map(([path, operationId]) =>
+    denialContract({
+      authorizedControl: { required: true, status: 200 },
+      denialResponse: { code: 'NOT_FOUND', status: 404 },
+      deniedBoundaries: ['tenant', 'organization', 'brand', 'event'],
+      method: 'GET',
+      operationId,
+      path,
+      permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+      resourceParameters: ['eventId'],
+      sideEffectAssertions: [],
+      source: 'event-reporting-route-authorization-db.integration.test.ts',
+    }),
+  ),
+  ...(
+    [
       ['/events/{eventId}/code-format', 'getEventsByEventIdCodeFormat'],
       ['/events/{eventId}/fee-policy', 'getEventsByEventIdFeePolicy'],
     ] as const

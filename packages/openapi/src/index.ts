@@ -16812,8 +16812,10 @@ const rawOpenApiSpec = {
     },
     '/events/{eventId}/reports/tax': {
       get: {
+        operationId: 'getEventsByEventIdReportsTax',
         summary: 'Get tax report',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['reports.read'],
         parameters: [
           {
             name: 'from',
@@ -16858,8 +16860,10 @@ const rawOpenApiSpec = {
     },
     '/events/{eventId}/reports/attendance': {
       get: {
+        operationId: 'getEventsByEventIdReportsAttendance',
         summary: 'Get attendance report',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['reports.read'],
         responses: {
           '200': {
             description: 'Attendance metrics',
@@ -16890,8 +16894,10 @@ const rawOpenApiSpec = {
     },
     '/events/{eventId}/reports/promo': {
       get: {
+        operationId: 'getEventsByEventIdReportsPromo',
         summary: 'Get promo code report',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['reports.read'],
         responses: {
           '200': {
             description: 'Promo code metrics',
@@ -16922,8 +16928,10 @@ const rawOpenApiSpec = {
     },
     '/events/{eventId}/reports/conversion': {
       get: {
+        operationId: 'getEventsByEventIdReportsConversion',
         summary: 'Get conversion report',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['reports.read'],
         responses: {
           '200': {
             description: 'Conversion funnel metrics',

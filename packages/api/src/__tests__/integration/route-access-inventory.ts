@@ -158,6 +158,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'event-route-authorization-db.integration.test.ts'),
   ],
   [
+    'event-reporting-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'event-reporting-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'export-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'export-route-authorization-db.integration.test.ts'),
   ],
@@ -413,6 +417,15 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     source: 'event-create-route-authorization-db.integration.test.ts',
     persistenceSource: 'event-create-route-authorization-db.integration.test.ts',
   }),
+  ...evidenceBindings(
+    [
+      'getEventsByEventIdReportsTax',
+      'getEventsByEventIdReportsAttendance',
+      'getEventsByEventIdReportsPromo',
+      'getEventsByEventIdReportsConversion',
+    ],
+    { source: 'event-reporting-route-authorization-db.integration.test.ts' },
+  ),
   ...evidenceBindings(
     [
       'getEventsByEventId',

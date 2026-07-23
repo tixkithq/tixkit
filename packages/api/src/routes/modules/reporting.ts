@@ -175,10 +175,18 @@ function requireReportEventAccess(
   event: Record<string, unknown>,
   eventId: string,
 ) {
-  ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
-  ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
-  ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
-  ClerkAuthService.requireEventScope(principal, eventId);
+  try {
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(
+      principal,
+      event.organization_id as string | undefined,
+    );
+    ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+    ClerkAuthService.requireEventScope(principal, eventId);
+  } catch (error) {
+    if (error instanceof NotFoundError) throw new NotFoundError('Event', eventId);
+    throw error;
+  }
 }
 
 function requireUnscopedOrganizationReportPrincipal(principal: Principal) {
@@ -308,6 +316,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const from =
       typeof query.from === 'string' ? parseDateFilterBoundary(query.from, 'start') : undefined;
     const to = typeof query.to === 'string' ? parseDateFilterBoundary(query.to, 'end') : undefined;
+    if (from && to && from > to) throw new ValidationError('from must not be after to');
 
     // Aggregate tax snapshots via SQL join instead of materializing all order rows.
     let taxSnapshotQuery = db
@@ -523,6 +532,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .where('orders.event_id', '=', eventId)
       .where('orders.tenant_id', '=', principal.tenantId)
       .where('checkout_sessions.tenant_id', '=', principal.tenantId)
+      .where('checkout_sessions.event_id', '=', eventId)
       .where('orders.is_test', '=', false)
       .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)

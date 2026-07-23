@@ -2790,6 +2790,19 @@ describe('openApiSpec', () => {
   });
 
   it('documents report contracts from live route shapes', () => {
+    const reportingPermissions = [
+      ['/events/{eventId}/reports/tax', 'getEventsByEventIdReportsTax'],
+      ['/events/{eventId}/reports/attendance', 'getEventsByEventIdReportsAttendance'],
+      ['/events/{eventId}/reports/promo', 'getEventsByEventIdReportsPromo'],
+      ['/events/{eventId}/reports/conversion', 'getEventsByEventIdReportsConversion'],
+    ] as const;
+    for (const [path, operationId] of reportingPermissions) {
+      const operation = openApiSpec.paths[path].get;
+      expect(operation.operationId).toBe(operationId);
+      expect(operation['x-required-permissions']).toEqual(['reports.read']);
+      expect(operation.responses['403']).toBeDefined();
+    }
+
     expect(openApiSpec.components.schemas.SalesReport.properties.range).toEqual({
       type: 'object',
       properties: {

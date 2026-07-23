@@ -18225,7 +18225,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "reports.read"
+    ],
     "parameters": [
       {
         "name": "eventId",
@@ -18329,7 +18331,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "reports.read"
+    ],
     "parameters": [
       {
         "name": "eventId",
@@ -18417,7 +18421,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "reports.read"
+    ],
     "parameters": [
       {
         "name": "eventId",
@@ -18501,7 +18507,9 @@ export const apiReferenceOperations = [
         "BearerAuth": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "reports.read"
+    ],
     "parameters": [
       {
         "name": "eventId",

@@ -34621,11 +34621,15 @@
     },
     "/events/{eventId}/reports/tax": {
       "get": {
+        "operationId": "getEventsByEventIdReportsTax",
         "summary": "Get tax report",
         "security": [
           {
             "BearerAuth": []
           }
+        ],
+        "x-required-permissions": [
+          "reports.read"
         ],
         "parameters": [
           {
@@ -34714,7 +34718,6 @@
             }
           }
         },
-        "operationId": "getEventsByEventIdReportsTax",
         "tags": [
           "Events"
         ]
@@ -34722,11 +34725,15 @@
     },
     "/events/{eventId}/reports/attendance": {
       "get": {
+        "operationId": "getEventsByEventIdReportsAttendance",
         "summary": "Get attendance report",
         "security": [
           {
             "BearerAuth": []
           }
+        ],
+        "x-required-permissions": [
+          "reports.read"
         ],
         "responses": {
           "200": {
@@ -34799,7 +34806,6 @@
             }
           }
         ],
-        "operationId": "getEventsByEventIdReportsAttendance",
         "tags": [
           "Events"
         ]
@@ -34807,11 +34813,15 @@
     },
     "/events/{eventId}/reports/promo": {
       "get": {
+        "operationId": "getEventsByEventIdReportsPromo",
         "summary": "Get promo code report",
         "security": [
           {
             "BearerAuth": []
           }
+        ],
+        "x-required-permissions": [
+          "reports.read"
         ],
         "responses": {
           "200": {
@@ -34880,7 +34890,6 @@
             }
           }
         ],
-        "operationId": "getEventsByEventIdReportsPromo",
         "tags": [
           "Events"
         ]
@@ -34888,11 +34897,15 @@
     },
     "/events/{eventId}/reports/conversion": {
       "get": {
+        "operationId": "getEventsByEventIdReportsConversion",
         "summary": "Get conversion report",
         "security": [
           {
             "BearerAuth": []
           }
+        ],
+        "x-required-permissions": [
+          "reports.read"
         ],
         "responses": {
           "200": {
@@ -34981,7 +34994,6 @@
             }
           }
         ],
-        "operationId": "getEventsByEventIdReportsConversion",
         "tags": [
           "Events"
         ]
