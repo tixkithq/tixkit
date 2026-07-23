@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { AuditLogRepository, createDb, type Database } from '@tixkit/db';
+import { AuditLogRepository, createDb, OrganizationRepository, type Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import { registerErrorHandler, type AppContext } from '../../app.js';
@@ -464,6 +464,155 @@ describeWithIntegrationDatabase('organization update route authorization matrix'
     expect(diff.before).toEqual(diff.after);
   });
 
+  it('returns a stable slug conflict without changing the organization or audit ledger', async () => {
+    const before = await snapshot();
+    const response = await invoke({ slug: `organization-update-sibling-${suffix}` });
+    expect(response.statusCode, response.body).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Organization slug is already in use',
+      },
+    });
+    await expect(snapshot()).resolves.toEqual(before);
+  });
+
+  it('prefers an exact slug constraint over unrelated Clerk column text in a wrapper', async () => {
+    const before = await snapshot();
+    const failure = vi.spyOn(OrganizationRepository.prototype, 'update').mockRejectedValueOnce(
+      Object.assign(new Error('update organizations set clerk_organization_id = unchanged'), {
+        code: '23505',
+        cause: {
+          code: '23505',
+          constraint: 'organizations_slug_tenant_unique',
+        },
+      }),
+    );
+    try {
+      const response = await invoke({ slug: `organization-update-sibling-${suffix}` });
+      expect(response.statusCode, response.body).toBe(400);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Organization slug is already in use',
+        },
+      });
+      await expect(snapshot()).resolves.toEqual(before);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  it('authoritatively rechecks an unclassified duplicate against a real slug collision after rollback', async () => {
+    const conflictingSlug = `organization-update-sibling-${suffix}`;
+    const sentinelName = 'Unclassified duplicate rollback sentinel';
+    await db
+      .updateTable('organizations')
+      .set({ name: sentinelName })
+      .where('id', '=', organizationId)
+      .execute();
+    const before = await snapshot();
+    const failure = vi.spyOn(OrganizationRepository.prototype, 'update').mockRejectedValueOnce(
+      Object.assign(new Error('injected duplicate without constraint metadata'), {
+        code: '23505',
+      }),
+    );
+    try {
+      const response = await invoke({
+        name: 'Must not replace the rollback sentinel',
+        slug: conflictingSlug,
+      });
+      expect(failure).toHaveBeenCalledTimes(1);
+      expect(response.statusCode, response.body).toBe(400);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Organization slug is already in use',
+        },
+      });
+      const { requestId: _requestId, ...publicError } = response.json().error as Record<
+        string,
+        unknown
+      >;
+      const serializedPublicError = JSON.stringify(publicError);
+      expect(serializedPublicError).not.toContain(conflictingSlug);
+      expect(serializedPublicError).not.toContain(organizationId);
+      expect(serializedPublicError).not.toContain(siblingOrganizationId);
+      expect(publicError).not.toHaveProperty('details');
+      const after = await snapshot();
+      expect(after).toEqual(before);
+      expect(after.organization.name).toBe(sentinelName);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  it('rethrows an unclassified duplicate without a real collision as a sanitized atomic failure', async () => {
+    const sentinelName = 'Unmatched duplicate rollback sentinel';
+    const privateFailureMarker = `private_duplicate_${suffix}`;
+    await db
+      .updateTable('organizations')
+      .set({ name: sentinelName })
+      .where('id', '=', organizationId)
+      .execute();
+    const before = await snapshot();
+    const failure = vi.spyOn(OrganizationRepository.prototype, 'update').mockRejectedValueOnce(
+      Object.assign(new Error(`duplicate ${privateFailureMarker}`), {
+        code: 'ER_DUP_ENTRY',
+        errno: 1062,
+      }),
+    );
+    try {
+      const response = await invoke({ name: 'Must not persist after unmatched duplicate' });
+      expect(failure).toHaveBeenCalledTimes(1);
+      expect(response.statusCode, response.body).toBe(500);
+      expect(response.json()).toMatchObject({
+        error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+      });
+      const { requestId: _requestId, ...publicError } = response.json().error as Record<
+        string,
+        unknown
+      >;
+      const serializedPublicError = JSON.stringify(publicError);
+      expect(serializedPublicError).not.toContain(privateFailureMarker);
+      expect(serializedPublicError).not.toContain(organizationId);
+      expect(serializedPublicError).not.toContain(tenantId);
+      expect(publicError).not.toHaveProperty('details');
+      const after = await snapshot();
+      expect(after).toEqual(before);
+      expect(after.organization.name).toBe(sentinelName);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  it('returns a distinct stable Clerk ID conflict without changing the organization or audit ledger', async () => {
+    const clerkOrganizationId = `clerk_existing_${suffix}`;
+    await db
+      .updateTable('organizations')
+      .set({ clerk_organization_id: clerkOrganizationId })
+      .where('id', '=', siblingOrganizationId)
+      .execute();
+    const before = await snapshot();
+    try {
+      const response = await invoke({ clerkOrganizationId });
+      expect(response.statusCode, response.body).toBe(400);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Clerk organization ID is already assigned to another organization',
+        },
+      });
+      await expect(snapshot()).resolves.toEqual(before);
+    } finally {
+      await db
+        .updateTable('organizations')
+        .set({ clerk_organization_id: null })
+        .where('id', '=', siblingOrganizationId)
+        .execute();
+    }
+  });
+
   it.each(['api_key', 'agent', 'mobile_device', 'system'] as const)(
     'denies %s principals even when the claim carries settings.write',
     async (type) => {
@@ -758,6 +907,13 @@ describeWithIntegrationDatabase('organization update route authorization matrix'
     ]);
     const statuses = [first.statusCode, second.statusCode].sort();
     expect(statuses, `${first.body}\n${second.body}`).toEqual([200, 400]);
+    const rejected = [first, second].find((response) => response.statusCode === 400)!;
+    expect(rejected.json()).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Clerk organization ID is already assigned to another organization',
+      },
+    });
     const organizations = await db
       .selectFrom('organizations')
       .select(['id', 'name', 'clerk_organization_id'])
@@ -788,14 +944,20 @@ describeWithIntegrationDatabase('organization update route authorization matrix'
     });
   });
 
-  it('rolls the organization change back when the required audit write fails', async () => {
+  it('does not misclassify a duplicate audit failure and rolls the organization change back', async () => {
     const before = await snapshot();
-    const failure = vi
-      .spyOn(AuditLogRepository.prototype, 'create')
-      .mockRejectedValueOnce(new Error('injected organization update audit failure'));
+    const failure = vi.spyOn(AuditLogRepository.prototype, 'create').mockRejectedValueOnce(
+      Object.assign(new Error('injected duplicate organization audit failure'), {
+        code: '23505',
+        constraint: 'audit_logs_pkey',
+      }),
+    );
     try {
       const response = await invoke({ name: 'Audit rollback organization update' });
       expect(response.statusCode, response.body).toBe(500);
+      expect(response.json()).toMatchObject({
+        error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+      });
       await expect(snapshot()).resolves.toEqual(before);
     } finally {
       failure.mockRestore();

@@ -391,6 +391,101 @@ function isDuplicateInsert(error: unknown): boolean {
   );
 }
 
+type OrganizationUniqueConflict = 'clerkOrganizationId' | 'slug';
+
+class UnclassifiedOrganizationUpdateDuplicateError extends Error {
+  readonly databaseError: unknown;
+
+  constructor(databaseError: unknown) {
+    super('ORGANIZATION_UPDATE_DUPLICATE_REQUIRES_RECHECK');
+    this.name = 'UnclassifiedOrganizationUpdateDuplicateError';
+    this.databaseError = databaseError;
+  }
+}
+
+function classifyOrganizationUpdateDuplicate(
+  error: unknown,
+): OrganizationUniqueConflict | 'unclassified' | null {
+  const pending: unknown[] = [error];
+  const visited = new Set<object>();
+  let duplicate = false;
+  let namedClerkConstraint = false;
+  let namedSlugConstraint = false;
+  let messageClerkConstraint = false;
+  let messageSlugConstraint = false;
+  while (pending.length > 0 && visited.size < 20) {
+    const current = pending.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) continue;
+    visited.add(current);
+    const record = current as {
+      cause?: unknown;
+      constraint?: unknown;
+      constraintName?: unknown;
+      index?: unknown;
+      key?: unknown;
+      message?: unknown;
+      originalError?: unknown;
+      sqlMessage?: unknown;
+    };
+    duplicate ||= isDuplicateInsert(current);
+    const namedEvidence = [record.constraint, record.constraintName, record.index, record.key]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ');
+    const messageEvidence = [record.message, record.sqlMessage]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ');
+    namedClerkConstraint ||= /uniq_organizations_clerk_organization_id/iu.test(namedEvidence);
+    namedSlugConstraint ||= /organizations_slug_tenant_unique/iu.test(namedEvidence);
+    messageClerkConstraint ||= /uniq_organizations_clerk_organization_id/iu.test(messageEvidence);
+    messageSlugConstraint ||= /organizations_slug_tenant_unique/iu.test(messageEvidence);
+    pending.push(record.cause, record.originalError);
+  }
+  if (namedClerkConstraint !== namedSlugConstraint) {
+    return namedClerkConstraint ? 'clerkOrganizationId' : 'slug';
+  }
+  if (!namedClerkConstraint && messageClerkConstraint !== messageSlugConstraint) {
+    return messageClerkConstraint ? 'clerkOrganizationId' : 'slug';
+  }
+  return duplicate ? 'unclassified' : null;
+}
+
+function organizationUpdateConflict(field: OrganizationUniqueConflict): ValidationError {
+  return field === 'clerkOrganizationId'
+    ? new ValidationError('Clerk organization ID is already assigned to another organization')
+    : new ValidationError('Organization slug is already in use');
+}
+
+async function recheckOrganizationUpdateDuplicate(
+  db: Database,
+  input: {
+    tenantId: string;
+    organizationId: string;
+    clerkOrganizationId?: string | null;
+    slug?: string;
+  },
+): Promise<OrganizationUniqueConflict | null> {
+  if (input.clerkOrganizationId != null && input.clerkOrganizationId.trim() !== '') {
+    const clerkCollision = await db
+      .selectFrom('organizations')
+      .select('id')
+      .where('clerk_organization_id', '=', input.clerkOrganizationId.trim())
+      .where('id', '!=', input.organizationId)
+      .executeTakeFirst();
+    if (clerkCollision) return 'clerkOrganizationId';
+  }
+  if (input.slug !== undefined) {
+    const slugCollision = await db
+      .selectFrom('organizations')
+      .select('id')
+      .where('tenant_id', '=', input.tenantId)
+      .where('slug', '=', input.slug.trim())
+      .where('id', '!=', input.organizationId)
+      .executeTakeFirst();
+    if (slugCollision) return 'slug';
+  }
+  return null;
+}
+
 function isRetryableOrganizationUpdateConflict(error: unknown): boolean {
   const pending: unknown[] = [error];
   const visited = new Set<object>();
@@ -1005,19 +1100,29 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
               if (!defaultVenue)
                 throw new ValidationError('Default venue must belong to this workspace');
             }
-            const updated = await new OrganizationRepository(transactionDb).update(organizationId, {
-              ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
-              ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
-              ...(body.clerkOrganizationId !== undefined
-                ? { clerk_organization_id: body.clerkOrganizationId }
-                : {}),
-              ...(body.boxOfficeSettings !== undefined
-                ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
-                : {}),
-              ...(body.eventDefaults !== undefined
-                ? { event_defaults: JSON.stringify(body.eventDefaults) }
-                : {}),
-            });
+            let updated;
+            try {
+              updated = await new OrganizationRepository(transactionDb).update(organizationId, {
+                ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
+                ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
+                ...(body.clerkOrganizationId !== undefined
+                  ? { clerk_organization_id: body.clerkOrganizationId }
+                  : {}),
+                ...(body.boxOfficeSettings !== undefined
+                  ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
+                  : {}),
+                ...(body.eventDefaults !== undefined
+                  ? { event_defaults: JSON.stringify(body.eventDefaults) }
+                  : {}),
+              });
+            } catch (error) {
+              const conflict = classifyOrganizationUpdateDuplicate(error);
+              if (conflict === null) throw error;
+              if (conflict === 'unclassified') {
+                throw new UnclassifiedOrganizationUpdateDuplicateError(error);
+              }
+              throw organizationUpdateConflict(conflict);
+            }
             const after = organizationAuditSnapshot(updated as unknown as Record<string, unknown>);
             await writeAuditLog(
               new AuditLogRepository(transactionDb),
@@ -1036,13 +1141,16 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
           }),
       );
       return serializeOrganization(updated);
-    } catch (err) {
-      if (isDuplicateInsert(err)) {
-        throw new ValidationError(
-          'Clerk organization ID is already assigned to another organization',
-        );
-      }
-      throw err;
+    } catch (error) {
+      if (!(error instanceof UnclassifiedOrganizationUpdateDuplicateError)) throw error;
+      const conflict = await recheckOrganizationUpdateDuplicate(db, {
+        tenantId: principal.tenantId,
+        organizationId,
+        clerkOrganizationId: body.clerkOrganizationId,
+        slug: body.slug,
+      });
+      if (conflict) throw organizationUpdateConflict(conflict);
+      throw error.databaseError;
     }
   });
 
