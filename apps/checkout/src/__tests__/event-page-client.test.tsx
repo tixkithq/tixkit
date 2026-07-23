@@ -382,4 +382,27 @@ describe('EventPageClient Puck runtime', () => {
     expect(view.getByText('Tickets')).toBeInTheDocument();
     expect(view.getByRole('button', { name: /Get tickets/i })).toBeInTheDocument();
   });
+
+  it('preserves event content when availability refresh fails and marks tickets stale', async () => {
+    publicApiMock.getEventPageBootstrap.mockRejectedValue(
+      new CheckoutApiError('BOOTSTRAP_UNAVAILABLE', 'Bootstrap unavailable', 503),
+    );
+    publicApiMock.getEvent.mockResolvedValue(
+      eventFixture({ id: 'evt_stale_avail', title: 'Stale Availability Event' }),
+    );
+    publicApiMock.getAvailability.mockRejectedValue(
+      new CheckoutApiError('NETWORK_ERROR', 'offline', 0),
+    );
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getResaleListings.mockResolvedValue(emptyResaleListings);
+
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_stale_avail' }));
+
+    expect(
+      await view.findByRole('heading', { name: 'Stale Availability Event' }),
+    ).toBeInTheDocument();
+    expect(view.getByTestId('availability-status-banner')).toBeVisible();
+    expect(view.getByRole('button', { name: 'Retry availability' })).toBeVisible();
+    expect(view.queryByRole('button', { name: /Get tickets/i })).not.toBeInTheDocument();
+  });
 });

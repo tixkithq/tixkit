@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircleIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -81,6 +81,11 @@ export default function EventPageClient({
   const [loading, setLoading] = useState(() => !initialBootstrap);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [availabilityStatus, setAvailabilityStatus] = useState<
+    'current' | 'stale' | 'unavailable' | 'loading'
+  >(() => (initialBootstrap ? 'current' : 'loading'));
+  const [availabilityMessage, setAvailabilityMessage] = useState<string | null>(null);
+  const availabilityGenerationRef = useRef(0);
   const requestedLocale = useMemo(() => resolveEventPageLocale(locale), [locale]);
   const resolvedLocale = useMemo(
     () => resolveEventPageLocale(contentPage?.document.locale ?? requestedLocale),
@@ -112,6 +117,29 @@ export default function EventPageClient({
     ),
   );
 
+  const refreshAvailability = useCallback(async () => {
+    const targetEventId = event?.id ?? eventId;
+    if (!targetEventId) return;
+    const generation = ++availabilityGenerationRef.current;
+    setAvailabilityStatus((current) => (current === 'current' ? 'loading' : current));
+    try {
+      const next = await publicApi.getAvailability(targetEventId);
+      if (generation !== availabilityGenerationRef.current) return;
+      setAvailability(next);
+      setAvailabilityStatus('current');
+      setAvailabilityMessage(null);
+    } catch (err) {
+      if (generation !== availabilityGenerationRef.current) return;
+      const hasTickets = availability.length > 0;
+      setAvailabilityStatus(hasTickets ? 'stale' : 'unavailable');
+      setAvailabilityMessage(
+        hasTickets
+          ? 'Ticket availability may be out of date. Event details are still shown.'
+          : userFacingMessage(err),
+      );
+    }
+  }, [availability.length, event?.id, eventId]);
+
   useEffect(() => {
     if (initialBootstrap) {
       setEvent(initialBootstrap.event);
@@ -122,6 +150,8 @@ export default function EventPageClient({
       setLoading(false);
       setError(null);
       setNotFound(false);
+      setAvailabilityStatus('current');
+      setAvailabilityMessage(null);
       return;
     }
 
@@ -133,6 +163,7 @@ export default function EventPageClient({
       setLoading(true);
       setError(null);
       setResaleListingsError(null);
+      setAvailabilityStatus('loading');
       try {
         let loadedEvent: PublicEvent;
         let loadedAvailability: AvailabilityItem[];
@@ -141,6 +172,8 @@ export default function EventPageClient({
           items: CheckoutPublicResaleListing[];
           error: string | null;
         };
+        let availabilityLoadFailed = false;
+        let availabilityLoadError: string | null = null;
 
         try {
           const bootstrap = eventId
@@ -173,8 +206,14 @@ export default function EventPageClient({
                     requestedLocale,
                   )
               : () => publicApi.getEventPage(loadedEvent.id, controller.signal, requestedLocale);
-          [loadedAvailability, loadedContentPage, loadedResaleListings] = await Promise.all([
-            publicApi.getAvailability(loadedEvent.id, controller.signal),
+          const [availabilityResult, contentResult, resaleResult] = await Promise.all([
+            publicApi.getAvailability(loadedEvent.id, controller.signal).then(
+              (items) => ({ ok: true as const, items }),
+              (err: unknown) => ({
+                ok: false as const,
+                error: userFacingMessage(err),
+              }),
+            ),
             loadContentPage().catch((err) => {
               // Broken published content should fall back to the default public page,
               // not hard-fail the entire event page.
@@ -192,12 +231,31 @@ export default function EventPageClient({
                 return { items: [], error: userFacingMessage(err) };
               }),
           ]);
+          if (availabilityResult.ok) {
+            loadedAvailability = availabilityResult.items;
+          } else {
+            loadedAvailability = [];
+            availabilityLoadFailed = true;
+            availabilityLoadError = availabilityResult.error;
+          }
+          loadedContentPage = contentResult;
+          loadedResaleListings = resaleResult;
         }
 
         if (cancelled) return;
         setEvent(loadedEvent);
         setContentPage(loadedContentPage);
         setAvailability(loadedAvailability);
+        if (availabilityLoadFailed) {
+          setAvailabilityStatus('unavailable');
+          setAvailabilityMessage(
+            availabilityLoadError ??
+              'Ticket availability is unavailable right now. Event details are still shown.',
+          );
+        } else {
+          setAvailabilityStatus('current');
+          setAvailabilityMessage(null);
+        }
         setResaleListings(loadedResaleListings.items);
         setResaleListingsError(loadedResaleListings.error);
       } catch (err) {
@@ -220,7 +278,9 @@ export default function EventPageClient({
     () => availability.filter((t) => t.status === 'active' || t.status === 'sold_out'),
     [availability],
   );
-  const hasActiveTickets = visibleTickets.some((t) => t.status === 'active');
+  // Never present stale/unavailable inventory as currently purchasable.
+  const hasActiveTickets =
+    availabilityStatus === 'current' && visibleTickets.some((t) => t.status === 'active');
   const publishedPuckData = contentPage?.page.puckData;
   const hasPublishedPuckContent = isEventPagePuckData(publishedPuckData);
 
@@ -310,6 +370,8 @@ export default function EventPageClient({
   const runtime = useMemo<EventPageRuntime>(() => {
     const tickets: PublicEventPageTicket[] = visibleTickets.map((ticket) => {
       const soldOut = ticket.status === 'sold_out' || ticket.available <= 0;
+      const inventoryUnreliable =
+        availabilityStatus === 'stale' || availabilityStatus === 'unavailable';
       return {
         id: ticket.ticketTypeId ?? ticket.productId ?? ticket.name,
         name: ticket.name,
@@ -320,9 +382,14 @@ export default function EventPageClient({
           currency: ticket.currency,
           minimumPriceCents: ticket.minimumPriceCents,
         }),
-        status: soldOut ? 'sold_out' : ticket.status,
-        availabilityLabel:
-          !soldOut && ticket.available <= 10 ? `${ticket.available} left` : undefined,
+        status: inventoryUnreliable ? 'sold_out' : soldOut ? 'sold_out' : ticket.status,
+        availabilityLabel: inventoryUnreliable
+          ? availabilityStatus === 'stale'
+            ? 'Availability may be out of date'
+            : 'Availability unavailable'
+          : !soldOut && ticket.available <= 10
+            ? `${ticket.available} left`
+            : undefined,
       };
     });
     const productIds = new Set(
@@ -366,11 +433,25 @@ export default function EventPageClient({
       })),
       resaleError: resaleListingsError ?? undefined,
       showGetTicketsCta: hasActiveTickets,
-      interactive: true,
-      onGetTickets: () => goToCheckout(),
-      onBuyResale: (listingId) => goToCheckout(listingId),
+      interactive: availabilityStatus === 'current',
+      onGetTickets: () => {
+        if (availabilityStatus !== 'current') return;
+        goToCheckout();
+      },
+      onBuyResale: (listingId) => {
+        if (availabilityStatus !== 'current') return;
+        goToCheckout(listingId);
+      },
     };
-  }, [brand, goToCheckout, hasActiveTickets, resaleListings, resaleListingsError, visibleTickets]);
+  }, [
+    availabilityStatus,
+    brand,
+    goToCheckout,
+    hasActiveTickets,
+    resaleListings,
+    resaleListingsError,
+    visibleTickets,
+  ]);
 
   useEffect(() => {
     if (!event) return;
@@ -424,6 +505,26 @@ export default function EventPageClient({
       <RefreshNotifier eventId={eventId ?? event?.id} />
       <SurfaceShell brand={brand} testId="public-event-page-surface">
         <div data-testid={hasPublishedPuckContent ? 'published-event-page' : 'default-event-page'}>
+          {availabilityMessage ? (
+            <output
+              className="mx-auto block w-full max-w-3xl px-4 pt-6 sm:px-6"
+              aria-live="polite"
+              data-testid="availability-status-banner"
+            >
+              <div className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+                <p>{availabilityMessage}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit shrink-0"
+                  onClick={() => void refreshAvailability()}
+                >
+                  Retry availability
+                </Button>
+              </div>
+            </output>
+          ) : null}
           {pageDocument ? (
             <EventPagePuckRender
               brandVariables={{
