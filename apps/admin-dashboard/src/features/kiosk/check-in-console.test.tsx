@@ -16,15 +16,22 @@ const listTicketTypes = vi.fn();
 const listEventOccurrences = vi.fn();
 const listAttendees = vi.fn();
 const subscribeToCheckInActivity = vi.fn((..._args: unknown[]) => vi.fn());
-const useTicketScanner = vi.fn((_options: unknown) => ({
+const defaultScannerState = () => ({
   scanning: false,
-  lastResult: null,
-  scanError: null,
+  lastResult: null as null | { status: string; message?: string },
+  scanError: null as string | null,
   acceptedScanCount: 0,
+  offlinePreparing: false,
+  offlineReady: false,
+  offlineSyncing: false,
+  offlineSyncError: null as string | null,
+  pendingOfflineCount: 0,
   scan: vi.fn(),
   retryLastScan: vi.fn(),
   reset: vi.fn(),
-}));
+  syncPendingOffline: vi.fn(),
+});
+const useTicketScanner = vi.fn((_options: unknown) => defaultScannerState());
 
 function setNavigatorOnline(isOnline: boolean) {
   Object.defineProperty(window.navigator, 'onLine', {
@@ -128,15 +135,7 @@ describe('CheckInConsole', () => {
       ok: true,
       data: { items: [], total: 0, nextCursor: undefined, filterTotal: 0 },
     });
-    useTicketScanner.mockImplementation((_options: unknown) => ({
-      scanning: false,
-      lastResult: null,
-      scanError: null,
-      acceptedScanCount: 0,
-      scan: vi.fn(),
-      retryLastScan: vi.fn(),
-      reset: vi.fn(),
-    }));
+    useTicketScanner.mockImplementation((_options: unknown) => defaultScannerState());
   });
 
   afterAll(() => {
@@ -350,13 +349,8 @@ describe('CheckInConsole', () => {
 
   it('shows checked-in summary including accepted scans on this device', async () => {
     useTicketScanner.mockImplementation((_options: unknown) => ({
-      scanning: false,
-      lastResult: null,
-      scanError: null,
+      ...defaultScannerState(),
       acceptedScanCount: 1,
-      scan: vi.fn(),
-      retryLastScan: vi.fn(),
-      reset: vi.fn(),
     }));
 
     render(
@@ -541,5 +535,77 @@ describe('CheckInConsole', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: /scan/i })).toBeInTheDocument());
     expect(screen.getByRole('tab', { name: /live/i })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /sales/i })).not.toBeInTheDocument();
+  });
+
+  it('renders queued offline state and sync failure and invokes retry', async () => {
+    const syncPendingOffline = vi.fn();
+    useTicketScanner.mockImplementation(() => ({
+      ...defaultScannerState(),
+      acceptedScanCount: 3,
+      offlineReady: true,
+      pendingOfflineCount: 2,
+      offlineSyncError: 'Network unavailable',
+      syncPendingOffline,
+    }));
+
+    render(<CheckInConsole mode="kiosk" initialEventId="evt_1" initialListId="cil_1" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Offline ready · 2 pending sync', { exact: true }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText('2 queued')).toBeInTheDocument();
+    expect(screen.getByTestId('scan-incident-banner')).toHaveTextContent(/Sync failed/i);
+    expect(screen.getByTestId('scan-incident-banner')).toHaveTextContent(
+      /Queued scans are retained/i,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Sync offline scans/i }));
+    expect(syncPendingOffline).toHaveBeenCalled();
+  });
+
+  it('surfaces a scan-in-progress incident while a scan is active', async () => {
+    useTicketScanner.mockImplementation(() => ({
+      ...defaultScannerState(),
+      scanning: true,
+    }));
+
+    render(<CheckInConsole mode="kiosk" initialEventId="evt_1" initialListId="cil_1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scan-incident-banner')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('scan-incident-banner')).toHaveTextContent(/Scan in progress/i);
+    expect(screen.getByTestId('scan-incident-banner')).not.toHaveTextContent(/Duplicate ticket/i);
+  });
+
+  it('surfaces a settled duplicate-ticket incident', async () => {
+    useTicketScanner.mockImplementation(() => ({
+      ...defaultScannerState(),
+      lastResult: { status: 'duplicate' },
+    }));
+
+    render(<CheckInConsole mode="kiosk" initialEventId="evt_1" initialListId="cil_1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scan-incident-banner')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('scan-incident-banner')).toHaveTextContent(/Duplicate ticket/i);
+    expect(screen.getByTestId('scan-incident-banner')).not.toHaveTextContent(/Scan in progress/i);
+  });
+
+  it('surfaces invalid ticket incidents with manual-lookup guidance', async () => {
+    useTicketScanner.mockImplementation(() => ({
+      ...defaultScannerState(),
+      lastResult: { status: 'invalid' },
+    }));
+
+    render(<CheckInConsole mode="kiosk" initialEventId="evt_1" initialListId="cil_1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scan-incident-banner')).toHaveTextContent(/Invalid ticket/i);
+    });
+    expect(screen.getByTestId('scan-incident-banner')).toHaveTextContent(/manual lookup/i);
   });
 });
