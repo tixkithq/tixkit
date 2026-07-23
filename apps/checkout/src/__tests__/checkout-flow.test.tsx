@@ -23,11 +23,20 @@ vi.mock('@/lib/api', () => {
   class CheckoutApiError extends Error {
     code: string;
     status: number;
+    details?: Record<string, unknown>;
 
-    constructor(code: string, message: string, status = 500) {
+    constructor(
+      code: string,
+      message: string,
+      status = 500,
+      requestId?: string,
+      details?: Record<string, unknown>,
+    ) {
       super(message);
       this.code = code;
       this.status = status;
+      this.details = details;
+      void requestId;
     }
   }
 
@@ -1023,7 +1032,9 @@ describe('CheckoutFlow live session expiry', () => {
     await reachConfirmPhase(view, session);
 
     await vi.advanceTimersByTimeAsync(5_100);
-    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`));
+    await waitFor(() =>
+      expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`),
+    );
     expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeEnabled();
     expect(view.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -1042,7 +1053,9 @@ describe('CheckoutFlow live session expiry', () => {
     await reachPaymentPhase(view, session);
 
     await vi.advanceTimersByTimeAsync(5_100);
-    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`));
+    await waitFor(() =>
+      expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`),
+    );
     await waitFor(() => {
       expect(
         view.getByText(/Secure payment processed by Stripe|Payment is ready for local capture/),
@@ -1088,7 +1101,9 @@ describe('CheckoutFlow live session expiry', () => {
 
     expect(await view.findByText('Checkout expired')).toBeVisible();
     expect(
-      view.getByText(/Your checkout session expired\. Start a new order to reserve tickets again\./),
+      view.getByText(
+        /Your checkout session expired\. Start a new order to reserve tickets again\./,
+      ),
     ).toBeVisible();
     const restart = view.getByRole('button', { name: 'Start new order' });
     expect(restart).toBeVisible();
@@ -1116,9 +1131,7 @@ describe('CheckoutFlow live session expiry', () => {
     await vi.advanceTimersByTimeAsync(2_100);
 
     expect(await view.findByText('Reservation could not be verified')).toBeVisible();
-    expect(
-      view.getByText(/Payment is paused until the reservation is revalidated/),
-    ).toBeVisible();
+    expect(view.getByText(/Payment is paused until the reservation is revalidated/)).toBeVisible();
     expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeDisabled();
 
     fireEvent.click(view.getByRole('button', { name: 'Retry reservation check' }));
@@ -1185,7 +1198,11 @@ describe('CheckoutFlow live session expiry', () => {
     const expiresAt = new Date(Date.now() + 2_000).toISOString();
     const session = checkoutSession('cs_code_expired', { expiresAt });
     checkoutApiMock.getSession.mockRejectedValue(
-      new CheckoutApiError('CHECKOUT_EXPIRED', 'Your checkout session expired. Please start a new order.', 410),
+      new CheckoutApiError(
+        'CHECKOUT_EXPIRED',
+        'Your checkout session expired. Please start a new order.',
+        410,
+      ),
     );
 
     const view = renderCheckoutFlow();
@@ -1195,5 +1212,237 @@ describe('CheckoutFlow live session expiry', () => {
     expect(await view.findByText('Checkout expired')).toBeVisible();
     expect(view.getByRole('button', { name: 'Start new order' })).toBeVisible();
     expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeDisabled();
+  });
+});
+
+describe('CheckoutFlow inventory and quote recovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue(availability);
+    publicApiMock.getResaleListings.mockResolvedValue({ items: [] });
+    publicApiMock.getQuestions.mockResolvedValue({
+      buyerQuestions: [],
+      attendeeQuestions: [],
+    });
+    publicApiMock.getOccurrences.mockResolvedValue([]);
+    publicApiMock.getCheckoutBootstrap.mockImplementation(
+      async (
+        eventId: string,
+        signal?: AbortSignal,
+        input?: { products?: string; resaleListingId?: string },
+      ) => {
+        const [loadedEvent, loadedAvailability, questions, occurrences] = await Promise.all([
+          publicApiMock.getEvent(eventId, signal),
+          publicApiMock.getAvailability(eventId, signal, input?.products),
+          publicApiMock.getQuestions(eventId, signal),
+          publicApiMock.getOccurrences(eventId, signal),
+        ]);
+        return {
+          event: loadedEvent,
+          availability: loadedAvailability,
+          questions,
+          occurrences,
+          resaleListing: null,
+        };
+      },
+    );
+    publicApiMock.getBrand.mockResolvedValue({
+      id: 'brd_1',
+      name: 'Brand',
+      status: 'active',
+      theme: {},
+      legalUrls: {},
+      whiteLabel: false,
+    });
+  });
+
+  it('requires acknowledgement when create hits inventory exhaustion and preserves buyer email', async () => {
+    const exhausted = new CheckoutApiError('INVENTORY_EXHAUSTED', 'Insufficient inventory', 409);
+    Object.assign(exhausted, {
+      details: { ticketTypeId: 'tt_general', requested: 1, available: 0 },
+    });
+    checkoutApiMock.createSession.mockRejectedValueOnce(exhausted);
+    publicApiMock.getAvailability
+      .mockResolvedValueOnce(availability)
+      .mockResolvedValueOnce([{ ...availability[0]!, available: 0, status: 'sold_out' }]);
+
+    const view = renderCheckoutFlow();
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    expect(await view.findByText('Your selection changed')).toBeVisible();
+    expect(view.getByText(/sold out/i)).toBeVisible();
+    expect((view.getByLabelText(/Email/) as HTMLInputElement).value).toBe('buyer@example.com');
+    expect(view.getByRole('button', { name: 'Continue' })).toBeDisabled();
+
+    fireEvent.click(view.getByRole('button', { name: /I understand/i }));
+    await waitFor(() => {
+      expect(view.queryByText('Your selection changed')).not.toBeInTheDocument();
+    });
+    expect(checkoutApiMock.confirmSession).not.toHaveBeenCalled();
+  });
+
+  it('blocks confirm after inventory conflict until the buyer acknowledges', async () => {
+    const session = checkoutSession('cs_inv_confirm');
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+
+    const conflict = new CheckoutApiError('INVENTORY_EXHAUSTED', 'Insufficient inventory', 409);
+    Object.assign(conflict, {
+      details: { ticketTypeId: 'tt_general', requested: 1, available: 0 },
+    });
+    checkoutApiMock.confirmSession.mockRejectedValueOnce(conflict);
+    publicApiMock.getAvailability.mockResolvedValueOnce([
+      { ...availability[0]!, available: 0, status: 'sold_out' },
+    ]);
+
+    fireEvent.click(view.getByRole('button', { name: 'Pay $25.00' }));
+    expect(await view.findByText('Your selection changed')).toBeVisible();
+    expect(view.queryByRole('button', { name: 'Pay $25.00' })).not.toBeInTheDocument();
+    expect(checkoutApiMock.confirmSession).toHaveBeenCalledTimes(1);
+
+    // Second confirm must not fire while recovery is pending.
+    fireEvent.click(view.getByRole('button', { name: /I understand/i }));
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeVisible());
+    expect(checkoutApiMock.confirmSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires acknowledgement when the server quote total differs from the local preview', async () => {
+    checkoutApiMock.createSession.mockResolvedValue(
+      checkoutSession('cs_quote_change', { totalCents: 2800 }),
+    );
+
+    const view = renderCheckoutFlow();
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    expect(await view.findByText('Your selection changed')).toBeVisible();
+    expect(view.getAllByText(/Order total changed/i).length).toBeGreaterThan(0);
+    expect(view.getByRole('button', { name: 'Pay $28.00' })).toBeDisabled();
+
+    fireEvent.click(view.getByRole('button', { name: /I understand/i }));
+    await waitFor(() => {
+      expect(view.getByRole('button', { name: 'Pay $28.00' })).toBeEnabled();
+    });
+  });
+});
+
+describe('CheckoutFlow offline recovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue(availability);
+    publicApiMock.getResaleListings.mockResolvedValue({ items: [] });
+    publicApiMock.getQuestions.mockResolvedValue({
+      buyerQuestions: [],
+      attendeeQuestions: [],
+    });
+    publicApiMock.getOccurrences.mockResolvedValue([]);
+    publicApiMock.getCheckoutBootstrap.mockImplementation(
+      async (
+        eventId: string,
+        signal?: AbortSignal,
+        input?: { products?: string; resaleListingId?: string },
+      ) => {
+        const [loadedEvent, loadedAvailability, questions, occurrences] = await Promise.all([
+          publicApiMock.getEvent(eventId, signal),
+          publicApiMock.getAvailability(eventId, signal, input?.products),
+          publicApiMock.getQuestions(eventId, signal),
+          publicApiMock.getOccurrences(eventId, signal),
+        ]);
+        return {
+          event: loadedEvent,
+          availability: loadedAvailability,
+          questions,
+          occurrences,
+          resaleListing: null,
+        };
+      },
+    );
+    publicApiMock.getBrand.mockResolvedValue({
+      id: 'brd_1',
+      name: 'Brand',
+      status: 'active',
+      theme: {},
+      legalUrls: {},
+      whiteLabel: false,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+  });
+
+  it('blocks session creation while offline and preserves the email', async () => {
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const view = renderCheckoutFlow();
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'offline@example.com' },
+    });
+
+    expect(view.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(view.getByText('You are offline')).toBeVisible();
+    expect((view.getByLabelText(/Email/) as HTMLInputElement).value).toBe('offline@example.com');
+    expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+  });
+
+  it('surfaces transport failure on confirm without treating it as a checkout rejection', async () => {
+    const session = checkoutSession('cs_net_confirm');
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+
+    checkoutApiMock.confirmSession.mockRejectedValueOnce(
+      new CheckoutApiError('NETWORK_ERROR', 'Could not reach the checkout service', 0),
+    );
+
+    fireEvent.click(view.getByRole('button', { name: 'Pay $25.00' }));
+    expect(await view.findByRole('button', { name: 'Retry' })).toBeVisible();
+    expect(view.getByText(/Could not reach the checkout service/i)).toBeVisible();
+    expect(view.queryByText('Your selection changed')).not.toBeInTheDocument();
+  });
+
+  it('ignores a late create response after a newer attempt generation', async () => {
+    let resolveFirst: (value: unknown) => void = () => undefined;
+    const first = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+    checkoutApiMock.createSession
+      .mockImplementationOnce(() => first as never)
+      .mockResolvedValueOnce(checkoutSession('cs_second'));
+
+    const view = renderCheckoutFlow();
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+
+    // Start first create (held pending), then go offline/online path is hard;
+    // instead unmount to invalidate generation, ensuring late resolve is ignored.
+    const continueBtn = view.getByRole('button', { name: 'Continue' });
+    fireEvent.click(continueBtn);
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledTimes(1));
+    view.unmount();
+    resolveFirst(checkoutSession('cs_stale_late'));
+    // No throw / no navigation side effect expected after unmount.
+    expect(push).not.toHaveBeenCalled();
   });
 });

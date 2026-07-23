@@ -393,6 +393,7 @@ export class CheckoutApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly requestId?: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'CheckoutApiError';
@@ -606,13 +607,21 @@ async function apiRequest<T>(
 
   if (!response.ok) {
     const error = (data ?? {}) as {
-      error?: { code?: string; message?: string; requestId?: string };
+      error?: {
+        code?: string;
+        message?: string;
+        requestId?: string;
+        details?: Record<string, unknown>;
+      };
     };
     throw new CheckoutApiError(
       error.error?.code ?? 'REQUEST_FAILED',
       error.error?.message ?? `Request failed with status ${response.status}`,
       response.status,
       error.error?.requestId,
+      error.error?.details && typeof error.error.details === 'object'
+        ? error.error.details
+        : undefined,
     );
   }
 
@@ -1045,6 +1054,23 @@ export function userFacingMessage(error: unknown): string {
     }
     if (error.code === 'CHECKOUT_EXPIRED') {
       return 'Your checkout session expired. Please start a new order.';
+    }
+    if (error.code === 'INVENTORY_EXHAUSTED') {
+      const available =
+        typeof error.details?.available === 'number' ? error.details.available : undefined;
+      if (available === 0) {
+        return 'One or more selected items are sold out. Review your selection to continue.';
+      }
+      if (typeof available === 'number') {
+        return `Only ${available} remaining for one of your selected items. Review your selection to continue.`;
+      }
+      return 'Inventory changed for your selection. Review your tickets to continue.';
+    }
+    if (error.code === 'HOLD_EXPIRED') {
+      return 'Your ticket hold expired. Start a new order to reserve tickets again.';
+    }
+    if (error.code === 'NETWORK_ERROR') {
+      return 'We could not reach checkout. Check your connection and try again.';
     }
     return error.message;
   }

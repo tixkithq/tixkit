@@ -66,6 +66,21 @@ import {
 } from '@tixkit/domain/eligibility';
 import type { PublicEventOccurrence } from '@/lib/api';
 import { emitEmbedLifecycle, initializeEmbedHandshake } from '@/lib/embed-contract';
+import {
+  isInventoryConflictCode,
+  planFromInventoryErrorDetails,
+  planInventoryRecovery,
+  type InventoryApiDetails,
+  type InventoryRecoveryPlan,
+} from '@/lib/inventory-recovery';
+import {
+  isTransportFailure,
+  readConnectivityStatus,
+  RequestGeneration,
+  transportFailureMessage,
+  type ConnectivityStatus,
+} from '@/lib/network-recovery';
+import { checkoutCopy } from '@/lib/checkout-copy';
 
 type Props = {
   initialEventId: string;
@@ -103,8 +118,7 @@ export function isServerSessionExpired(session: Pick<CheckoutSession, 'status'>)
 
 function isCheckoutExpiredError(error: unknown): boolean {
   return (
-    error instanceof CheckoutApiError &&
-    (error.code === 'CHECKOUT_EXPIRED' || error.status === 410)
+    error instanceof CheckoutApiError && (error.code === 'CHECKOUT_EXPIRED' || error.status === 410)
   );
 }
 
@@ -254,10 +268,22 @@ export default function CheckoutFlow({
   const serverConfirmedHoldRef = useRef<{ sessionId: string; expiresAt: string } | null>(null);
   const expiryRestartButtonRef = useRef<HTMLButtonElement | null>(null);
   const expiryRetryButtonRef = useRef<HTMLButtonElement | null>(null);
+  const inventoryAlertRef = useRef<HTMLDivElement | null>(null);
+  const [inventoryRecovery, setInventoryRecovery] = useState<InventoryRecoveryPlan | null>(null);
+  const [inventoryAcknowledged, setInventoryAcknowledged] = useState(false);
+  const [connectivity, setConnectivity] = useState<ConnectivityStatus>(() =>
+    readConnectivityStatus(),
+  );
+  const [networkMessage, setNetworkMessage] = useState<string | null>(null);
+  const mutationGenerationRef = useRef(new RequestGeneration());
+  const quantitiesRef = useRef(quantities);
+  const availabilityRef = useRef(availability);
 
   sessionRef.current = session;
   sessionTokenRef.current = sessionToken;
   phaseRef.current = phase;
+  quantitiesRef.current = quantities;
+  availabilityRef.current = availability;
 
   const setHoldStatus = useCallback((status: SessionHoldStatus, message: string | null = null) => {
     sessionHoldStatusRef.current = status;
@@ -298,6 +324,126 @@ export default function CheckoutFlow({
     setValidationError(null);
     setLoading(false);
   }, [clearExpiryTimer, clearHeldSessionLocally, setHoldStatus]);
+
+  useEffect(() => {
+    const generation = mutationGenerationRef.current;
+    function handleOnline() {
+      setConnectivity('online');
+      setNetworkMessage(null);
+    }
+    function handleOffline() {
+      setConnectivity('offline');
+      setNetworkMessage(transportFailureMessage('offline'));
+    }
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      generation.invalidate();
+    };
+  }, []);
+
+  const applyInventoryRecoveryPlan = useCallback(
+    (plan: InventoryRecoveryPlan, options?: { refreshAvailability?: AvailabilityItem[] }) => {
+      if (options?.refreshAvailability) {
+        setAvailability(options.refreshAvailability);
+        availabilityRef.current = options.refreshAvailability;
+      }
+      setInventoryRecovery(plan);
+      setInventoryAcknowledged(false);
+      setValidationError(plan.summary || null);
+      setError(null);
+      if (sessionRef.current) {
+        clearExpiryTimer();
+        revalidateAbortRef.current?.abort();
+        revalidateAbortRef.current = null;
+        revalidateInFlightRef.current = false;
+        serverConfirmedHoldRef.current = null;
+        clearHeldSessionLocally();
+        setHoldStatus('ok', null);
+      }
+      createSessionAttemptRef.current = undefined;
+      confirmSessionAttemptRef.current = undefined;
+      setPhase('select');
+      setConfirmResult(null);
+      queueMicrotask(() => inventoryAlertRef.current?.focus());
+    },
+    [clearExpiryTimer, clearHeldSessionLocally, setHoldStatus],
+  );
+
+  const acknowledgeInventoryRecovery = useCallback(() => {
+    if (!inventoryRecovery) return;
+    setQuantities(inventoryRecovery.proposedQuantities);
+    quantitiesRef.current = inventoryRecovery.proposedQuantities;
+    setInventoryAcknowledged(true);
+    setInventoryRecovery(null);
+    setValidationError(null);
+    setError(null);
+  }, [inventoryRecovery]);
+
+  const handleSelectionConflict = useCallback(
+    async (err: unknown) => {
+      const code = err instanceof CheckoutApiError ? err.code : undefined;
+      if (
+        !isInventoryConflictCode(code) &&
+        !(err instanceof CheckoutApiError && err.status === 409)
+      ) {
+        return false;
+      }
+
+      let refreshed = availabilityRef.current;
+      try {
+        if (eventId) {
+          refreshed = await publicApi.getAvailability(eventId);
+          setAvailability(refreshed);
+          availabilityRef.current = refreshed;
+        }
+      } catch {
+        // Keep last known availability when refresh fails; still surface the conflict.
+      }
+
+      const details =
+        err instanceof CheckoutApiError
+          ? (err.details as InventoryApiDetails | undefined)
+          : undefined;
+      const fromDetails = planFromInventoryErrorDetails(details, quantitiesRef.current, refreshed);
+      const plan =
+        fromDetails ??
+        planInventoryRecovery({
+          quantities: quantitiesRef.current,
+          availability: refreshed,
+          currency: refreshed[0]?.currency,
+          previousQuote: sessionRef.current?.quote ?? null,
+          nextQuote: null,
+        });
+
+      if (!plan.requiresAcknowledgement) {
+        const fallback: InventoryRecoveryPlan = {
+          changes: [
+            {
+              kind: 'unavailable',
+              itemId: details?.ticketTypeId
+                ? `ticket:${details.ticketTypeId}:${details.occurrenceId ?? details.eventOccurrenceId ?? 'event'}`
+                : 'selection',
+              name: 'Selected tickets',
+              message: userFacingMessage(err),
+            },
+          ],
+          proposedQuantities: quantitiesRef.current,
+          requiresAcknowledgement: true,
+          summary: userFacingMessage(err),
+          focusItemId: null,
+        };
+        applyInventoryRecoveryPlan(fallback, { refreshAvailability: refreshed });
+        return true;
+      }
+
+      applyInventoryRecoveryPlan(plan, { refreshAvailability: refreshed });
+      return true;
+    },
+    [applyInventoryRecoveryPlan, eventId],
+  );
 
   const brand: ResolvedBrand = useResolvedBrand(
     useMemo(
@@ -633,7 +779,9 @@ export default function CheckoutFlow({
     !questionsLoading &&
     !questionsError &&
     questions &&
-    (!resaleListing || resaleTermsAccepted),
+    (!resaleListing || resaleTermsAccepted) &&
+    !(inventoryRecovery && !inventoryAcknowledged) &&
+    connectivity !== 'offline',
   );
 
   // Resolve an existing session once on mount when resuming via sessionId +
@@ -900,10 +1048,7 @@ export default function CheckoutFlow({
       const controller = new AbortController();
       revalidateAbortRef.current = controller;
       clearExpiryTimer();
-      setHoldStatus(
-        'checking',
-        'Checking whether your ticket reservation is still valid…',
-      );
+      setHoldStatus('checking', 'Checking whether your ticket reservation is still valid…');
 
       try {
         const loaded = await checkoutApi.getSession(held.id, token);
@@ -1086,13 +1231,16 @@ export default function CheckoutFlow({
   const submissionBlockedByHold =
     sessionHoldStatus === 'checking' ||
     sessionHoldStatus === 'expired' ||
-    sessionHoldStatus === 'revalidation_failed';
+    sessionHoldStatus === 'revalidation_failed' ||
+    Boolean(inventoryRecovery && !inventoryAcknowledged) ||
+    connectivity === 'offline';
 
   const handlePaymentError = useCallback((message: string) => {
     setError(message);
   }, []);
 
   function increase(itemId: string) {
+    if (inventoryRecovery && !inventoryAcknowledged) return;
     const ticket = visibleAvailability.find((t) => availabilityItemId(t) === itemId);
     if (
       ticket?.ticketTypeId &&
@@ -1115,6 +1263,7 @@ export default function CheckoutFlow({
     });
   }
   function decrease(itemId: string) {
+    if (inventoryRecovery && !inventoryAcknowledged) return;
     const ticket = visibleAvailability.find((t) => availabilityItemId(t) === itemId);
     setQuantities((current) => {
       const quantity = current[itemId] ?? 0;
@@ -1227,6 +1376,7 @@ export default function CheckoutFlow({
   async function createSession() {
     if (!canCreateSession) return;
     if (sessionHoldStatusRef.current === 'expired') return;
+    if (inventoryRecovery && !inventoryAcknowledged) return;
     if (resaleListing && !resaleTermsAccepted) {
       setValidationError('Accept the resale settlement and refund terms to continue.');
       return;
@@ -1239,8 +1389,19 @@ export default function CheckoutFlow({
       return;
     }
     if (createSessionInFlightRef.current) return;
+
+    const connectivityNow = readConnectivityStatus();
+    setConnectivity(connectivityNow);
+    if (connectivityNow === 'offline') {
+      setNetworkMessage(transportFailureMessage('offline'));
+      setError(transportFailureMessage('offline'));
+      return;
+    }
+
     createSessionInFlightRef.current = true;
+    const generation = mutationGenerationRef.current.next();
     setValidationError(null);
+    setNetworkMessage(null);
 
     setLoading(true);
     setError(null);
@@ -1286,6 +1447,7 @@ export default function CheckoutFlow({
           : { fingerprint, idempotencyKey: newCheckoutIdempotencyKey() };
       createSessionAttemptRef.current = attempt;
       const created = await checkoutApi.createSession(createInput, attempt.idempotencyKey);
+      if (!mutationGenerationRef.current.isCurrent(generation)) return;
       if (!created.clientToken) {
         throw new CheckoutApiError(
           'SESSION_TOKEN_MISSING',
@@ -1293,6 +1455,34 @@ export default function CheckoutFlow({
           200,
         );
       }
+
+      // Surface material quote total changes vs the buyer's local preview.
+      const quotePlan = planInventoryRecovery({
+        quantities: quantitiesRef.current,
+        availability: availabilityRef.current,
+        currency: created.currency ?? displayCurrency,
+        previousQuote: {
+          subtotalCents: previewTotal,
+          discountCents: 0,
+          taxCents: 0,
+          feeCents: 0,
+          totalCents: previewTotal,
+        },
+        nextQuote: created.quote,
+      });
+      const quoteOnlyChange =
+        quotePlan.changes.length === 1 && quotePlan.changes[0]?.kind === 'quote_changed';
+      if (quoteOnlyChange && created.quote.totalCents !== previewTotal) {
+        // Keep the server session (authoritative total) but require acknowledgement
+        // before confirm so the buyer is not charged a silent total change.
+        setInventoryRecovery(quotePlan);
+        setInventoryAcknowledged(false);
+        setValidationError(quotePlan.summary);
+      } else {
+        setInventoryRecovery(null);
+        setInventoryAcknowledged(true);
+      }
+
       createSessionAttemptRef.current = undefined;
       serverConfirmedHoldRef.current = null;
       setSession(created);
@@ -1319,24 +1509,51 @@ export default function CheckoutFlow({
         eventId,
       });
     } catch (err) {
+      if (!mutationGenerationRef.current.isCurrent(generation)) return;
+      if (await handleSelectionConflict(err)) {
+        createSessionAttemptRef.current = undefined;
+        return;
+      }
+      if (isTransportFailure(err)) {
+        const status = readConnectivityStatus();
+        setConnectivity(status);
+        // Keep the original transport message (supports idempotent retry UX).
+        // Only swap in the offline banner copy when the browser is offline.
+        const message =
+          status === 'offline' ? transportFailureMessage('offline') : userFacingMessage(err);
+        setNetworkMessage(message);
+        setError(message);
+        return;
+      }
       if (!isRetryable(err)) createSessionAttemptRef.current = undefined;
       setError(userFacingMessage(err));
     } finally {
-      createSessionInFlightRef.current = false;
-      setLoading(false);
+      if (mutationGenerationRef.current.isCurrent(generation)) {
+        createSessionInFlightRef.current = false;
+        setLoading(false);
+      } else {
+        createSessionInFlightRef.current = false;
+      }
     }
   }
 
   async function confirmSession() {
     if (!session || !sessionToken || confirmSessionInFlightRef.current) return;
     if (submissionBlockedByHold || sessionHoldStatusRef.current !== 'ok') return;
+    if (inventoryRecovery && !inventoryAcknowledged) return;
+
+    const connectivityNow = readConnectivityStatus();
+    setConnectivity(connectivityNow);
+    if (connectivityNow === 'offline') {
+      setNetworkMessage(transportFailureMessage('offline'));
+      setError(transportFailureMessage('offline'));
+      return;
+    }
 
     const expiresAtMs = parseSessionExpiresAtMs(session.expiresAt);
     const confirmed = serverConfirmedHoldRef.current;
     const serverAlreadyConfirmed =
-      confirmed &&
-      confirmed.sessionId === session.id &&
-      confirmed.expiresAt === session.expiresAt;
+      confirmed && confirmed.sessionId === session.id && confirmed.expiresAt === session.expiresAt;
     // Always revalidate before pay when expiresAt is missing/invalid, or when
     // the browser clock says the hold lapsed and the server has not confirmed it.
     if (expiresAtMs === null || (expiresAtMs <= Date.now() && !serverAlreadyConfirmed)) {
@@ -1345,8 +1562,10 @@ export default function CheckoutFlow({
     }
 
     confirmSessionInFlightRef.current = true;
+    const generation = mutationGenerationRef.current.next();
     setLoading(true);
     setError(null);
+    setNetworkMessage(null);
     try {
       const currentAttempt = confirmSessionAttemptRef.current;
       const attempt =
@@ -1359,6 +1578,7 @@ export default function CheckoutFlow({
         sessionToken,
         attempt.idempotencyKey,
       );
+      if (!mutationGenerationRef.current.isCurrent(generation)) return;
       // Hold may flip while confirm is in flight; never advance payment after expiry.
       const holdAfterConfirm = sessionHoldStatusRef.current;
       if (holdAfterConfirm !== 'ok') {
@@ -1396,6 +1616,7 @@ export default function CheckoutFlow({
         setPhase('payment');
       }
     } catch (err) {
+      if (!mutationGenerationRef.current.isCurrent(generation)) return;
       if (isCheckoutExpiredError(err)) {
         confirmSessionAttemptRef.current = undefined;
         setConfirmResult(null);
@@ -1404,6 +1625,19 @@ export default function CheckoutFlow({
           userFacingMessage(err) ||
             'Your checkout session expired. Start a new order to reserve tickets again.',
         );
+        return;
+      }
+      if (await handleSelectionConflict(err)) {
+        confirmSessionAttemptRef.current = undefined;
+        return;
+      }
+      if (isTransportFailure(err)) {
+        const status = readConnectivityStatus();
+        setConnectivity(status);
+        const message =
+          status === 'offline' ? transportFailureMessage('offline') : userFacingMessage(err);
+        setNetworkMessage(message);
+        setError(message);
         return;
       }
       if (!isRetryable(err)) confirmSessionAttemptRef.current = undefined;
@@ -1854,10 +2088,60 @@ export default function CheckoutFlow({
                   presetTotalCents={previewTotal}
                 />
 
-                {validationError ? (
+                {inventoryRecovery ? (
+                  <Alert
+                    ref={inventoryAlertRef}
+                    variant="destructive"
+                    tabIndex={-1}
+                    aria-live="assertive"
+                    className="outline-none"
+                  >
+                    <AlertCircleIcon />
+                    <AlertTitle>{checkoutCopy.inventoryChangedTitle}</AlertTitle>
+                    <AlertDescription className="space-y-3">
+                      <p>{inventoryRecovery.summary}</p>
+                      <ul className="list-disc space-y-1 pl-4 text-sm">
+                        {inventoryRecovery.changes.map((change) => (
+                          <li key={`${change.kind}:${change.itemId}`}>{change.message}</li>
+                        ))}
+                      </ul>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit"
+                          onClick={acknowledgeInventoryRecovery}
+                        >
+                          {checkoutCopy.inventoryChangedAcknowledge}
+                        </Button>
+                        {inventoryRecovery.focusItemId ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="w-fit"
+                            onClick={() => {
+                              setPhase('select');
+                              const el = document.getElementById(
+                                `ticket-${inventoryRecovery.focusItemId}`,
+                              );
+                              el?.focus();
+                              el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                            }}
+                          >
+                            {checkoutCopy.inventoryReviewSelection}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {validationError && !inventoryRecovery ? (
                   <Alert variant="destructive">
                     <AlertCircleIcon />
-                    <AlertTitle>Please fix the following</AlertTitle>
+                    <AlertTitle>{checkoutCopy.pleaseFixTitle}</AlertTitle>
                     <AlertDescription>{validationError}</AlertDescription>
                   </Alert>
                 ) : null}
@@ -1870,11 +2154,77 @@ export default function CheckoutFlow({
                   </Alert>
                 ) : null}
 
-                {error ? (
+                {connectivity === 'offline' ? (
+                  <Alert variant="destructive" aria-live="assertive">
+                    <AlertCircleIcon />
+                    <AlertTitle>{checkoutCopy.networkOfflineTitle}</AlertTitle>
+                    <AlertDescription className="space-y-3">
+                      <p>{networkMessage ?? transportFailureMessage('offline')}</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-fit"
+                        onClick={() => {
+                          const status = readConnectivityStatus();
+                          setConnectivity(status);
+                          if (status === 'offline') {
+                            setNetworkMessage(transportFailureMessage('offline'));
+                            return;
+                          }
+                          setNetworkMessage(null);
+                          setError(null);
+                          if (phase === 'confirm' && session) {
+                            void confirmSession();
+                          } else if (phase === 'select') {
+                            void createSession();
+                          } else if (sessionHoldStatus === 'revalidation_failed' && session) {
+                            void revalidateSessionHold({ manual: true });
+                          }
+                        }}
+                      >
+                        {checkoutCopy.networkRetry}
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {error && connectivity !== 'offline' ? (
                   <Alert variant="destructive">
                     <AlertCircleIcon />
-                    <AlertTitle>Checkout error</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
+                    <AlertTitle>
+                      {isTransportFailure({ code: 'NETWORK_ERROR', status: 0 }) &&
+                      (error.toLowerCase().includes('reach') ||
+                        error.toLowerCase().includes('network') ||
+                        error.toLowerCase().includes('offline'))
+                        ? checkoutCopy.networkUnreachableTitle
+                        : error.toLowerCase().includes('inventory') ||
+                            error.toLowerCase().includes('sold out')
+                          ? checkoutCopy.inventoryChangedTitle
+                          : checkoutCopy.checkoutErrorTitle}
+                    </AlertTitle>
+                    <AlertDescription className="space-y-3">
+                      <p>{error}</p>
+                      {networkMessage ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit"
+                          onClick={() => {
+                            setNetworkMessage(null);
+                            setError(null);
+                            if (phase === 'confirm' && session) {
+                              void confirmSession();
+                            } else if (phase === 'select') {
+                              void createSession();
+                            }
+                          }}
+                        >
+                          {checkoutCopy.networkRetry}
+                        </Button>
+                      ) : null}
+                    </AlertDescription>
                   </Alert>
                 ) : null}
 
