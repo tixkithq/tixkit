@@ -266,9 +266,13 @@ function createQuestionMutationDb(rows: QuestionRow[]) {
       };
       return deletion;
     },
-    transaction: () => ({
-      execute: async (fn: (trx: typeof mockDb) => Promise<unknown>) => fn(mockDb),
-    }),
+    transaction: () => {
+      const transaction = {
+        execute: async (fn: (trx: typeof mockDb) => Promise<unknown>) => fn(mockDb),
+        setIsolationLevel: () => transaction,
+      };
+      return transaction;
+    },
   };
 
   return { mockDb, deletedQuestionIds, updatedQuestionIds, insertedQuestions };

@@ -160,6 +160,11 @@ export type AppContext = {
     stage: 'before_transaction' | 'before_audit';
     questionId: string;
   }) => void | Promise<void>;
+  questionUpdateCheckpoint?: (input: {
+    stage: 'before_event_lock' | 'after_event_lock' | 'after_question_lock' | 'before_update';
+    questionId: string;
+    eventId: string;
+  }) => void | Promise<void>;
   checkoutQuestionPersistenceCheckpoint?: (input: {
     stage: 'before_transaction';
     flow: 'box_office' | 'primary' | 'resale';

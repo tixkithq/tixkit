@@ -55,6 +55,114 @@ function assertQuestionDefinition(input: QuestionDefinitionInput) {
   }
 }
 
+function isRetryableQuestionUpdateConflict(error: unknown): boolean {
+  const pending: unknown[] = [error];
+  const visited = new Set<object>();
+  while (pending.length > 0 && visited.size < 20) {
+    const current = pending.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) continue;
+    visited.add(current);
+    const databaseError = current as {
+      cause?: unknown;
+      code?: string;
+      errno?: number;
+      number?: number;
+      originalError?: unknown;
+    };
+    if (
+      databaseError.code === '40001' ||
+      databaseError.code === '40P01' ||
+      databaseError.code === 'ER_LOCK_DEADLOCK' ||
+      databaseError.code === 'ER_LOCK_WAIT_TIMEOUT' ||
+      databaseError.errno === 1213 ||
+      databaseError.errno === 1205 ||
+      databaseError.number === 1205
+    ) {
+      return true;
+    }
+    pending.push(databaseError.cause, databaseError.originalError);
+  }
+  return false;
+}
+
+async function executeQuestionUpdateWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableQuestionUpdateConflict(error) || attempt === 3) throw error;
+    }
+  }
+  throw new Error('QUESTION_UPDATE_TRANSACTION_RETRY_EXHAUSTED');
+}
+
+function questionMaterialSnapshot(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    ticketTypeId: row.ticket_type_id ?? null,
+    type: row.type,
+    label: row.label,
+    description: row.description ?? null,
+    required: row.required === true || row.required === 1,
+    appliesTo: row.applies_to,
+    options: parseJsonValue(row.options, null),
+    placeholder: row.placeholder ?? null,
+    validationPattern: row.validation_pattern ?? null,
+    conditionalVisibility: parseJsonValue(row.conditional_visibility, null),
+    sortOrder: row.sort_order,
+    isConsentField: row.is_consent_field === true || row.is_consent_field === 1,
+    consentText: row.consent_text ?? null,
+    consentVersion: row.consent_version ?? null,
+  };
+}
+
+function questionMaterialChangedFields(
+  before: ReturnType<typeof questionMaterialSnapshot>,
+  after: ReturnType<typeof questionMaterialSnapshot>,
+) {
+  const changedFields = (Object.keys(before) as Array<keyof typeof before>).filter(
+    (field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]),
+  );
+  return changedFields;
+}
+
+function questionUpdateAuditSnapshot(row: Record<string, unknown>) {
+  const material = questionMaterialSnapshot(row);
+  return {
+    id: material.id,
+    eventId: material.eventId,
+    ticketTypeId: material.ticketTypeId,
+    type: material.type,
+    label: material.label,
+    required: material.required,
+    appliesTo: material.appliesTo,
+    conditionalVisibility: material.conditionalVisibility,
+    sortOrder: material.sortOrder,
+    isConsentField: material.isConsentField,
+    consentVersion: material.consentVersion,
+  };
+}
+
+function questionUpdateAuditDiff(
+  before: ReturnType<typeof questionUpdateAuditSnapshot>,
+  after: ReturnType<typeof questionUpdateAuditSnapshot>,
+  changedFields: readonly string[],
+) {
+  return {
+    before,
+    after,
+    changedFields,
+    noOp: changedFields.length === 0,
+    sensitiveChanges: {
+      consentTextChanged: changedFields.includes('consentText'),
+      contentChanged: changedFields.some((field) =>
+        ['description', 'options', 'placeholder', 'validationPattern'].includes(field),
+      ),
+    },
+  };
+}
+
 export const questionRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
@@ -69,30 +177,56 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     database: Database,
     eventId: string,
     ticketTypeId?: string | null,
+    options?: { lock?: boolean },
   ) => {
     if (!ticketTypeId) return;
-    const ticketType = await database
-      .selectFrom('ticket_types')
-      .selectAll()
-      .where('id', '=', ticketTypeId)
-      .executeTakeFirst();
-    if (!ticketType || ticketType.event_id !== eventId) {
-      throw new NotFoundError('TicketType', ticketTypeId);
-    }
+    const ticketType = options?.lock
+      ? (
+          await database
+            .selectFrom('ticket_types')
+            .selectAll()
+            .where('event_id', '=', eventId)
+            .forUpdate()
+            .execute()
+        ).find((candidate) => candidate.id === ticketTypeId)
+      : await (async () => {
+          const preflight = await database
+            .selectFrom('ticket_types')
+            .selectAll()
+            .where('id', '=', ticketTypeId)
+            .where('event_id', '=', eventId)
+            .executeTakeFirst();
+          return preflight;
+        })();
+    if (!ticketType) throw new NotFoundError('TicketType', ticketTypeId);
   };
 
   const requireConditionalReference = async (
     database: Database,
     eventId: string,
     conditionalVisibility?: { field: string } | null,
+    options?: { lock?: boolean },
   ) => {
     if (!conditionalVisibility) return;
-    const source = await database
-      .selectFrom('questions')
-      .selectAll()
-      .where('id', '=', conditionalVisibility.field)
-      .executeTakeFirst();
-    if (!source || source.event_id !== eventId) {
+    const source = options?.lock
+      ? (
+          await database
+            .selectFrom('questions')
+            .selectAll()
+            .where('event_id', '=', eventId)
+            .forUpdate()
+            .execute()
+        ).find((candidate) => candidate.id === conditionalVisibility.field)
+      : await (async () => {
+          const preflight = await database
+            .selectFrom('questions')
+            .selectAll()
+            .where('id', '=', conditionalVisibility.field)
+            .where('event_id', '=', eventId)
+            .executeTakeFirst();
+          return preflight;
+        })();
+    if (!source) {
       throw new ValidationError('Conditional visibility source question must belong to this event');
     }
     if (isHiddenQuestion(source)) {
@@ -317,157 +451,232 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
     const { questionId } = request.params as { questionId: string };
-    const body = parseBody(updateQuestionSchema, request.body);
-
-    const question = await db
+    const preflightQuestion = await db
       .selectFrom('questions')
       .selectAll()
       .where('id', '=', questionId)
       .executeTakeFirst();
-    if (!question) throw new NotFoundError('Question', questionId);
-    const event = await loadEvent(question.event_id);
-    requireEventAccess(principal, event, question.event_id);
-
-    const existingOptions = parseJsonValue<string[] | undefined>(question.options, undefined);
-    const finalType = (body.type ?? question.type) as QuestionType;
-    let finalOptions =
-      body.options !== undefined
-        ? body.options === null
-          ? undefined
-          : normalizeOptions(body.options)
-        : existingOptions;
-    if (
-      body.type !== undefined &&
-      !isOptionBearingQuestionType(finalType) &&
-      body.options === undefined
-    ) {
-      finalOptions = undefined;
+    if (!preflightQuestion) throw new NotFoundError('Question', 'concealed');
+    const preflightEvent = await db
+      .selectFrom('events')
+      .selectAll()
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', preflightQuestion.event_id)
+      .executeTakeFirst();
+    if (!preflightEvent) throw new NotFoundError('Question', 'concealed');
+    try {
+      requireEventAccess(principal, preflightEvent, preflightQuestion.event_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('Question', 'concealed');
+      throw error;
+    }
+    const body = parseBody(updateQuestionSchema, request.body);
+    if (Object.keys(body).length === 0)
+      throw new ValidationError('Question update requires a field');
+    // MySQL SERIALIZABLE reads can wait behind a foreign row lock even without
+    // FOR UPDATE. Verify a newly supplied dependency before entering the
+    // transaction; the same-event locked revalidation below remains authoritative.
+    if (body.ticketTypeId !== undefined) {
+      await loadScopedTicketType(db, preflightQuestion.event_id, body.ticketTypeId);
+    }
+    if (body.conditionalVisibility !== undefined) {
+      await requireConditionalReference(db, preflightQuestion.event_id, body.conditionalVisibility);
     }
 
-    const finalConditionalVisibility =
-      body.conditionalVisibility !== undefined
-        ? body.conditionalVisibility
-        : parseJsonValue<typeof body.conditionalVisibility | undefined>(
-            question.conditional_visibility,
-            undefined,
+    const updated = await executeQuestionUpdateWithRetry(() =>
+      db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (trx) => {
+          await app.context.questionUpdateCheckpoint?.({
+            stage: 'before_event_lock',
+            questionId,
+            eventId: preflightQuestion.event_id,
+          });
+          const event = await trx
+            .selectFrom('events')
+            .selectAll()
+            .where('tenant_id', '=', principal.tenantId)
+            .where('id', '=', preflightQuestion.event_id)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!event) throw new NotFoundError('Question', 'concealed');
+          await app.context.questionUpdateCheckpoint?.({
+            stage: 'after_event_lock',
+            questionId,
+            eventId: preflightQuestion.event_id,
+          });
+          const question = (
+            await trx
+              .selectFrom('questions')
+              .selectAll()
+              .where('event_id', '=', event.id)
+              .forUpdate()
+              .execute()
+          ).find((candidate) => candidate.id === questionId);
+          if (!question) throw new NotFoundError('Question', 'concealed');
+          await app.context.questionUpdateCheckpoint?.({
+            stage: 'after_question_lock',
+            questionId,
+            eventId: question.event_id,
+          });
+          try {
+            ClerkAuthService.requirePermission(principal, 'events.write');
+            requireEventAccess(principal, event, question.event_id);
+          } catch (error) {
+            if (error instanceof NotFoundError) throw new NotFoundError('Question', 'concealed');
+            throw error;
+          }
+
+          const existingOptions = parseJsonValue<string[] | undefined>(question.options, undefined);
+          const finalType = (body.type ?? question.type) as QuestionType;
+          let finalOptions =
+            body.options !== undefined
+              ? body.options === null
+                ? undefined
+                : normalizeOptions(body.options)
+              : existingOptions;
+          if (
+            body.type !== undefined &&
+            !isOptionBearingQuestionType(finalType) &&
+            body.options === undefined
+          ) {
+            finalOptions = undefined;
+          }
+          const finalConditionalVisibility =
+            body.conditionalVisibility !== undefined
+              ? body.conditionalVisibility
+              : parseJsonValue<typeof body.conditionalVisibility | undefined>(
+                  question.conditional_visibility,
+                  undefined,
+                );
+          const finalTicketTypeId =
+            body.ticketTypeId !== undefined ? body.ticketTypeId : question.ticket_type_id;
+          const finalIsConsentField =
+            finalType === 'waiver' ? true : (body.isConsentField ?? question.is_consent_field);
+          const finalConsentText =
+            body.consentText !== undefined ? body.consentText : question.consent_text;
+          let finalConsentVersion =
+            body.consentVersion !== undefined ? body.consentVersion : question.consent_version;
+          if (
+            finalIsConsentField &&
+            !finalConsentVersion &&
+            (body.isConsentField === true || finalType === 'waiver')
+          ) {
+            finalConsentVersion = '1';
+          }
+          if (
+            finalIsConsentField &&
+            body.consentText !== undefined &&
+            body.consentText !== question.consent_text &&
+            (body.consentVersion === undefined || body.consentVersion === question.consent_version)
+          ) {
+            throw new ValidationError('Changing consent text requires a new consent version');
+          }
+          await loadScopedTicketType(trx, question.event_id, finalTicketTypeId, { lock: true });
+          await requireConditionalReference(trx, question.event_id, finalConditionalVisibility, {
+            lock: true,
+          });
+          assertQuestionDefinition({
+            id: questionId,
+            type: finalType,
+            options: finalOptions,
+            validationPattern:
+              body.validationPattern !== undefined
+                ? body.validationPattern
+                : question.validation_pattern,
+            conditionalVisibility: finalConditionalVisibility,
+            sortOrder: body.sortOrder ?? question.sort_order,
+            isConsentField: finalIsConsentField,
+            consentText: finalConsentText,
+            consentVersion: finalConsentVersion,
+          });
+
+          const updateData: Record<string, unknown> = {};
+          if (body.ticketTypeId !== undefined) updateData.ticket_type_id = finalTicketTypeId;
+          if (body.type !== undefined) updateData.type = finalType;
+          if (body.label !== undefined) updateData.label = body.label;
+          if (body.description !== undefined) updateData.description = body.description;
+          if (body.required !== undefined) updateData.required = body.required;
+          if (body.appliesTo !== undefined) updateData.applies_to = body.appliesTo;
+          if (
+            body.options !== undefined ||
+            (body.type !== undefined && !isOptionBearingQuestionType(finalType))
+          ) {
+            updateData.options = finalOptions ? JSON.stringify(finalOptions) : null;
+          }
+          if (body.placeholder !== undefined) updateData.placeholder = body.placeholder;
+          if (body.validationPattern !== undefined)
+            updateData.validation_pattern = body.validationPattern;
+          if (body.conditionalVisibility !== undefined) {
+            updateData.conditional_visibility = finalConditionalVisibility
+              ? JSON.stringify(finalConditionalVisibility)
+              : null;
+          }
+          if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
+          if (
+            body.isConsentField !== undefined ||
+            (finalType === 'waiver' && !question.is_consent_field)
+          ) {
+            updateData.is_consent_field = finalIsConsentField;
+          }
+          if (finalIsConsentField && !question.consent_version && finalConsentVersion) {
+            updateData.consent_version = finalConsentVersion;
+          }
+          if (body.consentText !== undefined) updateData.consent_text = finalConsentText;
+          if (body.consentVersion !== undefined) updateData.consent_version = finalConsentVersion;
+
+          const beforeMaterial = questionMaterialSnapshot(
+            question as unknown as Record<string, unknown>,
           );
-    const finalTicketTypeId =
-      body.ticketTypeId !== undefined ? body.ticketTypeId : question.ticket_type_id;
-    const finalIsConsentField =
-      finalType === 'waiver' ? true : (body.isConsentField ?? question.is_consent_field);
-    const finalConsentText =
-      body.consentText !== undefined ? body.consentText : question.consent_text;
-    let finalConsentVersion =
-      body.consentVersion !== undefined ? body.consentVersion : question.consent_version;
-    if (
-      finalIsConsentField &&
-      !finalConsentVersion &&
-      (body.isConsentField === true || finalType === 'waiver')
-    ) {
-      finalConsentVersion = '1';
-    }
-
-    if (
-      finalIsConsentField &&
-      body.consentText !== undefined &&
-      body.consentText !== question.consent_text &&
-      (body.consentVersion === undefined || body.consentVersion === question.consent_version)
-    ) {
-      throw new ValidationError('Changing consent text requires a new consent version');
-    }
-
-    await loadScopedTicketType(db, question.event_id, finalTicketTypeId);
-    await requireConditionalReference(db, question.event_id, finalConditionalVisibility);
-    assertQuestionDefinition({
-      id: questionId,
-      type: finalType,
-      options: finalOptions,
-      validationPattern:
-        body.validationPattern !== undefined ? body.validationPattern : question.validation_pattern,
-      conditionalVisibility: finalConditionalVisibility,
-      sortOrder: body.sortOrder ?? question.sort_order,
-      isConsentField: finalIsConsentField,
-      consentText: finalConsentText,
-      consentVersion: finalConsentVersion,
-    });
-
-    const updateData: Record<string, unknown> = {};
-    if (body.ticketTypeId !== undefined) updateData.ticket_type_id = body.ticketTypeId;
-    if (body.type !== undefined) updateData.type = body.type;
-    if (body.label !== undefined) updateData.label = body.label;
-    if (body.description !== undefined) updateData.description = body.description;
-    if (body.required !== undefined) updateData.required = body.required;
-    if (body.appliesTo !== undefined) updateData.applies_to = body.appliesTo;
-    if (
-      body.options !== undefined ||
-      (body.type !== undefined && !isOptionBearingQuestionType(finalType))
-    ) {
-      updateData.options = finalOptions ? JSON.stringify(finalOptions) : null;
-    }
-    if (body.placeholder !== undefined) updateData.placeholder = body.placeholder;
-    if (body.validationPattern !== undefined)
-      updateData.validation_pattern = body.validationPattern;
-    if (body.conditionalVisibility !== undefined) {
-      updateData.conditional_visibility = body.conditionalVisibility
-        ? JSON.stringify(body.conditionalVisibility)
-        : null;
-    }
-    if (body.sortOrder !== undefined) updateData.sort_order = body.sortOrder;
-    if (
-      body.isConsentField !== undefined ||
-      (finalType === 'waiver' && question.is_consent_field !== true)
-    ) {
-      updateData.is_consent_field = finalIsConsentField;
-    }
-    if (finalIsConsentField && !question.consent_version && finalConsentVersion) {
-      updateData.consent_version = finalConsentVersion;
-    }
-    if (body.consentText !== undefined) updateData.consent_text = body.consentText;
-    if (body.consentVersion !== undefined) updateData.consent_version = body.consentVersion;
-    updateData.updated_at = new Date();
-
-    const updateQuestion = async (database: Database, eventId: string) =>
-      database
-        .updateTable('questions')
-        .set(updateData)
-        .where('id', '=', questionId)
-        .where('event_id', '=', eventId)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-    let updated: Record<string, unknown>;
-    if (body.conditionalVisibility !== undefined) {
-      updated = await db.transaction().execute(async (trx) => {
-        const lockedEvent = await trx
-          .selectFrom('events')
-          .selectAll()
-          .where('id', '=', question.event_id)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!lockedEvent) throw new NotFoundError('Question', questionId);
-        const lockedQuestion = await trx
-          .selectFrom('questions')
-          .selectAll()
-          .where('id', '=', questionId)
-          .where('event_id', '=', question.event_id)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!lockedQuestion) throw new NotFoundError('Question', questionId);
-        try {
-          requireEventAccess(principal, lockedEvent, lockedQuestion.event_id);
-        } catch (error) {
-          if (error instanceof NotFoundError) throw new NotFoundError('Question', questionId);
-          throw error;
-        }
-        await requireConditionalReference(trx, lockedQuestion.event_id, finalConditionalVisibility);
-        const result = await updateQuestion(trx, lockedQuestion.event_id);
-        await bumpEventPublicRevision(trx, lockedQuestion.event_id, updateData.updated_at as Date);
-        return result;
-      });
-    } else {
-      updated = await updateQuestion(db, question.event_id);
-      await bumpEventPublicRevision(db, question.event_id, updateData.updated_at as Date);
-    }
-
+          const projected = { ...question, ...updateData } as Record<string, unknown>;
+          const changedFields = questionMaterialChangedFields(
+            beforeMaterial,
+            questionMaterialSnapshot(projected),
+          );
+          await app.context.questionUpdateCheckpoint?.({
+            stage: 'before_update',
+            questionId,
+            eventId: question.event_id,
+          });
+          let persisted = question;
+          const now = new Date();
+          if (changedFields.length > 0) {
+            await trx
+              .updateTable('questions')
+              .set({ ...updateData, updated_at: now })
+              .where('id', '=', questionId)
+              .where('event_id', '=', question.event_id)
+              .execute();
+            persisted = await trx
+              .selectFrom('questions')
+              .selectAll()
+              .where('id', '=', questionId)
+              .where('event_id', '=', question.event_id)
+              .executeTakeFirstOrThrow();
+            await bumpEventPublicRevision(trx, question.event_id, now);
+          }
+          await writeAuditLog(
+            new AuditLogRepository(trx as Database),
+            request,
+            principal,
+            {
+              action: 'question.updated',
+              organizationId: event.organization_id as string,
+              brandId: event.brand_id as string | null,
+              resourceType: 'Question',
+              resourceId: questionId,
+              diffSummary: questionUpdateAuditDiff(
+                questionUpdateAuditSnapshot(question as unknown as Record<string, unknown>),
+                questionUpdateAuditSnapshot(persisted as unknown as Record<string, unknown>),
+                changedFields,
+              ),
+            },
+            { failClosed: true },
+          );
+          return persisted;
+        }),
+    );
     return serializeQuestion(updated);
   });
 
@@ -574,6 +783,7 @@ function isHiddenQuestion(row: Record<string, unknown>): boolean {
     row.status === 'hidden' ||
     row.status === 'deleted' ||
     row.is_hidden === true ||
+    row.is_hidden === 1 ||
     row.hidden_at != null ||
     row.deleted_at != null
   );
@@ -646,14 +856,14 @@ function serializeQuestion(row: Record<string, unknown>) {
     type: row.type,
     label: row.label,
     description: row.description ?? undefined,
-    required: row.required,
+    required: row.required === true || row.required === 1,
     appliesTo: row.applies_to,
     options: parseJsonValue<string[] | undefined>(row.options, undefined),
     placeholder: row.placeholder ?? undefined,
     validationPattern: row.validation_pattern ?? undefined,
     conditionalVisibility: parseJsonValue(row.conditional_visibility, undefined),
     sortOrder: row.sort_order,
-    isConsentField: row.is_consent_field,
+    isConsentField: row.is_consent_field === true || row.is_consent_field === 1,
     consentText: row.consent_text ?? undefined,
     consentVersion: row.consent_version ?? undefined,
     createdAt: row.created_at,
