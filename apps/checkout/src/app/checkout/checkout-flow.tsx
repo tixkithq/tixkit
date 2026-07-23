@@ -47,7 +47,7 @@ import {
 import type { ResolvedBrand } from '@/lib/brand';
 import { BrandThemeSurface } from '@/components/brand-theme-surface';
 import { useResolvedBrand } from '@/lib/use-brand';
-import { storeSessionToken, getSessionToken } from '@/lib/session-token';
+import { storeSessionToken, getSessionToken, clearSessionToken } from '@/lib/session-token';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { parseItemsParam, parseProductFilterParam } from '@/lib/checkout-query';
 import {
@@ -84,6 +84,29 @@ type Props = {
   productFilterParam?: string;
   resaleListingId?: string;
 };
+
+/** Browser clock may only trigger revalidation; server status is authoritative. */
+export type SessionHoldStatus = 'ok' | 'checking' | 'expired' | 'revalidation_failed';
+
+/** setTimeout delays above 32-bit signed max overflow and can fire immediately. */
+export const MAX_EXPIRY_TIMER_MS = 2_147_483_647;
+
+export function parseSessionExpiresAtMs(expiresAt: string | undefined | null): number | null {
+  if (typeof expiresAt !== 'string' || expiresAt.trim() === '') return null;
+  const ms = Date.parse(expiresAt);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function isServerSessionExpired(session: Pick<CheckoutSession, 'status'>): boolean {
+  return session.status === 'expired' || session.status === 'cancelled';
+}
+
+function isCheckoutExpiredError(error: unknown): boolean {
+  return (
+    error instanceof CheckoutApiError &&
+    (error.code === 'CHECKOUT_EXPIRED' || error.status === 410)
+  );
+}
 
 function availabilityItemId(item: AvailabilityItem): string {
   if (item.resaleListingId) return `resale:${item.resaleListingId}`;
@@ -218,6 +241,63 @@ export default function CheckoutFlow({
   >(undefined);
   const createSessionInFlightRef = useRef(false);
   const confirmSessionInFlightRef = useRef(false);
+  const [sessionHoldStatus, setSessionHoldStatus] = useState<SessionHoldStatus>('ok');
+  const [sessionHoldMessage, setSessionHoldMessage] = useState<string | null>(null);
+  const sessionHoldStatusRef = useRef<SessionHoldStatus>('ok');
+  const sessionRef = useRef<CheckoutSession | null>(null);
+  const sessionTokenRef = useRef(sessionToken);
+  const phaseRef = useRef<Phase>(phase);
+  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revalidateAbortRef = useRef<AbortController | null>(null);
+  const revalidateInFlightRef = useRef(false);
+  /** After server confirms a still-valid hold, do not auto-loop when browser clock already passed expiresAt. */
+  const serverConfirmedHoldRef = useRef<{ sessionId: string; expiresAt: string } | null>(null);
+  const expiryRestartButtonRef = useRef<HTMLButtonElement | null>(null);
+  const expiryRetryButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  sessionRef.current = session;
+  sessionTokenRef.current = sessionToken;
+  phaseRef.current = phase;
+
+  const setHoldStatus = useCallback((status: SessionHoldStatus, message: string | null = null) => {
+    sessionHoldStatusRef.current = status;
+    setSessionHoldStatus(status);
+    setSessionHoldMessage(message);
+  }, []);
+
+  const clearExpiryTimer = useCallback(() => {
+    if (expiryTimerRef.current !== null) {
+      clearTimeout(expiryTimerRef.current);
+      expiryTimerRef.current = null;
+    }
+  }, []);
+
+  const clearHeldSessionLocally = useCallback(() => {
+    const held = sessionRef.current;
+    if (held?.id) clearSessionToken(held.id);
+    setSession(null);
+    setSessionId('');
+    setSessionToken('');
+    setConfirmResult(null);
+    setPhase('select');
+    createSessionAttemptRef.current = undefined;
+    confirmSessionAttemptRef.current = undefined;
+    createSessionInFlightRef.current = false;
+    confirmSessionInFlightRef.current = false;
+  }, []);
+
+  const restartCheckoutAfterExpiry = useCallback(() => {
+    clearExpiryTimer();
+    revalidateAbortRef.current?.abort();
+    revalidateAbortRef.current = null;
+    revalidateInFlightRef.current = false;
+    serverConfirmedHoldRef.current = null;
+    clearHeldSessionLocally();
+    setHoldStatus('ok', null);
+    setError(null);
+    setValidationError(null);
+    setLoading(false);
+  }, [clearExpiryTimer, clearHeldSessionLocally, setHoldStatus]);
 
   const brand: ResolvedBrand = useResolvedBrand(
     useMemo(
@@ -806,6 +886,208 @@ export default function CheckoutFlow({
     }));
   }, [claimQuantity, claimTicketTypeId, visibleAvailability]);
 
+  const revalidateSessionHold = useCallback(
+    async (options?: { manual?: boolean }) => {
+      const held = sessionRef.current;
+      const token = sessionTokenRef.current;
+      const activePhase = phaseRef.current;
+      if (!held || !token) return;
+      if (activePhase === 'completed' || activePhase === 'select') return;
+      if (revalidateInFlightRef.current) return;
+
+      revalidateInFlightRef.current = true;
+      revalidateAbortRef.current?.abort();
+      const controller = new AbortController();
+      revalidateAbortRef.current = controller;
+      clearExpiryTimer();
+      setHoldStatus(
+        'checking',
+        'Checking whether your ticket reservation is still valid…',
+      );
+
+      try {
+        const loaded = await checkoutApi.getSession(held.id, token);
+        if (controller.signal.aborted) return;
+        if (loaded.id !== sessionRef.current?.id) return;
+
+        if (isServerSessionExpired(loaded)) {
+          setSession(loaded);
+          setConfirmResult(null);
+          createSessionAttemptRef.current = undefined;
+          confirmSessionAttemptRef.current = undefined;
+          createSessionInFlightRef.current = false;
+          confirmSessionInFlightRef.current = false;
+          setHoldStatus(
+            'expired',
+            'Your checkout session expired. Start a new order to reserve tickets again.',
+          );
+          return;
+        }
+
+        // Server is authoritative: a still-open/pending session keeps checkout open
+        // even if the browser clock already passed expiresAt.
+        serverConfirmedHoldRef.current = {
+          sessionId: loaded.id,
+          expiresAt: loaded.expiresAt,
+        };
+        setSession(loaded);
+        if (loaded.clientToken) {
+          setSessionToken(loaded.clientToken);
+          storeSessionToken(loaded.id, loaded.clientToken);
+        }
+        setHoldStatus('ok', null);
+        if (options?.manual) setError(null);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        if (sessionRef.current?.id !== held.id) return;
+
+        if (isCheckoutExpiredError(err)) {
+          serverConfirmedHoldRef.current = null;
+          setConfirmResult(null);
+          createSessionAttemptRef.current = undefined;
+          confirmSessionAttemptRef.current = undefined;
+          createSessionInFlightRef.current = false;
+          confirmSessionInFlightRef.current = false;
+          setHoldStatus(
+            'expired',
+            userFacingMessage(err) ||
+              'Your checkout session expired. Start a new order to reserve tickets again.',
+          );
+          return;
+        }
+
+        setHoldStatus(
+          'revalidation_failed',
+          'We could not confirm your ticket reservation. Payment is paused until the reservation is revalidated.',
+        );
+      } finally {
+        if (revalidateAbortRef.current === controller) {
+          revalidateAbortRef.current = null;
+        }
+        revalidateInFlightRef.current = false;
+      }
+    },
+    [clearExpiryTimer, setHoldStatus],
+  );
+
+  useEffect(() => {
+    clearExpiryTimer();
+    revalidateAbortRef.current?.abort();
+    revalidateAbortRef.current = null;
+    revalidateInFlightRef.current = false;
+
+    if (!session || !sessionToken) {
+      if (sessionHoldStatusRef.current !== 'ok') setHoldStatus('ok', null);
+      return;
+    }
+
+    if (phase === 'completed' || phase === 'select') {
+      if (sessionHoldStatusRef.current !== 'ok' && phase === 'completed') {
+        setHoldStatus('ok', null);
+      }
+      return;
+    }
+
+    if (isServerSessionExpired(session)) {
+      serverConfirmedHoldRef.current = null;
+      setHoldStatus(
+        'expired',
+        'Your checkout session expired. Start a new order to reserve tickets again.',
+      );
+      return;
+    }
+
+    if (sessionHoldStatusRef.current === 'expired') {
+      return;
+    }
+    if (sessionHoldStatusRef.current === 'revalidation_failed') {
+      return;
+    }
+    if (sessionHoldStatusRef.current === 'checking') {
+      return;
+    }
+
+    // Malformed expiresAt: fail closed and force server revalidation before pay.
+    const expiresAtMs = parseSessionExpiresAtMs(session.expiresAt);
+    if (expiresAtMs === null) {
+      void revalidateSessionHold();
+      return;
+    }
+
+    const delay = expiresAtMs - Date.now();
+    if (delay <= 0) {
+      const confirmed = serverConfirmedHoldRef.current;
+      // Server already confirmed this exact hold after local expiry; avoid a
+      // revalidation loop driven only by clock skew. Submit still re-checks.
+      if (
+        confirmed &&
+        confirmed.sessionId === session.id &&
+        confirmed.expiresAt === session.expiresAt
+      ) {
+        setHoldStatus('ok', null);
+        return;
+      }
+      void revalidateSessionHold();
+      return;
+    }
+
+    serverConfirmedHoldRef.current = null;
+    setHoldStatus('ok', null);
+
+    // Chain capped timers so far-future expiresAt values never overflow setTimeout.
+    const scheduleExpiryCheck = (targetMs: number) => {
+      clearExpiryTimer();
+      const remaining = targetMs - Date.now();
+      if (remaining <= 0) {
+        void revalidateSessionHold();
+        return;
+      }
+      expiryTimerRef.current = setTimeout(
+        () => {
+          const stillRemaining = targetMs - Date.now();
+          if (stillRemaining <= 0) {
+            void revalidateSessionHold();
+            return;
+          }
+          scheduleExpiryCheck(targetMs);
+        },
+        Math.min(remaining, MAX_EXPIRY_TIMER_MS),
+      );
+    };
+    scheduleExpiryCheck(expiresAtMs);
+
+    return () => {
+      clearExpiryTimer();
+      revalidateAbortRef.current?.abort();
+      revalidateAbortRef.current = null;
+    };
+  }, [
+    clearExpiryTimer,
+    phase,
+    revalidateSessionHold,
+    session,
+    session?.expiresAt,
+    session?.id,
+    session?.status,
+    sessionToken,
+    setHoldStatus,
+  ]);
+
+  useEffect(() => {
+    if (sessionHoldStatus === 'expired') {
+      expiryRestartButtonRef.current?.focus();
+      return;
+    }
+    if (sessionHoldStatus === 'revalidation_failed') {
+      expiryRetryButtonRef.current?.focus();
+    }
+  }, [sessionHoldStatus]);
+
+  const submissionBlockedByHold =
+    sessionHoldStatus === 'checking' ||
+    sessionHoldStatus === 'expired' ||
+    sessionHoldStatus === 'revalidation_failed';
+
   const handlePaymentError = useCallback((message: string) => {
     setError(message);
   }, []);
@@ -944,6 +1226,7 @@ export default function CheckoutFlow({
 
   async function createSession() {
     if (!canCreateSession) return;
+    if (sessionHoldStatusRef.current === 'expired') return;
     if (resaleListing && !resaleTermsAccepted) {
       setValidationError('Accept the resale settlement and refund terms to continue.');
       return;
@@ -1011,9 +1294,11 @@ export default function CheckoutFlow({
         );
       }
       createSessionAttemptRef.current = undefined;
+      serverConfirmedHoldRef.current = null;
       setSession(created);
       setSessionId(created.id);
       setSessionToken(created.clientToken);
+      setHoldStatus('ok', null);
       setPhase('confirm');
       // Store the token in sessionStorage for resume after redirect.
       // Do NOT write the token to the URL or browser history.
@@ -1044,6 +1329,21 @@ export default function CheckoutFlow({
 
   async function confirmSession() {
     if (!session || !sessionToken || confirmSessionInFlightRef.current) return;
+    if (submissionBlockedByHold || sessionHoldStatusRef.current !== 'ok') return;
+
+    const expiresAtMs = parseSessionExpiresAtMs(session.expiresAt);
+    const confirmed = serverConfirmedHoldRef.current;
+    const serverAlreadyConfirmed =
+      confirmed &&
+      confirmed.sessionId === session.id &&
+      confirmed.expiresAt === session.expiresAt;
+    // Always revalidate before pay when expiresAt is missing/invalid, or when
+    // the browser clock says the hold lapsed and the server has not confirmed it.
+    if (expiresAtMs === null || (expiresAtMs <= Date.now() && !serverAlreadyConfirmed)) {
+      void revalidateSessionHold();
+      return;
+    }
+
     confirmSessionInFlightRef.current = true;
     setLoading(true);
     setError(null);
@@ -1059,10 +1359,17 @@ export default function CheckoutFlow({
         sessionToken,
         attempt.idempotencyKey,
       );
+      // Hold may flip while confirm is in flight; never advance payment after expiry.
+      const holdAfterConfirm = sessionHoldStatusRef.current;
+      if (holdAfterConfirm !== 'ok') {
+        confirmSessionAttemptRef.current = undefined;
+        return;
+      }
       confirmSessionAttemptRef.current = undefined;
       setConfirmResult(result);
       if ('order' in result) {
         setPhase('completed');
+        setHoldStatus('ok', null);
         const order = result.order;
         trackMarketingEvent(event?.marketingIntegrations, 'purchase', {
           eventId,
@@ -1089,6 +1396,16 @@ export default function CheckoutFlow({
         setPhase('payment');
       }
     } catch (err) {
+      if (isCheckoutExpiredError(err)) {
+        confirmSessionAttemptRef.current = undefined;
+        setConfirmResult(null);
+        setHoldStatus(
+          'expired',
+          userFacingMessage(err) ||
+            'Your checkout session expired. Start a new order to reserve tickets again.',
+        );
+        return;
+      }
       if (!isRetryable(err)) confirmSessionAttemptRef.current = undefined;
       setError(userFacingMessage(err));
     } finally {
@@ -1098,6 +1415,10 @@ export default function CheckoutFlow({
   }
 
   function editOrder() {
+    if (sessionHoldStatusRef.current === 'expired') {
+      restartCheckoutAfterExpiry();
+      return;
+    }
     setPhase('select');
     setError(null);
     setValidationError(null);
@@ -1428,18 +1749,81 @@ export default function CheckoutFlow({
                 <CardHeader>
                   <CardTitle>Payment</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <PaymentHandoff
-                    clientSecret={confirmResult.clientSecret ?? ''}
-                    currency={confirmResult.currency}
-                    totalCents={confirmResult.totalCents}
-                    billingDetails={paymentBillingDetails}
-                    // Return URL contains only sessionId, no token.
-                    // The confirmation page resolves the session via
-                    // sessionId using the token from sessionStorage.
-                    returnUrl={`${window.location.origin}/checkout/confirmation?sessionId=${encodeURIComponent(sessionId)}`}
-                    onError={handlePaymentError}
-                  />
+                <CardContent className="space-y-4">
+                  {sessionHoldStatus === 'checking' ? (
+                    <output
+                      className="flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-sm text-card-foreground"
+                      aria-live="polite"
+                    >
+                      <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
+                      <span className="space-y-1">
+                        <span className="block font-medium tracking-tight">
+                          Checking reservation
+                        </span>
+                        <span className="block text-muted-foreground">
+                          {sessionHoldMessage ??
+                            'Checking whether your ticket reservation is still valid…'}
+                        </span>
+                      </span>
+                    </output>
+                  ) : null}
+                  {sessionHoldStatus === 'expired' ? (
+                    <Alert variant="destructive">
+                      <AlertCircleIcon />
+                      <AlertTitle>Checkout expired</AlertTitle>
+                      <AlertDescription className="space-y-3">
+                        <p>
+                          {sessionHoldMessage ??
+                            'Your checkout session expired. Start a new order to reserve tickets again.'}
+                        </p>
+                        <Button
+                          ref={expiryRestartButtonRef}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit"
+                          onClick={restartCheckoutAfterExpiry}
+                        >
+                          Start new order
+                        </Button>
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {sessionHoldStatus === 'revalidation_failed' ? (
+                    <Alert variant="destructive">
+                      <AlertCircleIcon />
+                      <AlertTitle>Reservation could not be verified</AlertTitle>
+                      <AlertDescription className="space-y-3">
+                        <p>
+                          {sessionHoldMessage ??
+                            'We could not confirm your ticket reservation. Payment is paused until the reservation is revalidated.'}
+                        </p>
+                        <Button
+                          ref={expiryRetryButtonRef}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit"
+                          onClick={() => void revalidateSessionHold({ manual: true })}
+                        >
+                          Retry reservation check
+                        </Button>
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {sessionHoldStatus === 'ok' ? (
+                    <PaymentHandoff
+                      clientSecret={confirmResult.clientSecret ?? ''}
+                      currency={confirmResult.currency}
+                      totalCents={confirmResult.totalCents}
+                      billingDetails={paymentBillingDetails}
+                      // Return URL contains only sessionId, no token.
+                      // The confirmation page resolves the session via
+                      // sessionId using the token from sessionStorage.
+                      returnUrl={`${window.location.origin}/checkout/confirmation?sessionId=${encodeURIComponent(sessionId)}`}
+                      onError={handlePaymentError}
+                    />
+                  ) : null}
                 </CardContent>
               </Card>
             ) : null}
@@ -1494,12 +1878,89 @@ export default function CheckoutFlow({
                   </Alert>
                 ) : null}
 
+                {session && (phase === 'confirm' || phase === 'payment') ? (
+                  <div className="space-y-2" aria-live="polite">
+                    {sessionHoldStatus === 'ok' && parseSessionExpiresAtMs(session.expiresAt) ? (
+                      <p className="text-xs text-muted-foreground">
+                        Session reserved until{' '}
+                        {new Date(session.expiresAt).toLocaleTimeString([], {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                        . Your tickets are held while you complete checkout. We re-check the
+                        reservation with the server when that time is reached.
+                      </p>
+                    ) : null}
+                    {sessionHoldStatus === 'checking' ? (
+                      <output
+                        className="flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-sm text-card-foreground"
+                        aria-live="polite"
+                      >
+                        <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
+                        <span className="space-y-1">
+                          <span className="block font-medium tracking-tight">
+                            Checking reservation
+                          </span>
+                          <span className="block text-muted-foreground">
+                            {sessionHoldMessage ??
+                              'Checking whether your ticket reservation is still valid…'}
+                          </span>
+                        </span>
+                      </output>
+                    ) : null}
+                    {sessionHoldStatus === 'expired' ? (
+                      <Alert variant="destructive">
+                        <AlertCircleIcon />
+                        <AlertTitle>Checkout expired</AlertTitle>
+                        <AlertDescription className="space-y-3">
+                          <p>
+                            {sessionHoldMessage ??
+                              'Your checkout session expired. Start a new order to reserve tickets again.'}
+                          </p>
+                          <Button
+                            ref={phase === 'confirm' ? expiryRestartButtonRef : undefined}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-fit"
+                            onClick={restartCheckoutAfterExpiry}
+                          >
+                            Start new order
+                          </Button>
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
+                    {sessionHoldStatus === 'revalidation_failed' ? (
+                      <Alert variant="destructive">
+                        <AlertCircleIcon />
+                        <AlertTitle>Reservation could not be verified</AlertTitle>
+                        <AlertDescription className="space-y-3">
+                          <p>
+                            {sessionHoldMessage ??
+                              'We could not confirm your ticket reservation. Payment is paused until the reservation is revalidated.'}
+                          </p>
+                          <Button
+                            ref={phase === 'confirm' ? expiryRetryButtonRef : undefined}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-fit"
+                            onClick={() => void revalidateSessionHold({ manual: true })}
+                          >
+                            Retry reservation check
+                          </Button>
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {phase === 'select' ? (
                   <Button
                     type="button"
                     size="lg"
                     className="w-full gap-2"
-                    disabled={!canCreateSession}
+                    disabled={!canCreateSession || sessionHoldStatus === 'expired'}
                     onClick={createSession}
                   >
                     {loading ? <LoaderCircleIcon className="size-4 animate-spin" /> : null}
@@ -1510,25 +1971,18 @@ export default function CheckoutFlow({
                     type="button"
                     size="lg"
                     className="w-full gap-2"
-                    disabled={loading || !session}
+                    disabled={loading || !session || submissionBlockedByHold}
                     onClick={confirmSession}
                   >
-                    {loading ? <LoaderCircleIcon className="size-4 animate-spin" /> : null}
-                    {isFreeOrder
-                      ? 'Place free order'
-                      : `Pay ${formatCurrency(session?.quote.totalCents ?? previewTotal, session?.currency ?? displayCurrency)}`}
+                    {loading || sessionHoldStatus === 'checking' ? (
+                      <LoaderCircleIcon className="size-4 animate-spin" />
+                    ) : null}
+                    {sessionHoldStatus === 'checking'
+                      ? 'Checking reservation…'
+                      : isFreeOrder
+                        ? 'Place free order'
+                        : `Pay ${formatCurrency(session?.quote.totalCents ?? previewTotal, session?.currency ?? displayCurrency)}`}
                   </Button>
-                ) : null}
-
-                {session ? (
-                  <p className="text-xs text-muted-foreground">
-                    Session reserved until{' '}
-                    {new Date(session.expiresAt).toLocaleTimeString([], {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                    . Your tickets are held while you complete checkout.
-                  </p>
                 ) : null}
               </CardContent>
             </Card>

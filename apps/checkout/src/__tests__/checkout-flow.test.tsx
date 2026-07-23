@@ -104,12 +104,14 @@ const publicApiMock = publicApi as unknown as {
 };
 const checkoutApiMock = checkoutApi as unknown as {
   createSession: ReturnType<typeof vi.fn>;
+  getSession: ReturnType<typeof vi.fn>;
   exchangeHandoff: ReturnType<typeof vi.fn>;
   confirmSession: ReturnType<typeof vi.fn>;
 };
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 const event: PublicEvent = {
@@ -147,22 +149,74 @@ function renderCheckoutFlow(props: Partial<React.ComponentProps<typeof CheckoutF
   );
 }
 
-function checkoutSession(id: string) {
+function checkoutSession(
+  id: string,
+  overrides: Partial<{
+    status: string;
+    expiresAt: string;
+    clientToken: string;
+    totalCents: number;
+  }> = {},
+) {
+  const totalCents = overrides.totalCents ?? 2500;
   return {
     id,
     eventId: event.id,
-    status: 'open',
+    status: overrides.status ?? 'open',
     currency: 'USD',
-    clientToken: `token_${id}`,
+    clientToken: overrides.clientToken ?? `token_${id}`,
     quote: {
-      subtotalCents: 2500,
+      subtotalCents: totalCents,
       discountCents: 0,
       taxCents: 0,
       feeCents: 0,
-      totalCents: 2500,
+      totalCents,
     },
-    expiresAt: '2026-07-17T20:00:00.000Z',
+    // Default far in the future so confirm/pay tests are not blocked by live expiry.
+    expiresAt: overrides.expiresAt ?? '2099-01-01T00:00:00.000Z',
   };
+}
+
+async function reachConfirmPhase(
+  view: ReturnType<typeof renderCheckoutFlow>,
+  session = checkoutSession('cs_hold', {
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }),
+) {
+  checkoutApiMock.createSession.mockResolvedValue(session);
+  await view.findByText('General Admission');
+  fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+  fireEvent.change(view.getByLabelText(/Email/), {
+    target: { value: 'buyer@example.com' },
+  });
+  fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+  expect(await view.findByRole('button', { name: 'Pay $25.00' })).toBeVisible();
+  return session;
+}
+
+async function reachPaymentPhase(
+  view: ReturnType<typeof renderCheckoutFlow>,
+  session = checkoutSession('cs_pay_hold', {
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }),
+) {
+  await reachConfirmPhase(view, session);
+  checkoutApiMock.confirmSession.mockResolvedValue({
+    status: 'pending_payment',
+    sessionId: session.id,
+    clientSecret: `pi_capture_${session.id}_secret`,
+    currency: 'USD',
+    totalCents: 2500,
+  });
+  fireEvent.click(view.getByRole('button', { name: 'Pay $25.00' }));
+  expect(await view.findByText('Secure payment processed by Stripe').catch(() => null));
+  // Local capture mode shows a different banner.
+  await waitFor(() => {
+    expect(
+      view.getByText(/Secure payment processed by Stripe|Payment is ready for local capture/),
+    ).toBeVisible();
+  });
+  return session;
 }
 
 function fillRequiredDatesOfBirth(view: ReturnType<typeof renderCheckoutFlow>) {
@@ -236,7 +290,7 @@ describe('CheckoutFlow buyer validation', () => {
         taxCents: 0,
         feeCents: 0,
       },
-      expiresAt: '2026-07-17T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
       clientToken: 'scoped_session_credential',
     });
 
@@ -269,7 +323,7 @@ describe('CheckoutFlow buyer validation', () => {
         taxCents: 0,
         feeCents: 0,
       },
-      expiresAt: '2026-07-17T20:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
 
     renderCheckoutFlow({ initialEventId: '', initialSessionId: 'cs_stored' });
@@ -898,7 +952,7 @@ describe('CheckoutFlow buyer validation', () => {
         feeCents: 0,
         totalCents: 5500,
       },
-      expiresAt: '2026-07-09T22:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
     });
     const view = renderCheckoutFlow({ resaleListingId: 'lst_occurrence' });
 
@@ -914,5 +968,232 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledOnce());
+  });
+});
+
+describe('CheckoutFlow live session expiry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    publicApiMock.getEvent.mockResolvedValue(event);
+    publicApiMock.getAvailability.mockResolvedValue(availability);
+    publicApiMock.getResaleListings.mockResolvedValue({ items: [] });
+    publicApiMock.getQuestions.mockResolvedValue({
+      buyerQuestions: [],
+      attendeeQuestions: [],
+    });
+    publicApiMock.getOccurrences.mockResolvedValue([]);
+    publicApiMock.getCheckoutBootstrap.mockImplementation(
+      async (
+        eventId: string,
+        signal?: AbortSignal,
+        input?: { products?: string; resaleListingId?: string },
+      ) => {
+        const [loadedEvent, loadedAvailability, questions, occurrences] = await Promise.all([
+          publicApiMock.getEvent(eventId, signal),
+          publicApiMock.getAvailability(eventId, signal, input?.products),
+          publicApiMock.getQuestions(eventId, signal),
+          publicApiMock.getOccurrences(eventId, signal),
+        ]);
+        return {
+          event: loadedEvent,
+          availability: loadedAvailability,
+          questions,
+          resaleListing: null,
+          occurrences,
+        };
+      },
+    );
+    publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+    checkoutApiMock.getSession.mockReset();
+    checkoutApiMock.confirmSession.mockReset();
+    checkoutApiMock.createSession.mockReset();
+  });
+
+  it('revalidates when the hold timer elapses while reviewing the order', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const expiresAt = new Date(Date.now() + 5_000).toISOString();
+    const session = checkoutSession('cs_review_timer', { expiresAt });
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...session,
+      status: 'open',
+      expiresAt: new Date(Date.now() + 120_000).toISOString(),
+    });
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+
+    await vi.advanceTimersByTimeAsync(5_100);
+    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`));
+    expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeEnabled();
+    expect(view.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('revalidates when the hold timer elapses during payment', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const expiresAt = new Date(Date.now() + 5_000).toISOString();
+    const session = checkoutSession('cs_pay_timer', { expiresAt });
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...session,
+      status: 'open',
+      expiresAt: new Date(Date.now() + 120_000).toISOString(),
+    });
+
+    const view = renderCheckoutFlow();
+    await reachPaymentPhase(view, session);
+
+    await vi.advanceTimersByTimeAsync(5_100);
+    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`));
+    await waitFor(() => {
+      expect(
+        view.getByText(/Secure payment processed by Stripe|Payment is ready for local capture/),
+      ).toBeVisible();
+    });
+  });
+
+  it('keeps checkout open when the server says the session is still valid after local expiry', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const expiresAt = new Date(Date.now() + 2_000).toISOString();
+    const session = checkoutSession('cs_still_valid', { expiresAt });
+    const extendedExpiresAt = new Date(Date.now() + 300_000).toISOString();
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...session,
+      status: 'open',
+      expiresAt: extendedExpiresAt,
+    });
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+    await vi.advanceTimersByTimeAsync(2_100);
+
+    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(1));
+    expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeEnabled();
+    expect(view.queryByText('Checkout expired')).not.toBeInTheDocument();
+    // Server-confirmed hold must not spin a revalidation loop on the old clock.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows an expired state with restart when the server confirms expiration', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const expiresAt = new Date(Date.now() + 2_000).toISOString();
+    const session = checkoutSession('cs_server_expired', { expiresAt });
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...session,
+      status: 'expired',
+    });
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+    await vi.advanceTimersByTimeAsync(2_100);
+
+    expect(await view.findByText('Checkout expired')).toBeVisible();
+    expect(
+      view.getByText(/Your checkout session expired\. Start a new order to reserve tickets again\./),
+    ).toBeVisible();
+    const restart = view.getByRole('button', { name: 'Start new order' });
+    expect(restart).toBeVisible();
+    expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeDisabled();
+
+    fireEvent.click(restart);
+    expect(await view.findByRole('button', { name: 'Continue' })).toBeVisible();
+    expect(view.queryByText('Checkout expired')).not.toBeInTheDocument();
+  });
+
+  it('fails closed on offline revalidation and recovers after retry', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const expiresAt = new Date(Date.now() + 2_000).toISOString();
+    const session = checkoutSession('cs_offline', { expiresAt });
+    checkoutApiMock.getSession
+      .mockRejectedValueOnce(new CheckoutApiError('NETWORK_ERROR', 'offline', 0))
+      .mockResolvedValueOnce({
+        ...session,
+        status: 'open',
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      });
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+    await vi.advanceTimersByTimeAsync(2_100);
+
+    expect(await view.findByText('Reservation could not be verified')).toBeVisible();
+    expect(
+      view.getByText(/Payment is paused until the reservation is revalidated/),
+    ).toBeVisible();
+    expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeDisabled();
+
+    fireEvent.click(view.getByRole('button', { name: 'Retry reservation check' }));
+    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeEnabled();
+    });
+    expect(view.queryByText('Reservation could not be verified')).not.toBeInTheDocument();
+  });
+
+  it('does not submit payment after the hold has expired', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const expiresAt = new Date(Date.now() + 2_000).toISOString();
+    const session = checkoutSession('cs_no_submit', { expiresAt });
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...session,
+      status: 'expired',
+    });
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+    await vi.advanceTimersByTimeAsync(2_100);
+    expect(await view.findByText('Checkout expired')).toBeVisible();
+
+    fireEvent.click(view.getByRole('button', { name: 'Pay $25.00' }));
+    expect(checkoutApiMock.confirmSession).not.toHaveBeenCalled();
+  });
+
+  it('cleans up the expiry timer on unmount', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const expiresAt = new Date(Date.now() + 30_000).toISOString();
+    const session = checkoutSession('cs_unmount', { expiresAt });
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+    const clearedBefore = clearTimeoutSpy.mock.calls.length;
+    view.unmount();
+    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(clearedBefore);
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it('fails safely on malformed expiresAt by revalidating before submit', async () => {
+    const session = checkoutSession('cs_bad_expiry', { expiresAt: 'not-a-date' });
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...session,
+      status: 'open',
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
+    });
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+
+    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalled());
+    // While checking / until server confirms, Pay must not confirm.
+    expect(checkoutApiMock.confirmSession).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeEnabled();
+    });
+  });
+
+  it('treats CHECKOUT_EXPIRED from revalidation as an expired hold', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const expiresAt = new Date(Date.now() + 2_000).toISOString();
+    const session = checkoutSession('cs_code_expired', { expiresAt });
+    checkoutApiMock.getSession.mockRejectedValue(
+      new CheckoutApiError('CHECKOUT_EXPIRED', 'Your checkout session expired. Please start a new order.', 410),
+    );
+
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+    await vi.advanceTimersByTimeAsync(2_100);
+
+    expect(await view.findByText('Checkout expired')).toBeVisible();
+    expect(view.getByRole('button', { name: 'Start new order' })).toBeVisible();
+    expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeDisabled();
   });
 });
