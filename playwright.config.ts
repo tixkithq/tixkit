@@ -278,6 +278,26 @@ export default defineConfig({
       grep: /completes a paid order through hosted checkout UI in local capture mode|validates online scanning, duplicate detection, offline manifest, and offline sync/u,
       use: { ...devices['Pixel 5'] },
     },
+    {
+      name: 'mobile-chromium-checkout-recovery',
+      testMatch: /checkout-(cross-browser-recovery|payment-auth-navigation)\.spec\.ts/u,
+      use: { ...devices['Pixel 5'] },
+    },
+    {
+      name: 'mobile-webkit-checkout-recovery',
+      testMatch: /checkout-(cross-browser-recovery|payment-auth-navigation)\.spec\.ts/u,
+      use: { ...devices['iPhone 13'] },
+    },
+    {
+      name: 'mobile-chromium-checkin-recovery',
+      testMatch: /checkin-cross-browser-recovery\.spec\.ts/u,
+      use: { ...devices['Pixel 5'] },
+    },
+    {
+      name: 'mobile-webkit-checkin-recovery',
+      testMatch: /checkin-cross-browser-recovery\.spec\.ts/u,
+      use: { ...devices['iPhone 13'] },
+    },
   ],
 
   webServer: useWebServer

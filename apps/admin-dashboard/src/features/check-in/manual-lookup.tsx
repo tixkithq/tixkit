@@ -68,7 +68,10 @@ export function ManualLookup({
           className="border-0 bg-transparent p-0"
         />
       ) : showInitialLoading || isSearchPending ? (
-        <Skeleton className="h-24 w-full" aria-label="Loading attendees" />
+        <>
+          <output className="sr-only">Loading attendees</output>
+          <Skeleton aria-hidden="true" className="h-24 w-full" />
+        </>
       ) : attendees.length === 0 ? (
         <p className="py-4 text-center text-sm text-muted-foreground">No attendees found</p>
       ) : (
