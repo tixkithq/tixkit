@@ -254,6 +254,13 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'ticket-configuration-route-authorization-db.integration.test.ts'),
   ],
   [
+    'ticket-type-batch-update-route-authorization-db.integration.test.ts',
+    resolve(
+      import.meta.dirname,
+      'ticket-type-batch-update-route-authorization-db.integration.test.ts',
+    ),
+  ],
+  [
     'resale-listing-read-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'resale-listing-read-route-authorization-db.integration.test.ts'),
   ],
@@ -437,6 +444,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
       persistenceSource: 'ticket-configuration-route-authorization-db.integration.test.ts',
     },
   ),
+  ...evidenceBindings(['patchTicketTypesByTicketTypeIdBatch'], {
+    source: 'ticket-type-batch-update-route-authorization-db.integration.test.ts',
+    persistenceSource: 'ticket-type-batch-update-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['getTicketTypesByTicketTypeIdAccessRules'], {
     source: 'ticket-configuration-route-authorization-db.integration.test.ts',
   }),

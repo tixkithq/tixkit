@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   AccessRuleRepository,
-  EventOccurrenceRepository,
   EventRepository,
   TicketTypeRepository,
   TicketRepository,
@@ -14,6 +13,7 @@ import {
   AuditLogRepository,
   ResaleSettlementRepository,
   ResaleSettlementConflictError,
+  bumpEventPublicRevision,
   type Database,
 } from '@tixkit/db';
 import {
@@ -42,6 +42,8 @@ import {
 import {
   createAccessRuleSchema,
   createTicketTypeBatchSchema,
+  MAX_ACCESS_RULES_PER_BATCH_UPDATE,
+  MAX_ACCESS_RULES_PER_TICKET_TYPE,
   createProductCategorySchema,
   createProductSchema,
   createTicketTypeSchema,
@@ -73,6 +75,27 @@ function accessRuleKey(rule: { type: string; value: string }): string {
   return `${rule.type}:${value}`;
 }
 
+function ticketTypeFieldEquals(field: string, current: unknown, next: unknown): boolean {
+  if (field === 'sales_start_at' || field === 'sales_end_at') {
+    if (current == null || next == null) return current == null && next == null;
+    return (
+      new Date(current as Date | string).getTime() === new Date(next as Date | string).getTime()
+    );
+  }
+  if (
+    field === 'price_cents' ||
+    field === 'minimum_price_cents' ||
+    field === 'min_per_order' ||
+    field === 'max_per_order' ||
+    field === 'sort_order'
+  ) {
+    if (current == null || next == null) return current == null && next == null;
+    return Number(current) === Number(next);
+  }
+  if (field === 'requires_access_code') return Boolean(current) === Boolean(next);
+  return current === next;
+}
+
 function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
   ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
@@ -95,27 +118,11 @@ function normalizeAccessRules(rules: AccessRuleInput[] = []): NormalizedAccessRu
     }
     const key = accessRuleKey(rule);
     if (keys.has(key)) {
-      throw new ValidationError(`Duplicate access rule value: ${rule.value}`);
+      throw new ValidationError('Duplicate access rule value');
     }
     keys.add(key);
   }
   return normalized;
-}
-
-async function assertNoExistingAccessRuleDuplicates(
-  ticketTypeId: string,
-  rules: NormalizedAccessRule[],
-  accessRuleRepo: AccessRuleRepository,
-) {
-  if (rules.length === 0) return;
-  const existing = await accessRuleRepo.findByTicketType(ticketTypeId);
-  const existingKeys = new Set(
-    existing.map((rule) => accessRuleKey({ type: String(rule.type), value: String(rule.value) })),
-  );
-  const duplicate = rules.find((rule) => existingKeys.has(accessRuleKey(rule)));
-  if (duplicate) {
-    throw new ValidationError(`Access rule already exists: ${duplicate.value}`);
-  }
 }
 
 async function assertInventoryPoolReassignmentAllowed(
@@ -133,33 +140,34 @@ async function assertInventoryPoolReassignmentAllowed(
     return;
   }
 
-  const [hold, orderLineItem, ticket, waitlistEntry] = await Promise.all([
-    db
-      .selectFrom('checkout_holds')
-      .select('id')
-      .where('ticket_type_id', '=', input.ticketTypeId)
-      .limit(1)
-      .executeTakeFirst(),
-    db
-      .selectFrom('order_line_items')
-      .select('id')
-      .where('ticket_type_id', '=', input.ticketTypeId)
-      .limit(1)
-      .executeTakeFirst(),
-    db
-      .selectFrom('tickets')
-      .select('id')
-      .where('ticket_type_id', '=', input.ticketTypeId)
-      .limit(1)
-      .executeTakeFirst(),
-    db
-      .selectFrom('waitlist_entries')
-      .select('id')
-      .where('ticket_type_id', '=', input.ticketTypeId)
-      .where('status', 'in', ['joined', 'offered'])
-      .limit(1)
-      .executeTakeFirst(),
-  ]);
+  // Fixed-order probes keep a transaction on one connection and make the dependency
+  // decision deterministic. The enclosing event lock serializes configuration changes;
+  // checkout and fulfillment flows retain their own ticket/pool invariants.
+  const hold = await db
+    .selectFrom('checkout_holds')
+    .select('id')
+    .where('ticket_type_id', '=', input.ticketTypeId)
+    .limit(1)
+    .executeTakeFirst();
+  const orderLineItem = await db
+    .selectFrom('order_line_items')
+    .select('id')
+    .where('ticket_type_id', '=', input.ticketTypeId)
+    .limit(1)
+    .executeTakeFirst();
+  const ticket = await db
+    .selectFrom('tickets')
+    .select('id')
+    .where('ticket_type_id', '=', input.ticketTypeId)
+    .limit(1)
+    .executeTakeFirst();
+  const waitlistEntry = await db
+    .selectFrom('waitlist_entries')
+    .select('id')
+    .where('ticket_type_id', '=', input.ticketTypeId)
+    .where('status', 'in', ['joined', 'offered'])
+    .limit(1)
+    .executeTakeFirst();
 
   if (hold || orderLineItem || ticket || waitlistEntry) {
     throw new ValidationError(
@@ -304,14 +312,6 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       eventId: listing.event_id,
       listingId,
     };
-  };
-
-  const validateEventOccurrence = async (eventId: string, occurrenceId?: string | null) => {
-    if (!occurrenceId) return;
-    const occurrence = await new EventOccurrenceRepository(db).findById(occurrenceId);
-    if (!occurrence || occurrence.event_id !== eventId) {
-      throw new NotFoundError('EventOccurrence', occurrenceId);
-    }
   };
 
   const emitFirstTicketMilestone = (eventCreatedAt: Date | string) => {
@@ -918,7 +918,17 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           resourceId: ticketType.id,
           diffSummary: {
             eventId,
-            after: { ...serialized, inventoryPool: createdInventoryPool },
+            after: {
+              ticketType: serialized.ticketType,
+              inventoryPool: createdInventoryPool,
+              accessRuleCount: createdRules.length,
+              accessRules: createdRules.map((rule) => ({
+                id: rule.id,
+                type: rule.type,
+                maxUses: rule.max_uses == null ? null : Number(rule.max_uses),
+                expiresAt: rule.expires_at ?? null,
+              })),
+            },
           },
         },
         { failClosed: true },
@@ -1086,93 +1096,152 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketTypeId } = request.params as { ticketTypeId: string };
+    const scopedTicketType = await db
+      .selectFrom('ticket_types')
+      .innerJoin('events', 'events.id', 'ticket_types.event_id')
+      .select([
+        'ticket_types.event_id as event_id',
+        'events.tenant_id',
+        'events.organization_id',
+        'events.brand_id',
+      ])
+      .where('ticket_types.id', '=', ticketTypeId)
+      .where('events.tenant_id', '=', principal.tenantId)
+      .executeTakeFirst();
+    if (!scopedTicketType) throw new NotFoundError('TicketType', ticketTypeId);
+    try {
+      requireEventAccess(principal, scopedTicketType, scopedTicketType.event_id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+      throw error;
+    }
     const body = parseBody(updateTicketTypeBatchSchema, request.body);
     const accessRules = normalizeAccessRules(body.accessRules);
-    const repo = new TicketTypeRepository(db);
-    const existing = await repo.findById(ticketTypeId);
-    if (!existing) throw new NotFoundError('TicketType', ticketTypeId);
-    const event = await loadEvent(existing.event_id);
-    requireEventAccess(principal, event, existing.event_id);
-
-    if (body.ticketType.inventoryPoolId) {
-      const pool = await new InventoryPoolRepository(db).findById(body.ticketType.inventoryPoolId);
-      if (!pool || pool.event_id !== existing.event_id) {
-        throw new NotFoundError('InventoryPool', body.ticketType.inventoryPoolId);
-      }
-      await assertInventoryPoolReassignmentAllowed(db, {
-        ticketTypeId,
-        currentInventoryPoolId: existing.inventory_pool_id,
-        nextInventoryPoolId: body.ticketType.inventoryPoolId,
-      });
+    if (accessRules.length > MAX_ACCESS_RULES_PER_BATCH_UPDATE) {
+      throw new ValidationError(
+        `At most ${MAX_ACCESS_RULES_PER_BATCH_UPDATE} access rules may be added in one request`,
+      );
     }
-    await validateEventOccurrence(existing.event_id, body.ticketType.eventOccurrenceId);
+
+    const updateData = pickAllowedFields(
+      body.ticketType,
+      [
+        'name',
+        'description',
+        'kind',
+        'status',
+        'visibility',
+        'currency',
+        'priceCents',
+        'minimumPriceCents',
+        'salesStartAt',
+        'salesEndAt',
+        'minPerOrder',
+        'maxPerOrder',
+        'inventoryPoolId',
+        'eventOccurrenceId',
+        'requiresAccessCode',
+        'accessCodeHint',
+        'sortOrder',
+      ],
+      {
+        priceCents: 'price_cents',
+        minimumPriceCents: 'minimum_price_cents',
+        salesStartAt: 'sales_start_at',
+        salesEndAt: 'sales_end_at',
+        minPerOrder: 'min_per_order',
+        maxPerOrder: 'max_per_order',
+        inventoryPoolId: 'inventory_pool_id',
+        eventOccurrenceId: 'event_occurrence_id',
+        requiresAccessCode: 'requires_access_code',
+        accessCodeHint: 'access_code_hint',
+        sortOrder: 'sort_order',
+      },
+    );
+    if (updateData.sales_start_at)
+      updateData.sales_start_at = new Date(updateData.sales_start_at as string);
+    if (updateData.sales_end_at)
+      updateData.sales_end_at = new Date(updateData.sales_end_at as string);
+    await app.context.ticketConfigurationCheckpoint?.({
+      stage: 'before_transaction',
+      operation: 'ticket_type_batch_update',
+      eventId: scopedTicketType.event_id,
+    });
 
     const result = await db.transaction().execute(async (trx) => {
       const txDb = trx as typeof db;
-      const currentEvent = await loadAuthorizedEventForUpdate(txDb, principal, existing.event_id);
-      const currentTicketType = await txDb
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'before_lock',
+        operation: 'ticket_type_batch_update',
+        eventId: scopedTicketType.event_id,
+      });
+      let currentEvent;
+      try {
+        currentEvent = await loadAuthorizedEventForUpdate(
+          txDb,
+          principal,
+          scopedTicketType.event_id,
+        );
+      } catch (error) {
+        if (error instanceof NotFoundError) throw new NotFoundError('TicketType', ticketTypeId);
+        throw error;
+      }
+
+      // Lock every event-local dependency in a single, fixed order. Parallel lock queries on
+      // one transaction connection are driver-dependent and can invert lock acquisition.
+      const localPools = await txDb
+        .selectFrom('inventory_pools')
+        .selectAll()
+        .where('event_id', '=', currentEvent.id)
+        .orderBy('id', 'asc')
+        .forUpdate()
+        .execute();
+      const localOccurrences = await txDb
+        .selectFrom('event_occurrences')
+        .selectAll()
+        .where('event_id', '=', currentEvent.id)
+        .orderBy('id', 'asc')
+        .forUpdate()
+        .execute();
+      const localTicketTypes = await txDb
         .selectFrom('ticket_types')
         .selectAll()
-        .where('id', '=', ticketTypeId)
+        .where('event_id', '=', currentEvent.id)
+        .orderBy('id', 'asc')
         .forUpdate()
-        .executeTakeFirst();
-      if (!currentTicketType || currentTicketType.event_id !== currentEvent.id) {
+        .execute();
+      const currentTicketType = localTicketTypes.find(
+        (ticketType) => ticketType.id === ticketTypeId,
+      );
+      if (!currentTicketType) {
         throw new NotFoundError('TicketType', ticketTypeId);
       }
-      const accessRuleRepo = new AccessRuleRepository(txDb);
-      await assertNoExistingAccessRuleDuplicates(ticketTypeId, accessRules, accessRuleRepo);
-
-      const updateData = pickAllowedFields(
-        body.ticketType,
-        [
-          'name',
-          'description',
-          'kind',
-          'status',
-          'visibility',
-          'currency',
-          'priceCents',
-          'minimumPriceCents',
-          'salesStartAt',
-          'salesEndAt',
-          'minPerOrder',
-          'maxPerOrder',
-          'inventoryPoolId',
-          'eventOccurrenceId',
-          'requiresAccessCode',
-          'accessCodeHint',
-          'sortOrder',
-        ],
-        {
-          priceCents: 'price_cents',
-          minimumPriceCents: 'minimum_price_cents',
-          salesStartAt: 'sales_start_at',
-          salesEndAt: 'sales_end_at',
-          minPerOrder: 'min_per_order',
-          maxPerOrder: 'max_per_order',
-          inventoryPoolId: 'inventory_pool_id',
-          eventOccurrenceId: 'event_occurrence_id',
-          requiresAccessCode: 'requires_access_code',
-          accessCodeHint: 'access_code_hint',
-          sortOrder: 'sort_order',
-        },
-      );
-      if (updateData.sales_start_at)
-        updateData.sales_start_at = new Date(updateData.sales_start_at as string);
-      if (updateData.sales_end_at)
-        updateData.sales_end_at = new Date(updateData.sales_end_at as string);
+      const localAccessRules = await txDb
+        .selectFrom('access_rules')
+        .innerJoin('ticket_types', 'ticket_types.id', 'access_rules.ticket_type_id')
+        .selectAll('access_rules')
+        .where('ticket_types.event_id', '=', currentEvent.id)
+        .orderBy('access_rules.id', 'asc')
+        .forUpdate()
+        .execute();
+      await app.context.ticketConfigurationCheckpoint?.({
+        stage: 'after_lock',
+        operation: 'ticket_type_batch_update',
+        eventId: currentEvent.id,
+      });
       if ('event_occurrence_id' in updateData) {
-        await validateEventOccurrence(
-          existing.event_id,
-          updateData.event_occurrence_id as string | null,
-        );
+        const occurrenceId = updateData.event_occurrence_id as string | null;
+        if (
+          occurrenceId &&
+          !localOccurrences.some((occurrence) => occurrence.id === occurrenceId)
+        ) {
+          throw new NotFoundError('EventOccurrence', occurrenceId);
+        }
       }
 
       if (updateData.inventory_pool_id) {
-        const pool = await new InventoryPoolRepository(txDb).findById(
-          updateData.inventory_pool_id as string,
-        );
-        if (!pool || pool.event_id !== currentEvent.id) {
+        const inventoryPoolId = updateData.inventory_pool_id as string;
+        if (!localPools.some((pool) => pool.id === inventoryPoolId)) {
           throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
         }
         await assertInventoryPoolReassignmentAllowed(txDb, {
@@ -1182,21 +1251,86 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const ticketType =
-        Object.keys(updateData).length > 0
-          ? await new TicketTypeRepository(txDb).update(ticketTypeId, updateData)
-          : existing;
-      for (const rule of accessRules) {
-        // eslint-disable-next-line no-await-in-loop -- access-rule additions stay sequential in the same update transaction.
-        await accessRuleRepo.create({
-          ticketTypeId,
-          type: rule.type,
-          value: rule.value,
-          maxUses: rule.maxUses ?? undefined,
-          expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
-        });
+      const nextMinPerOrder = Number(updateData.min_per_order ?? currentTicketType.min_per_order);
+      const nextMaxPerOrder = Number(updateData.max_per_order ?? currentTicketType.max_per_order);
+      if (nextMinPerOrder > nextMaxPerOrder) {
+        throw new ValidationError('minPerOrder must be less than or equal to maxPerOrder');
+      }
+
+      const ticketTypeAccessRules = localAccessRules.filter(
+        (rule) => rule.ticket_type_id === ticketTypeId,
+      );
+      if (ticketTypeAccessRules.length + accessRules.length > MAX_ACCESS_RULES_PER_TICKET_TYPE) {
+        throw new ValidationError(
+          `A ticket type may have at most ${MAX_ACCESS_RULES_PER_TICKET_TYPE} access rules`,
+        );
+      }
+      const existingRuleKeys = new Set(
+        ticketTypeAccessRules.map((rule) =>
+          accessRuleKey({ type: String(rule.type), value: String(rule.value) }),
+        ),
+      );
+      const duplicate = accessRules.find((rule) => existingRuleKeys.has(accessRuleKey(rule)));
+      if (duplicate) throw new ValidationError('Access rule already exists');
+
+      const ticketTypeChanged = Object.entries(updateData).some(([field, value]) => {
+        const current = currentTicketType[field as keyof typeof currentTicketType];
+        return !ticketTypeFieldEquals(field, current, value);
+      });
+      const before = serializeTicketType(currentTicketType);
+      const ticketType = ticketTypeChanged
+        ? await new TicketTypeRepository(txDb).update(ticketTypeId, updateData)
+        : currentTicketType;
+      const accessRuleRepo = new AccessRuleRepository(txDb);
+      const createdRules = [];
+      try {
+        for (const rule of accessRules) {
+          // eslint-disable-next-line no-await-in-loop -- additions are serialized by the event lock for deterministic duplicate validation.
+          createdRules.push(
+            await accessRuleRepo.create({
+              ticketTypeId,
+              type: rule.type,
+              value: rule.value,
+              maxUses: rule.maxUses ?? undefined,
+              expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : undefined,
+            }),
+          );
+        }
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new ValidationError('Access rule already exists');
+        throw error;
+      }
+      if (!ticketTypeChanged && createdRules.length > 0) {
+        await bumpEventPublicRevision(txDb, currentEvent.id);
       }
       const allRules = await accessRuleRepo.findByTicketType(ticketTypeId);
+      if (ticketTypeChanged || createdRules.length > 0) {
+        await writeAuditLog(
+          new AuditLogRepository(txDb),
+          request,
+          principal,
+          {
+            action: 'ticket_type.batch_updated',
+            organizationId: currentEvent.organization_id,
+            brandId: currentEvent.brand_id,
+            resourceType: 'TicketType',
+            resourceId: ticketTypeId,
+            diffSummary: {
+              eventId: currentEvent.id,
+              before,
+              after: serializeTicketType(ticketType),
+              addedAccessRuleCount: createdRules.length,
+              addedAccessRules: createdRules.map((rule) => ({
+                id: rule.id,
+                type: rule.type,
+                maxUses: rule.max_uses == null ? null : Number(rule.max_uses),
+                expiresAt: rule.expires_at ?? null,
+              })),
+            },
+          },
+          { failClosed: true },
+        );
+      }
       return { ticketType, accessRules: allRules };
     });
 

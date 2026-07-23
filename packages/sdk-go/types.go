@@ -1,5 +1,7 @@
 package tixkit
 
+import "encoding/json"
+
 // FlexibleObject is used for API fields whose keys are tenant-defined.
 type FlexibleObject map[string]any
 
@@ -275,6 +277,46 @@ type UpdateTicketTypeRequest struct {
 	SortOrder          *int    `json:"sortOrder,omitempty"`
 }
 
+// NullableString distinguishes a JSON null from an omitted update field.
+// Use NullString to clear a nullable field and NewNullableString to set it.
+type NullableString struct {
+	Value *string
+}
+
+// NullableInt distinguishes a JSON null from an omitted integer update field.
+// Use NullInt to clear a nullable field and NewNullableInt to set it.
+type NullableInt struct {
+	Value *int
+}
+
+// NullString returns a nullable string that marshals as JSON null.
+func NullString() *NullableString {
+	return &NullableString{}
+}
+
+// NewNullableString returns a nullable string that marshals as the supplied value.
+func NewNullableString(value string) *NullableString {
+	return &NullableString{Value: &value}
+}
+
+func (value NullableString) MarshalJSON() ([]byte, error) {
+	return json.Marshal(value.Value)
+}
+
+// NullInt returns a nullable integer that marshals as JSON null.
+func NullInt() *NullableInt {
+	return &NullableInt{}
+}
+
+// NewNullableInt returns a nullable integer that marshals as the supplied value.
+func NewNullableInt(value int) *NullableInt {
+	return &NullableInt{Value: &value}
+}
+
+func (value NullableInt) MarshalJSON() ([]byte, error) {
+	return json.Marshal(value.Value)
+}
+
 type InventoryPoolRequest struct {
 	Name           string `json:"name"`
 	TotalCapacity  int    `json:"totalCapacity"`
@@ -285,6 +327,34 @@ type TicketTypeBatchRequest struct {
 	TicketType    CreateTicketTypeRequest   `json:"ticketType"`
 	InventoryPool *InventoryPoolRequest     `json:"inventoryPool,omitempty"`
 	AccessRules   []CreateAccessRuleRequest `json:"accessRules,omitempty"`
+}
+
+// UpdateTicketTypeBatchTicketTypeRequest contains partial ticket-type changes.
+// Nil nullable fields are omitted; NullString or NullInt explicitly clears them.
+type UpdateTicketTypeBatchTicketTypeRequest struct {
+	Name               *string         `json:"name,omitempty"`
+	Description        *string         `json:"description,omitempty"`
+	Kind               *string         `json:"kind,omitempty"`
+	Currency           *string         `json:"currency,omitempty"`
+	PriceCents         *int            `json:"priceCents,omitempty"`
+	MinimumPriceCents  *NullableInt    `json:"minimumPriceCents,omitempty"`
+	EventOccurrenceID  *NullableString `json:"eventOccurrenceId,omitempty"`
+	InventoryPoolID    *string         `json:"inventoryPoolId,omitempty"`
+	MinPerOrder        *int            `json:"minPerOrder,omitempty"`
+	MaxPerOrder        *int            `json:"maxPerOrder,omitempty"`
+	SalesStartAt       *NullableString `json:"salesStartAt,omitempty"`
+	SalesEndAt         *NullableString `json:"salesEndAt,omitempty"`
+	Status             *string         `json:"status,omitempty"`
+	Visibility         *string         `json:"visibility,omitempty"`
+	RequiresAccessCode *bool           `json:"requiresAccessCode,omitempty"`
+	AccessCodeHint     *NullableString `json:"accessCodeHint,omitempty"`
+	SortOrder          *int            `json:"sortOrder,omitempty"`
+}
+
+// UpdateTicketTypeBatchRequest updates a ticket type and appends access rules atomically.
+type UpdateTicketTypeBatchRequest struct {
+	TicketType  UpdateTicketTypeBatchTicketTypeRequest `json:"ticketType"`
+	AccessRules []CreateAccessRuleRequest              `json:"accessRules,omitempty"`
 }
 
 type TicketTypeBatchResult struct {

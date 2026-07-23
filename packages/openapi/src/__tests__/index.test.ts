@@ -77,6 +77,71 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
 }
 
 describe('openApiSpec', () => {
+  it('documents atomic ticket-type batch updates with the runtime authorization and bounds', () => {
+    const operation = openApiSpec.paths['/ticket-types/{ticketTypeId}/batch'].patch;
+    const schema = openApiSpec.components.schemas.UpdateTicketTypeBatch;
+
+    expect(operation.operationId).toBe('patchTicketTypesByTicketTypeIdBatch');
+    expect(operation.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+    expect(operation['x-required-permissions']).toEqual(['tickets.write']);
+    expect(operation.description).toContain('at most 100 access rules');
+    expect(operation.description).toContain('500 persisted rules');
+    expect(operation.responses['400'].description).toContain('500 persisted rules');
+    expect(operation.parameters).toContainEqual({
+      name: 'ticketTypeId',
+      in: 'path',
+      required: true,
+      schema: { type: 'string', minLength: 1 },
+    });
+    expect(schema.properties.ticketType.properties.eventOccurrenceId).toEqual({
+      type: ['string', 'null'],
+      minLength: 1,
+    });
+    expect(schema).toMatchObject({ additionalProperties: false });
+    expect(schema.properties.ticketType).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        name: { minLength: 1 },
+        currency: { pattern: '^[A-Z]{3}$' },
+        priceCents: { minimum: 0 },
+        minimumPriceCents: { type: ['integer', 'null'], minimum: 0 },
+        salesStartAt: { type: ['string', 'null'], format: 'date-time' },
+        salesEndAt: { type: ['string', 'null'], format: 'date-time' },
+        minPerOrder: { minimum: 1 },
+        maxPerOrder: { minimum: 1 },
+        inventoryPoolId: { minLength: 1 },
+        accessCodeHint: { type: ['string', 'null'] },
+      },
+    });
+    expect(schema.properties.accessRules).toMatchObject({ maxItems: 100 });
+    expect(
+      openApiSpec.components.schemas.TicketTypeBatchResult.properties.accessRules,
+    ).not.toHaveProperty('maxItems');
+    expect(
+      openApiSpec.components.schemas.UpdateTicketTypeBatchResult.properties.accessRules.maxItems,
+    ).toBe(500);
+    expect(
+      openApiSpec.paths['/events/{eventId}/ticket-types/batch'].post.responses['201'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/TicketTypeBatchResult' });
+    expect(operation.responses['200'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/UpdateTicketTypeBatchResult',
+    });
+    expect(openApiSpec.components.schemas.AccessRuleCreate).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        value: { minLength: 1 },
+        maxUses: { type: ['integer', 'null'], minimum: 1 },
+        expiresAt: { type: ['string', 'null'], format: 'date-time' },
+      },
+    });
+    for (const status of ['400', '401', '403', '404'] as const)
+      expect(operation.responses[status].content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/ApiError',
+      });
+  });
+
   it('documents question deletion access, path parameters, and conflicts', () => {
     const operation = openApiSpec.paths['/questions/{questionId}'].delete;
 
@@ -210,7 +275,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-09-01');
+    expect(openApiSpec.info.version).toBe('2026-09-02');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -1419,7 +1484,7 @@ describe('openApiSpec', () => {
   });
 
   it('documents the breaking message campaign idempotency-key grammar', () => {
-    expect(openApiSpec.info.version).toBe('2026-09-01');
+    expect(openApiSpec.info.version).toBe('2026-09-02');
     expect(openApiSpec.components.parameters.MessageCampaignIdempotencyKey).toEqual({
       name: 'Idempotency-Key',
       in: 'header',

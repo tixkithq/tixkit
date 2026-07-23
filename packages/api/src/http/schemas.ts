@@ -783,10 +783,13 @@ export const createTicketTypeBatchSchema = z
     }
   });
 
+export const MAX_ACCESS_RULES_PER_BATCH_UPDATE = 100;
+export const MAX_ACCESS_RULES_PER_TICKET_TYPE = 500;
+
 export const updateTicketTypeBatchSchema = z
   .object({
     ticketType: updateTicketTypeSchema,
-    accessRules: z.array(createAccessRuleSchema).optional(),
+    accessRules: z.array(createAccessRuleSchema).max(MAX_ACCESS_RULES_PER_BATCH_UPDATE).optional(),
   })
   .strict();
 

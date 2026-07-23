@@ -49,6 +49,109 @@ func TestRequestBuildsHeadersPathAndQuery(t *testing.T) {
 	}
 }
 
+func TestTicketTypeBatchUpdateNullableFieldsPreserveOmitSetAndClear(t *testing.T) {
+	t.Parallel()
+
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNumber++
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/v1/ticket-types/tt_1/batch" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		ticketType, ok := body["ticketType"].(map[string]any)
+		if !ok {
+			t.Fatalf("ticketType = %#v", body["ticketType"])
+		}
+		nullableFields := []string{
+			"minimumPriceCents",
+			"salesStartAt",
+			"salesEndAt",
+			"eventOccurrenceId",
+			"accessCodeHint",
+		}
+		switch requestNumber {
+		case 1:
+			for _, field := range nullableFields {
+				value, present := ticketType[field]
+				if !present || value != nil {
+					t.Fatalf("clear %s = %#v, present = %t", field, value, present)
+				}
+			}
+		case 2:
+			expected := map[string]any{
+				"minimumPriceCents": float64(2500),
+				"salesStartAt":      "2026-08-01T10:00:00Z",
+				"salesEndAt":        "2026-08-02T10:00:00Z",
+				"eventOccurrenceId": "occ_1",
+				"accessCodeHint":    "Members only",
+			}
+			for field, want := range expected {
+				if got := ticketType[field]; got != want {
+					t.Fatalf("set %s = %#v, want %#v", field, got, want)
+				}
+			}
+		case 3:
+			for _, field := range nullableFields {
+				if value, present := ticketType[field]; present {
+					t.Fatalf("omitted %s unexpectedly present as %#v", field, value)
+				}
+			}
+		default:
+			t.Fatalf("unexpected request %d", requestNumber)
+		}
+		_ = json.NewEncoder(w).Encode(TicketTypeBatchResult{TicketType: TicketType{ID: "tt_1"}})
+	}))
+	defer server.Close()
+
+	client := testClient(t, server.URL)
+	clearResult, err := client.TicketTypes.UpdateBatchTyped(context.Background(), "tt_1", UpdateTicketTypeBatchRequest{
+		TicketType: UpdateTicketTypeBatchTicketTypeRequest{
+			MinimumPriceCents: NullInt(),
+			SalesStartAt:      NullString(),
+			SalesEndAt:        NullString(),
+			EventOccurrenceID: NullString(),
+			AccessCodeHint:    NullString(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clearResult.TicketType.ID != "tt_1" {
+		t.Fatalf("clear result = %#v", clearResult)
+	}
+
+	_, err = client.TicketTypes.UpdateBatchTyped(context.Background(), "tt_1", UpdateTicketTypeBatchRequest{
+		TicketType: UpdateTicketTypeBatchTicketTypeRequest{
+			MinimumPriceCents: NewNullableInt(2500),
+			SalesStartAt:      NewNullableString("2026-08-01T10:00:00Z"),
+			SalesEndAt:        NewNullableString("2026-08-02T10:00:00Z"),
+			EventOccurrenceID: NewNullableString("occ_1"),
+			AccessCodeHint:    NewNullableString("Members only"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.TicketTypes.UpdateBatchTyped(context.Background(), "tt_1", UpdateTicketTypeBatchRequest{
+		TicketType: UpdateTicketTypeBatchTicketTypeRequest{Name: stringPointer("VIP")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stringPointer(value string) *string {
+	return &value
+}
+
 func TestRetriesSafeRequestsOnServerErrors(t *testing.T) {
 	t.Parallel()
 

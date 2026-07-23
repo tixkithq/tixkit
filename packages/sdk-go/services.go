@@ -164,6 +164,13 @@ func (s *TicketTypesService) UpdateBatch(ctx context.Context, ticketTypeID strin
 	return &out, err
 }
 
+// UpdateBatchTyped updates a ticket type with nullable partial-update semantics.
+func (s *TicketTypesService) UpdateBatchTyped(ctx context.Context, ticketTypeID string, input UpdateTicketTypeBatchRequest) (*TicketTypeBatchResult, error) {
+	var out TicketTypeBatchResult
+	err := s.client.request(ctx, http.MethodPatch, "/ticket-types/"+escape(ticketTypeID)+"/batch", input, &out)
+	return &out, err
+}
+
 func (s *TicketTypesService) ListAccessRules(ctx context.Context, ticketTypeID string) (*Page[AccessRule], error) {
 	var out Page[AccessRule]
 	err := s.client.request(ctx, http.MethodGet, "/ticket-types/"+escape(ticketTypeID)+"/access-rules", nil, &out)

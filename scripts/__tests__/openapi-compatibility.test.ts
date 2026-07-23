@@ -496,7 +496,7 @@ describe('OpenAPI compatibility', () => {
   });
 
   it.each([
-    [{ nullable: true }, {}, 'schema-nullable-removed'],
+    [{ type: 'string', nullable: true }, { type: 'string' }, 'schema-nullable-removed'],
     [{ oneOf: [{ type: 'string' }, { type: 'null' }] }, {}, 'schema-oneOf-changed'],
     [{ anyOf: [{ type: 'string' }, { type: 'null' }] }, {}, 'schema-anyOf-changed'],
   ])('detects removal of accepted schema variants', (before, after, category) => {
@@ -511,5 +511,41 @@ describe('OpenAPI compatibility', () => {
     expect(compareOpenApi(previous as never, current as never)).toContainEqual(
       expect.objectContaining({ severity: 'breaking', category }),
     );
+  });
+
+  it('does not report nullable-to-json-schema-null normalization as a breaking change', () => {
+    const previous = {
+      components: {
+        schemas: { Value: { type: 'string', nullable: true } },
+      },
+      paths: {},
+    };
+    const current = {
+      components: {
+        schemas: { Value: { type: ['string', 'null'] } },
+      },
+      paths: {},
+    };
+
+    expect(compareOpenApi(previous as never, current as never)).toEqual([]);
+  });
+
+  it('detects an unconstrained nullable schema narrowed to null only', () => {
+    const previous = { components: { schemas: { Value: { nullable: true } } }, paths: {} };
+    const current = {
+      components: { schemas: { Value: { type: 'null' } } },
+      paths: {},
+    };
+
+    expect(compareOpenApi(previous as never, current as never)).toContainEqual(
+      expect.objectContaining({ severity: 'breaking', category: 'schema-type' }),
+    );
+  });
+
+  it('does not treat nullable removal as breaking when an unconstrained schema remains unconstrained', () => {
+    const previous = { components: { schemas: { Value: { nullable: true } } }, paths: {} };
+    const current = { components: { schemas: { Value: {} } }, paths: {} };
+
+    expect(compareOpenApi(previous as never, current as never)).toEqual([]);
   });
 });

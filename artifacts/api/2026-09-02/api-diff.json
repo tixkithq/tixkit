@@ -1,0 +1,366 @@
+{
+  "from": "2026-09-01",
+  "to": "2026-09-02",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 30,
+    "compatible": 29
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /brands/{brandId}/email-sender-identities",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "PATCH /ticket-types/{ticketTypeId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema.properties.name",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-pattern",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema.properties.currency",
+      "message": "pattern changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema.properties.priceCents",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema.properties.minimumPriceCents",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema.properties.minPerOrder",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema.properties.maxPerOrder",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema.properties.eventOccurrenceId",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "additional-properties-closed",
+      "path": "PATCH /ticket-types/{ticketTypeId}.requestBody.content.application/json.schema",
+      "message": "Additional properties are no longer accepted."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "PATCH /ticket-types/{ticketTypeId}/batch",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "PATCH /ticket-types/{ticketTypeId}/batch",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "PATCH /ticket-types/{ticketTypeId}/batch.parameters.path:ticketTypeId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-$ref",
+      "path": "PATCH /ticket-types/{ticketTypeId}/batch.responses.200.content.application/json.schema",
+      "message": "$ref changed."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "PATCH /products/{productId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "PATCH /products/{productId}.requestBody.content.application/json.schema.properties.name",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "PATCH /products/{productId}.requestBody.content.application/json.schema.properties.priceCents",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-pattern",
+      "path": "PATCH /products/{productId}.requestBody.content.application/json.schema.properties.currency",
+      "message": "pattern changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "PATCH /products/{productId}.requestBody.content.application/json.schema.properties.maxPerOrder",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "additional-properties-closed",
+      "path": "PATCH /products/{productId}.requestBody.content.application/json.schema",
+      "message": "Additional properties are no longer accepted."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /check-ins/bulk-sync-jobs/{jobId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /check-ins/bulk-sync-jobs/{jobId}/chunks",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /scanner-devices",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /organizations/{organizationId}/billing",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "DELETE /questions/{questionId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "POST /exports",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /exports/{exportId}",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /exports/{exportId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "GET /exports/{exportId}.parameters.path:exportId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /exports/{exportId}/events",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /exports/{exportId}/events",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "GET /exports/{exportId}/events.parameters.path:exportId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /exports/{exportId}/download",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /exports/{exportId}/download",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "GET /exports/{exportId}/download.parameters.path:exportId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /privacy/requests/{requestId}",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /privacy/requests/{requestId}",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /oauth-applications",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /short-links",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /short-links",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "POST /short-links",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "POST /short-links",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /short-links/{id}/clicks",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /short-links/{id}/clicks",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.name",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-pattern",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.currency",
+      "message": "pattern changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.priceCents",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.minimumPriceCents",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.minPerOrder",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.maxPerOrder",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.inventoryPoolId",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType.properties.eventOccurrenceId",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "additional-properties-closed",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.ticketType",
+      "message": "Additional properties are no longer accepted."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-maxItems",
+      "path": "components.schemas.UpdateTicketTypeBatch.properties.accessRules",
+      "message": "maxItems became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "additional-properties-closed",
+      "path": "components.schemas.UpdateTicketTypeBatch",
+      "message": "Additional properties are no longer accepted."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minLength",
+      "path": "components.schemas.AccessRuleCreate.properties.value",
+      "message": "minLength became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "constraint-minimum",
+      "path": "components.schemas.AccessRuleCreate.properties.maxUses",
+      "message": "minimum became more restrictive."
+    },
+    {
+      "severity": "breaking",
+      "category": "additional-properties-closed",
+      "path": "components.schemas.AccessRuleCreate",
+      "message": "Additional properties are no longer accepted."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.UpdateTicketTypeBatchResult",
+      "message": "A named schema was added."
+    }
+  ]
+}

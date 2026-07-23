@@ -226,7 +226,7 @@ async function treeFiles(root: string, prefix = ''): Promise<string[]> {
 async function validateOwnedGeneratedOutput(
   directory: string,
   apiVersion: string,
-  sourceReleaseManifestSha256: string,
+  expectedReleaseManifestSha256: string,
 ): Promise<void> {
   const manifestPath = resolve(directory, 'artifact-manifest.json');
   const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
@@ -239,7 +239,7 @@ async function validateOwnedGeneratedOutput(
     manifest.generator !== GENERATOR_MARKER ||
     manifest.apiVersion !== apiVersion ||
     manifest.generationMode !== 'local-evaluation' ||
-    manifest.sourceReleaseManifestSha256 !== sourceReleaseManifestSha256 ||
+    manifest.sourceReleaseManifestSha256 !== expectedReleaseManifestSha256 ||
     !Array.isArray(manifest.artifacts)
   ) {
     throw new Error('Existing generated skill output is not owned by this generator');

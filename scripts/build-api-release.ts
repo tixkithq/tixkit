@@ -176,11 +176,16 @@ if (apiDiff.breaking && previous && previous.version !== version) {
     throw new Error('Approved breaking releases require a checked-in version migration guide.');
   });
 }
+const breakingChangeNotes = breakingChanges.length
+  ? `\n## Breaking changes\n\n${breakingChanges
+      .map((change) => `- \`${change.path}\`: ${change.message}`)
+      .join('\n')}\n`
+  : '';
 const changelog = `# API ${version}\n\n${
   apiDiff.from
     ? `Compared with ${apiDiff.from}. Breaking changes: ${apiDiff.summary.breaking}. Compatible changes: ${apiDiff.summary.compatible}.`
     : 'Initial versioned repository contract release.'
-}\n\n- OpenAPI JSON and YAML\n- Generated TypeScript declarations\n- Webhook event catalog\n- Sanitized request/response examples\n- Machine-readable API diff and checksums\n`;
+}\n\n- OpenAPI JSON and YAML\n- Generated TypeScript declarations\n- Webhook event catalog\n- Sanitized request/response examples\n- Machine-readable API diff and checksums\n${breakingChangeNotes}`;
 
 const files = new Map<string, string>([
   ['openapi.json', json],

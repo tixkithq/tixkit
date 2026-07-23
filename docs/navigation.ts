@@ -274,6 +274,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-09-01 transactional member administration',
         routeId: 'apiMigration20260831To20260901',
       },
+      {
+        label: 'Adopt 2026-09-02 strict ticket-type batch updates',
+        routeId: 'apiMigration20260901To20260902',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

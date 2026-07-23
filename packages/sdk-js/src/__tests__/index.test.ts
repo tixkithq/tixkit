@@ -42,7 +42,19 @@ import {
   type MarketingIntegrationProvider,
   type MarketingIntegration,
   type PublicMarketingIntegration,
+  type TypedUpdateTicketTypeBatchInput,
+  type UpdateTicketTypeBatchInput,
 } from '../index.js';
+
+const dynamicTicketTypeBatchUpdate: UpdateTicketTypeBatchInput = {
+  ticketType: { pluginDefinedField: 'preserved-for-compatible-callers' },
+};
+void dynamicTicketTypeBatchUpdate;
+
+const typedTicketTypeBatchUpdate: TypedUpdateTicketTypeBatchInput = {
+  ticketType: { eventOccurrenceId: null, minimumPriceCents: null },
+};
+void typedTicketTypeBatchUpdate;
 
 const validResolvedEventMedia: AgentEventPrepareResolvedChanges = {
   coverImageUrl: '/v1/public/event-media/event_cover/upl_example',
@@ -3255,16 +3267,50 @@ describe('TixkitClient new resource methods', () => {
       accessRules: [{ value: 'VIP123' }],
     });
 
-    await c.ticketTypes.updateBatch('tt_1', {
-      ticketType: { name: 'VIP 2' },
+    const update: TypedUpdateTicketTypeBatchInput = {
+      ticketType: {
+        name: 'VIP 2',
+        minimumPriceCents: null,
+        salesStartAt: '2026-08-01T10:00:00Z',
+        salesEndAt: null,
+        eventOccurrenceId: null,
+      },
       accessRules: [{ type: 'code', value: 'VIP456' }],
-    });
+    };
+    await c.ticketTypes.updateBatch('tt_1', update);
     call = getCall(fm, 1);
     expect(call.url).toBe('https://api.test/v1/ticket-types/tt_1/batch');
     expect(call.method).toBe('PATCH');
     expect(JSON.parse(call.body)).toEqual({
-      ticketType: { name: 'VIP 2' },
+      ticketType: {
+        name: 'VIP 2',
+        minimumPriceCents: null,
+        salesStartAt: '2026-08-01T10:00:00Z',
+        salesEndAt: null,
+        eventOccurrenceId: null,
+      },
       accessRules: [{ type: 'code', value: 'VIP456' }],
+    });
+    expect(JSON.parse(call.body).ticketType).not.toHaveProperty('accessCodeHint');
+
+    await c.ticketTypes.updateBatch('tt_1', {
+      ticketType: {
+        minimumPriceCents: 2500,
+        salesStartAt: null,
+        salesEndAt: '2026-08-02T10:00:00Z',
+        eventOccurrenceId: 'occ_1',
+        accessCodeHint: 'Members only',
+      },
+    });
+    call = getCall(fm, 2);
+    expect(JSON.parse(call.body)).toEqual({
+      ticketType: {
+        minimumPriceCents: 2500,
+        salesStartAt: null,
+        salesEndAt: '2026-08-02T10:00:00Z',
+        eventOccurrenceId: 'occ_1',
+        accessCodeHint: 'Members only',
+      },
     });
   });
 
@@ -4059,7 +4105,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-09-01',
+        'X-Tixkit-Version': '2026-09-02',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

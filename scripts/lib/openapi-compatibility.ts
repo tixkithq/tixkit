@@ -11,6 +11,20 @@ const object = (value: Json | undefined): Record<string, Json> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const array = (value: Json | undefined): Json[] => (Array.isArray(value) ? value : []);
 const stable = (value: Json | undefined): string => JSON.stringify(value ?? null);
+const explicitTypes = (schema: Record<string, Json>): string[] =>
+  (Array.isArray(schema.type)
+    ? schema.type.filter((type): type is string => typeof type === 'string')
+    : typeof schema.type === 'string'
+      ? [schema.type]
+      : []
+  ).toSorted();
+const acceptedTypes = (schema: Record<string, Json>): string[] => {
+  const types = explicitTypes(schema);
+  if (schema.nullable === true && !types.includes('null')) types.push('null');
+  return types.toSorted();
+};
+const acceptsNull = (schema: Record<string, Json>): boolean =>
+  explicitTypes(schema).length === 0 || acceptedTypes(schema).includes('null');
 
 function compareSchema(
   previous: Json,
@@ -37,10 +51,16 @@ function compareSchema(
   for (const key of ['type', 'format', 'const', '$ref', 'pattern']) {
     const inferredConstType =
       key === 'type' && before.type === undefined && beforeConstType === after.type;
+    const equivalentAcceptedTypes =
+      key === 'type' &&
+      explicitTypes(before).length > 0 &&
+      explicitTypes(after).length > 0 &&
+      stable(acceptedTypes(before)) === stable(acceptedTypes(after));
     if (
       !(key === '$ref' && referenceWidened) &&
       after[key] !== undefined &&
       !inferredConstType &&
+      !equivalentAcceptedTypes &&
       stable(before[key]) !== stable(after[key])
     )
       changes.push({
@@ -64,7 +84,7 @@ function compareSchema(
       path,
       message: 'Every prior anyOf branch remains accepted and new alternatives were added.',
     });
-  if (before.nullable === true && after.nullable !== true)
+  if (before.nullable === true && !acceptsNull(after))
     changes.push({
       severity: 'breaking',
       category: 'schema-nullable-removed',

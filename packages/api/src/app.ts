@@ -149,6 +149,7 @@ export type AppContext = {
       | 'inventory_pool_create'
       | 'ticket_type_create'
       | 'ticket_type_batch_create'
+      | 'ticket_type_batch_update'
       | 'ticket_type_update';
     eventId: string;
   }) => void | Promise<void>;

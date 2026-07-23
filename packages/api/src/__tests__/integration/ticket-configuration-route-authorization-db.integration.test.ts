@@ -642,6 +642,27 @@ function sortAccessRules<T extends { type: unknown }>(rules: T[]): T[] {
   return [...rules].sort((left, right) => String(left.type).localeCompare(String(right.type)));
 }
 
+function redactBatchAccessRules(response: {
+  accessRules: Array<{
+    expiresAt?: string | null;
+    id: string;
+    maxUses?: number | null;
+    type: string;
+  }>;
+  ticketType: unknown;
+}) {
+  return {
+    ticketType: response.ticketType,
+    accessRuleCount: response.accessRules.length,
+    accessRules: response.accessRules.map((rule) => ({
+      id: rule.id,
+      type: rule.type,
+      maxUses: rule.maxUses ?? null,
+      expiresAt: rule.expiresAt ?? null,
+    })),
+  };
+}
+
 describeWithIntegrationDatabase('ticket configuration route authorization matrix', () => {
   beforeAll(async () => {
     previousDriver = setIntegrationDatabaseDriver();
@@ -1065,7 +1086,7 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         organizationId: organizationA,
         resourceId: existingBatch.ticketType.id,
         resourceType: 'TicketType',
-        after: { ...existingBatch, inventoryPool: null },
+        after: { ...redactBatchAccessRules(existingBatch), inventoryPool: null },
         eventId: eventA,
       },
     );
@@ -1098,7 +1119,7 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
         organizationId: organizationA,
         resourceId: newPoolBatch.ticketType.id,
         resourceType: 'TicketType',
-        after: { ...newPoolBatch, inventoryPool: serializedBatchPool },
+        after: { ...redactBatchAccessRules(newPoolBatch), inventoryPool: serializedBatchPool },
         eventId: eventA,
       },
     );
@@ -1858,7 +1879,15 @@ describeWithIntegrationDatabase('ticket configuration route authorization matrix
           ).toEqual(inventoryPool);
           return response;
         });
-        expect(auditedResponses).toEqual(expect.arrayContaining(responseBodies));
+        const redactedResponses = responseBodies.map((response) =>
+          redactBatchAccessRules(response),
+        );
+        expect(auditedResponses).toEqual(expect.arrayContaining(redactedResponses));
+        for (const response of responseBodies) {
+          for (const rule of response.accessRules as Array<{ value: string }>) {
+            expect(JSON.stringify(auditAfters)).not.toContain(rule.value);
+          }
+        }
       } else {
         expect(auditAfters).toEqual(expect.arrayContaining(responseBodies));
       }

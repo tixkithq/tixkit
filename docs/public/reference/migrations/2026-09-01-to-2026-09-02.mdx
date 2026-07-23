@@ -1,0 +1,34 @@
+---
+title: Migrate API 2026-09-01 to 2026-09-02
+description: Adopt the strict, authorized ticket-type batch-update contract.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-22
+prerequisites:
+  - /reference/api-versions
+related:
+  - /reference/api
+---
+
+API `2026-09-02` makes `PATCH /ticket-types/{ticketTypeId}/batch` a strict, explicitly authorized mutation. The request body accepts only `ticketType` and optional `accessRules`; nested objects reject unknown fields. A request can append at most 100 access rules, while a ticket type can retain at most 500 rules. A response returns the locked current ticket type and no more than 500 persisted access rules.
+
+The operation accepts bearer principals and scoped API keys. It requires `tickets.write`; unauthenticated requests receive the documented `401` API error, and authenticated callers without the required permission receive `403`. Ticket types, inventory pools and occurrences outside the authorized event are concealed as `404`.
+
+`ticketType` is partial. Omit a field to preserve its value. `minimumPriceCents`, `salesStartAt`, `salesEndAt`, `eventOccurrenceId` and `accessCodeHint` may be sent as JSON `null` to clear them; an empty string is not a substitute for `null` where the field has a non-empty identifier or value constraint. Invalid bounds, invalid cross-event references, duplicate normalized rules, a request over 100 rules, or a result over 500 persisted rules return `400` rather than a partial mutation.
+
+The JavaScript SDK retains `UpdateTicketTypeBatchInput` for source-compatible dynamic callers and adds `TypedUpdateTicketTypeBatchInput` for typed partial updates. The Go SDK now distinguishes omission from clearing nullable fields: leave the nullable pointer nil to omit it, use `NullString()` or `NullInt()` to send JSON `null`, and use `NewNullableString(value)` or `NewNullableInt(value)` to set a value. Update callers that previously relied on empty strings or zero values to clear nullable data.
+
+The endpoint serializes authorized ticket configuration updates, returns the post-lock state, advances the event public revision once for a material change, and records a redacted audit event. A true no-op does not advance the revision or create an audit event. Clients should retry only their own idempotent request flow after a transient transport failure; they must not assume an error response means the prior state is still current.
+
+This release also captures the following strictness changes already present in the integrated contract:
+
+- `PATCH /ticket-types/{ticketTypeId}` rejects unknown fields, requires non-empty ticket-type and inventory-pool identifiers where supplied, requires uppercase three-letter currency, and rejects negative prices or non-positive per-order limits. It also documents optional `eventOccurrenceId`.
+- `PATCH /products/{productId}` now rejects unknown fields and applies the same non-empty name, uppercase currency, non-negative price and positive per-order constraints. Remove extension fields from these payloads and validate values client-side before retrying.
+- `GET /exports/{exportId}`, `/events`, and `/download` require a non-empty `exportId` path value. Do not construct these URLs with an empty identifier.
+- The batch `200` response now uses the dedicated update result schema. Consumers must use its `ticketType` and capped `accessRules` fields and must not depend on the create-batch-only `inventoryPool` field.
+
+The OpenAPI document now expresses nullable batch fields with JSON Schema `type: [valueType, "null"]` instead of OpenAPI 3.0's `nullable: true`. This is representation normalization, not a removal of `null`: existing JSON `null` clients remain compatible. The machine-readable API diff excludes that false-positive comparator noise and records the remaining restrictions individually.

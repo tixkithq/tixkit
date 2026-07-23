@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-09-01';
+export const TIXKIT_API_VERSION = '2026-09-02';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -730,8 +730,33 @@ export type CreateTicketTypeBatchInput = {
   accessRules?: CreateAccessRuleInput[];
 };
 
+export type UpdateTicketTypeBatchTicketTypeInput = {
+  name?: string;
+  description?: string;
+  kind?: 'free' | 'paid' | 'donation';
+  status?: 'draft' | 'active' | 'paused' | 'sold_out' | 'ended';
+  visibility?: 'public' | 'hidden' | 'locked';
+  currency?: string;
+  priceCents?: number;
+  minimumPriceCents?: number | null;
+  salesStartAt?: string | null;
+  salesEndAt?: string | null;
+  minPerOrder?: number;
+  maxPerOrder?: number;
+  inventoryPoolId?: string;
+  eventOccurrenceId?: string | null;
+  requiresAccessCode?: boolean;
+  accessCodeHint?: string | null;
+  sortOrder?: number;
+};
+
 export type UpdateTicketTypeBatchInput = {
   ticketType: Record<string, unknown>;
+  accessRules?: CreateAccessRuleInput[];
+};
+
+export type TypedUpdateTicketTypeBatchInput = {
+  ticketType: UpdateTicketTypeBatchTicketTypeInput;
   accessRules?: CreateAccessRuleInput[];
 };
 
@@ -4641,7 +4666,7 @@ class TicketTypeResource {
   }
   async updateBatch(
     ticketTypeId: string,
-    input: UpdateTicketTypeBatchInput,
+    input: UpdateTicketTypeBatchInput | TypedUpdateTicketTypeBatchInput,
   ): Promise<TicketTypeBatchResult> {
     return this.client.request('PATCH', `/ticket-types/${ticketTypeId}/batch`, {
       body: input,

@@ -644,7 +644,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-09-01',
+    version: '2026-09-02',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -3585,6 +3585,18 @@ const rawOpenApiSpec = {
         },
         required: ['ticketType', 'accessRules'],
       },
+      UpdateTicketTypeBatchResult: {
+        type: 'object',
+        properties: {
+          ticketType: { $ref: '#/components/schemas/TicketType' },
+          accessRules: {
+            type: 'array',
+            maxItems: 500,
+            items: { $ref: '#/components/schemas/AccessRule' },
+          },
+        },
+        required: ['ticketType', 'accessRules'],
+      },
       CreateTicketTypeBatch: {
         type: 'object',
         properties: {
@@ -3629,11 +3641,13 @@ const rawOpenApiSpec = {
       },
       UpdateTicketTypeBatch: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           ticketType: {
             type: 'object',
+            additionalProperties: false,
             properties: {
-              name: { type: 'string' },
+              name: { type: 'string', minLength: 1 },
               description: { type: 'string' },
               kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
               status: {
@@ -3644,29 +3658,29 @@ const rawOpenApiSpec = {
                 type: 'string',
                 enum: ['public', 'hidden', 'locked'],
               },
-              currency: { type: 'string' },
-              priceCents: { type: 'integer' },
-              minimumPriceCents: { type: 'integer', nullable: true },
+              currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+              priceCents: { type: 'integer', minimum: 0 },
+              minimumPriceCents: { type: ['integer', 'null'], minimum: 0 },
               salesStartAt: {
-                type: 'string',
+                type: ['string', 'null'],
                 format: 'date-time',
-                nullable: true,
               },
               salesEndAt: {
-                type: 'string',
+                type: ['string', 'null'],
                 format: 'date-time',
-                nullable: true,
               },
-              minPerOrder: { type: 'integer' },
-              maxPerOrder: { type: 'integer' },
-              inventoryPoolId: { type: 'string' },
+              minPerOrder: { type: 'integer', minimum: 1 },
+              maxPerOrder: { type: 'integer', minimum: 1 },
+              inventoryPoolId: { type: 'string', minLength: 1 },
+              eventOccurrenceId: { type: ['string', 'null'], minLength: 1 },
               requiresAccessCode: { type: 'boolean' },
-              accessCodeHint: { type: 'string', nullable: true },
+              accessCodeHint: { type: ['string', 'null'] },
               sortOrder: { type: 'integer' },
             },
           },
           accessRules: {
             type: 'array',
+            maxItems: 100,
             items: { $ref: '#/components/schemas/AccessRuleCreate' },
           },
         },
@@ -3674,11 +3688,12 @@ const rawOpenApiSpec = {
       },
       AccessRuleCreate: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           type: { type: 'string', enum: ['code', 'email_domain'] },
-          value: { type: 'string' },
-          maxUses: { type: 'integer', nullable: true },
-          expiresAt: { type: 'string', format: 'date-time', nullable: true },
+          value: { type: 'string', minLength: 1 },
+          maxUses: { type: ['integer', 'null'], minimum: 1 },
+          expiresAt: { type: ['string', 'null'], format: 'date-time' },
         },
         required: ['type', 'value'],
       },
@@ -6104,7 +6119,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-09-01, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-09-02, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6151,7 +6166,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-09-01, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-09-02, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -6258,7 +6273,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-09-01 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-09-02 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -6295,7 +6310,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-09-01 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-09-02 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8581,7 +8596,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-09-01 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-09-02 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8638,7 +8653,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-09-01 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-09-02 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -10842,8 +10857,20 @@ const rawOpenApiSpec = {
     },
     '/ticket-types/{ticketTypeId}/batch': {
       patch: {
+        operationId: 'patchTicketTypesByTicketTypeIdBatch',
         summary: 'Update ticket type and append access rules atomically',
-        security: [{ BearerAuth: [] }],
+        description:
+          'Requires `tickets.write`. The ticket type, inventory pool, and event occurrence are all constrained to the caller-authorized event. A batch may append at most 100 access rules, up to 500 persisted rules for the ticket type.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['tickets.write'],
+        parameters: [
+          {
+            name: 'ticketTypeId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -10857,7 +10884,40 @@ const rawOpenApiSpec = {
             description: 'Ticket type updated and access rules returned',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/TicketTypeBatchResult' },
+                schema: { $ref: '#/components/schemas/UpdateTicketTypeBatchResult' },
+              },
+            },
+          },
+          '400': {
+            description:
+              'Invalid ticket type or access rule update, more than 100 appended rules, more than 500 persisted rules for the ticket type, or a ticket type that cannot move inventory pools after dependent records exist.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '401': {
+            description: 'Authentication required',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description: 'Ticket type, inventory pool, or event occurrence not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },
