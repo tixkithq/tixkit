@@ -150,6 +150,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'event-list-route-authorization-db.integration.test.ts'),
   ],
   [
+    'event-create-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'event-create-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'event-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'event-route-authorization-db.integration.test.ts'),
   ],
@@ -397,6 +401,10 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
   ...evidenceBindings(['postEventsByEventIdMessages'], {
     source: 'message-campaign-write-route-authorization-db.integration.test.ts',
     persistenceSource: 'message-campaign-write-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postEvents'], {
+    source: 'event-create-route-authorization-db.integration.test.ts',
+    persistenceSource: 'event-create-route-authorization-db.integration.test.ts',
   }),
   ...evidenceBindings(
     [
@@ -825,6 +833,7 @@ const delegatedAuthorizationGuards = new Set([
   'assertPrincipalCanAuthorizeResourceOwnerOAuth',
   'authorizeScope',
   'createPrivacyRequest',
+  'requireConcealedEventCreationScope',
   'loadCampaignProviderEventItems',
   'loadAuthorizedCampaign',
   'loadAuthorizedDocument',
@@ -1326,6 +1335,7 @@ function boundariesFor(
   }
   if (guardEvidence.includes('scopedJob')) boundaries.push('organization');
   if (guardEvidence.includes('ClerkAuthService.requireNoEventScope')) boundaries.push('event');
+  if (guardEvidence.includes('requireConcealedEventCreationScope')) boundaries.push('venue');
   if (
     guardEvidence.includes('requireHumanUserPrincipal') ||
     guardEvidence.includes('requireHumanAgentAdministrator') ||

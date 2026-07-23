@@ -28,6 +28,7 @@ export const MAX_MESSAGE_TEMPLATE_SUBJECT_LENGTH = 500;
 export const MAX_MESSAGE_TEMPLATE_HTML_LENGTH = 50_000;
 export const MAX_MESSAGE_TEMPLATE_TEXT_LENGTH = 5_000;
 export const MAX_MESSAGE_OPT_OUT_TOKEN_LENGTH = 256;
+export const MAX_EVENT_DESCRIPTION_BYTES = 65_535;
 const eventSlugSchema = z
   .string()
   .min(1)
@@ -425,11 +426,15 @@ export const createEventSchema = z
     title: z
       .string()
       .min(1)
-      .max(512)
+      .max(500)
       .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes'),
     description: z
       .string()
       .max(50_000)
+      .refine(
+        (value) => Buffer.byteLength(value, 'utf8') <= MAX_EVENT_DESCRIPTION_BYTES,
+        `Description must be ${MAX_EVENT_DESCRIPTION_BYTES} UTF-8 bytes or smaller`,
+      )
       .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
       .optional(),
     currency: currencySchema,
@@ -456,13 +461,17 @@ export const updateEventSchema = z
     title: z
       .string()
       .min(1)
-      .max(512)
+      .max(500)
       .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
       .optional(),
     slug: eventSlugSchema.optional(),
     description: z
       .string()
       .max(50_000)
+      .refine(
+        (value) => Buffer.byteLength(value, 'utf8') <= MAX_EVENT_DESCRIPTION_BYTES,
+        `Description must be ${MAX_EVENT_DESCRIPTION_BYTES} UTF-8 bytes or smaller`,
+      )
       .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
       .optional(),
     currency: currencySchema.optional(),

@@ -84,6 +84,20 @@ export type AppContext = {
     eventId: string;
     startingPoint: 'free' | 'paid' | 'donation' | 'multiple';
   }) => void | Promise<void>;
+  eventCreateCheckpoint?: (input: {
+    stage:
+      | 'after_preflight_before_transaction'
+      | 'before_resource_lock'
+      | 'after_resource_lock'
+      | 'before_event_insert';
+    organizationId: string;
+    brandId: string;
+    slug: string;
+  }) => void | Promise<void>;
+  eventCreateIdempotencyOptions?: {
+    inProgressPollIntervalMs?: number;
+    inProgressWaitMs?: number;
+  };
   eventUpdateCheckpoint?: (input: {
     stage: 'before_transaction';
     eventId: string;

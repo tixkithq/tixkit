@@ -145,6 +145,23 @@ function createEventMutationDb(
         slug: 'brand',
       },
     ],
+    organizations: [
+      {
+        id: 'org_1',
+        tenant_id: 'tnt_1',
+      },
+    ],
+    permission_grants: [
+      {
+        id: 'pgr_events_write',
+        tenant_id: 'tnt_1',
+        principal_type: 'user',
+        principal_id: 'usr_1',
+        permission: 'events.write',
+        scope_type: 'organization',
+        scope_id: 'org_1',
+      },
+    ],
     audit_logs: [],
     marketing_integrations: seed.marketingIntegrations ? [...seed.marketingIntegrations] : [],
     fee_rules: seed.feeRules ? [...seed.feeRules] : [],
@@ -201,6 +218,19 @@ function createEventMutationDb(
     return {
       values(values: Record<string, unknown> | Record<string, unknown>[]) {
         const valueRows = Array.isArray(values) ? values : [values];
+        if (
+          table === 'events' &&
+          valueRows.some((value) =>
+            (rows.events ?? []).some(
+              (existing) => existing.brand_id === value.brand_id && existing.slug === value.slug,
+            ),
+          )
+        ) {
+          throw Object.assign(new Error('duplicate key value violates unique constraint'), {
+            code: '23505',
+            constraint: 'events_brand_slug_unique',
+          });
+        }
         const insertRows = valueRows.map((value) =>
           table === 'events' ? baseEventRow(value) : value,
         );
@@ -532,7 +562,7 @@ describe('event routes', () => {
       },
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(409);
     await app.close();
   });
 

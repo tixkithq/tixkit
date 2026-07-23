@@ -5,7 +5,8 @@ export type AuthorizationBoundary =
   | 'owner'
   | 'permission'
   | 'principal-type'
-  | 'tenant';
+  | 'tenant'
+  | 'venue';
 
 export type AuthorizationSideEffectKind = 'persistence' | 'workflow';
 
@@ -638,6 +639,26 @@ export const EVENT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     resourceParameters: [],
     sideEffectAssertions: [],
     source: 'event-list-route-authorization-db.integration.test.ts',
+  }),
+]);
+
+export const EVENT_CREATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization', 'brand', 'venue'],
+    method: 'POST',
+    operationId: 'postEvents',
+    path: '/events',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    principalTypeDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'no-event-scope' },
+    policyDeniedBoundaries: ['event'],
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'event-create-route-authorization-db.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'event-create-route-authorization-db.integration.test.ts',
   }),
 ]);
 
@@ -2380,6 +2401,7 @@ export const AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze(
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...EVENT_CREATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_MEDIA_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_MEDIA_WRITE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORGANIZATION_READINESS_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,

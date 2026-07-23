@@ -2,9 +2,14 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { ulid } from 'ulid';
 import { sql } from 'kysely';
-import { ClerkAuthService } from '../../auth/clerk.js';
 import {
-  BrandRepository,
+  ClerkAuthService,
+  DEV_BRAND_ID,
+  DEV_ORG_ID,
+  DEV_TENANT_ID,
+  parseOAuthScopes,
+} from '../../auth/clerk.js';
+import {
   EventRepository,
   EventOccurrenceRepository,
   InventoryPoolRepository,
@@ -12,6 +17,7 @@ import {
   FeeRuleRepository,
   AuditLogRepository,
   executeTableQuery,
+  type Database,
 } from '@tixkit/db';
 import {
   col,
@@ -20,7 +26,13 @@ import {
   type AdminTableQuery,
   type AdminTablePage,
 } from '@tixkit/admin-table-core';
-import { ConflictError, NotFoundError, ValidationError } from '@tixkit/domain';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  type Principal,
+} from '@tixkit/domain';
 import { SCANNER_CONTRACT_VERSION, DEFAULT_CODE_FORMAT } from '@tixkit/domain';
 import type { CodeFormat } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
@@ -250,6 +262,280 @@ export function isVenueForeignKeyError(error: unknown): boolean {
     code === 'ER_NO_REFERENCED_ROW_2' ||
     number === 547
   );
+}
+
+function eventCreateRawScope(body: unknown): {
+  organizationId: string;
+  brandId: string;
+  venueId?: string;
+} | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.organizationId !== 'string' || typeof record.brandId !== 'string') return null;
+  return {
+    organizationId: record.organizationId.trim(),
+    brandId: record.brandId.trim(),
+    ...(typeof record.venueId === 'string' ? { venueId: record.venueId.trim() } : {}),
+  };
+}
+
+function requireEventCreateIdempotencyKey(headers: Record<string, unknown>): string | undefined {
+  const value = headers['idempotency-key'];
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 128 ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint <= 31 || codePoint === 127;
+    })
+  ) {
+    throw new ValidationError('Idempotency-Key must contain 1-128 printable characters');
+  }
+  return value;
+}
+
+function savedVenueEventSnapshot(venue: { name: string; address: string | null }) {
+  let address: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(venue.address ?? '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      address = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // A corrupt legacy address must not prevent a safe event draft from preserving its name.
+  }
+  return { ...address, name: venue.name };
+}
+
+function concealedEventCreateTarget(): NotFoundError {
+  return new NotFoundError('Event creation target', 'concealed');
+}
+
+function isEventCreateDuplicate(error: unknown): boolean {
+  const pending: unknown[] = [error];
+  const visited = new Set<object>();
+  while (pending.length > 0 && visited.size < 20) {
+    const current = pending.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) continue;
+    visited.add(current);
+    const record = current as {
+      cause?: unknown;
+      code?: string;
+      constraint?: string;
+      errno?: string | number;
+      index?: string;
+      message?: string;
+      number?: string | number;
+      originalError?: unknown;
+      sqlMessage?: string;
+    };
+    const number = getErrorNumber(record.number);
+    const duplicate =
+      record.code === '23505' ||
+      record.code === 'ER_DUP_ENTRY' ||
+      record.errno === 1062 ||
+      record.errno === '1062' ||
+      (record.code === 'EREQUEST' && (number === 2601 || number === 2627)) ||
+      /duplicate|unique/i.test(record.message ?? '');
+    const evidence = [record.constraint, record.index, record.message, record.sqlMessage]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ');
+    if (
+      duplicate &&
+      /events_brand_slug_unique|events.*brand_id.*slug|brand_id.*slug/i.test(evidence)
+    ) {
+      return true;
+    }
+    pending.push(record.cause, record.originalError);
+  }
+  return false;
+}
+
+function isRetryableEventCreateConflict(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as {
+    cause?: unknown;
+    code?: string;
+    errno?: string | number;
+    number?: string | number;
+    originalError?: unknown;
+  };
+  const number = getErrorNumber(record.number);
+  return (
+    record.code === '40001' ||
+    record.code === '40P01' ||
+    record.code === 'ER_LOCK_DEADLOCK' ||
+    record.code === 'ER_LOCK_WAIT_TIMEOUT' ||
+    record.errno === 1213 ||
+    record.errno === 1205 ||
+    number === 1205 ||
+    isRetryableEventCreateConflict(record.cause) ||
+    isRetryableEventCreateConflict(record.originalError)
+  );
+}
+
+async function executeEventCreateWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableEventCreateConflict(error) || attempt === 3) throw error;
+    }
+  }
+  throw new Error('EVENT_CREATE_TRANSACTION_RETRY_EXHAUSTED');
+}
+
+async function requireLiveEventCreationPermission(
+  db: Database,
+  principal: Principal,
+  organizationId: string,
+  brandId: string,
+  options?: { lock?: boolean },
+): Promise<void> {
+  ClerkAuthService.requirePermission(principal, 'events.write');
+  ClerkAuthService.requireOrganizationScope(principal, organizationId);
+  if (principal.type === 'system') return;
+  if (
+    principal.type === 'user' &&
+    principal.id === 'usr_dev_local' &&
+    principal.tenantId === DEV_TENANT_ID &&
+    organizationId === DEV_ORG_ID &&
+    brandId === DEV_BRAND_ID
+  ) {
+    return;
+  }
+  if (principal.type === 'user') {
+    let organizationGrant = db
+      .selectFrom('permission_grants')
+      .select('id')
+      .where('tenant_id', '=', principal.tenantId)
+      .where('principal_type', '=', 'user')
+      .where('principal_id', '=', principal.id)
+      .where('permission', '=', 'events.write')
+      .where('scope_type', '=', 'organization')
+      .where('scope_id', '=', organizationId);
+    let brandGrant = db
+      .selectFrom('permission_grants')
+      .select('id')
+      .where('tenant_id', '=', principal.tenantId)
+      .where('principal_type', '=', 'user')
+      .where('principal_id', '=', principal.id)
+      .where('permission', '=', 'events.write')
+      .where('scope_type', '=', 'brand')
+      .where('scope_id', '=', brandId);
+    if (options?.lock) {
+      organizationGrant = organizationGrant.forUpdate();
+      brandGrant = brandGrant.forUpdate();
+    }
+    if ((await organizationGrant.executeTakeFirst()) || (await brandGrant.executeTakeFirst()))
+      return;
+    throw new ForbiddenError('An active events.write organization or brand grant is required');
+  }
+  if (principal.type !== 'api_key') {
+    throw new ForbiddenError('Event creation requires a user, API credential, or system principal');
+  }
+  let apiKeyQuery = db
+    .selectFrom('api_keys')
+    .selectAll()
+    .where('id', '=', principal.id)
+    .where('tenant_id', '=', principal.tenantId);
+  if (options?.lock) apiKeyQuery = apiKeyQuery.forUpdate();
+  const apiKey = await apiKeyQuery.executeTakeFirst();
+  if (apiKey) {
+    const parseIds = (value: unknown): string[] => {
+      if (value == null || value === '') return [];
+      try {
+        const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+        return Array.isArray(parsed) && parsed.every((id) => typeof id === 'string') ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+    const scopes = (() => {
+      try {
+        const parsed =
+          typeof apiKey.scopes === 'string' ? JSON.parse(apiKey.scopes) : apiKey.scopes;
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    if (
+      apiKey.revoked_at ||
+      (apiKey.expires_at && new Date(apiKey.expires_at) <= new Date()) ||
+      apiKey.organization_id !== organizationId ||
+      !scopes.includes('events.write') ||
+      parseIds(apiKey.event_ids).length > 0 ||
+      (parseIds(apiKey.brand_ids).length > 0 && !parseIds(apiKey.brand_ids).includes(brandId))
+    ) {
+      throw new ForbiddenError('API credential no longer authorizes event creation');
+    }
+    return;
+  }
+  let oauthQuery = db
+    .selectFrom('oauth_access_tokens')
+    .innerJoin(
+      'oauth_applications',
+      'oauth_applications.id',
+      'oauth_access_tokens.oauth_application_id',
+    )
+    .select([
+      'oauth_access_tokens.id as token_id',
+      'oauth_access_tokens.organization_id as organization_id',
+      'oauth_access_tokens.expires_at as expires_at',
+      'oauth_access_tokens.revoked_at as revoked_at',
+      'oauth_access_tokens.scopes as scopes',
+      'oauth_applications.status as application_status',
+    ])
+    .where('oauth_access_tokens.id', '=', principal.id)
+    .where('oauth_access_tokens.tenant_id', '=', principal.tenantId);
+  if (options?.lock) oauthQuery = oauthQuery.forUpdate();
+  const oauth = await oauthQuery.executeTakeFirst();
+  if (
+    !oauth ||
+    oauth.revoked_at ||
+    oauth.application_status !== 'active' ||
+    new Date(oauth.expires_at) <= new Date() ||
+    oauth.organization_id !== organizationId ||
+    !parseOAuthScopes(oauth.scopes).includes('events.write')
+  ) {
+    throw new ForbiddenError('OAuth credential no longer authorizes event creation');
+  }
+}
+
+async function requireConcealedEventCreationScope(
+  db: Database,
+  principal: Principal,
+  scope: { organizationId: string; brandId: string; venueId?: string | null },
+): Promise<void> {
+  try {
+    ClerkAuthService.requireOrganizationScope(principal, scope.organizationId);
+    ClerkAuthService.requireBrandScope(principal, scope.brandId);
+    const brand = await db
+      .selectFrom('brands')
+      .select(['id', 'tenant_id', 'organization_id'])
+      .where('tenant_id', '=', principal.tenantId)
+      .where('id', '=', scope.brandId)
+      .executeTakeFirst();
+    if (!brand || brand.organization_id !== scope.organizationId)
+      throw concealedEventCreateTarget();
+    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', scope.brandId);
+    await requireLiveEventCreationPermission(db, principal, scope.organizationId, scope.brandId);
+    if (!scope.venueId) return;
+    const venue = await db
+      .selectFrom('venues')
+      .select('id')
+      .where('tenant_id', '=', principal.tenantId)
+      .where('organization_id', '=', scope.organizationId)
+      .where('id', '=', scope.venueId)
+      .executeTakeFirst();
+    if (!venue) throw concealedEventCreateTarget();
+  } catch (error) {
+    if (error instanceof NotFoundError) throw concealedEventCreateTarget();
+    throw error;
+  }
 }
 
 function isMarketingIntegrationEventProviderDuplicateInsert(error: unknown): boolean {
@@ -797,159 +1083,253 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const creationStartedAt = performance.now();
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
-    const body = parseBody(createEventSchema, request.body);
-    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
-    ClerkAuthService.requireBrandScope(principal, body.brandId);
-    const brand = await new BrandRepository(db).findById(body.brandId);
-    if (!brand) throw new NotFoundError('Brand', body.brandId);
-    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', body.brandId);
-    ClerkAuthService.requireOrganizationScope(principal, brand.organization_id);
-    if (brand.organization_id !== body.organizationId) {
-      throw new NotFoundError('Brand', body.brandId);
+    ClerkAuthService.requireNoEventScope(principal, 'event creation');
+    const rawScope = eventCreateRawScope(request.body);
+    if (rawScope) {
+      await requireConcealedEventCreationScope(db, principal, rawScope);
     }
-    const savedVenue = body.venueId
-      ? await db
-          .selectFrom('venues')
-          .selectAll()
-          .where('id', '=', body.venueId)
-          .where('tenant_id', '=', principal.tenantId)
-          .where('organization_id', '=', body.organizationId)
-          .executeTakeFirst()
-      : undefined;
-    if (body.venueId && !savedVenue) throw new NotFoundError('Venue', body.venueId);
-    const venueSnapshot = savedVenue
-      ? { name: savedVenue.name, ...JSON.parse(savedVenue.address ?? '{}') }
-      : body.venue;
+    const body = parseBody(createEventSchema, request.body);
+    await requireConcealedEventCreationScope(db, principal, body);
 
-    const rawIdempotencyKey = request.headers['idempotency-key'];
-    const idempotencyKey =
-      typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : undefined;
-    if (body.startingPoint !== 'blank' && !idempotencyKey) {
+    if (body.venue && body.venueId) {
+      throw new ValidationError('Provide either venue or venueId, not both');
+    }
+    const rawIdempotencyKey = requireEventCreateIdempotencyKey(request.headers);
+    if (body.startingPoint !== 'blank' && !rawIdempotencyKey) {
       throw new ValidationError('Idempotency-Key header is required for preset event creation');
     }
-    const createEvent = async () => {
-      const repo = new EventRepository(db);
-      if (!(await repo.isSlugAvailable(body.brandId, body.slug))) {
-        throw new ValidationError('Event slug is already in use');
-      }
-      const event = await db.transaction().execute(async (trx) => {
-        const txDb = trx as typeof db;
-        const created = await new EventRepository(txDb).create({
-          tenantId: principal.tenantId,
-          organizationId: body.organizationId,
-          brandId: body.brandId,
-          slug: body.slug,
-          title: body.title,
-          description: body.description,
-          currency: body.currency,
-          timezone: body.timezone,
-          startsAt: new Date(body.startsAt),
-          endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
-          venue: venueSnapshot as Record<string, unknown> | undefined,
-          visibility: body.visibility,
-          seo: body.seo as Record<string, unknown> | undefined,
-          capacity: body.capacity,
-          minimumAge: body.minimumAge,
-          externalUrl: body.externalUrl,
+    const idempotencyKey = rawIdempotencyKey
+      ? hashRequest({
+          operation: 'event.create',
+          principal: { id: principal.id, type: principal.type },
+          key: rawIdempotencyKey,
+        })
+      : undefined;
+    const createEvent = async (idempotencyContext?: {
+      completeInTransaction: (
+        transactionDb: Database,
+        response: { status: number; body: unknown },
+      ) => Promise<void>;
+    }) => {
+      await app.context.eventCreateCheckpoint?.({
+        stage: 'after_preflight_before_transaction',
+        organizationId: body.organizationId,
+        brandId: body.brandId,
+        slug: body.slug,
+      });
+      const event = await executeEventCreateWithRetry(async () => {
+        try {
+          return await db
+            .transaction()
+            .setIsolationLevel('serializable')
+            .execute(async (trx) => {
+              const txDb = trx as typeof db;
+              await app.context.eventCreateCheckpoint?.({
+                stage: 'before_resource_lock',
+                organizationId: body.organizationId,
+                brandId: body.brandId,
+                slug: body.slug,
+              });
+              const organizations = await trx
+                .selectFrom('organizations')
+                .select(['id', 'tenant_id'])
+                .where('tenant_id', '=', principal.tenantId)
+                .forUpdate()
+                .execute();
+              const organization = organizations.find((row) => row.id === body.organizationId);
+              if (!organization) throw new NotFoundError('Organization', 'concealed');
+              const brands = await trx
+                .selectFrom('brands')
+                .select(['id', 'tenant_id', 'organization_id'])
+                .where('tenant_id', '=', principal.tenantId)
+                .where('organization_id', '=', body.organizationId)
+                .forUpdate()
+                .execute();
+              const brand = brands.find((row) => row.id === body.brandId);
+              if (!brand) throw new NotFoundError('Brand', 'concealed');
+              const savedVenue = body.venueId
+                ? (
+                    await trx
+                      .selectFrom('venues')
+                      .selectAll()
+                      .where('tenant_id', '=', principal.tenantId)
+                      .where('organization_id', '=', body.organizationId)
+                      .forUpdate()
+                      .execute()
+                  ).find((row) => row.id === body.venueId)
+                : undefined;
+              if (body.venueId && !savedVenue) throw new NotFoundError('Venue', 'concealed');
+              await app.context.eventCreateCheckpoint?.({
+                stage: 'after_resource_lock',
+                organizationId: body.organizationId,
+                brandId: body.brandId,
+                slug: body.slug,
+              });
+              try {
+                ClerkAuthService.requirePermission(principal, 'events.write');
+                ClerkAuthService.requireNoEventScope(principal, 'event creation');
+                ClerkAuthService.requireResourceTenant(
+                  principal,
+                  organization,
+                  'Organization',
+                  body.organizationId,
+                );
+                ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', body.brandId);
+                ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+                ClerkAuthService.requireBrandScope(principal, body.brandId);
+                await requireLiveEventCreationPermission(
+                  txDb,
+                  principal,
+                  body.organizationId,
+                  body.brandId,
+                  {
+                    lock: true,
+                  },
+                );
+              } catch (error) {
+                if (error instanceof NotFoundError) throw new NotFoundError('Brand', 'concealed');
+                throw error;
+              }
+              await app.context.eventCreateCheckpoint?.({
+                stage: 'before_event_insert',
+                organizationId: body.organizationId,
+                brandId: body.brandId,
+                slug: body.slug,
+              });
+              const venueSnapshot = savedVenue ? savedVenueEventSnapshot(savedVenue) : body.venue;
+              const created = await new EventRepository(txDb).create({
+                tenantId: principal.tenantId,
+                organizationId: body.organizationId,
+                brandId: body.brandId,
+                slug: body.slug,
+                title: body.title,
+                description: body.description,
+                currency: body.currency,
+                timezone: body.timezone,
+                startsAt: new Date(body.startsAt),
+                endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
+                venue: venueSnapshot as Record<string, unknown> | undefined,
+                visibility: body.visibility,
+                seo: body.seo as Record<string, unknown> | undefined,
+                capacity: body.capacity,
+                minimumAge: body.minimumAge,
+                externalUrl: body.externalUrl,
+              });
+              if (savedVenue) {
+                await txDb
+                  .updateTable('events')
+                  .set({ venue_id: savedVenue.id })
+                  .where('id', '=', created.id)
+                  .execute();
+              }
+              if (body.startingPoint === 'multiple') {
+                const startsAt = new Date(body.startsAt);
+                await new EventOccurrenceRepository(txDb).create({
+                  eventId: created.id,
+                  title: body.title,
+                  startsAt,
+                  endsAt: body.endsAt
+                    ? new Date(body.endsAt)
+                    : new Date(startsAt.getTime() + 7_200_000),
+                  timezone: body.timezone,
+                  venue: venueSnapshot as Record<string, unknown> | undefined,
+                  capacity: body.capacity,
+                });
+              } else if (body.startingPoint !== 'blank') {
+                const pool = await new InventoryPoolRepository(txDb).create({
+                  eventId: created.id,
+                  name: 'Admission inventory',
+                  totalCapacity: body.capacity ?? 100,
+                  holdTtlSeconds: 900,
+                });
+                await new TicketTypeRepository(txDb).create({
+                  eventId: created.id,
+                  name:
+                    body.startingPoint === 'free'
+                      ? 'RSVP'
+                      : body.startingPoint === 'paid'
+                        ? 'General admission'
+                        : 'Donation',
+                  kind: body.startingPoint,
+                  currency: body.currency,
+                  priceCents: body.startingPoint === 'paid' ? 2500 : 0,
+                  minimumPriceCents: body.startingPoint === 'donation' ? 0 : undefined,
+                  inventoryPoolId: pool.id,
+                  minPerOrder: 1,
+                  maxPerOrder: 10,
+                });
+              }
+              if (body.startingPoint !== 'blank') {
+                await app.context.eventPresetCheckpoint?.({
+                  stage: 'after_preset_applied',
+                  eventId: created.id,
+                  startingPoint: body.startingPoint,
+                });
+              }
+              const finalized = await txDb
+                .selectFrom('events')
+                .selectAll()
+                .where('id', '=', created.id)
+                .where('tenant_id', '=', principal.tenantId)
+                .executeTakeFirstOrThrow();
+              const response = { status: 201, body: serializeEvent(finalized) };
+              await writeAuditLog(
+                new AuditLogRepository(txDb),
+                request,
+                principal,
+                {
+                  action: 'event.created',
+                  organizationId: body.organizationId,
+                  brandId: body.brandId,
+                  resourceType: 'Event',
+                  resourceId: created.id,
+                  diffSummary: { slug: body.slug, title: body.title },
+                },
+                { failClosed: true },
+              );
+              if (idempotencyContext) {
+                await idempotencyContext.completeInTransaction(txDb, response);
+              }
+              return finalized;
+            });
+        } catch (error) {
+          if (isEventCreateDuplicate(error)) {
+            throw new ConflictError('Event slug is already in use');
+          }
+          throw error;
+        }
+      });
+      try {
+        app.observability?.metrics.metrics.onboardingEvents?.inc({
+          stage: 'first_draft',
+          outcome: 'completed',
+          reason_code: 'none',
         });
-        if (savedVenue) {
-          await txDb
-            .updateTable('events')
-            .set({ venue_id: savedVenue.id })
-            .where('id', '=', created.id)
-            .execute();
-        }
-        if (body.startingPoint === 'multiple') {
-          const startsAt = new Date(body.startsAt);
-          await new EventOccurrenceRepository(txDb).create({
-            eventId: created.id,
-            title: body.title,
-            startsAt,
-            endsAt: body.endsAt ? new Date(body.endsAt) : new Date(startsAt.getTime() + 7_200_000),
-            timezone: body.timezone,
-            venue: venueSnapshot as Record<string, unknown> | undefined,
-            capacity: body.capacity,
-          });
-        } else if (body.startingPoint !== 'blank') {
-          const pool = await new InventoryPoolRepository(txDb).create({
-            eventId: created.id,
-            name: 'Admission inventory',
-            totalCapacity: body.capacity ?? 100,
-            holdTtlSeconds: 900,
-          });
-          await new TicketTypeRepository(txDb).create({
-            eventId: created.id,
-            name:
-              body.startingPoint === 'free'
-                ? 'RSVP'
-                : body.startingPoint === 'paid'
-                  ? 'General admission'
-                  : 'Donation',
-            kind: body.startingPoint,
-            currency: body.currency,
-            priceCents: body.startingPoint === 'paid' ? 2500 : 0,
-            minimumPriceCents: body.startingPoint === 'donation' ? 0 : undefined,
-            inventoryPoolId: pool.id,
-            minPerOrder: 1,
-            maxPerOrder: 10,
-          });
-        }
         if (body.startingPoint !== 'blank') {
-          await app.context.eventPresetCheckpoint?.({
-            stage: 'after_preset_applied',
-            eventId: created.id,
-            startingPoint: body.startingPoint,
+          app.observability?.metrics.metrics.onboardingEvents?.inc({
+            stage: 'starting_point_applied',
+            outcome: 'completed',
+            reason_code: 'none',
           });
         }
-        await writeAuditLog(new AuditLogRepository(txDb), request, principal, {
-          action: 'event.created',
-          organizationId: body.organizationId,
-          brandId: body.brandId,
-          resourceType: 'Event',
-          resourceId: created.id,
-          diffSummary: { slug: body.slug, title: body.title },
-        });
-        if (idempotencyKey) {
-          await txDb
-            .updateTable('idempotency_records')
-            .set({
-              response_status: 201,
-              response_body: JSON.stringify(serializeEvent(created)),
-              status: 'completed',
-            })
-            .where('key', '=', idempotencyKey)
-            .where('tenant_id', '=', principal.tenantId)
-            .execute();
+        if (['free', 'paid', 'donation'].includes(body.startingPoint)) {
+          app.observability?.metrics.metrics.onboardingEvents?.inc({
+            stage: 'first_ticket',
+            outcome: 'completed',
+            reason_code: 'none',
+          });
+          app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
+            { milestone: 'first_ticket' },
+            Math.max(0, (performance.now() - creationStartedAt) / 1000),
+          );
         }
-        return created;
-      });
-      app.observability?.metrics.metrics.onboardingEvents?.inc({
-        stage: 'first_draft',
-        outcome: 'completed',
-        reason_code: 'none',
-      });
-      if (body.startingPoint !== 'blank') {
-        app.observability?.metrics.metrics.onboardingEvents?.inc({
-          stage: 'starting_point_applied',
-          outcome: 'completed',
-          reason_code: 'none',
-        });
-      }
-      if (['free', 'paid', 'donation'].includes(body.startingPoint)) {
-        app.observability?.metrics.metrics.onboardingEvents?.inc({
-          stage: 'first_ticket',
-          outcome: 'completed',
-          reason_code: 'none',
-        });
         app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
-          { milestone: 'first_ticket' },
+          { milestone: 'first_draft' },
           Math.max(0, (performance.now() - creationStartedAt) / 1000),
         );
+      } catch (error) {
+        request.log.warn({ err: error }, 'Event creation metrics emission failed after commit');
       }
-      app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
-        { milestone: 'first_draft' },
-        Math.max(0, (performance.now() - creationStartedAt) / 1000),
-      );
       return { status: 201, body: serializeEvent(event) };
     };
 
@@ -962,10 +1342,14 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
               key: idempotencyKey,
               tenantId: principal.tenantId,
               requestHash: hashRequest({
+                operation: 'event.create',
+                principal: { id: principal.id, type: principal.type },
                 organizationId: body.organizationId,
                 brandId: body.brandId,
                 body,
               }),
+              discardErrorCodes: ['FORBIDDEN', 'NOT_FOUND'],
+              ...app.context.eventCreateIdempotencyOptions,
             },
             createEvent,
           )

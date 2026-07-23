@@ -437,6 +437,20 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
       eventIds: [source.id, scopeSource.id],
       scopes: ['events.read', 'events.write'],
     };
+    await db
+      .insertInto('permission_grants')
+      .values({
+        id: `pgr_dup_events_write_${suffix}`,
+        tenant_id: tenantId,
+        principal_type: 'user',
+        principal_id: principal.id,
+        permission: 'events.write',
+        scope_type: 'organization',
+        scope_id: organizationId,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
     app = Fastify();
     app.decorate('context', {
       db,
@@ -955,6 +969,7 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
   });
 
   it('atomically creates a free preset and replays a duplicate submission without duplicate children', async () => {
+    principal = { ...principal, eventIds: undefined };
     const slug = `preset-free-${suffix}`;
     const payload = {
       organizationId,
