@@ -50,6 +50,7 @@ import {
   evaluateDateOfBirthEligibility,
   requiresDateOfBirthVerification,
   assertCurrentResaleTermsAcceptance,
+  validateCheckoutHolds,
 } from '@tixkit/domain';
 import type { Question } from '@tixkit/domain';
 import {
@@ -195,6 +196,76 @@ function publicCheckoutSession(
           updatedAt: compensation.updated_at,
         }
       : undefined,
+  };
+}
+
+type CheckoutSessionAuthorityInput = {
+  session: {
+    status: string;
+    order_id: string | null;
+    expires_at: Date | string;
+  };
+  cartItems: Array<{ ticketTypeId?: string; quantity: number }>;
+  activeHolds: Array<{
+    id: string;
+    ticketTypeId: string;
+    quantity: number;
+    expires_at: Date | string;
+  }>;
+  paymentIntents: Array<{
+    order_id: string | null;
+    status: string;
+  }>;
+  now: Date;
+};
+
+/**
+ * Decide whether a reserving checkout can still be presented as payable.
+ *
+ * A succeeded or processing payment is deliberately authoritative over stale
+ * hold data: finalization can convert holds before it commits the session.
+ */
+export function resolveCheckoutSessionAuthority(input: CheckoutSessionAuthorityInput): {
+  shouldExpire: boolean;
+  expiredHoldIds: string[];
+  releaseActiveHolds: boolean;
+} {
+  if (!['open', 'pending_payment'].includes(input.session.status)) {
+    return { shouldExpire: false, expiredHoldIds: [], releaseActiveHolds: false };
+  }
+
+  const nowMs = input.now.getTime();
+  const sessionExpired = new Date(input.session.expires_at).getTime() <= nowMs;
+  const holdValidation = validateCheckoutHolds({
+    cartItems: input.cartItems,
+    holds: input.activeHolds.map((hold) => ({
+      id: hold.id,
+      ticketTypeId: hold.ticketTypeId,
+      quantity: hold.quantity,
+      expiresAt: hold.expires_at,
+    })),
+    now: input.now,
+  });
+  const paymentFinalizationIsAuthoritative = input.paymentIntents.some(
+    (paymentIntent) =>
+      paymentIntent.order_id !== null ||
+      paymentIntent.status === 'requires_capture' ||
+      paymentIntent.status === 'processing' ||
+      paymentIntent.status === 'succeeded',
+  );
+
+  if (
+    input.session.order_id !== null ||
+    paymentFinalizationIsAuthoritative ||
+    (!sessionExpired && holdValidation.ok)
+  ) {
+    return { shouldExpire: false, expiredHoldIds: [], releaseActiveHolds: false };
+  }
+
+  return {
+    shouldExpire: true,
+    expiredHoldIds: holdValidation.ok ? [] : holdValidation.expiredHoldIds,
+    releaseActiveHolds: true,
   };
 }
 
@@ -2167,17 +2238,17 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     };
 
     const repo = new CheckoutSessionRepository(db);
-    const session = await repo.findById(sessionId);
-    if (!session) throw new NotFoundError('CheckoutSession', sessionId);
+    const requestedSession = await repo.findById(sessionId);
+    if (!requestedSession) throw new NotFoundError('CheckoutSession', sessionId);
     const clientToken = request.headers['x-checkout-session-token'];
     let includeClientToken = false;
     if (typeof clientToken === 'string') {
-      assertCheckoutSessionToken(session, clientToken);
+      assertCheckoutSessionToken(requestedSession, clientToken);
       includeClientToken = true;
     } else if (
       typeof paymentIntentClientSecret === 'string' &&
       paymentIntentClientSecret.length > 0 &&
-      session.status === 'pending_payment'
+      requestedSession.status === 'pending_payment'
     ) {
       const paymentIntent = await db
         .selectFrom('payment_intents')
@@ -2188,9 +2259,103 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       if (!paymentIntent) {
         throw new ValidationError('X-Checkout-Session-Token header is required');
       }
-    } else if (session.status !== 'completed') {
+    } else if (requestedSession.status !== 'completed') {
       throw new ValidationError('X-Checkout-Session-Token header is required');
     }
+
+    const session = await db.transaction().execute(async (trx) => {
+      // This mirrors the relevant finalization lock order: inventory pools,
+      // holds, payment intent, then session. It prevents a revalidation from
+      // expiring a session while the payment finalizer is converting its holds.
+      const candidateHolds = await trx
+        .selectFrom('checkout_holds')
+        .select(['inventory_pool_id'])
+        .where('checkout_session_id', '=', sessionId)
+        .where('status', '=', 'active')
+        .execute();
+      const poolIds = [...new Set(candidateHolds.map((hold) => hold.inventory_pool_id))].sort();
+      for (const poolId of poolIds) {
+        // eslint-disable-next-line no-await-in-loop -- pool locks use the finalizer's deterministic ascending order.
+        await trx
+          .selectFrom('inventory_pools')
+          .select(['id'])
+          .where('id', '=', poolId)
+          .forUpdate()
+          .executeTakeFirst();
+      }
+
+      const activeHolds = await trx
+        .selectFrom('checkout_holds')
+        .select(['id', 'ticket_type_id', 'quantity', 'expires_at'])
+        .where('checkout_session_id', '=', sessionId)
+        .where('status', '=', 'active')
+        .orderBy('inventory_pool_id', 'asc')
+        .orderBy('id', 'asc')
+        .forUpdate()
+        .execute();
+      const paymentIntents = await trx
+        .selectFrom('payment_intents')
+        .select(['order_id', 'status'])
+        .where('checkout_session_id', '=', sessionId)
+        .forUpdate()
+        .execute();
+      const lockedSession = await trx
+        .selectFrom('checkout_sessions')
+        .selectAll()
+        .where('id', '=', sessionId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!lockedSession) throw new NotFoundError('CheckoutSession', sessionId);
+
+      const authority = resolveCheckoutSessionAuthority({
+        session: lockedSession,
+        cartItems: parseJsonValue<CartInput>(lockedSession.cart, { items: [] }).items,
+        activeHolds: activeHolds.map((hold) => ({
+          id: hold.id,
+          ticketTypeId: hold.ticket_type_id,
+          quantity: Number(hold.quantity),
+          expires_at: hold.expires_at,
+        })),
+        paymentIntents,
+        now: new Date(),
+      });
+      if (!authority.shouldExpire) return lockedSession;
+
+      const now = new Date();
+      if (authority.expiredHoldIds.length > 0) {
+        await trx
+          .updateTable('checkout_holds')
+          .set({ status: 'expired', updated_at: now })
+          .where('id', 'in', authority.expiredHoldIds)
+          .where('status', '=', 'active')
+          .execute();
+      }
+      if (authority.releaseActiveHolds) {
+        await trx
+          .updateTable('checkout_holds')
+          .set({ status: 'released', updated_at: now })
+          .where('checkout_session_id', '=', sessionId)
+          .where('status', '=', 'active')
+          .execute();
+      }
+      const updateResult = await trx
+        .updateTable('checkout_sessions')
+        .set({ status: 'expired', updated_at: now })
+        .where('id', '=', sessionId)
+        .where('status', 'in', ['open', 'pending_payment'])
+        .where('order_id', 'is', null)
+        .executeTakeFirst();
+
+      if (Number(updateResult.numUpdatedRows) === 0) {
+        return trx
+          .selectFrom('checkout_sessions')
+          .selectAll()
+          .where('id', '=', sessionId)
+          .executeTakeFirstOrThrow();
+      }
+
+      return { ...lockedSession, status: 'expired' };
+    });
 
     const compensation = await new PaymentCompensationRepository(db).findLatestByCheckoutSession(
       sessionId,

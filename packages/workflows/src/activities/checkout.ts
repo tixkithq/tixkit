@@ -16,6 +16,7 @@ import {
   RESALE_REFUND_MODEL,
   RESALE_SETTLEMENT_MODEL,
   RESALE_TERMS_VERSION,
+  validateCheckoutHolds,
 } from '@tixkit/domain';
 import {
   ProviderOperationError,
@@ -534,67 +535,6 @@ async function pointCheckoutSessionAtPaymentIntent(
     session?.payment_intent_id === paymentIntentId &&
     ['open', 'pending_payment'].includes(session.status)
   );
-}
-
-function validateHeldCartItems(input: {
-  cartItems: { ticketTypeId?: string; productId?: string; quantity: number }[];
-  holds: CheckoutHoldRow[];
-  now: Date;
-}): { ok: true } | { ok: false; expiredHoldIds: string[]; message: string } {
-  const expectedByTicketType = new Map<string, number>();
-  for (const item of input.cartItems) {
-    if (!item.ticketTypeId) continue;
-    expectedByTicketType.set(
-      item.ticketTypeId,
-      (expectedByTicketType.get(item.ticketTypeId) ?? 0) + item.quantity,
-    );
-  }
-
-  const heldByTicketType = new Map<string, number>();
-  const expiredHoldIds: string[] = [];
-  for (const hold of input.holds) {
-    if (new Date(hold.expires_at) <= input.now) {
-      expiredHoldIds.push(hold.id);
-      continue;
-    }
-    heldByTicketType.set(
-      hold.ticket_type_id,
-      (heldByTicketType.get(hold.ticket_type_id) ?? 0) + Number(hold.quantity),
-    );
-  }
-
-  if (expiredHoldIds.length > 0) {
-    return {
-      ok: false,
-      expiredHoldIds,
-      message: `Checkout hold ${expiredHoldIds[0]} has expired`,
-    };
-  }
-
-  for (const [ticketTypeId, expected] of expectedByTicketType) {
-    if ((heldByTicketType.get(ticketTypeId) ?? 0) !== expected) {
-      return {
-        ok: false,
-        expiredHoldIds,
-        message: `Checkout session is missing an active inventory hold for ticket type ${ticketTypeId}`,
-      };
-    }
-  }
-
-  for (const [ticketTypeId, held] of heldByTicketType) {
-    if (
-      !expectedByTicketType.has(ticketTypeId) ||
-      expectedByTicketType.get(ticketTypeId) !== held
-    ) {
-      return {
-        ok: false,
-        expiredHoldIds,
-        message: `Checkout session has an unexpected inventory hold for ticket type ${ticketTypeId}`,
-      };
-    }
-  }
-
-  return { ok: true };
 }
 
 async function validateFinalizePaymentIntent(input: {
@@ -1687,9 +1627,14 @@ export async function finalizeOrderActivity(input: {
           .forUpdate()
           .execute()) as CheckoutHoldRow[];
 
-        const heldCart = validateHeldCartItems({
+        const heldCart = validateCheckoutHolds({
           cartItems: cart.items,
-          holds,
+          holds: holds.map((hold) => ({
+            id: hold.id,
+            ticketTypeId: hold.ticket_type_id,
+            quantity: Number(hold.quantity),
+            expiresAt: hold.expires_at,
+          })),
           now,
         });
         if (!heldCart.ok) {

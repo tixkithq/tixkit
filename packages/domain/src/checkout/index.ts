@@ -148,6 +148,80 @@ export type ConfirmCheckoutInput = {
   idempotencyKey: IdempotencyKey;
 };
 
+export type CheckoutHoldValidationResult =
+  | { ok: true }
+  | { ok: false; expiredHoldIds: string[]; message: string };
+
+/**
+ * Validates that every ticket line in a checkout has exactly the active,
+ * unexpired inventory quantity that finalization will consume.
+ */
+export function validateCheckoutHolds(input: {
+  cartItems: Array<{ ticketTypeId?: string; quantity: number }>;
+  holds: Array<{
+    id: string;
+    ticketTypeId: string;
+    quantity: number;
+    expiresAt: Date | string;
+  }>;
+  now: Date;
+}): CheckoutHoldValidationResult {
+  const expectedByTicketType = new Map<string, number>();
+  for (const item of input.cartItems) {
+    if (!item.ticketTypeId) continue;
+    expectedByTicketType.set(
+      item.ticketTypeId,
+      (expectedByTicketType.get(item.ticketTypeId) ?? 0) + item.quantity,
+    );
+  }
+
+  const heldByTicketType = new Map<string, number>();
+  const expiredHoldIds: string[] = [];
+  for (const hold of input.holds) {
+    if (new Date(hold.expiresAt) <= input.now) {
+      expiredHoldIds.push(hold.id);
+      continue;
+    }
+    heldByTicketType.set(
+      hold.ticketTypeId,
+      (heldByTicketType.get(hold.ticketTypeId) ?? 0) + Number(hold.quantity),
+    );
+  }
+
+  if (expiredHoldIds.length > 0) {
+    return {
+      ok: false,
+      expiredHoldIds,
+      message: `Checkout hold ${expiredHoldIds[0]} has expired`,
+    };
+  }
+
+  for (const [ticketTypeId, expected] of expectedByTicketType) {
+    if ((heldByTicketType.get(ticketTypeId) ?? 0) !== expected) {
+      return {
+        ok: false,
+        expiredHoldIds,
+        message: `Checkout session is missing an active inventory hold for ticket type ${ticketTypeId}`,
+      };
+    }
+  }
+
+  for (const [ticketTypeId, held] of heldByTicketType) {
+    if (
+      !expectedByTicketType.has(ticketTypeId) ||
+      expectedByTicketType.get(ticketTypeId) !== held
+    ) {
+      return {
+        ok: false,
+        expiredHoldIds,
+        message: `Checkout session has an unexpected inventory hold for ticket type ${ticketTypeId}`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
 export type RefundInput = {
   orderId: Ulid;
   amountCents?: number;

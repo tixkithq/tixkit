@@ -8269,6 +8269,18 @@ describe('checkout confirm', () => {
 
   it('GET /checkout/sessions/:sessionId accepts native JSON session columns', async () => {
     const tables = {
+      inventory_pools: [{ id: 'pool_1' }],
+      checkout_holds: [
+        {
+          id: 'hld_1',
+          inventory_pool_id: 'pool_1',
+          checkout_session_id: 'cs_1',
+          ticket_type_id: 'tt_1',
+          quantity: 1,
+          status: 'active',
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
       checkout_sessions: [
         {
           id: 'cs_1',
@@ -8306,6 +8318,119 @@ describe('checkout confirm', () => {
     const body = res.json();
     expect(body.quote.totalCents).toBe(2500);
     expect(body.clientToken).toBe('tok_1');
+    await app.close();
+  });
+
+  it('GET /checkout/sessions/:sessionId expires an elapsed session and releases its holds', async () => {
+    const tables = {
+      inventory_pools: [{ id: 'pool_1' }],
+      checkout_holds: [
+        {
+          id: 'hld_1',
+          inventory_pool_id: 'pool_1',
+          checkout_session_id: 'cs_1',
+          ticket_type_id: 'tt_1',
+          quantity: 1,
+          status: 'active',
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'open',
+          currency: 'USD',
+          quote: { totalCents: 2500 },
+          buyer: { email: 'buyer@test.com' },
+          cart: { items: [{ ticketTypeId: 'tt_1', quantity: 1 }] },
+          expires_at: new Date(Date.now() - 1),
+          hold_id: 'hld_1',
+          order_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/checkout/sessions/cs_1',
+      headers: { 'x-checkout-session-token': 'tok_1' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe('expired');
+    expect(tables.checkout_sessions[0]?.status).toBe('expired');
+    expect(tables.checkout_holds[0]?.status).toBe('released');
+    await app.close();
+  });
+
+  it('GET /checkout/sessions/:sessionId expires a partially lost multi-ticket reservation', async () => {
+    const tables = {
+      inventory_pools: [{ id: 'pool_1' }, { id: 'pool_2' }],
+      checkout_holds: [
+        {
+          id: 'hld_1',
+          inventory_pool_id: 'pool_1',
+          checkout_session_id: 'cs_1',
+          ticket_type_id: 'tt_1',
+          quantity: 1,
+          status: 'active',
+          expires_at: new Date(Date.now() + 60_000),
+        },
+        {
+          id: 'hld_2',
+          inventory_pool_id: 'pool_2',
+          checkout_session_id: 'cs_1',
+          ticket_type_id: 'tt_2',
+          quantity: 1,
+          status: 'active',
+          expires_at: new Date(Date.now() - 1),
+        },
+      ],
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'open',
+          currency: 'USD',
+          quote: { totalCents: 5000 },
+          buyer: { email: 'buyer@test.com' },
+          cart: {
+            items: [
+              { ticketTypeId: 'tt_1', quantity: 1 },
+              { ticketTypeId: 'tt_2', quantity: 1 },
+            ],
+          },
+          expires_at: new Date(Date.now() + 60_000),
+          hold_id: 'hld_1',
+          order_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/checkout/sessions/cs_1',
+      headers: { 'x-checkout-session-token': 'tok_1' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe('expired');
+    expect(tables.checkout_holds.map((hold) => hold.status)).toEqual(['released', 'expired']);
     await app.close();
   });
 
@@ -8399,6 +8524,18 @@ describe('checkout confirm', () => {
 
   it('GET /checkout/sessions/:sessionId accepts matching Stripe client secret for pending confirmation', async () => {
     const tables = {
+      inventory_pools: [{ id: 'pool_1' }],
+      checkout_holds: [
+        {
+          id: 'hld_1',
+          inventory_pool_id: 'pool_1',
+          checkout_session_id: 'cs_1',
+          ticket_type_id: 'tt_1',
+          quantity: 1,
+          status: 'active',
+          expires_at: new Date(Date.now() + 60_000),
+        },
+      ],
       checkout_sessions: [
         {
           id: 'cs_1',
@@ -8430,6 +8567,8 @@ describe('checkout confirm', () => {
           id: 'pi_db_1',
           checkout_session_id: 'cs_1',
           client_secret: 'pi_secret_123',
+          order_id: null,
+          status: 'requires_payment_method',
         },
       ],
     };
