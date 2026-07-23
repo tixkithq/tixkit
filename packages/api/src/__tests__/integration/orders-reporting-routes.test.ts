@@ -44,6 +44,7 @@ const dbState = vi.hoisted(() => ({
     currency: 'USD',
   } as Record<string, unknown>,
   events: [] as Record<string, unknown>[],
+  organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }] as Record<string, unknown>[],
   lineItems: [] as Record<string, unknown>[],
   attendees: [] as Record<string, unknown>[],
   tickets: [] as Record<string, unknown>[],
@@ -256,6 +257,11 @@ function createMockDb(): unknown {
           };
         }
         if (table === 'events') return dbState.event;
+        if (table === 'organizations') {
+          return dbState.organizations.find((organization) =>
+            rowMatchesWheres(organization, query.wheres),
+          );
+        }
         if (table === 'idempotency_records') {
           return (
             dbState.idempotencyCheck ??
@@ -435,7 +441,9 @@ function createMockDb(): unknown {
                   (o) =>
                     o.id === attr.order_id &&
                     o.tenant_id === tenantId &&
-                    o.organization_id === orgId,
+                    o.organization_id === orgId &&
+                    o.is_test !== true &&
+                    ['paid', 'partially_refunded', 'refunded'].includes(String(o.status)),
                 );
                 joinedRows.push({
                   affiliateId: aff.id,
@@ -2448,7 +2456,7 @@ describe('reporting routes', () => {
     const app = await setupApp(reportingRoutes, principal);
     const res = await app.inject({ method: 'GET', url: '/organizations/org_1/reports/affiliate' });
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(403);
     expect(dbState.queryWheres).not.toContainEqual(
       expect.objectContaining({ table: 'affiliates' }),
     );
@@ -2465,7 +2473,7 @@ describe('reporting routes', () => {
     const app = await setupApp(reportingRoutes, principal);
     const res = await app.inject({ method: 'GET', url: '/organizations/org_1/reports/affiliate' });
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(403);
     expect(dbState.queryWheres).not.toContainEqual(
       expect.objectContaining({ table: 'affiliates' }),
     );

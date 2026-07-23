@@ -5715,6 +5715,8 @@ const rawOpenApiSpec = {
       },
       AffiliateReport: {
         type: 'object',
+        description:
+          'Affiliate revenue is max(0, total minus refunded) per qualifying order, so fully or over-refunded orders contribute zero revenue. Commission is summed per qualifying attribution, including fully or over-refunded orders.',
         properties: {
           organizationId: { type: 'string' },
           affiliates: {
@@ -16978,11 +16980,22 @@ const rawOpenApiSpec = {
     },
     '/organizations/{organizationId}/reports/affiliate': {
       get: {
+        operationId: 'getOrganizationsByOrganizationIdReportsAffiliate',
         summary: 'Get affiliate attribution report',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['reports.read'],
+        parameters: [
+          {
+            name: 'organizationId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
-            description: 'Affiliate metrics',
+            description:
+              'Affiliate metrics. Revenue is max(0, total minus refunded) per qualifying order, so fully or over-refunded orders contribute zero revenue; commission sums each qualifying attribution, including fully or over-refunded orders.',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/AffiliateReport' },
@@ -16998,7 +17011,17 @@ const rawOpenApiSpec = {
             },
           },
           '403': {
-            description: 'Forbidden',
+            description:
+              'Forbidden when reports.read is missing or the principal has brand or event scope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description:
+              'Organization not found or outside the principal tenant or organization scope',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },

@@ -7,6 +7,7 @@ import { ClerkAuthService } from '../../auth/clerk.js';
 import { EventRepository, type Database } from '@tixkit/db';
 import {
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   ValidationError,
   type Permission,
@@ -190,12 +191,10 @@ function requireReportEventAccess(
 }
 
 function requireUnscopedOrganizationReportPrincipal(principal: Principal) {
-  if (principal.type === 'system') return;
-
   const hasBrandScope = Array.isArray(principal.brandIds) && principal.brandIds.length > 0;
   const hasEventScope = Array.isArray(principal.eventIds) && principal.eventIds.length > 0;
   if (hasBrandScope || hasEventScope) {
-    throw new ValidationError('Resource-scoped principals cannot access organization-wide reports');
+    throw new ForbiddenError('Resource-scoped principals cannot access organization-wide reports');
   }
 }
 
@@ -667,6 +666,14 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, organizationId);
     requireUnscopedOrganizationReportPrincipal(principal);
 
+    const organization = await db
+      .selectFrom('organizations')
+      .select('id')
+      .where('id', '=', organizationId)
+      .where('tenant_id', '=', principal.tenantId)
+      .executeTakeFirst();
+    if (!organization) throw new NotFoundError('Organization', organizationId);
+
     // Single join query instead of N+1 per-affiliate queries.
     const rows = await db
       .selectFrom('affiliates')
@@ -675,7 +682,9 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
         join
           .onRef('orders.id', '=', 'attributions.order_id')
           .on('orders.tenant_id', '=', principal.tenantId)
-          .on('orders.organization_id', '=', organizationId),
+          .on('orders.organization_id', '=', organizationId)
+          .on('orders.is_test', '=', false)
+          .on('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']),
       )
       .select([
         'affiliates.id as affiliateId',
@@ -688,6 +697,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       ])
       .where('affiliates.tenant_id', '=', principal.tenantId)
       .where('affiliates.organization_id', '=', organizationId)
+      .orderBy('affiliates.id')
       .execute();
 
     const affiliateMap = new Map<
@@ -711,12 +721,14 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
         revenueAttributedCents: 0,
         commissionCents: 0,
       };
-      if (row.orderId && !aff.attributedOrderIds.has(row.orderId)) {
-        aff.attributedOrderIds.add(row.orderId);
-        aff.revenueAttributedCents += Math.max(
-          0,
-          Number(row.total_cents ?? 0) - Number(row.refunded_cents ?? 0),
-        );
+      if (row.orderId) {
+        if (!aff.attributedOrderIds.has(row.orderId)) {
+          aff.attributedOrderIds.add(row.orderId);
+          aff.revenueAttributedCents += Math.max(
+            0,
+            Number(row.total_cents ?? 0) - Number(row.refunded_cents ?? 0),
+          );
+        }
         aff.commissionCents += Number(row.commission_cents ?? 0);
       }
       affiliateMap.set(row.affiliateId, aff);

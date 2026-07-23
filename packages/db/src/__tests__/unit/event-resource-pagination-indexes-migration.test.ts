@@ -9,10 +9,10 @@ const source = readFileSync(
 );
 
 describe('EventResourcePaginationIndexesMigration', () => {
-  it('remains registered before the three newer additive index migrations', async () => {
+  it('remains registered before the four newer additive index migrations', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-4)).toBe('0096_event_resource_pagination_indexes');
+    expect(Object.keys(migrations).at(-5)).toBe('0096_event_resource_pagination_indexes');
     expect(migrations['0096_event_resource_pagination_indexes']).toBe(
       EventResourcePaginationIndexesMigration,
     );

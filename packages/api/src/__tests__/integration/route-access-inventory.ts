@@ -158,6 +158,10 @@ const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
     resolve(import.meta.dirname, 'event-route-authorization-db.integration.test.ts'),
   ],
   [
+    'affiliate-report-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'affiliate-report-route-authorization-db.integration.test.ts'),
+  ],
+  [
     'event-reporting-route-authorization-db.integration.test.ts',
     resolve(import.meta.dirname, 'event-reporting-route-authorization-db.integration.test.ts'),
   ],
@@ -406,6 +410,9 @@ const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
     ['getExportsByExportId', 'getExportsByExportIdEvents', 'getExportsByExportIdDownload'],
     { source: 'export-route-authorization-db.integration.test.ts' },
   ),
+  ...evidenceBindings(['getOrganizationsByOrganizationIdReportsAffiliate'], {
+    source: 'affiliate-report-route-authorization-db.integration.test.ts',
+  }),
   ...evidenceBindings(['getShortLinks', 'getShortLinksByIdClicks'], {
     source: 'short-link-route-authorization-db.integration.test.ts',
   }),
@@ -885,6 +892,7 @@ const delegatedAuthorizationGuards = new Set([
   'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
   'requireReportEventAccess',
+  'requireUnscopedOrganizationReportPrincipal',
   'requireUploadArtifactAccess',
   'scopedEvent',
   'scopedJob',
@@ -917,6 +925,7 @@ const organizationWideScopeGuards = new Set([
   'requireMigrationPermission',
   'requireOrganizationWideOAuthApplicationPrincipal',
   'requireOrganizationWideWebhookEndpointPrincipal',
+  'requireUnscopedOrganizationReportPrincipal',
 ]);
 const privacyRequestScopeGuards = new Set(['createPrivacyRequest']);
 const scopedJobAuthorizationOperations = new Set([

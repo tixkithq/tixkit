@@ -2847,6 +2847,37 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/organizations/{organizationId}/reports/affiliate'].get.responses['200']
         .content['application/json'].schema,
     ).toEqual({ $ref: '#/components/schemas/AffiliateReport' });
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/reports/affiliate'].get,
+    ).toMatchObject({
+      operationId: 'getOrganizationsByOrganizationIdReportsAffiliate',
+      security: [{ BearerAuth: [] }, { ApiKey: [] }],
+      'x-required-permissions': ['reports.read'],
+      parameters: [
+        {
+          name: 'organizationId',
+          in: 'path',
+          required: true,
+          schema: { type: 'string' },
+        },
+      ],
+    });
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/reports/affiliate'].get.responses,
+    ).toMatchObject({
+      '403': { description: expect.stringContaining('reports.read') },
+      '404': { description: expect.stringContaining('Organization not found') },
+    });
+    expect(
+      openApiSpec.paths['/organizations/{organizationId}/reports/affiliate'].get.responses['200']
+        .description,
+    ).toContain('max(0, total minus refunded) per qualifying order');
+    expect(openApiSpec.components.schemas.AffiliateReport.description).toContain(
+      'over-refunded orders contribute zero revenue',
+    );
+    expect(openApiSpec.components.schemas.AffiliateReport.description).toContain(
+      'Commission is summed per qualifying attribution',
+    );
     expect(openApiSpec.components.schemas.AttendanceReport.required).toEqual([
       'eventId',
       'totalAttendees',

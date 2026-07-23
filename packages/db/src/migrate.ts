@@ -100,6 +100,7 @@ import { EventResourcePaginationIndexesMigration } from './migrations/0096_event
 import { ProductCatalogPaginationIndexesMigration } from './migrations/0097_product_catalog_pagination_indexes.js';
 import { TicketListingPaginationIndexMigration } from './migrations/0098_ticket_listing_pagination_index.js';
 import { TicketTypeDependencyIndexesMigration } from './migrations/0099_ticket_type_batch_hot_path_indexes.js';
+import { AffiliateReportIndexesMigration } from './migrations/0100_affiliate_report_indexes.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -398,6 +399,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0097_product_catalog_pagination_indexes': ProductCatalogPaginationIndexesMigration,
       '0098_ticket_listing_pagination_index': TicketListingPaginationIndexMigration,
       '0099_ticket_type_batch_hot_path_indexes': TicketTypeDependencyIndexesMigration,
+      '0100_affiliate_report_indexes': AffiliateReportIndexesMigration,
     };
   }
 }

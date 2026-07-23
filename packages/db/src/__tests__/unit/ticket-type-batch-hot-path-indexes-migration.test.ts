@@ -9,9 +9,9 @@ const source = readFileSync(
 );
 
 describe('TicketTypeDependencyIndexesMigration', () => {
-  it('is the final registered migration', async () => {
+  it('remains registered immediately before the affiliate-report indexes', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
-    expect(Object.keys(migrations).at(-1)).toBe('0099_ticket_type_batch_hot_path_indexes');
+    expect(Object.keys(migrations).at(-1)).toBe('0100_affiliate_report_indexes');
     expect(migrations['0099_ticket_type_batch_hot_path_indexes']).toBe(
       TicketTypeDependencyIndexesMigration,
     );

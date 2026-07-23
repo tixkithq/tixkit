@@ -97,3 +97,4 @@ export { EventResourcePaginationIndexesMigration } from './0096_event_resource_p
 export { ProductCatalogPaginationIndexesMigration } from './0097_product_catalog_pagination_indexes.js';
 export { TicketListingPaginationIndexMigration } from './0098_ticket_listing_pagination_index.js';
 export { TicketTypeDependencyIndexesMigration } from './0099_ticket_type_batch_hot_path_indexes.js';
+export { AffiliateReportIndexesMigration } from './0100_affiliate_report_indexes.js';

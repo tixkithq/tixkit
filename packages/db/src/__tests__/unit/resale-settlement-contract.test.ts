@@ -128,7 +128,7 @@ describe('resale settlement persistence contract', () => {
 
   it('registers the settlement migration after the existing migration chain', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
-    expect(Object.keys(migrations).at(-1)).toBe('0099_ticket_type_batch_hot_path_indexes');
+    expect(Object.keys(migrations).at(-1)).toBe('0100_affiliate_report_indexes');
     expect(migrations).toHaveProperty('0089_resale_settlements');
   });
 

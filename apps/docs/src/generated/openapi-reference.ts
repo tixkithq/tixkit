@@ -18611,9 +18611,14 @@ export const apiReferenceOperations = [
     "security": [
       {
         "BearerAuth": []
+      },
+      {
+        "ApiKey": []
       }
     ],
-    "requiredPermissions": null,
+    "requiredPermissions": [
+      "reports.read"
+    ],
     "parameters": [
       {
         "name": "organizationId",
@@ -18627,7 +18632,7 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Affiliate metrics",
+        "description": "Affiliate metrics. Revenue is max(0, total minus refunded) per qualifying order, so fully or over-refunded orders contribute zero revenue; commission sums each qualifying attribution, including fully or over-refunded orders.",
         "content": {
           "application/json": {
             "schema": {
@@ -18667,7 +18672,24 @@ export const apiReferenceOperations = [
         }
       },
       "403": {
-        "description": "Forbidden",
+        "description": "Forbidden when reports.read is missing or the principal has brand or event scope",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Organization not found or outside the principal tenant or organization scope",
         "content": {
           "application/json": {
             "schema": {
@@ -36806,7 +36828,7 @@ export const apiReferenceSchemas = [
   {
     "name": "AffiliateReport",
     "type": "object",
-    "description": "",
+    "description": "Affiliate revenue is max(0, total minus refunded) per qualifying order, so fully or over-refunded orders contribute zero revenue. Commission is summed per qualifying attribution, including fully or over-refunded orders.",
     "required": [
       "organizationId",
       "affiliates"

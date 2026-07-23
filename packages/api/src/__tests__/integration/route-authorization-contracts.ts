@@ -661,6 +661,24 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ),
 ]);
 
+export const AFFILIATE_REPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'GET',
+    operationId: 'getOrganizationsByOrganizationIdReportsAffiliate',
+    path: '/organizations/{organizationId}/reports/affiliate',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    policyCondition: { discriminator: 'principal-scope', value: 'organization-wide' },
+    policyDeniedBoundaries: ['brand', 'event'],
+    policyDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    resourceParameters: ['organizationId'],
+    sideEffectAssertions: [],
+    source: 'affiliate-report-route-authorization-db.integration.test.ts',
+  }),
+]);
+
 export const EVENT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   denialContract({
     authorizedControl: { required: true, status: 200 },
@@ -2434,6 +2452,7 @@ export const AGENT_CONTROL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze(
 
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...AFFILIATE_REPORT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_LIST_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_CREATE_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...EVENT_MEDIA_READ_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
