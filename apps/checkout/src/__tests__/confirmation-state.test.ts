@@ -90,6 +90,23 @@ describe('confirmation state derivation', () => {
     expect(deriveState(null, 'succeeded')).toBe('pending');
   });
 
+  it('treats redirect_status=processing as non-authoritative for terminal outcomes', () => {
+    expect(deriveState(makeSession('pending_payment'), 'processing')).toBe('pending');
+    expect(deriveState(makeSession('open'), 'processing')).toBe('pending');
+    expect(deriveState(makeSession('completed'), 'processing')).toBe('confirmed');
+    expect(deriveState(makeSession('failed'), 'processing')).toBe('failed');
+    expect(deriveState(makeSession('cancelled'), 'processing')).toBe('cancelled');
+    expect(deriveState(null, 'processing')).toBe('unknown');
+  });
+
+  it('never lets a client redirect_status invent an order without a completed session', () => {
+    for (const redirect of ['succeeded', 'processing', 'failed', null] as const) {
+      expect(deriveState(makeSession('pending_payment'), redirect) === 'confirmed').toBe(false);
+      expect(deriveState(makeSession('open'), redirect) === 'confirmed').toBe(false);
+    }
+    expect(deriveState(makeSession('completed'), 'failed')).toBe('confirmed');
+  });
+
   it('returns a valid ConfirmationState for every input', () => {
     const states: ConfirmationState[] = [
       'loading',

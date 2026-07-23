@@ -372,4 +372,74 @@ describe('ConfirmationClient', () => {
     expect(isRetryableMock).toHaveBeenCalledWith(terminalError);
     expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps processing UI while session is pending_payment even if redirect_status=succeeded', async () => {
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&redirect_status=succeeded&payment_intent=pi_processing',
+    );
+    checkoutApiMock.getSession.mockResolvedValue(pendingSession);
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByText('Processing your payment')).toBeVisible();
+    expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
+    expect(screen.queryByText('Payment failed')).not.toBeInTheDocument();
+    expect(checkoutApiMock.getWalletPasses).not.toHaveBeenCalled();
+  });
+
+  it('shows payment failed when session is still pending and redirect_status=failed (auth decline path)', async () => {
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&redirect_status=failed&payment_intent=pi_declined',
+    );
+    checkoutApiMock.getSession.mockResolvedValue(pendingSession);
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Payment failed' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Try again' })).toBeVisible();
+    expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add to Wallet')).not.toBeInTheDocument();
+  });
+
+  it('shows cancelled when the server session is cancelled regardless of redirect_status', async () => {
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&redirect_status=succeeded&payment_intent=pi_cancel',
+    );
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...pendingSession,
+      status: 'cancelled',
+      orderId: null,
+    });
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Order cancelled' })).toBeVisible();
+    expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { level: 1, name: 'Payment failed' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('promotes pending to confirmed only after the backend session status becomes completed', async () => {
+    vi.useFakeTimers();
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&redirect_status=processing&payment_intent=pi_slow',
+    );
+    checkoutApiMock.getSession
+      .mockResolvedValueOnce(pendingSession)
+      .mockResolvedValueOnce(confirmedSession);
+
+    render(<ConfirmationClient />);
+    await flushAsyncWork();
+
+    expect(screen.getByText('Processing your payment')).toBeInTheDocument();
+    expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(screen.getByText('What happens next')).toBeInTheDocument();
+    expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(2);
+  });
 });

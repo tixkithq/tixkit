@@ -166,11 +166,20 @@ export function PaymentHandoff({
   }
 
   async function handlePay() {
+    if (submitting) return;
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      onError('You appear to be offline. Reconnect, then try payment again.');
+      return;
+    }
+
     if (isLocalCapture) {
       setSubmitting(true);
       const url = new URL(returnUrl);
       url.searchParams.set('payment_intent', localCaptureIntentId(clientSecret));
       url.searchParams.set('payment_intent_client_secret', clientSecret);
+      // Local capture is a synthetic test harness only. It must never be treated
+      // as proof of real card authentication success outside local capture mode.
       url.searchParams.set('redirect_status', 'succeeded');
       window.location.assign(url.toString());
       return;
@@ -195,6 +204,7 @@ export function PaymentHandoff({
         redirect: 'if_required',
       });
       if (error) {
+        // Prefer Stripe's message; authentication/cancel/decline all surface here.
         onError(error.message ?? 'Payment failed.');
         return;
       }
@@ -210,6 +220,8 @@ export function PaymentHandoff({
       if (confirmedIntent) {
         const url = new URL(returnUrl);
         url.searchParams.set('payment_intent', confirmedIntent.id);
+        // client_secret is required by Stripe return handling; confirmation page
+        // strips it from the address bar immediately and never logs it.
         url.searchParams.set('payment_intent_client_secret', clientSecret);
         url.searchParams.set('redirect_status', stripeRedirectStatus(confirmedIntent.status));
         window.location.assign(url.toString());
@@ -217,7 +229,11 @@ export function PaymentHandoff({
       }
       onError('Payment confirmation did not return a payment intent.');
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Payment failed.');
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Payment failed due to a network error. Check your connection and try again.';
+      onError(message);
     } finally {
       setSubmitting(false);
     }
