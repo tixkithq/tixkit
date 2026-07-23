@@ -608,39 +608,83 @@ export function CheckInConsole({
                     </div>
                   </>
                 )}
-                <div className="rounded-xl border bg-background px-4 py-3 text-center text-sm">
-                  <span className="font-semibold tabular-nums">{scanner.acceptedScanCount}</span>{' '}
-                  <span className="text-muted-foreground">accepted on this device</span>
-                  <span className="mx-2 text-muted-foreground" aria-hidden="true">
-                    ·
-                  </span>
-                  <output className="text-muted-foreground" aria-live="polite">
-                    {scanner.offlinePreparing
-                      ? 'Preparing verified offline check-in'
-                      : scanner.offlineReady
-                        ? `Offline ready${
-                            scanner.pendingOfflineCount > 0
-                              ? ` · ${scanner.pendingOfflineCount} pending sync`
-                              : ''
-                          }`
-                        : 'Online check-in only'}
-                  </output>
-                  {scanner.pendingOfflineCount > 0 ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="ml-3"
-                      disabled={scanner.offlineSyncing}
-                      onClick={() => void scanner.syncPendingOffline()}
+                <div className="space-y-2">
+                  <div
+                    className="flex flex-wrap items-center justify-center gap-2 rounded-xl border bg-background px-4 py-3 text-center text-sm"
+                    data-testid="scan-connectivity-status"
+                  >
+                    {typeof navigator !== 'undefined' && navigator.onLine === false ? (
+                      <WifiOff className="size-4 text-amber-600" aria-hidden="true" />
+                    ) : (
+                      <Wifi className="size-4 text-emerald-600" aria-hidden="true" />
+                    )}
+                    <span className="font-semibold tabular-nums">{scanner.acceptedScanCount}</span>{' '}
+                    <span className="text-muted-foreground">accepted on this device</span>
+                    <span className="mx-2 text-muted-foreground" aria-hidden="true">
+                      ·
+                    </span>
+                    <output className="text-muted-foreground" aria-live="polite">
+                      {scanner.offlinePreparing
+                        ? 'Preparing verified offline check-in'
+                        : scanner.offlineReady
+                          ? `Offline ready${
+                              scanner.pendingOfflineCount > 0
+                                ? ` · ${scanner.pendingOfflineCount} pending sync`
+                                : ''
+                            }`
+                          : 'Online check-in only'}
+                    </output>
+                    {scanner.pendingOfflineCount > 0 ? (
+                      <Badge variant="secondary" className="tabular-nums">
+                        {scanner.pendingOfflineCount} queued
+                      </Badge>
+                    ) : null}
+                    {scanner.pendingOfflineCount > 0 ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={scanner.offlineSyncing}
+                        onClick={() => void scanner.syncPendingOffline()}
+                      >
+                        {scanner.offlineSyncing ? 'Syncing offline scans…' : 'Sync offline scans'}
+                      </Button>
+                    ) : null}
+                  </div>
+                  {scanner.offlineSyncError ||
+                  scanner.scanError ||
+                  scanner.lastResult?.status === 'duplicate' ||
+                  scanner.lastResult?.status === 'invalid' ||
+                  scanner.scanning ? (
+                    <output
+                      className="block rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+                      aria-live="assertive"
+                      data-testid="scan-incident-banner"
                     >
-                      {scanner.offlineSyncing ? 'Syncing offline scans…' : 'Sync offline scans'}
-                    </Button>
-                  ) : null}
-                  {scanner.offlineSyncError ? (
-                    <p className="mt-2 text-destructive" role="alert">
-                      {scanner.offlineSyncError}
-                    </p>
+                      {scanner.scanning ? (
+                        <p className="font-medium">
+                          Scan in progress — wait before scanning again.
+                        </p>
+                      ) : null}
+                      {scanner.offlineSyncError ? (
+                        <p className="font-medium">
+                          Sync failed: {scanner.offlineSyncError}. Queued scans are retained.
+                        </p>
+                      ) : null}
+                      {scanner.scanError ? (
+                        <p className="font-medium">Scan error: {scanner.scanError}</p>
+                      ) : null}
+                      {scanner.lastResult?.status === 'duplicate' ? (
+                        <p className="font-medium">
+                          Duplicate ticket — already checked in. Do not admit again.
+                        </p>
+                      ) : null}
+                      {scanner.lastResult?.status === 'invalid' ? (
+                        <p className="font-medium">
+                          Invalid ticket — do not admit. Use manual lookup if needed.
+                        </p>
+                      ) : null}
+                    </output>
                   ) : null}
                 </div>
               </TabsContent>
