@@ -373,6 +373,23 @@ describe('ConfirmationClient', () => {
     expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(1);
   });
 
+  it('does not treat redirect_status=failed as a payment failure when the session cannot be read', async () => {
+    navigationState.searchParams = new URLSearchParams(
+      'sessionId=cs_1&redirect_status=failed&payment_intent=pi_unavailable',
+    );
+    checkoutApiMock.getSession.mockRejectedValueOnce(
+      new Error('Confirmation is temporarily unavailable'),
+    );
+
+    render(<ConfirmationClient />);
+
+    expect(await screen.findByText('Could not load order details')).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { level: 1, name: 'Payment failed' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
   it('keeps processing UI while session is pending_payment even if redirect_status=succeeded', async () => {
     navigationState.searchParams = new URLSearchParams(
       'sessionId=cs_1&redirect_status=succeeded&payment_intent=pi_processing',
@@ -387,7 +404,7 @@ describe('ConfirmationClient', () => {
     expect(checkoutApiMock.getWalletPasses).not.toHaveBeenCalled();
   });
 
-  it('shows payment failed when session is still pending and redirect_status=failed (auth decline path)', async () => {
+  it('keeps processing UI when the authoritative server session is pending_payment and redirect_status=failed', async () => {
     navigationState.searchParams = new URLSearchParams(
       'sessionId=cs_1&redirect_status=failed&payment_intent=pi_declined',
     );
@@ -395,10 +412,58 @@ describe('ConfirmationClient', () => {
 
     render(<ConfirmationClient />);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Payment failed' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Try again' })).toBeVisible();
+    expect(await screen.findByText('Processing your payment')).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { level: 1, name: 'Payment failed' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Try again' })).not.toBeInTheDocument();
     expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
     expect(screen.queryByText('Add to Wallet')).not.toBeInTheDocument();
+  });
+
+  it('stops polling after the bounded pending confirmation attempts and keeps a safe refresh state', async () => {
+    vi.useFakeTimers();
+    checkoutApiMock.getSession.mockResolvedValue(pendingSession);
+
+    render(<ConfirmationClient />);
+    await flushAsyncWork();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(6);
+    expect(screen.getByText('Processing your payment')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'We are still waiting for payment confirmation. Refresh this page to check again, and contact support if this continues.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Refresh status' })).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Start new order' })).not.toBeInTheDocument();
+  });
+
+  it('bounds retryable polling transport failures and retains the safe refresh state', async () => {
+    vi.useFakeTimers();
+    const transientError = new Error('temporary gateway failure');
+    checkoutApiMock.getSession
+      .mockResolvedValueOnce(pendingSession)
+      .mockRejectedValue(transientError);
+    isRetryableMock.mockReturnValue(true);
+
+    render(<ConfirmationClient />);
+    await flushAsyncWork();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(6);
+    expect(isRetryableMock).toHaveBeenCalledTimes(5);
+    expect(screen.getByRole('button', { name: 'Refresh status' })).toBeVisible();
+    expect(screen.queryByText('Could not load order details')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
   it('shows cancelled when the server session is cancelled regardless of redirect_status', async () => {

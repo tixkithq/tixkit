@@ -102,6 +102,19 @@ export function CheckInConsole({
     'connecting' | 'live' | 'reconnecting' | 'offline'
   >('connecting');
   const [streamError, setStreamError] = React.useState<string | null>(null);
+  const [isOnline, setIsOnline] = React.useState(true);
+
+  React.useEffect(() => {
+    const updateConnectivity = () => setIsOnline(navigator.onLine);
+
+    updateConnectivity();
+    window.addEventListener('online', updateConnectivity);
+    window.addEventListener('offline', updateConnectivity);
+    return () => {
+      window.removeEventListener('online', updateConnectivity);
+      window.removeEventListener('offline', updateConnectivity);
+    };
+  }, []);
 
   const {
     events,
@@ -613,11 +626,14 @@ export function CheckInConsole({
                     className="flex flex-wrap items-center justify-center gap-2 rounded-xl border bg-background px-4 py-3 text-center text-sm"
                     data-testid="scan-connectivity-status"
                   >
-                    {typeof navigator !== 'undefined' && navigator.onLine === false ? (
-                      <WifiOff className="size-4 text-amber-600" aria-hidden="true" />
-                    ) : (
+                    {isOnline ? (
                       <Wifi className="size-4 text-emerald-600" aria-hidden="true" />
+                    ) : (
+                      <WifiOff className="size-4 text-amber-600" aria-hidden="true" />
                     )}
+                    <output aria-live="polite" data-testid="scan-network-status">
+                      {isOnline ? 'Network online' : 'Network offline'}
+                    </output>
                     <span className="font-semibold tabular-nums">{scanner.acceptedScanCount}</span>{' '}
                     <span className="text-muted-foreground">accepted on this device</span>
                     <span className="mx-2 text-muted-foreground" aria-hidden="true">

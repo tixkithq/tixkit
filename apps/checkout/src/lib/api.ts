@@ -137,6 +137,7 @@ export type CheckoutQuote = {
   lineItems?: Array<{
     type?: string;
     ticketTypeId?: string;
+    eventOccurrenceId?: string;
     productId?: string;
     resaleListingId?: string;
     description: string;
@@ -945,6 +946,7 @@ export const checkoutApi = {
     sessionId: string,
     sessionToken?: string,
     paymentIntentClientSecret?: string,
+    signal?: AbortSignal,
   ): Promise<CheckoutSession> {
     const params = new URLSearchParams();
     if (paymentIntentClientSecret) {
@@ -953,7 +955,7 @@ export const checkoutApi = {
     const query = params.size ? `?${params.toString()}` : '';
     return apiRequest<CheckoutSession>(
       `/checkout/sessions/${encodeURIComponent(sessionId)}${query}`,
-      sessionToken ? { sessionToken } : undefined,
+      { ...(sessionToken ? { sessionToken } : {}), ...(signal ? { signal } : {}) },
     );
   },
 

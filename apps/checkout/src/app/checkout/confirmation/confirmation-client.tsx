@@ -61,6 +61,8 @@ type ResaleFormState = {
 
 type WalletPassStatus = 'idle' | 'loading' | 'ready' | 'missing_token' | 'error';
 
+const MAX_CONFIRMATION_POLL_ATTEMPTS = 5;
+
 function createResaleIdempotencyKey(sessionId: string, ticketId: string): string {
   const random =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -108,6 +110,7 @@ export default function ConfirmationClient() {
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pollingExhausted, setPollingExhausted] = useState(false);
   const [, setPollCount] = useState(0);
   const pollCountRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -148,6 +151,7 @@ export default function ConfirmationClient() {
     // Reset the backoff counter for each new confirmation load cycle.
     pollCountRef.current = 0;
     setPollCount(0);
+    setPollingExhausted(false);
 
     async function load() {
       if (!sessionId) {
@@ -181,6 +185,10 @@ export default function ConfirmationClient() {
 
     function startPolling(id: string, token?: string, stripeClientSecret?: string) {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (pollCountRef.current >= MAX_CONFIRMATION_POLL_ATTEMPTS) {
+        setPollingExhausted(true);
+        return;
+      }
       // Use a ref so the recursive closure always sees the latest count.
       // The stale `pollCount` state captured by this closure previously
       // pinned every delay to 2s. The ref drives the real backoff.
@@ -433,10 +441,32 @@ export default function ConfirmationClient() {
               <ClockIcon className="size-8 text-amber-500" />
               <h2 className="text-lg font-semibold">Processing your payment</h2>
               <p className="text-sm text-muted-foreground">
-                We are confirming your payment with the processor. This page will update
-                automatically once your payment is confirmed.
+                {pollingExhausted
+                  ? 'We are still waiting for payment confirmation. Refresh this page to check again, and contact support if this continues.'
+                  : 'We are confirming your payment with the processor. This page will update automatically once your payment is confirmed.'}
               </p>
-              <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+              {pollingExhausted ? (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => window.location.reload()}
+                  >
+                    <RefreshCwIcon className="size-4" />
+                    Refresh status
+                  </Button>
+                  {brand.supportUrl ? (
+                    <Button asChild variant="ghost" className="gap-1.5">
+                      <a href={brand.supportUrl} target="_blank" rel="noreferrer">
+                        Contact support
+                      </a>
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+              )}
             </CardContent>
           </Card>
         ) : null}

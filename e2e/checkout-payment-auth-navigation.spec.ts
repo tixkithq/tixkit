@@ -2,8 +2,8 @@
  * Checkout payment authentication / navigation coverage that does not depend on
  * the always-succeeded local-capture redirect fixture.
  *
- * These tests mock checkout API + Stripe-adjacent browser surfaces so Chromium
- * can assert:
+ * These tests mock checkout API + Stripe-adjacent browser surfaces so browser
+ * runs can assert:
  * - redirect_status is never treated as order authority
  * - decline / processing / cancelled session outcomes
  * - refresh and back navigation do not invent a completed order
@@ -60,6 +60,8 @@ async function installCheckoutConfirmationMocks(
   },
 ) {
   const token = input.token ?? 'tok_auth_nav';
+  const fallbackSession =
+    typeof input.session === 'function' ? baseSession({ id: input.sessionId }) : input.session;
   await page.addInitScript(
     ({ sessionId, token: storedToken }) => {
       window.sessionStorage.setItem(`tk:session:${sessionId}`, storedToken);
@@ -68,10 +70,11 @@ async function installCheckoutConfirmationMocks(
   );
 
   await page.route('**/v1/**', async (route) => {
-    const url = route.request().url();
-    const session = typeof input.session === 'function' ? input.session() : input.session;
+    const request = route.request();
+    const url = new URL(request.url());
+    const sessionPath = `/v1/checkout/sessions/${encodeURIComponent(input.sessionId)}`;
 
-    if (url.includes(`/v1/checkout/sessions/${input.sessionId}/wallet-passes`)) {
+    if (request.method() === 'GET' && url.pathname === `${sessionPath}/wallet-passes`) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -80,11 +83,8 @@ async function installCheckoutConfirmationMocks(
       return;
     }
 
-    if (
-      url.includes(`/v1/checkout/sessions/${input.sessionId}`) &&
-      !url.includes('/confirm') &&
-      !url.includes('/handoff')
-    ) {
+    if (request.method() === 'GET' && url.pathname === sessionPath) {
+      const session = typeof input.session === 'function' ? input.session() : input.session;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -93,28 +93,34 @@ async function installCheckoutConfirmationMocks(
       return;
     }
 
-    if (url.includes(`/v1/public/events/${session.eventId}`)) {
+    if (
+      request.method() === 'GET' &&
+      url.pathname === `/v1/public/events/${encodeURIComponent(fallbackSession.eventId)}`
+    ) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          id: session.eventId,
+          id: fallbackSession.eventId,
           title: 'Auth Navigation Night',
           status: 'published',
           timezone: 'America/New_York',
           startsAt: '2026-07-17T19:00:00.000Z',
-          brandId: session.brandId,
+          brandId: fallbackSession.brandId,
         }),
       });
       return;
     }
 
-    if (url.includes(`/v1/public/brands/${session.brandId}`)) {
+    if (
+      request.method() === 'GET' &&
+      url.pathname === `/v1/public/brands/${encodeURIComponent(fallbackSession.brandId)}`
+    ) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          id: session.brandId,
+          id: fallbackSession.brandId,
           name: 'Platform',
           supportUrl: null,
           termsUrl: null,
@@ -133,7 +139,7 @@ async function installCheckoutConfirmationMocks(
   });
 }
 
-test.describe('checkout payment auth and navigation (mocked, Chromium)', () => {
+test.describe('mocked confirmation authority and navigation', () => {
   test('pending_payment + redirect_status=succeeded stays processing (session is authoritative)', async ({
     page,
   }) => {
@@ -154,7 +160,7 @@ test.describe('checkout payment auth and navigation (mocked, Chromium)', () => {
     await expect(page.getByText('Payment failed')).toHaveCount(0);
   });
 
-  test('auth decline path: pending session + redirect_status=failed shows payment failed', async ({
+  test('pending session + redirect_status=failed remains processing until the server resolves it', async ({
     page,
   }) => {
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
@@ -168,8 +174,9 @@ test.describe('checkout payment auth and navigation (mocked, Chromium)', () => {
       `${checkoutBaseUrl}/checkout/confirmation?sessionId=${sessionId}&redirect_status=failed&payment_intent=pi_declined`,
     );
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Payment failed' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Try again' })).toBeVisible();
+    await expect(page.getByText('Processing your payment')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Payment failed' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Try again' })).toHaveCount(0);
     await expect(page.getByText('What happens next')).toHaveCount(0);
     await expect(page.getByText('Add to Wallet')).toHaveCount(0);
   });
@@ -220,6 +227,22 @@ test.describe('checkout payment auth and navigation (mocked, Chromium)', () => {
     await expect(page.getByText('What happens next')).toHaveCount(0);
   });
 
+  test('expired backend session wins over redirect_status=succeeded', async ({ page }) => {
+    await requireReachable(page, checkoutBaseUrl, 'checkout app');
+    const sessionId = 'cs_auth_expired';
+    await installCheckoutConfirmationMocks(page, {
+      sessionId,
+      session: baseSession({ id: sessionId, status: 'expired', orderId: null }),
+    });
+
+    await page.goto(
+      `${checkoutBaseUrl}/checkout/confirmation?sessionId=${sessionId}&redirect_status=succeeded&payment_intent=pi_expired`,
+    );
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Checkout expired' })).toBeVisible();
+    await expect(page.getByText('What happens next')).toHaveCount(0);
+  });
+
   test('refresh on confirmation reloads session state and does not invent completion from URL', async ({
     page,
   }) => {
@@ -243,7 +266,7 @@ test.describe('checkout payment auth and navigation (mocked, Chromium)', () => {
     await page.reload();
     await expect(page.getByText('Processing your payment')).toBeVisible();
     await expect(page.getByText('What happens next')).toHaveCount(0);
-    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(calls).toBe(2);
   });
 
   test('browser back from confirmation to checkout entry does not keep a fake completed order shell', async ({

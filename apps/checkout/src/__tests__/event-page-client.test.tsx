@@ -58,6 +58,7 @@ type MockedCallable<TArgs extends unknown[], TResult> = ((...args: TArgs) => TRe
   mockResolvedValue(value: unknown): MockedCallable<TArgs, TResult>;
   mockRejectedValue(value: unknown): MockedCallable<TArgs, TResult>;
   mockImplementation(fn: (...args: TArgs) => TResult): MockedCallable<TArgs, TResult>;
+  mock: { calls: TArgs[] };
 };
 
 const publicApiMock = publicApi as unknown as {
@@ -404,5 +405,33 @@ describe('EventPageClient Puck runtime', () => {
     expect(view.getByTestId('availability-status-banner')).toBeVisible();
     expect(view.getByRole('button', { name: 'Retry availability' })).toBeVisible();
     expect(view.queryByRole('button', { name: /Get tickets/i })).not.toBeInTheDocument();
+  });
+
+  it('runs an availability retry once, exposes refreshing state, and aborts it on cleanup', async () => {
+    publicApiMock.getEventPageBootstrap.mockRejectedValue(
+      new CheckoutApiError('BOOTSTRAP_UNAVAILABLE', 'Bootstrap unavailable', 503),
+    );
+    publicApiMock.getEvent.mockResolvedValue(eventFixture({ id: 'evt_retry' }));
+    publicApiMock.getEventPage.mockResolvedValue(null);
+    publicApiMock.getResaleListings.mockResolvedValue(emptyResaleListings);
+    let retrySignal: AbortSignal | undefined;
+    (publicApiMock.getAvailability as unknown as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new CheckoutApiError('NETWORK_ERROR', 'offline', 0))
+      .mockImplementationOnce((_eventId: string, signal?: AbortSignal) => {
+        retrySignal = signal;
+        return new Promise<AvailabilityItem[]>(() => undefined);
+      });
+
+    const view = render(React.createElement(EventPageClient, { eventId: 'evt_retry' }));
+    const retry = await view.findByRole('button', { name: 'Retry availability' });
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(publicApiMock.getAvailability.mock.calls).toHaveLength(2));
+    expect(view.getByTestId('availability-status-banner')).toHaveAttribute('aria-busy', 'true');
+    expect(view.getByRole('button', { name: 'Refreshing availability…' })).toBeDisabled();
+
+    view.unmount();
+    expect(retrySignal?.aborted).toBe(true);
   });
 });

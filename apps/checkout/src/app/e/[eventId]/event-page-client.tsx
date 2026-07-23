@@ -82,10 +82,16 @@ export default function EventPageClient({
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [availabilityStatus, setAvailabilityStatus] = useState<
-    'current' | 'stale' | 'unavailable' | 'loading'
+    'current' | 'stale' | 'unavailable' | 'loading' | 'refreshing'
   >(() => (initialBootstrap ? 'current' : 'loading'));
   const [availabilityMessage, setAvailabilityMessage] = useState<string | null>(null);
   const availabilityGenerationRef = useRef(0);
+  const availabilityRef = useRef(availability);
+  const availabilityRefreshRef = useRef<{
+    eventId: string;
+    controller: AbortController;
+    promise: Promise<void>;
+  } | null>(null);
   const requestedLocale = useMemo(() => resolveEventPageLocale(locale), [locale]);
   const resolvedLocale = useMemo(
     () => resolveEventPageLocale(contentPage?.document.locale ?? requestedLocale),
@@ -117,28 +123,67 @@ export default function EventPageClient({
     ),
   );
 
-  const refreshAvailability = useCallback(async () => {
+  useEffect(() => {
+    availabilityRef.current = availability;
+  }, [availability]);
+
+  useEffect(() => {
+    return () => {
+      availabilityGenerationRef.current += 1;
+      const active = availabilityRefreshRef.current;
+      active?.controller.abort();
+      if (availabilityRefreshRef.current === active) {
+        availabilityRefreshRef.current = null;
+      }
+    };
+  }, [event?.id, eventId]);
+
+  const refreshAvailability = useCallback((): Promise<void> => {
     const targetEventId = event?.id ?? eventId;
-    if (!targetEventId) return;
+    if (!targetEventId) return Promise.resolve();
+    const active = availabilityRefreshRef.current;
+    if (active?.eventId === targetEventId) return active.promise;
+
+    active?.controller.abort();
     const generation = ++availabilityGenerationRef.current;
-    setAvailabilityStatus((current) => (current === 'current' ? 'loading' : current));
-    try {
-      const next = await publicApi.getAvailability(targetEventId);
-      if (generation !== availabilityGenerationRef.current) return;
-      setAvailability(next);
-      setAvailabilityStatus('current');
-      setAvailabilityMessage(null);
-    } catch (err) {
-      if (generation !== availabilityGenerationRef.current) return;
-      const hasTickets = availability.length > 0;
-      setAvailabilityStatus(hasTickets ? 'stale' : 'unavailable');
-      setAvailabilityMessage(
-        hasTickets
-          ? 'Ticket availability may be out of date. Event details are still shown.'
-          : userFacingMessage(err),
-      );
-    }
-  }, [availability.length, event?.id, eventId]);
+    const controller = new AbortController();
+    setAvailabilityStatus('refreshing');
+    const promise = (async () => {
+      try {
+        const next = await publicApi.getAvailability(targetEventId, controller.signal);
+        if (
+          controller.signal.aborted ||
+          generation !== availabilityGenerationRef.current ||
+          availabilityRefreshRef.current?.controller !== controller
+        )
+          return;
+        availabilityRef.current = next;
+        setAvailability(next);
+        setAvailabilityStatus('current');
+        setAvailabilityMessage(null);
+      } catch (err) {
+        if (
+          controller.signal.aborted ||
+          generation !== availabilityGenerationRef.current ||
+          availabilityRefreshRef.current?.controller !== controller
+        )
+          return;
+        const hasTickets = availabilityRef.current.length > 0;
+        setAvailabilityStatus(hasTickets ? 'stale' : 'unavailable');
+        setAvailabilityMessage(
+          hasTickets
+            ? 'Ticket availability may be out of date. Event details are still shown.'
+            : userFacingMessage(err),
+        );
+      } finally {
+        if (availabilityRefreshRef.current?.controller === controller) {
+          availabilityRefreshRef.current = null;
+        }
+      }
+    })();
+    availabilityRefreshRef.current = { eventId: targetEventId, controller, promise };
+    return promise;
+  }, [event?.id, eventId]);
 
   useEffect(() => {
     if (initialBootstrap) {
@@ -509,6 +554,7 @@ export default function EventPageClient({
             <output
               className="mx-auto block w-full max-w-3xl px-4 pt-6 sm:px-6"
               aria-live="polite"
+              aria-busy={availabilityStatus === 'refreshing'}
               data-testid="availability-status-banner"
             >
               <div className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
@@ -518,9 +564,12 @@ export default function EventPageClient({
                   variant="outline"
                   size="sm"
                   className="w-fit shrink-0"
+                  disabled={availabilityStatus === 'refreshing'}
                   onClick={() => void refreshAvailability()}
                 >
-                  Retry availability
+                  {availabilityStatus === 'refreshing'
+                    ? 'Refreshing availability…'
+                    : 'Retry availability'}
                 </Button>
               </div>
             </output>

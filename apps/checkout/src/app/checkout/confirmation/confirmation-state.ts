@@ -22,7 +22,9 @@ export function deriveState(
   redirectStatus: string | null,
 ): ConfirmationState {
   if (!session) {
-    if (redirectStatus === 'failed') return 'failed';
+    // Redirect query parameters are hints from a browser/provider return, not
+    // proof of a payment outcome. Never expose a terminal payment state until
+    // the checkout service has supplied an authoritative session.
     return redirectStatus === 'succeeded' ? 'pending' : 'unknown';
   }
 
@@ -31,9 +33,9 @@ export function deriveState(
   if (status === 'expired') return 'expired';
   if (status === 'cancelled') return 'cancelled';
   if (status === 'completed') return 'confirmed';
-  if (redirectStatus === 'failed') return 'failed';
+  // An open or pending session can still settle after a provider redirect
+  // reports a failure. The server is authoritative while it remains pending.
   if (status === 'pending_payment') return 'pending';
-  // Paid orders have session status "completed" but the order status may be "paid".
   if (status === 'open') return 'pending';
   return 'unknown';
 }

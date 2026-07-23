@@ -74,10 +74,13 @@ describe('confirmation state derivation', () => {
     },
   );
 
-  it('returns failed for redirect_status=failed when the session is absent or non-terminal', () => {
-    expect(deriveState(null, 'failed')).toBe('failed');
-    expect(deriveState(makeSession('pending_payment'), 'failed')).toBe('failed');
-    expect(deriveState(makeSession('open'), 'failed')).toBe('failed');
+  it('keeps authoritative open and pending sessions safe when redirect_status=failed', () => {
+    expect(deriveState(makeSession('pending_payment'), 'failed')).toBe('pending');
+    expect(deriveState(makeSession('open'), 'failed')).toBe('pending');
+  });
+
+  it('treats redirect_status=failed without a server session as unknown', () => {
+    expect(deriveState(null, 'failed')).toBe('unknown');
   });
 
   it('returns unknown for null session and null redirect status', () => {
@@ -99,11 +102,13 @@ describe('confirmation state derivation', () => {
     expect(deriveState(null, 'processing')).toBe('unknown');
   });
 
-  it('never lets a client redirect_status invent an order without a completed session', () => {
+  it('never lets a client redirect_status invent a terminal payment outcome', () => {
     for (const redirect of ['succeeded', 'processing', 'failed', null] as const) {
       expect(deriveState(makeSession('pending_payment'), redirect) === 'confirmed').toBe(false);
       expect(deriveState(makeSession('open'), redirect) === 'confirmed').toBe(false);
     }
+    expect(deriveState(null, 'failed')).not.toBe('failed');
+    expect(deriveState(null, 'failed')).not.toBe('confirmed');
     expect(deriveState(makeSession('completed'), 'failed')).toBe('confirmed');
   });
 

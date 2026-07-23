@@ -101,7 +101,7 @@ type Props = {
 };
 
 /** Browser clock may only trigger revalidation; server status is authoritative. */
-export type SessionHoldStatus = 'ok' | 'checking' | 'expired' | 'revalidation_failed';
+export type SessionHoldStatus = 'ok' | 'checking' | 'expired' | 'terminal' | 'revalidation_failed';
 
 /** setTimeout delays above 32-bit signed max overflow and can fire immediately. */
 export const MAX_EXPIRY_TIMER_MS = 2_147_483_647;
@@ -114,6 +114,42 @@ export function parseSessionExpiresAtMs(expiresAt: string | undefined | null): n
 
 export function isServerSessionExpired(session: Pick<CheckoutSession, 'status'>): boolean {
   return session.status === 'expired' || session.status === 'cancelled';
+}
+
+type ServerSessionTransition = 'confirm' | 'payment' | 'completed' | 'terminal';
+
+/**
+ * Session status is server-authoritative. Keep this table deliberately small:
+ * a payment handoff is valid only for a pending payment with no completed order;
+ * every unknown state fails closed instead of reopening checkout.
+ */
+function serverSessionTransition(session: CheckoutSession): ServerSessionTransition {
+  if (session.orderId || session.status === 'completed' || session.status === 'succeeded') {
+    return 'completed';
+  }
+  if (
+    session.status === 'expired' ||
+    session.status === 'cancelled' ||
+    session.status === 'failed'
+  ) {
+    return 'terminal';
+  }
+  if (session.status === 'pending_payment') return 'payment';
+  if (session.status === 'open' || session.status === 'pending') return 'confirm';
+  return 'terminal';
+}
+
+function terminalSessionMessage(session: Pick<CheckoutSession, 'status'>): string {
+  if (session.status === 'expired') {
+    return 'Your checkout session expired. Start a new order to reserve tickets again.';
+  }
+  if (session.status === 'cancelled') {
+    return 'This checkout session was cancelled. Start a new order to reserve tickets again.';
+  }
+  if (session.status === 'failed') {
+    return 'This checkout session can no longer accept payment. Start a new order to try again.';
+  }
+  return 'This checkout session is not payable. Start a new order to try again.';
 }
 
 function isCheckoutExpiredError(error: unknown): boolean {
@@ -195,7 +231,7 @@ export default function CheckoutFlow({
   productFilterParam,
   resaleListingId,
 }: Props) {
-  const router = useRouter();
+  const { push } = useRouter();
   useEffect(() => initializeEmbedHandshake(), []);
   const [eventId, setEventId] = useState(initialEventId);
   const [sessionId, setSessionId] = useState(initialSessionId);
@@ -264,6 +300,8 @@ export default function CheckoutFlow({
   const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revalidateAbortRef = useRef<AbortController | null>(null);
   const revalidateInFlightRef = useRef(false);
+  const confirmationNavigationRef = useRef<string | null>(null);
+  const resumeRequestGenerationRef = useRef(0);
   /** After server confirms a still-valid hold, do not auto-loop when browser clock already passed expiresAt. */
   const serverConfirmedHoldRef = useRef<{ sessionId: string; expiresAt: string } | null>(null);
   const expiryRestartButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -311,6 +349,72 @@ export default function CheckoutFlow({
     createSessionInFlightRef.current = false;
     confirmSessionInFlightRef.current = false;
   }, []);
+
+  const navigateToConfirmation = useCallback(
+    (nextSessionId: string, orderId?: string | null) => {
+      if (!nextSessionId) return;
+      const params = new URLSearchParams({ sessionId: nextSessionId });
+      if (orderId) params.set('orderId', orderId);
+      const destination = `/checkout/confirmation?${params.toString()}`;
+      if (confirmationNavigationRef.current === destination) return;
+      confirmationNavigationRef.current = destination;
+      push(destination);
+    },
+    [push],
+  );
+
+  const applyServerSessionState = useCallback(
+    (loaded: CheckoutSession): ServerSessionTransition => {
+      const transition = serverSessionTransition(loaded);
+      sessionRef.current = loaded;
+      setSession(loaded);
+      if (loaded.clientToken) {
+        setSessionToken(loaded.clientToken);
+        storeSessionToken(loaded.id, loaded.clientToken);
+      }
+
+      if (transition === 'completed') {
+        clearExpiryTimer();
+        setConfirmResult(null);
+        setPhase('completed');
+        setHoldStatus('ok', null);
+        navigateToConfirmation(loaded.id, loaded.orderId);
+        return transition;
+      }
+
+      if (transition === 'terminal') {
+        clearExpiryTimer();
+        serverConfirmedHoldRef.current = null;
+        setConfirmResult(null);
+        createSessionAttemptRef.current = undefined;
+        confirmSessionAttemptRef.current = undefined;
+        createSessionInFlightRef.current = false;
+        confirmSessionInFlightRef.current = false;
+        setPhase('confirm');
+        setHoldStatus(
+          isServerSessionExpired(loaded) ? 'expired' : 'terminal',
+          terminalSessionMessage(loaded),
+        );
+        return transition;
+      }
+
+      // A resumed pending_payment session does not include a capability for
+      // the payment provider. Re-confirming with the existing session is
+      // idempotent server-side and is the only authority that may restore a
+      // client secret; never synthesize one in the browser.
+      if (transition === 'payment' && !confirmResult) {
+        setPhase('confirm');
+        setValidationError('Resume payment to securely restore your checkout session.');
+      } else {
+        setPhase(transition);
+      }
+      setHoldStatus('ok', null);
+      return transition;
+    },
+    [clearExpiryTimer, confirmResult, navigateToConfirmation, setHoldStatus],
+  );
+  const applyServerSessionStateRef = useRef(applyServerSessionState);
+  applyServerSessionStateRef.current = applyServerSessionState;
 
   const restartCheckoutAfterExpiry = useCallback(() => {
     clearExpiryTimer();
@@ -788,14 +892,15 @@ export default function CheckoutFlow({
   // token. This must NOT re-run when we create a new session mid-flow (that
   // would reset the phase back to "select"), so it reads the initial values
   // and only fires on mount.
-  const didResumeRef = useRef(false);
   useEffect(() => {
-    if (didResumeRef.current) return;
-    didResumeRef.current = true;
-    let cancelled = false;
+    const requestGeneration = ++resumeRequestGenerationRef.current;
+    const controller = new AbortController();
+    let active = true;
+    const isCurrentRequest = () =>
+      active && requestGeneration === resumeRequestGenerationRef.current;
     async function loadSession() {
       if (!initialSessionId) {
-        setInitialLoading(false);
+        if (isCurrentRequest()) setInitialLoading(false);
         return;
       }
       // Prefer the token from sessionStorage (resume mechanism), then from
@@ -810,27 +915,31 @@ export default function CheckoutFlow({
       }
       const handoff = token ? '' : fragmentHandoff;
       if (!token && !handoff) {
-        setInitialLoading(false);
+        if (isCurrentRequest()) setInitialLoading(false);
         return;
       }
       setLoading(true);
       try {
         const loaded = handoff
           ? await checkoutApi.exchangeHandoff(initialSessionId, handoff)
-          : await checkoutApi.getSession(initialSessionId, token || undefined);
-        if (cancelled) return;
+          : await checkoutApi.getSession(
+              initialSessionId,
+              token || undefined,
+              undefined,
+              controller.signal,
+            );
+        if (!isCurrentRequest()) return;
         token = token || loaded.clientToken || '';
         if (!token) throw new Error('Checkout handoff did not return a session credential.');
         storeSessionToken(initialSessionId, token);
-        setSession(loaded);
         setSessionId(loaded.id);
         setSessionToken(token);
         setEventId(loaded.eventId);
-        setPhase(loaded.status === 'open' ? 'select' : 'confirm');
+        applyServerSessionStateRef.current(loaded);
       } catch (err) {
-        if (!cancelled) setError(userFacingMessage(err));
+        if (isCurrentRequest() && !controller.signal.aborted) setError(userFacingMessage(err));
       } finally {
-        if (!cancelled) {
+        if (isCurrentRequest()) {
           setLoading(false);
           setInitialLoading(false);
         }
@@ -838,10 +947,10 @@ export default function CheckoutFlow({
     }
     void loadSession();
     return () => {
-      cancelled = true;
+      active = false;
+      controller.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialSessionId, initialSessionToken]);
 
   // Load event + availability + questions whenever eventId changes.
   useEffect(() => {
@@ -1041,31 +1150,25 @@ export default function CheckoutFlow({
       const activePhase = phaseRef.current;
       if (!held || !token) return;
       if (activePhase === 'completed' || activePhase === 'select') return;
-      if (revalidateInFlightRef.current) return;
 
-      revalidateInFlightRef.current = true;
+      // A manual retry or a newer expiry check supersedes the previous request.
+      // Its finally block may not clear the shared state after this controller
+      // becomes stale.
       revalidateAbortRef.current?.abort();
+      revalidateInFlightRef.current = true;
       const controller = new AbortController();
       revalidateAbortRef.current = controller;
       clearExpiryTimer();
       setHoldStatus('checking', 'Checking whether your ticket reservation is still valid…');
 
       try {
-        const loaded = await checkoutApi.getSession(held.id, token);
-        if (controller.signal.aborted) return;
+        const loaded = await checkoutApi.getSession(held.id, token, undefined, controller.signal);
+        if (controller.signal.aborted || revalidateAbortRef.current !== controller) return;
         if (loaded.id !== sessionRef.current?.id) return;
 
-        if (isServerSessionExpired(loaded)) {
-          setSession(loaded);
-          setConfirmResult(null);
-          createSessionAttemptRef.current = undefined;
-          confirmSessionAttemptRef.current = undefined;
-          createSessionInFlightRef.current = false;
-          confirmSessionInFlightRef.current = false;
-          setHoldStatus(
-            'expired',
-            'Your checkout session expired. Start a new order to reserve tickets again.',
-          );
+        const transition = serverSessionTransition(loaded);
+        if (transition === 'completed' || transition === 'terminal') {
+          applyServerSessionState(loaded);
           return;
         }
 
@@ -1075,15 +1178,10 @@ export default function CheckoutFlow({
           sessionId: loaded.id,
           expiresAt: loaded.expiresAt,
         };
-        setSession(loaded);
-        if (loaded.clientToken) {
-          setSessionToken(loaded.clientToken);
-          storeSessionToken(loaded.id, loaded.clientToken);
-        }
-        setHoldStatus('ok', null);
+        applyServerSessionState(loaded);
         if (options?.manual) setError(null);
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || revalidateAbortRef.current !== controller) return;
         if (sessionRef.current?.id !== held.id) return;
 
         if (isCheckoutExpiredError(err)) {
@@ -1108,11 +1206,11 @@ export default function CheckoutFlow({
       } finally {
         if (revalidateAbortRef.current === controller) {
           revalidateAbortRef.current = null;
+          revalidateInFlightRef.current = false;
         }
-        revalidateInFlightRef.current = false;
       }
     },
-    [clearExpiryTimer, setHoldStatus],
+    [applyServerSessionState, clearExpiryTimer, setHoldStatus],
   );
 
   useEffect(() => {
@@ -1133,16 +1231,17 @@ export default function CheckoutFlow({
       return;
     }
 
-    if (isServerSessionExpired(session)) {
+    if (serverSessionTransition(session) === 'terminal') {
+      setConfirmResult(null);
       serverConfirmedHoldRef.current = null;
       setHoldStatus(
-        'expired',
-        'Your checkout session expired. Start a new order to reserve tickets again.',
+        isServerSessionExpired(session) ? 'expired' : 'terminal',
+        terminalSessionMessage(session),
       );
       return;
     }
 
-    if (sessionHoldStatusRef.current === 'expired') {
+    if (sessionHoldStatusRef.current === 'expired' || sessionHoldStatusRef.current === 'terminal') {
       return;
     }
     if (sessionHoldStatusRef.current === 'revalidation_failed') {
@@ -1219,7 +1318,7 @@ export default function CheckoutFlow({
   ]);
 
   useEffect(() => {
-    if (sessionHoldStatus === 'expired') {
+    if (sessionHoldStatus === 'expired' || sessionHoldStatus === 'terminal') {
       expiryRestartButtonRef.current?.focus();
       return;
     }
@@ -1231,6 +1330,7 @@ export default function CheckoutFlow({
   const submissionBlockedByHold =
     sessionHoldStatus === 'checking' ||
     sessionHoldStatus === 'expired' ||
+    sessionHoldStatus === 'terminal' ||
     sessionHoldStatus === 'revalidation_failed' ||
     Boolean(inventoryRecovery && !inventoryAcknowledged) ||
     connectivity === 'offline';
@@ -1375,7 +1475,8 @@ export default function CheckoutFlow({
 
   async function createSession() {
     if (!canCreateSession) return;
-    if (sessionHoldStatusRef.current === 'expired') return;
+    if (sessionHoldStatusRef.current === 'expired' || sessionHoldStatusRef.current === 'terminal')
+      return;
     if (inventoryRecovery && !inventoryAcknowledged) return;
     if (resaleListing && !resaleTermsAccepted) {
       setValidationError('Accept the resale settlement and refund terms to continue.');
@@ -1457,6 +1558,23 @@ export default function CheckoutFlow({
       }
 
       // Surface material quote total changes vs the buyer's local preview.
+      const localQuoteLines = selectedItems.map((item) => {
+        const itemId = cartItemId(item);
+        const availabilityItem = availabilityRef.current.find(
+          (candidate) => availabilityItemId(candidate) === itemId,
+        );
+        const unitPriceCents = item.unitAmountCents ?? availabilityItem?.priceCents ?? 0;
+        return {
+          ticketTypeId: item.ticketTypeId,
+          eventOccurrenceId: item.occurrenceId,
+          productId: item.productId,
+          resaleListingId: item.resaleListingId,
+          description: availabilityItem?.name ?? 'Selected item',
+          quantity: item.quantity,
+          unitPriceCents,
+          totalCents: unitPriceCents * item.quantity,
+        };
+      });
       const quotePlan = planInventoryRecovery({
         quantities: quantitiesRef.current,
         availability: availabilityRef.current,
@@ -1467,14 +1585,14 @@ export default function CheckoutFlow({
           taxCents: 0,
           feeCents: 0,
           totalCents: previewTotal,
+          lineItems: localQuoteLines,
         },
         nextQuote: created.quote,
       });
-      const quoteOnlyChange =
-        quotePlan.changes.length === 1 && quotePlan.changes[0]?.kind === 'quote_changed';
-      if (quoteOnlyChange && created.quote.totalCents !== previewTotal) {
-        // Keep the server session (authoritative total) but require acknowledgement
-        // before confirm so the buyer is not charged a silent total change.
+      if (quotePlan.requiresAcknowledgement) {
+        // Keep the server session (authoritative quote), but never infer consent
+        // from a matching total. Component reallocations and item price changes
+        // require the buyer's explicit acknowledgement before confirmation.
         setInventoryRecovery(quotePlan);
         setInventoryAcknowledged(false);
         setValidationError(quotePlan.summary);
@@ -1485,11 +1603,9 @@ export default function CheckoutFlow({
 
       createSessionAttemptRef.current = undefined;
       serverConfirmedHoldRef.current = null;
-      setSession(created);
       setSessionId(created.id);
       setSessionToken(created.clientToken);
-      setHoldStatus('ok', null);
-      setPhase('confirm');
+      applyServerSessionState(created);
       // Store the token in sessionStorage for resume after redirect.
       // Do NOT write the token to the URL or browser history.
       storeSessionToken(created.id, created.clientToken);
@@ -1586,8 +1702,8 @@ export default function CheckoutFlow({
         return;
       }
       confirmSessionAttemptRef.current = undefined;
-      setConfirmResult(result);
       if ('order' in result) {
+        setConfirmResult(result);
         setPhase('completed');
         setHoldStatus('ok', null);
         const order = result.order;
@@ -1605,14 +1721,24 @@ export default function CheckoutFlow({
           eventId,
         });
         // Redirect to confirmation with only sessionId/orderId, no token.
-        const params = new URLSearchParams({
-          sessionId: session.id,
-          orderId: order.id,
-        });
-        if (order.orderNumber) params.set('orderNumber', order.orderNumber);
-        router.push(`/checkout/confirmation?${params.toString()}`);
+        navigateToConfirmation(session.id, order.id);
       } else {
-        // Paid order: backend returned a payment intent client secret.
+        // Payment UI is only valid while the server session remains payable.
+        const payableSession: CheckoutSession = {
+          ...session,
+          status: result.status,
+          orderId: null,
+        };
+        if (serverSessionTransition(payableSession) !== 'payment') {
+          setConfirmResult(null);
+          setHoldStatus('terminal', terminalSessionMessage(payableSession));
+          setPhase('confirm');
+          return;
+        }
+        sessionRef.current = payableSession;
+        setSession(payableSession);
+        setConfirmResult(result);
+        setValidationError(null);
         setPhase('payment');
       }
     } catch (err) {
@@ -1649,7 +1775,7 @@ export default function CheckoutFlow({
   }
 
   function editOrder() {
-    if (sessionHoldStatusRef.current === 'expired') {
+    if (sessionHoldStatusRef.current === 'expired' || sessionHoldStatusRef.current === 'terminal') {
       restartCheckoutAfterExpiry();
       return;
     }
@@ -1775,7 +1901,7 @@ export default function CheckoutFlow({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => router.push(`/e/${eventId}`)}
+                onClick={() => push(`/e/${eventId}`)}
                 className="gap-1.5"
               >
                 <ArrowLeftIcon className="size-4" />
@@ -2001,10 +2127,14 @@ export default function CheckoutFlow({
                       </span>
                     </output>
                   ) : null}
-                  {sessionHoldStatus === 'expired' ? (
+                  {sessionHoldStatus === 'expired' || sessionHoldStatus === 'terminal' ? (
                     <Alert variant="destructive">
                       <AlertCircleIcon />
-                      <AlertTitle>Checkout expired</AlertTitle>
+                      <AlertTitle>
+                        {sessionHoldStatus === 'expired'
+                          ? 'Checkout expired'
+                          : 'Checkout unavailable'}
+                      </AlertTitle>
                       <AlertDescription className="space-y-3">
                         <p>
                           {sessionHoldMessage ??
@@ -2258,10 +2388,14 @@ export default function CheckoutFlow({
                         </span>
                       </output>
                     ) : null}
-                    {sessionHoldStatus === 'expired' ? (
+                    {sessionHoldStatus === 'expired' || sessionHoldStatus === 'terminal' ? (
                       <Alert variant="destructive">
                         <AlertCircleIcon />
-                        <AlertTitle>Checkout expired</AlertTitle>
+                        <AlertTitle>
+                          {sessionHoldStatus === 'expired'
+                            ? 'Checkout expired'
+                            : 'Checkout unavailable'}
+                        </AlertTitle>
                         <AlertDescription className="space-y-3">
                           <p>
                             {sessionHoldMessage ??
@@ -2310,7 +2444,11 @@ export default function CheckoutFlow({
                     type="button"
                     size="lg"
                     className="w-full gap-2"
-                    disabled={!canCreateSession || sessionHoldStatus === 'expired'}
+                    disabled={
+                      !canCreateSession ||
+                      sessionHoldStatus === 'expired' ||
+                      sessionHoldStatus === 'terminal'
+                    }
                     onClick={createSession}
                   >
                     {loading ? <LoaderCircleIcon className="size-4 animate-spin" /> : null}

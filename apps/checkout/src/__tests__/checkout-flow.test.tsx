@@ -338,11 +338,101 @@ describe('CheckoutFlow buyer validation', () => {
     renderCheckoutFlow({ initialEventId: '', initialSessionId: 'cs_stored' });
 
     await waitFor(() => {
-      expect(checkoutApi.getSession).toHaveBeenCalledWith('cs_stored', 'stored_credential');
+      expect(checkoutApi.getSession).toHaveBeenCalledWith(
+        'cs_stored',
+        'stored_credential',
+        undefined,
+        expect.any(AbortSignal),
+      );
     });
     expect(checkoutApiMock.exchangeHandoff).not.toHaveBeenCalled();
     expect(window.location.hash).toBe('');
     window.sessionStorage.removeItem('tk:session:cs_stored');
+  });
+
+  it('routes a resumed completed session to confirmation once with its order id', async () => {
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...checkoutSession('cs_completed_resume'),
+      status: 'completed',
+      orderId: 'ord_completed_resume',
+    });
+
+    renderCheckoutFlow({
+      initialEventId: '',
+      initialSessionId: 'cs_completed_resume',
+      initialSessionToken: 'resume_token',
+    });
+
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith(
+        '/checkout/confirmation?sessionId=cs_completed_resume&orderId=ord_completed_resume',
+      );
+    });
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a resumed pending payment session to idempotent confirmation when no client secret exists', async () => {
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...checkoutSession('cs_pending_resume'),
+      status: 'pending_payment',
+    });
+    checkoutApiMock.confirmSession.mockResolvedValue({
+      sessionId: 'cs_pending_resume',
+      status: 'pending_payment',
+      paymentIntentId: 'pi_pending_resume',
+      clientSecret: 'pi_pending_resume_secret',
+      currency: 'USD',
+      totalCents: 2500,
+    });
+
+    const view = renderCheckoutFlow({
+      initialEventId: '',
+      initialSessionId: 'cs_pending_resume',
+      initialSessionToken: 'resume_token',
+    });
+
+    const pay = await view.findByRole('button', { name: 'Pay $25.00' });
+    fireEvent.click(pay);
+
+    await waitFor(() => {
+      expect(checkoutApiMock.confirmSession).toHaveBeenCalledWith(
+        'cs_pending_resume',
+        'token_cs_pending_resume',
+        expect.any(String),
+      );
+    });
+    expect(
+      await view.findByText(
+        /Secure payment processed by Stripe|Payment is ready for local capture/,
+      ),
+    ).toBeVisible();
+  });
+
+  it('survives StrictMode resume replay and restores an actionable pending payment session', async () => {
+    checkoutApiMock.getSession.mockResolvedValue({
+      ...checkoutSession('cs_pending_strict'),
+      status: 'pending_payment',
+    });
+
+    const view = render(
+      React.createElement(
+        React.StrictMode,
+        null,
+        React.createElement(CheckoutFlow, {
+          initialEventId: '',
+          initialSessionId: 'cs_pending_strict',
+          initialSessionToken: 'resume_token',
+        }),
+      ),
+    );
+
+    expect(await view.findByRole('button', { name: 'Pay $25.00' })).toBeEnabled();
+    await waitFor(() => expect(checkoutApiMock.getSession).toHaveBeenCalledTimes(2));
+    expect(checkoutApiMock.getSession.mock.calls).toEqual(
+      expect.arrayContaining([
+        ['cs_pending_strict', 'resume_token', undefined, expect.any(AbortSignal)],
+      ]),
+    );
   });
 
   it('keeps Continue disabled until a ticket is selected', async () => {
@@ -1033,7 +1123,12 @@ describe('CheckoutFlow live session expiry', () => {
 
     await vi.advanceTimersByTimeAsync(5_100);
     await waitFor(() =>
-      expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`),
+      expect(checkoutApiMock.getSession).toHaveBeenCalledWith(
+        session.id,
+        `token_${session.id}`,
+        undefined,
+        expect.any(AbortSignal),
+      ),
     );
     expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeEnabled();
     expect(view.queryByRole('alert')).not.toBeInTheDocument();
@@ -1045,7 +1140,7 @@ describe('CheckoutFlow live session expiry', () => {
     const session = checkoutSession('cs_pay_timer', { expiresAt });
     checkoutApiMock.getSession.mockResolvedValue({
       ...session,
-      status: 'open',
+      status: 'pending_payment',
       expiresAt: new Date(Date.now() + 120_000).toISOString(),
     });
 
@@ -1054,7 +1149,12 @@ describe('CheckoutFlow live session expiry', () => {
 
     await vi.advanceTimersByTimeAsync(5_100);
     await waitFor(() =>
-      expect(checkoutApiMock.getSession).toHaveBeenCalledWith(session.id, `token_${session.id}`),
+      expect(checkoutApiMock.getSession).toHaveBeenCalledWith(
+        session.id,
+        `token_${session.id}`,
+        undefined,
+        expect.any(AbortSignal),
+      ),
     );
     await waitFor(() => {
       expect(
@@ -1113,6 +1213,41 @@ describe('CheckoutFlow live session expiry', () => {
     expect(await view.findByRole('button', { name: 'Continue' })).toBeVisible();
     expect(view.queryByText('Checkout expired')).not.toBeInTheDocument();
   });
+
+  it.each([
+    ['completed', 'ord_revalidated', 'Order complete'],
+    ['cancelled', undefined, 'Checkout expired'],
+    ['failed', undefined, 'Checkout unavailable'],
+  ] as const)(
+    'does not reopen %s sessions after payment revalidation',
+    async (status, orderId, expectedState) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const expiresAt = new Date(Date.now() + 2_000).toISOString();
+      const session = checkoutSession(`cs_${status}`, { expiresAt });
+      checkoutApiMock.getSession.mockResolvedValue({
+        ...session,
+        status,
+        ...(orderId ? { orderId } : {}),
+      });
+
+      const view = renderCheckoutFlow();
+      await reachPaymentPhase(view, session);
+      await vi.advanceTimersByTimeAsync(2_100);
+
+      expect(await view.findByText(expectedState)).toBeVisible();
+      expect(
+        view.queryByText(/Secure payment processed by Stripe|Payment is ready for local capture/),
+      ).not.toBeInTheDocument();
+      const confirm = view.queryByRole('button', { name: 'Pay $25.00' });
+      if (confirm) expect(confirm).toBeDisabled();
+      if (status === 'completed') {
+        expect(push).toHaveBeenCalledWith(
+          `/checkout/confirmation?sessionId=${session.id}&orderId=${orderId}`,
+        );
+        expect(push).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
 
   it('fails closed on offline revalidation and recovers after retry', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -1312,6 +1447,34 @@ describe('CheckoutFlow inventory and quote recovery', () => {
     expect(checkoutApiMock.confirmSession).toHaveBeenCalledTimes(1);
   });
 
+  it('falls back to refreshed authority when backend conflict details identify an unmatched pool', async () => {
+    const session = checkoutSession('cs_pool_conflict');
+    const view = renderCheckoutFlow();
+    await reachConfirmPhase(view, session);
+
+    const conflict = new CheckoutApiError('INVENTORY_EXHAUSTED', 'Insufficient inventory', 409);
+    Object.assign(conflict, {
+      details: { ticketTypeId: 'pool_shared', requested: 1, available: 0 },
+    });
+    checkoutApiMock.confirmSession.mockRejectedValueOnce(conflict);
+    publicApiMock.getAvailability.mockResolvedValueOnce([
+      { ...availability[0]!, available: 0, status: 'sold_out' },
+    ]);
+
+    fireEvent.click(view.getByRole('button', { name: 'Pay $25.00' }));
+
+    expect(await view.findByText('Your selection changed')).toBeVisible();
+    expect(view.getAllByText(/General Admission is sold out/i).length).toBeGreaterThan(0);
+    expect(view.queryByText(/pool_shared/i)).not.toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: /I understand/i }));
+    await waitFor(() => {
+      expect(view.queryByText('Your selection changed')).not.toBeInTheDocument();
+      expect(view.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    });
+    expect(checkoutApiMock.confirmSession).toHaveBeenCalledTimes(1);
+  });
+
   it('requires acknowledgement when the server quote total differs from the local preview', async () => {
     checkoutApiMock.createSession.mockResolvedValue(
       checkoutSession('cs_quote_change', { totalCents: 2800 }),
@@ -1333,6 +1496,61 @@ describe('CheckoutFlow inventory and quote recovery', () => {
     await waitFor(() => {
       expect(view.getByRole('button', { name: 'Pay $28.00' })).toBeEnabled();
     });
+  });
+
+  it('requires acknowledgement when quote components change but the total stays the same', async () => {
+    checkoutApiMock.createSession.mockResolvedValue({
+      ...checkoutSession('cs_same_total_quote'),
+      quote: {
+        subtotalCents: 2400,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 100,
+        totalCents: 2500,
+      },
+    });
+
+    const view = renderCheckoutFlow();
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), { target: { value: 'buyer@example.com' } });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    expect(await view.findByText('Your selection changed')).toBeVisible();
+    expect(view.getAllByText(/Order pricing details changed/i).length).toBeGreaterThan(0);
+    expect(view.getByRole('button', { name: 'Pay $25.00' })).toBeDisabled();
+  });
+
+  it('requires acknowledgement when a server quote changes an item price', async () => {
+    checkoutApiMock.createSession.mockResolvedValue({
+      ...checkoutSession('cs_item_price_change', { totalCents: 2600 }),
+      quote: {
+        subtotalCents: 2600,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        totalCents: 2600,
+        lineItems: [
+          {
+            ticketTypeId: 'tt_general',
+            description: 'General Admission',
+            quantity: 1,
+            unitPriceCents: 2600,
+            totalCents: 2600,
+          },
+        ],
+      },
+    });
+
+    const view = renderCheckoutFlow();
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), { target: { value: 'buyer@example.com' } });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    expect(await view.findByText('Your selection changed')).toBeVisible();
+    expect(view.getAllByText(/price changed from/i).length).toBeGreaterThan(0);
+    expect(view.getByRole('button', { name: 'Pay $26.00' })).toBeDisabled();
   });
 });
 

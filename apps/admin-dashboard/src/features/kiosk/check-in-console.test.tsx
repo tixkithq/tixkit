@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CheckInConsole } from './check-in-console';
 
@@ -25,6 +25,13 @@ const useTicketScanner = vi.fn((_options: unknown) => ({
   retryLastScan: vi.fn(),
   reset: vi.fn(),
 }));
+
+function setNavigatorOnline(isOnline: boolean) {
+  Object.defineProperty(window.navigator, 'onLine', {
+    configurable: true,
+    value: isOnline,
+  });
+}
 
 vi.mock('next/navigation', () => ({
   useRouter: () => navigationState.router,
@@ -92,6 +99,7 @@ vi.mock('@/features/check-in/use-ticket-scanner', () => ({
 describe('CheckInConsole', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setNavigatorOnline(true);
     navigationState.pathname = '/kiosk/evt_1';
     navigationState.searchParams = new URLSearchParams('tab=scan&listId=cil_1');
     permissionState.values = new Set(['checkins.write', 'checkins.read', 'box_office.write']);
@@ -129,6 +137,42 @@ describe('CheckInConsole', () => {
       retryLastScan: vi.fn(),
       reset: vi.fn(),
     }));
+  });
+
+  afterAll(() => {
+    delete (window.navigator as { onLine?: boolean }).onLine;
+  });
+
+  it('shows an accessible offline network status on initial render', async () => {
+    setNavigatorOnline(false);
+
+    render(<CheckInConsole mode="kiosk" initialEventId="evt_1" initialListId="cil_1" />);
+
+    expect(await screen.findByTestId('scan-network-status')).toHaveTextContent('Network offline');
+    expect(screen.getByTestId('scan-connectivity-status')).toHaveTextContent(
+      'Online check-in only',
+    );
+  });
+
+  it('updates the network status for offline and online browser events and removes listeners', async () => {
+    const removeEventListener = vi.spyOn(window, 'removeEventListener');
+    const { unmount } = render(
+      <CheckInConsole mode="kiosk" initialEventId="evt_1" initialListId="cil_1" />,
+    );
+
+    expect(await screen.findByTestId('scan-network-status')).toHaveTextContent('Network online');
+
+    setNavigatorOnline(false);
+    act(() => window.dispatchEvent(new Event('offline')));
+    expect(screen.getByTestId('scan-network-status')).toHaveTextContent('Network offline');
+
+    setNavigatorOnline(true);
+    act(() => window.dispatchEvent(new Event('online')));
+    expect(screen.getByTestId('scan-network-status')).toHaveTextContent('Network online');
+
+    unmount();
+    expect(removeEventListener).toHaveBeenCalledWith('online', expect.any(Function));
+    expect(removeEventListener).toHaveBeenCalledWith('offline', expect.any(Function));
   });
 
   it('renders kiosk tabs for scan, live activity, and sales', async () => {
