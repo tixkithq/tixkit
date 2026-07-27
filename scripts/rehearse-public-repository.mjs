@@ -9,6 +9,7 @@ import {
   API_PROVENANCE_EXCLUSIONS,
   canonicalJson,
   collectCommittedApiReleaseProvenance,
+  formatJson,
   sha256,
 } from './lib/api-release-provenance.ts';
 import {
@@ -77,9 +78,13 @@ export function publicRepositoryValidationCommands({ createSnapshot = false } = 
 
 export function rebindPublicApiReleaseProvenance(repository) {
   assertAuthoritativePublicRepository(repository);
-  const distribution = JSON.parse(
-    readFileSync(resolve(repository, 'distribution/public-distribution.json'), 'utf8'),
-  );
+  execFileSync('node', ['scripts/validate-public-distribution.mjs'], {
+    cwd: repository,
+    stdio: 'inherit',
+  });
+  const distributionPath = resolve(repository, 'distribution/public-distribution.json');
+  const originalDistribution = readFileSync(distributionPath);
+  const distribution = JSON.parse(originalDistribution.toString('utf8'));
   const version = authoritativeApiVersion(repository);
   const contract = `artifacts/api/${version}`;
   if (!distribution.release.contracts.includes(contract))
@@ -89,6 +94,9 @@ export function rebindPublicApiReleaseProvenance(repository) {
   const docsDirectory = resolve(repository, 'apps/docs/public/contracts', version);
   const artifactManifest = JSON.parse(
     readFileSync(resolve(artifactDirectory, 'release-manifest.json'), 'utf8'),
+  );
+  const artifactManifestSha256 = sha256(
+    readFileSync(resolve(artifactDirectory, 'release-manifest.json')),
   );
   const docsManifest = JSON.parse(
     readFileSync(resolve(docsDirectory, 'release-manifest.json'), 'utf8'),
@@ -132,6 +140,58 @@ export function rebindPublicApiReleaseProvenance(repository) {
     writeFileSync(resolve(directory, 'release-manifest.json'), manifestBytes);
     writeFileSync(resolve(directory, 'CHECKSUMS.sha256'), `${checksums}\n`);
   }
+  const integrationSkill = distribution.release.agentIntegrationSkills?.find(
+    (entry) => entry.apiVersion === version,
+  );
+  if (!integrationSkill)
+    throw new Error(
+      `API provenance rebinding cannot find integration-skill binding for ${version}`,
+    );
+  integrationSkill.releaseManifestSha256 = sha256(manifestBytes);
+  writeFileSync(distributionPath, `${formatJson(distribution)}\n`);
+  const skillDirectory = resolve(repository, integrationSkill.path);
+  const skillContractPath = resolve(skillDirectory, 'references/contract.json');
+  const skillManifestPath = resolve(skillDirectory, 'artifact-manifest.json');
+  const skillChecksumsPath = resolve(skillDirectory, 'CHECKSUMS.sha256');
+  const originalSkillContract = readFileSync(skillContractPath);
+  const originalSkillManifest = readFileSync(skillManifestPath);
+  const originalSkillChecksums = readFileSync(skillChecksumsPath);
+  try {
+    const skillContract = JSON.parse(originalSkillContract.toString('utf8'));
+    const skillManifest = JSON.parse(originalSkillManifest.toString('utf8'));
+    if (
+      skillContract.apiVersion !== version ||
+      skillContract.source?.releaseManifestSha256 !== artifactManifestSha256 ||
+      skillManifest.apiVersion !== version ||
+      skillManifest.generationMode !== 'local-evaluation' ||
+      skillManifest.sourceReleaseManifestSha256 !== artifactManifestSha256
+    )
+      throw new Error('API provenance rebinding found an unexpected integration-skill binding');
+    skillContract.source.releaseManifestSha256 = integrationSkill.releaseManifestSha256;
+    const skillContractBytes = `${JSON.stringify(skillContract, null, 2)}\n`;
+    const contractArtifact = skillManifest.artifacts.find(
+      (artifact) => artifact.name === 'references/contract.json',
+    );
+    if (!contractArtifact)
+      throw new Error('API provenance rebinding cannot find the skill contract artifact');
+    contractArtifact.sha256 = sha256(skillContractBytes);
+    contractArtifact.size = Buffer.byteLength(skillContractBytes);
+    skillManifest.sourceReleaseManifestSha256 = integrationSkill.releaseManifestSha256;
+    const skillManifestBytes = `${JSON.stringify(skillManifest, null, 2)}\n`;
+    const skillChecksums = [
+      ...skillManifest.artifacts.map(({ name, sha256: digest }) => `${digest}  ${name}`),
+      `${sha256(skillManifestBytes)}  artifact-manifest.json`,
+    ].join('\n');
+    writeFileSync(skillContractPath, skillContractBytes);
+    writeFileSync(skillManifestPath, skillManifestBytes);
+    writeFileSync(skillChecksumsPath, `${skillChecksums}\n`);
+  } catch (error) {
+    writeFileSync(distributionPath, originalDistribution);
+    writeFileSync(skillContractPath, originalSkillContract);
+    writeFileSync(skillManifestPath, originalSkillManifest);
+    writeFileSync(skillChecksumsPath, originalSkillChecksums);
+    throw error;
+  }
   const changedPaths = execFileSync(
     '/usr/bin/git',
     ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
@@ -142,10 +202,12 @@ export function rebindPublicApiReleaseProvenance(repository) {
     .filter(Boolean)
     .map((entry) => entry.slice(3));
   const bindings = new Map();
+  const skillPrefix = `${integrationSkill.path}/`;
   for (const path of changedPaths) {
     const match = path.match(
       /^(artifacts\/api|apps\/docs\/public\/contracts)\/(\d{4}-\d{2}-\d{2})\/(release-manifest\.json|CHECKSUMS\.sha256)$/u,
     );
+    if (path === 'distribution/public-distribution.json' || path.startsWith(skillPrefix)) continue;
     if (!match) throw new Error(`API provenance rebinding changed an unauthorized path: ${path}`);
     const [, root, version, name] = match;
     const key = `${version}/${name}`;

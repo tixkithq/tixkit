@@ -663,7 +663,7 @@ test('bounded local evidence execution invokes every declared command', async ()
     },
   });
   assert.equal(executed, 7);
-  assert.equal(invocations.length, 6);
+  assert.equal(invocations.length, 7);
   for (const invocation of invocations) {
     assert.equal(invocation.command.argv[0], 'node');
     assert.equal(invocation.commandRoot, root);

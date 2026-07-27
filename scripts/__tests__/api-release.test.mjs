@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,6 +39,53 @@ const releaseFiles = [
   'release-manifest.json',
   'CHECKSUMS.sha256',
 ];
+const disposableCandidateVersion = '2099-12-31';
+
+function buildApiRelease() {
+  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+    cwd: root,
+    stdio: 'pipe',
+  });
+}
+
+function withDisposableApiCandidate(run) {
+  const openApiPath = resolve(root, 'packages/openapi/src/index.ts');
+  const candidateDirectory = resolve(root, `artifacts/api/${disposableCandidateVersion}`);
+  const candidateDocsDirectory = resolve(
+    root,
+    `apps/docs/public/contracts/${disposableCandidateVersion}`,
+  );
+  const releaseIndexPath = resolve(root, 'apps/docs/src/generated/api-release-index.ts');
+  assert.equal(
+    existsSync(candidateDirectory),
+    false,
+    'disposable API artifact directory already exists',
+  );
+  assert.equal(
+    existsSync(candidateDocsDirectory),
+    false,
+    'disposable API documentation directory already exists',
+  );
+  const originalOpenApi = readFileSync(openApiPath, 'utf8');
+  const candidateOpenApi = originalOpenApi.replace(
+    "version: '2026-09-03'",
+    `version: '${disposableCandidateVersion}'`,
+  );
+  assert.notEqual(candidateOpenApi, originalOpenApi, 'OpenAPI version declaration was not found');
+  const originalReleaseIndex = readFileSync(releaseIndexPath);
+  writeFileSync(openApiPath, candidateOpenApi);
+  try {
+    return run({
+      directory: candidateDirectory,
+      version: disposableCandidateVersion,
+    });
+  } finally {
+    writeFileSync(openApiPath, originalOpenApi);
+    rmSync(candidateDirectory, { force: true, recursive: true });
+    rmSync(candidateDocsDirectory, { force: true, recursive: true });
+    writeFileSync(releaseIndexPath, originalReleaseIndex);
+  }
+}
 
 function snapshotRelease() {
   const directory = resolve(root, `artifacts/api/${currentVersion}`);
@@ -68,68 +115,72 @@ test(
   'builds a complete, checksummed API release with truthful compatibility metadata',
   { skip: currentReleaseIsDerivedExport },
   () => {
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
-    const directory = resolve(root, `artifacts/api/${currentVersion}`);
-    const manifest = JSON.parse(readFileSync(resolve(directory, 'release-manifest.json'), 'utf8'));
-    assert.equal(manifest.apiVersion, currentVersion);
-    assert.equal(manifest.publication, 'approval-required');
-    assert.match(manifest.provenance.sourceTreeHash, /^[a-f0-9]{64}$/u);
-    assert.equal(manifest.provenance.reproducible, true);
-    assert.ok(
-      manifest.provenance.excludedGeneratedPaths.includes('apps/admin-dashboard/next-env.d.ts'),
-    );
-    assert.ok(
-      manifest.provenance.excludedGeneratedPaths.includes('artifacts/api-integration-skills/'),
-    );
-    assert.ok(
-      manifest.provenance.excludedGeneratedPaths.includes('distribution/public-distribution.json'),
-    );
-    if (manifest.provenance.worktreeState === 'modified') {
+    withDisposableApiCandidate(({ directory, version }) => {
+      buildApiRelease();
+      const manifest = JSON.parse(
+        readFileSync(resolve(directory, 'release-manifest.json'), 'utf8'),
+      );
+      assert.equal(manifest.apiVersion, version);
+      assert.equal(manifest.publication, 'approval-required');
+      assert.match(manifest.provenance.sourceTreeHash, /^[a-f0-9]{64}$/u);
+      assert.equal(manifest.provenance.reproducible, true);
+      assert.ok(
+        manifest.provenance.excludedGeneratedPaths.includes('apps/admin-dashboard/next-env.d.ts'),
+      );
+      assert.ok(
+        manifest.provenance.excludedGeneratedPaths.includes('artifacts/api-integration-skills/'),
+      );
+      assert.ok(
+        manifest.provenance.excludedGeneratedPaths.includes(
+          'distribution/public-distribution.json',
+        ),
+      );
       assert.equal(manifest.commit, null);
       assert.equal(manifest.timestamp, null);
       assert.equal(manifest.provenance.publishable, false);
-    }
-    const apiDiff = JSON.parse(readFileSync(resolve(directory, 'api-diff.json'), 'utf8'));
-    assert.equal(manifest.breaking, apiDiff.breaking);
-    assert.equal(manifest.artifacts.length, 7);
-    const checksums = new Map(
-      readFileSync(resolve(directory, 'CHECKSUMS.sha256'), 'utf8')
-        .trim()
-        .split('\n')
-        .map((line) => {
-          const [hash, name] = line.split(/\s{2}/u);
-          return [name, hash];
-        }),
-    );
-    for (const artifact of manifest.artifacts) {
-      const bytes = readFileSync(resolve(directory, artifact.name));
-      assert.equal(createHash('sha256').update(bytes).digest('hex'), artifact.sha256);
-      assert.equal(checksums.get(artifact.name), artifact.sha256);
-    }
-    const webhookCatalog = JSON.parse(
-      readFileSync(resolve(directory, 'webhook-events.json'), 'utf8'),
-    );
-    assert.ok(webhookCatalog.events.some((event) => event.type === 'test.ping' && event.test));
-    for (const artifact of manifest.artifacts) {
-      const contents = readFileSync(resolve(directory, artifact.name), 'utf8');
-      assert.doesNotMatch(
-        contents,
-        /@(?!example\.(?:com|test))[a-z0-9.-]+\.[a-z]{2,}|sk_live|whsec_/iu,
+      const apiDiff = JSON.parse(readFileSync(resolve(directory, 'api-diff.json'), 'utf8'));
+      assert.equal(manifest.breaking, apiDiff.breaking);
+      assert.equal(manifest.artifacts.length, 7);
+      const checksums = new Map(
+        readFileSync(resolve(directory, 'CHECKSUMS.sha256'), 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => {
+            const [hash, name] = line.split(/\s{2}/u);
+            return [name, hash];
+          }),
       );
-    }
+      for (const artifact of manifest.artifacts) {
+        const bytes = readFileSync(resolve(directory, artifact.name));
+        assert.equal(createHash('sha256').update(bytes).digest('hex'), artifact.sha256);
+        assert.equal(checksums.get(artifact.name), artifact.sha256);
+      }
+      const webhookCatalog = JSON.parse(
+        readFileSync(resolve(directory, 'webhook-events.json'), 'utf8'),
+      );
+      assert.ok(webhookCatalog.events.some((event) => event.type === 'test.ping' && event.test));
+      for (const artifact of manifest.artifacts) {
+        const contents = readFileSync(resolve(directory, artifact.name), 'utf8');
+        assert.doesNotMatch(
+          contents,
+          /@(?!example\.(?:com|test))[a-z0-9.-]+\.[a-z]{2,}|sk_live|whsec_/iu,
+        );
+      }
+    });
   },
 );
 
-test(
-  'uses the checked-in same-version baseline instead of a mutable generated artifact',
-  { skip: !currentVersionIsCheckedIn },
-  () => {
-    const path = resolve(root, `artifacts/api/${currentVersion}/openapi.json`);
-    const original = readFileSync(path, 'utf8');
-    const baseline = JSON.parse(original);
+test('refuses current source drift against the protected API release without writing bytes', () => {
+  const expected = snapshotRelease();
+  assert.throws(buildApiRelease, /immutable API version/u);
+  assertReleaseSnapshot(expected);
+});
+
+test('uses the last checked-in release baseline instead of mutable candidate artifacts', () => {
+  withDisposableApiCandidate(({ directory }) => {
+    buildApiRelease();
+    const path = resolve(directory, 'openapi.json');
+    const baseline = JSON.parse(readFileSync(path, 'utf8'));
     baseline.paths['/__compatibility_fixture'] = {
       get: {
         operationId: 'compatibilityFixture',
@@ -137,41 +188,24 @@ test(
         responses: { 204: { description: 'Fixture' } },
       },
     };
-    try {
-      writeFileSync(path, `${JSON.stringify(baseline, null, 2)}\n`);
-      assert.doesNotThrow(() =>
-        execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-          cwd: root,
-          stdio: 'pipe',
-        }),
-      );
-    } finally {
-      writeFileSync(path, original);
-      execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-        cwd: root,
-        stdio: 'pipe',
-      });
-    }
-  },
-);
+    writeFileSync(path, `${JSON.stringify(baseline, null, 2)}\n`);
+    buildApiRelease();
+    assert.equal(
+      Object.hasOwn(JSON.parse(readFileSync(path, 'utf8')).paths, '/__compatibility_fixture'),
+      false,
+    );
+  });
+});
 
 test('rebuilds identical artifacts and never reuses stale provenance', () => {
-  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-    cwd: root,
-    stdio: 'pipe',
-  });
-  const directory = resolve(root, `artifacts/api/${currentVersion}`);
-  const manifestPath = resolve(directory, 'release-manifest.json');
-  const originalManifest = readFileSync(manifestPath, 'utf8');
-  const manifest = JSON.parse(originalManifest);
-  manifest.commit = '0000000000000000000000000000000000000000';
-  manifest.timestamp = '2000-01-01T00:00:00.000Z';
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  try {
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
+  withDisposableApiCandidate(({ directory }) => {
+    buildApiRelease();
+    const manifestPath = resolve(directory, 'release-manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.commit = '0000000000000000000000000000000000000000';
+    manifest.timestamp = '2000-01-01T00:00:00.000Z';
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    buildApiRelease();
     const rebuilt = JSON.parse(readFileSync(manifestPath, 'utf8'));
     assert.notEqual(rebuilt.commit, manifest.commit);
     assert.notEqual(rebuilt.timestamp, manifest.timestamp);
@@ -182,44 +216,28 @@ test('rebuilds identical artifacts and never reuses stale provenance', () => {
         ...rebuilt.artifacts.map((artifact) => artifact.name),
       ].map((name) => [name, readFileSync(resolve(directory, name), 'utf8')]),
     );
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
+    buildApiRelease();
     for (const [name, contents] of firstBuild) {
       assert.equal(readFileSync(resolve(directory, name), 'utf8'), contents);
     }
-  } finally {
-    writeFileSync(manifestPath, originalManifest);
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
-  }
+  });
 });
 
 test(
-  'dirty implementation-only inputs cannot rewrite a committed API release',
+  'dirty implementation-only inputs cannot rewrite a protected API release',
   { skip: !currentVersionIsCheckedIn },
   () => {
     const inputs = [
       resolve(root, 'packages/openapi/src/generate-types.ts'),
       resolve(root, 'scripts/lib/openapi-compatibility.ts'),
     ];
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
     const expected = snapshotRelease();
 
     for (const input of inputs) {
       const original = readFileSync(input, 'utf8');
       try {
         writeFileSync(input, `${original}\n`);
-        execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-          cwd: root,
-          stdio: 'pipe',
-        });
+        assert.throws(buildApiRelease, /immutable API version/u);
         assertReleaseSnapshot(expected);
       } finally {
         writeFileSync(input, original);
@@ -229,21 +247,14 @@ test(
 );
 
 test(
-  'untracked source inputs cannot rewrite a committed API release',
+  'untracked source inputs cannot rewrite a protected API release',
   { skip: !currentVersionIsCheckedIn },
   () => {
     const input = resolve(root, 'packages/openapi/src/__untracked_provenance_fixture.ts');
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
     const expected = snapshotRelease();
     try {
       writeFileSync(input, 'export const untrackedProvenanceFixture = true;\n');
-      execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-        cwd: root,
-        stdio: 'pipe',
-      });
+      assert.throws(buildApiRelease, /immutable API version/u);
       assertReleaseSnapshot(expected);
     } finally {
       rmSync(input, { force: true });
@@ -305,26 +316,27 @@ test(
 );
 
 test(
-  'committed local candidate is byte-stable and remains publication-ineligible',
+  'disposable local candidate is byte-stable and remains publication-ineligible',
   {
-    skip:
-      !currentVersionIsCheckedIn || currentReleaseIsDerivedExport || currentReleaseIsPublishable,
+    skip: currentReleaseIsDerivedExport,
   },
   () => {
-    const expected = snapshotRelease();
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
+    withDisposableApiCandidate(({ directory }) => {
+      buildApiRelease();
+      const expected = new Map(
+        releaseFiles.map((name) => [name, readFileSync(resolve(directory, name))]),
+      );
+      buildApiRelease();
+      for (const [name, bytes] of expected) {
+        assert.deepEqual(readFileSync(resolve(directory, name)), bytes, `${name} changed`);
+      }
+      const manifest = JSON.parse(
+        readFileSync(resolve(directory, 'release-manifest.json'), 'utf8'),
+      );
+      assert.equal(manifest.provenance.publishable, false);
+      assert.equal(manifest.commit, null);
+      assert.equal(manifest.timestamp, null);
     });
-    assertReleaseSnapshot(expected);
-    assert.throws(
-      () =>
-        execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
-          cwd: root,
-          stdio: 'pipe',
-        }),
-      /release provenance is not clean|release provenance is not publishable/u,
-    );
   },
 );
 
@@ -618,10 +630,8 @@ test(
     const manifestPath = resolve(directory, 'release-manifest.json');
     const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
     const distributionPath = resolve(root, `artifacts/api-distribution-drift-${process.pid}.json`);
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
+    const originalManifest = readFileSync(manifestPath);
+    const originalChecksums = readFileSync(checksumsPath);
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
       manifest.provenance.sourceTreeHash = 'a'.repeat(64);
@@ -661,11 +671,9 @@ test(
         /active API contract is not manifest-declared/u,
       );
     } finally {
+      writeFileSync(manifestPath, originalManifest);
+      writeFileSync(checksumsPath, originalChecksums);
       rmSync(distributionPath, { force: true });
-      execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-        cwd: root,
-        stdio: 'pipe',
-      });
     }
   },
 );

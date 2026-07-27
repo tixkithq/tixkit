@@ -181,7 +181,7 @@
         "vitest.config.ts"
       ],
       "privateCloud": ["managed"],
-      "internalPlanning": ["CLAUDE.md", "implementation-plan.md"],
+      "internalPlanning": [".graphifyignore", "CLAUDE.md", "implementation-plan.md"],
       "mixed": ["docs"]
     },
     "docs": {

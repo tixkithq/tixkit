@@ -3,7 +3,7 @@
   "schemaVersion": 2,
   "registry": {
     "path": "distribution/provider-integration-registry.json",
-    "sha256": "62a4d31357a1a9973b855964a6aa6124c31c6e9b3a4547b5d60ba3d070bce5a4"
+    "sha256": "a9c8717c713ce5944f02ac3aa65d4f54da8cbfa617f7b3d7d40a2ad28ef49665"
   },
   "declarations": [
     {

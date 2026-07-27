@@ -24,6 +24,31 @@ export const API_PROVENANCE_EXCLUSIONS = [
 ] as const;
 
 export const canonicalJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
+export const formatJson = (value: unknown, level = 0): string => {
+  const indentation = '  '.repeat(level);
+  const childIndentation = '  '.repeat(level + 1);
+  if (Array.isArray(value)) {
+    const compact = `[${value.map((item) => JSON.stringify(item)).join(', ')}]`;
+    if (
+      value.every(
+        (item) => item === null || ['boolean', 'number', 'string'].includes(typeof item),
+      ) &&
+      value.length <= 3 &&
+      indentation.length + compact.length <= 120
+    )
+      return compact;
+    return `[\n${value.map((item) => `${childIndentation}${formatJson(item, level + 1)}`).join(',\n')}\n${indentation}]`;
+  }
+  if (value && typeof value === 'object')
+    return `{\n${Object.entries(value)
+      .map(
+        ([key, item]) =>
+          `${childIndentation}${JSON.stringify(key)}: ${formatJson(item, level + 1)}`,
+      )
+      .join(',\n')}\n${indentation}}`;
+  return JSON.stringify(value);
+};
 export const sha256 = (value: Uint8Array | string): string =>
   createHash('sha256').update(value).digest('hex');
 
