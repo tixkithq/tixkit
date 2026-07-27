@@ -2,7 +2,7 @@
   "name": "@tixkit/js",
   "version": "0.1.0",
   "description": "Official JavaScript and TypeScript SDK for Tixkit",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

@@ -2,7 +2,7 @@
   "name": "@tixkit/portability",
   "version": "0.1.0",
   "description": "Shared signed logical portability bundle contracts for Tixkit Cloud and Self-Hosted",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

@@ -2,7 +2,7 @@
   "name": "@tixkit/content-core",
   "version": "0.1.0",
   "description": "Shared versioned content-document contracts for Tixkit",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

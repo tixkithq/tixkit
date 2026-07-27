@@ -2,7 +2,7 @@
   "name": "@tixkit/admin-table-core",
   "version": "0.1.0",
   "description": "Shared table query, filtering, cursor, and permission contracts for Tixkit",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

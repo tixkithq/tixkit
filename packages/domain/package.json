@@ -2,7 +2,7 @@
   "name": "@tixkit/domain",
   "version": "0.1.0",
   "description": "Shared Tixkit event-commerce domain contracts and business rules",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

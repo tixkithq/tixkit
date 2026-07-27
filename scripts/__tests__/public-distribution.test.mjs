@@ -361,10 +361,12 @@ test('scans workflow and script references throughout the public boundary', () =
 test('rejects false legal approval and missing immutable release entries', () => {
   const approved = structuredClone(manifest);
   approved.licensing.status = 'approved';
-  approved.licensing.mayClaimLegalApproval = true;
+  approved.licensing.mayClaimLegalApproval = false;
+  approved.licensing.legalReviewEvidence = '';
   assert.throws(() => validatePublicDistribution(approved, root), /canonical legal evidence/u);
 
-  approved.licensing.legalReviewEvidence = 'docs/completion/legal-review-approval.md';
+  approved.licensing.mayClaimLegalApproval = true;
+  approved.licensing.legalReviewEvidence = 'LEGAL_APPROVAL.md';
   assert.throws(() => validatePublicDistribution(approved, root), /path does not exist/u);
 
   const missingSdkRelease = structuredClone(manifest);

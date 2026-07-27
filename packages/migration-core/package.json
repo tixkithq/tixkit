@@ -2,7 +2,7 @@
   "name": "@tixkit/migration-core",
   "version": "0.1.0",
   "description": "Framework-neutral migration contracts, normalization, dry-run analysis, and rollback safety for Tixkit",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

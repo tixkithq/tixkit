@@ -2,7 +2,7 @@
   "name": "@tixkit/content-email",
   "version": "0.1.0",
   "description": "Tixkit email content contracts, defaults, and rendering adapters",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

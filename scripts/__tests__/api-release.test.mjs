@@ -445,6 +445,12 @@ test(
     const distribution = JSON.parse(
       readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
     );
+    distribution.licensing = {
+      intendedPublicLicense: 'MIT',
+      status: 'pending-legal-review',
+      mayClaimLegalApproval: false,
+      legalReviewEvidence: '',
+    };
     distribution.release.contracts = distribution.release.contracts.filter(
       (path) => !path.startsWith('artifacts/api/') || path === `artifacts/api/${currentVersion}`,
     );

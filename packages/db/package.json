@@ -2,7 +2,7 @@
   "name": "@tixkit/db",
   "version": "0.1.0",
   "description": "Tixkit database schema, migrations, and tenant-safe repositories",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

@@ -9,7 +9,7 @@ The manifest distinguishes:
 - internal planning documents that are not public product documentation;
 - generated public release artifacts that must be reproduced by their generators rather than edited manually.
 
-The intended public license is MIT, but the manifest deliberately records `pending-legal-review` and forbids claiming legal approval. While that state is pending, npm package metadata remains `UNLICENSED` and workflows may only build or dry-run packs; publication is not authorized. Approval requires the canonical `docs/completion/legal-review-approval.md` evidence artifact, after which package metadata must be changed to MIT before validation permits release. This repository does not currently contain that approval artifact.
+The public license is MIT. The repository owner authorization and technical provenance/license audit are recorded in `docs/completion/legal-review-approval.md`. Approved exports bind that exact file by SHA-256, emit the canonical root license and approval receipt, normalize every public package and SDK license surface to MIT, and continue to reject private or unclassified content.
 
 Run:
 

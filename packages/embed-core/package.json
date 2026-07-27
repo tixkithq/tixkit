@@ -2,7 +2,7 @@
   "name": "@tixkit/embed-core",
   "version": "1.0.0",
   "description": "Versioned Tixkit embed contracts, validation, snippet generation, and CSP profiles",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

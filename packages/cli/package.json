@@ -4,7 +4,7 @@
   "private": false,
   "type": "module",
   "description": "Tixkit developer-experience CLI: quickstart, setup validation, and local webhook automation",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

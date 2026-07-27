@@ -2,7 +2,7 @@
   "name": "@tixkit/vue",
   "version": "0.1.0",
   "description": "Official Vue and Nuxt integration for Tixkit",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

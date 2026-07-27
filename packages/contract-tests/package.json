@@ -2,7 +2,7 @@
   "name": "@tixkit/contract-tests",
   "version": "0.1.0",
   "description": "Executable Tixkit embed, webhook, SDK/API, and agent-platform contract profiles",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

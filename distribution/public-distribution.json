@@ -9,9 +9,9 @@
   },
   "licensing": {
     "intendedPublicLicense": "MIT",
-    "status": "pending-legal-review",
-    "mayClaimLegalApproval": false,
-    "legalReviewEvidence": ""
+    "status": "approved",
+    "mayClaimLegalApproval": true,
+    "legalReviewEvidence": "docs/completion/legal-review-approval.md"
   },
   "source": {
     "rootFiles": [

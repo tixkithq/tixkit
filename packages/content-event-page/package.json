@@ -2,7 +2,7 @@
   "name": "@tixkit/content-event-page",
   "version": "0.1.0",
   "description": "Canonical Tixkit event-page document and validation contracts",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",

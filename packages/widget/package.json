@@ -2,7 +2,7 @@
   "name": "@tixkit/widget",
   "version": "0.1.1",
   "description": "Tixkit Embed Contract v1 custom elements for hosted checkout",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tixkit/tixkit.git",
