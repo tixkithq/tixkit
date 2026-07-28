@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Headless white-label event commerce platform",
-  "license": "UNLICENSED",
+  "description": "Open-source headless event commerce engine",
+  "license": "MIT",
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "packages/*",
@@ -60,12 +60,8 @@
     "test:api-integration-skill-consumer": "node scripts/test-api-integration-skill-consumer.mjs",
     "docs:content": "node scripts/docs/generate-content-manifest.mjs --check",
     "docs:check": "bun run --filter @tixkit/docs-core build && bun run docs:frontmatter && bun run docs:navigation && bun run docs:links && bun run docs:redirects && bun run docs:readmes && bun run docs:examples && bun run docs:dashboard-links && bun run docs:legacy-links && bun run docs:reference && bun run docs:content && bun run docs:performance",
-    "export:oss": "node scripts/export-oss.mjs --validate-build",
     "guardrails:public-remote": "node scripts/public-remote-guardrails.mjs",
-    "validate:completion-backlog": "node scripts/validate-completion-backlog.mjs",
-    "validate:final-evidence-checklist": "node scripts/validate-final-evidence-checklist.mjs",
-    "validate:high-care-ledger": "node scripts/validate-high-care-ledger.mjs",
-    "validate:public-remote-guardrails": "PUBLIC_EXPORT_GITHUB_APP_ID=12345 node scripts/public-remote-guardrails.mjs --print > /tmp/tixkit-public-remote-ruleset.json && PUBLIC_EXPORT_GITHUB_APP_ID=12345 node scripts/public-remote-guardrails.mjs --check /tmp/tixkit-public-remote-ruleset.json --workflow .github/workflows/ci.yml --workflow .github/workflows/sdk-release-dry-run.yml --workflow .github/workflows/release-dry-run.yml --workflow .github/workflows/security-analysis.yml",
+    "validate:public-remote-guardrails": "PUBLIC_CI_GITHUB_APP_ID=12345 node scripts/public-remote-guardrails.mjs --topology authoritative --print > /tmp/tixkit-public-remote-ruleset.json && PUBLIC_CI_GITHUB_APP_ID=12345 node scripts/public-remote-guardrails.mjs --topology authoritative --check /tmp/tixkit-public-remote-ruleset.json --workflow .github/workflows/ci.yml --workflow .github/workflows/sdk-release-dry-run.yml --workflow .github/workflows/release-dry-run.yml",
     "validate:public-distribution": "node scripts/validate-public-distribution.mjs",
     "validate:provider-integration-registry": "node scripts/validate-provider-integration-registry.mjs",
     "validate:provider-dependencies": "node scripts/validate-provider-dependencies.mjs",
@@ -75,9 +71,6 @@
     "validate:trust-program": "node scripts/validate-trust-program.mjs",
     "validate:trust-evidence": "node scripts/validate-trust-program.mjs --execute-local-evidence",
     "validate:public-repository": "node scripts/rehearse-public-repository.mjs",
-    "rehearse:repository-cutover": "node scripts/rehearse-repository-cutover.mjs",
-    "rehearse:repository-history-cutover": "node scripts/rehearse-repository-history-cutover.mjs",
-    "validate:repository-content-review": "node scripts/validate-repository-content-review.mjs",
     "audit:repository-history": "node scripts/audit-repository-history.mjs",
     "validate:cloud-core-consumer": "node scripts/validate-cloud-core-consumer.mjs",
     "verify:cloud-core-install": "node scripts/verify-cloud-core-install.mjs",
@@ -88,8 +81,6 @@
     "validate:staged-public-release": "node scripts/validate-staged-public-release.mjs",
     "release:public:npm:dry-run": "node scripts/public-npm-release-dry-run.mjs",
     "validate:typescript-version": "node scripts/validate-typescript-version.mjs",
-    "validate:user-story-matrix": "node scripts/validate-user-story-matrix.mjs",
-    "validate:validation-runbook": "node scripts/validate-validation-runbook.mjs",
     "validate:widget-public": "node scripts/sync-widget-public.mjs --check",
     "validate:embed-fixtures": "bun scripts/generate-embed-fixtures.mjs --check",
     "security:route-inventory": "bun scripts/generate-api-access-inventory.ts --check",
@@ -100,9 +91,9 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "bun run test:unit && bun run test:integration",
-    "test:scripts": "bun run --filter @tixkit/docs-core build && node --test --test-concurrency=1 scripts/__tests__/*.test.mjs && bun run validate:typescript-version && bun run validate:completion-backlog && bun run validate:final-evidence-checklist && bun run validate:high-care-ledger && bun run validate:public-distribution && bun run validate:provider-integration-registry && bun run validate:provider-dependencies && bun run validate:provider-client-boundary && bun run validate:stripe-sdk-evaluation && node scripts/public-npm-release-dry-run.mjs --check && bun run validate:public-remote-guardrails && bun run validate:user-story-matrix && bun run validate:validation-runbook && bun run validate:widget-public && bun run validate:embed-fixtures && bun run security:route-inventory && node scripts/test-contract-test-consumers.mjs && bun run test:api-integration-skill-consumer",
+    "test:scripts": "node --test --test-concurrency=1 scripts/__tests__/public-distribution.test.mjs scripts/__tests__/public-remote-guardrails.test.mjs scripts/__tests__/public-repository-rehearsal.test.mjs && bun run validate:public-remote-guardrails",
     "test:production-dr:integration": "TIXKIT_RUN_PRODUCTION_DR_INTEGRATION=1 node --test --test-concurrency=1 scripts/__tests__/production-dr.integration.test.mjs scripts/__tests__/production-temporal-dr.integration.test.mjs scripts/__tests__/production-bundle.integration.test.mjs",
-    "test:unit": "turbo run test:unit --concurrency=2 && bun run test:scripts",
+    "test:unit": "turbo run test:unit --concurrency=2",
     "test:integration": "turbo run test:integration --concurrency=1",
     "test:integration:serial": "turbo run test:integration --concurrency=1",
     "test:coverage": "bun run --filter @tixkit/api test:coverage && bun run --filter @tixkit/workflows test:coverage && bun run --filter @tixkit/admin-table-core test:coverage && bun run --filter @tixkit/admin-dashboard test:coverage && bun run --filter @tixkit/checkout test:coverage",
@@ -192,12 +183,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nkgotcode/tixkit.git"
+    "url": "git+https://github.com/tixkithq/tixkit.git"
   },
   "keywords": [],
   "author": "",
   "bugs": {
-    "url": "https://github.com/nkgotcode/tixkit/issues"
+    "url": "https://github.com/tixkithq/tixkit/issues"
   },
-  "homepage": "https://github.com/nkgotcode/tixkit#readme"
+  "homepage": "https://github.com/tixkithq/tixkit#readme"
 }

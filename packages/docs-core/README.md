@@ -10,7 +10,7 @@ Documentation app, admin dashboard Help/onboarding/developer surfaces, and valid
 
 ## Status
 
-Shared public-workspace source of truth for documentation integration contracts. During the C-130 repository cutover it still resides in the transitional private-first tree, but it has no private Cloud dependency.
+Shared public-workspace source of truth for documentation integration contracts. It has no private Cloud dependency.
 
 ## Installation
 

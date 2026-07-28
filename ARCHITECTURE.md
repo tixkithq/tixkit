@@ -61,6 +61,6 @@ Payment, messaging, authentication, storage, and other integrations sit behind p
 
 The API, workers, workflows, and provider adapters emit structured logs, metrics, and traces with correlation context. Sensitive values and payloads are redacted. Operational guidance lives under `docs/public/operations` and `docs/public/self-hosting`.
 
-## Transitional source boundary
+## Public source boundary
 
-Until C-130 completes, this development tree remains private and `UNLICENSED`, and `scripts/export-oss.mjs` remains a temporary extraction and leak-validation tool. The accepted target is direct publication from the authoritative public repository; the private Cloud repository consumes immutable public artifacts. New shared work must be designed for the target boundary rather than adding new same-repository managed dependencies.
+This repository is the authoritative public source for shared product code and the complete Self-Hosted runtime. The private Cloud repository consumes immutable public artifacts and cannot introduce same-repository managed dependencies or maintain a private fork of shared source.

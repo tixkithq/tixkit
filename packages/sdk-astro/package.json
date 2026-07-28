@@ -16,7 +16,8 @@
     "!dist/__tests__",
     "!dist/**/*.test.*",
     "!dist/.tsbuildinfo",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {

@@ -90,5 +90,6 @@
     "tailwindcss": "^4.2.2",
     "typescript": "7.0.2",
     "vitest": "^4.1.0"
-  }
+  },
+  "license": "MIT"
 }

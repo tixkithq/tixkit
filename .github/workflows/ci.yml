@@ -58,16 +58,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  oss-export:
-    name: OSS Export
+  public-repository-independence:
+    name: Public Repository Independence
     runs-on: ubuntu-latest
     needs: lint-typecheck
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
-      - run: bun install --frozen-lockfile
-      - name: Rehearse an independent public repository
-        run: bun run validate:public-repository -- --export /tmp/tixkit-oss-export
+      - name: Validate the authoritative public repository directly
+        run: bun run validate:public-repository -- --repository .
 
   unit-tests:
     name: Unit Tests

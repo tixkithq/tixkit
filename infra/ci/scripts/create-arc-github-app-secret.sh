@@ -2,7 +2,7 @@
 set -euo pipefail
 
 : "${GITHUB_APP_ID:?Set GITHUB_APP_ID to the GitHub App ID}"
-: "${GITHUB_APP_INSTALLATION_ID:?Set GITHUB_APP_INSTALLATION_ID to the app installation ID for nkgotcode/tixkit}"
+: "${GITHUB_APP_INSTALLATION_ID:?Set GITHUB_APP_INSTALLATION_ID to the app installation ID for tixkithq/tixkit}"
 : "${GITHUB_APP_PRIVATE_KEY_FILE:?Set GITHUB_APP_PRIVATE_KEY_FILE to the GitHub App private key PEM path}"
 
 namespace="${ARC_RUNNERS_NAMESPACE:-arc-runners}"

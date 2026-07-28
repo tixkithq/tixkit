@@ -1,4 +1,4 @@
-githubConfigUrl: https://github.com/nkgotcode/tixkit
+githubConfigUrl: https://github.com/tixkithq/tixkit
 runnerScaleSetName: tixkit-epyc-trusted
 runnerGroup: Default
 

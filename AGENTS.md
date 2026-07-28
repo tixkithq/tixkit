@@ -32,7 +32,7 @@ This project has Serena configuration and memories under `.serena/`.
 
 Rules:
 
-- Activate Serena as `tixkit` or `/Users/itsnk/Desktop/Coding/tixkit`.
+- Activate Serena as `tixkit` or `tixkit`.
 - Read `mem:core` for durable project orientation, then follow its links to topic memories only when relevant.
 - Use Graphify first for cross-file/cross-package navigation, then Serena for precise symbol-level inspection.
 - Before reading a source file end-to-end, prefer Serena `get_symbols_overview` for that file.

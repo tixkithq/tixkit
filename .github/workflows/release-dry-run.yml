@@ -71,8 +71,8 @@ jobs:
         run: bun run docs:check
       - name: Build static documentation release
         run: bun run --filter @tixkit/docs build:static
-      - name: Validate sanitized OSS documentation release
-        run: bun run export:oss -- --out /tmp/tixkit-release-oss-export
+      - name: Validate authoritative public distribution
+        run: bun run validate:public-distribution
       - name: Write release dry-run env file
         run: |
           cat > .env.local <<'EOF'

@@ -37,7 +37,6 @@
 /scripts/validate-policy-promotion.mjs @tixkit/maintainers
 /scripts/verify-hosted-production-dr.mjs @tixkit/maintainers
 /scripts/verify-production-rehearsal.mjs @tixkit/maintainers
-/scripts/export-oss.mjs @tixkit/maintainers
 /scripts/performance-*.mjs @tixkit/maintainers
 /scripts/performance-*.schema.json @tixkit/maintainers
 /scripts/__tests__/performance-*.test.mjs @tixkit/maintainers
@@ -61,4 +60,3 @@
 /packages/sdk-flutter/ @tixkit/maintainers
 /packages/sdk-ios/ @tixkit/maintainers
 /packages/sdk-android/ @tixkit/maintainers
-/managed/ @tixkit/maintainers
