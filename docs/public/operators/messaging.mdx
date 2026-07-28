@@ -26,6 +26,11 @@ Select the correct brand and event scope. Use the lifecycle or campaign editor a
 
 Provider delivery requires the environment's verified email or SMS sender configuration. Local capture behavior can validate rendering without proving provider acceptance. Resolve sender warnings before a live send.
 
+SMTP routes require a TLS connection URL held in the environment variable named by the route's
+credential reference. Verify the sender domain and complete a smoke send before activating the
+route. SMTP Message-IDs are stable and opaque so an administrator can reconcile an ambiguous
+delivery without exposing the job or credential reference.
+
 ## Send and verify
 
 Use a limited test audience first. Confirm the dashboard's delivery/capture state and, when authorized, provider evidence. Do not copy recipient lists, message bodies containing personal data, or provider credentials into support reports.

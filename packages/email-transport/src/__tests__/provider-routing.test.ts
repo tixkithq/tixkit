@@ -141,11 +141,11 @@ describe('validateProviderFields', () => {
     expect(result.unsupportedFields).not.toContain('attachments');
   });
 
-  it('flags unsupported metadata for smtp', () => {
+  it('allows internal metadata for smtp', () => {
     const input = baseInput();
     const result = validateProviderFields(input, 'smtp');
-    expect(result.valid).toBe(false);
-    expect(result.unsupportedFields).toContain('metadata');
+    expect(result.valid).toBe(true);
+    expect(result.unsupportedFields).not.toContain('metadata');
   });
 
   it('flags unsupported tags for postmark', () => {

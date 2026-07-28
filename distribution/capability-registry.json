@@ -310,11 +310,11 @@
       "id": "smtp-email-adapter",
       "name": "SMTP email adapter",
       "classification": "public-provider-adapter",
-      "lifecycle": "planned",
+      "lifecycle": "stable",
       "availability": {
-        "cloud": "planned",
-        "platformApi": "planned",
-        "selfHosted": "planned"
+        "cloud": "available",
+        "platformApi": "available",
+        "selfHosted": "available"
       },
       "extensionContract": {
         "status": "versioned",
@@ -341,7 +341,7 @@
         "idempotency": "required",
         "audit": "required"
       },
-      "notes": "A public adapter boundary exists, but network delivery is not production-ready and remains planned on every adoption path."
+      "notes": "Implemented TLS SMTP adapter with normalized failure semantics and deterministic Message-ID reconciliation; deployments retain responsibility for relay credentials, sender authorization and account configuration."
     },
     {
       "id": "telnyx-sms-adapter",

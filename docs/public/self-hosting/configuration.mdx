@@ -38,6 +38,31 @@ All replicas in one environment must share the same value so organizer action cu
 verifiable across requests. Rotating it intentionally invalidates every outstanding dashboard
 cursor; clients then refresh the first page.
 
+## Configure SMTP delivery
+
+An SMTP email provider route stores an environment-variable name in `credentials_ref`. Set that
+variable to an SMTP connection URL:
+
+```dotenv
+SMTP_URL=smtp://smtp-user:smtp-password@mail.example.com:587
+```
+
+Use `smtp://` for mandatory STARTTLS or `smtps://` for implicit TLS, normally on port 465.
+Percent-encode reserved username or password characters. Authentication is optional for a
+network-authorized relay, but a username and password must otherwise be supplied together. Tixkit
+requires TLS 1.2 or newer and validates the server certificate.
+
+Set the route's `credentials_ref` to `SMTP_URL`, configure and verify a sender identity for the
+route's sender domain, then complete the route smoke send before activation. The transport sends
+text and HTML alternatives, reply-to, custom headers, and in-memory attachments. It derives a
+stable, opaque Message-ID from the provider route and delivery idempotency key for reconciliation.
+
+SMTP does not provide a portable idempotency API. Tixkit retries or fails over only failures known
+to occur before message submission. A timeout or connection loss with ambiguous submission state
+is recorded as unknown and is not automatically retried; reconcile it by Message-ID before another
+send. `SMTP_ALLOW_INSECURE_LOOPBACK=1` exists only for explicit non-production loopback tests and is
+ignored in production.
+
 ## Enable provider incident evidence only for an active incident
 
 Exact outbound provider request IDs are excluded from normal logs, traces, API errors, and Temporal history. For a support escalation that requires the provider's exact correlation value, operators may temporarily enable the encrypted incident sink with:

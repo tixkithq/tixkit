@@ -6,7 +6,6 @@ import {
   FallbackEmailTransport,
   OpenCoreEmailSdkTransport,
   ResendEmailTransport,
-  SmtpEmailTransport,
   buildEmailTransport,
   buildSmsTransport,
   createDefaultEmailTransport,
@@ -141,13 +140,6 @@ describe('planned email transports', () => {
       'Unsupported email provider route: opencore_email_sdk',
     );
   });
-
-  it('does not report synthetic SMTP acceptance while the adapter is planned', async () => {
-    const transport = new SmtpEmailTransport('localhost', 587, 'user', 'password');
-    await expect(transport.send(baseInput())).rejects.toThrow(
-      'Unsupported email provider route: smtp',
-    );
-  });
 });
 
 describe('validateProviderFields', () => {
@@ -169,10 +161,10 @@ describe('validateProviderFields', () => {
       ],
       metadata: { notificationType: 'transactional' },
     });
-    // smtp supports attachments but not metadata/tags
+    // SMTP supports attachments and internal metadata, but not provider-native tags.
     const result = validateProviderFields(input, 'smtp');
-    expect(result.valid).toBe(false);
-    expect(result.unsupportedFields).toContain('metadata');
+    expect(result.valid).toBe(true);
+    expect(result.unsupportedFields).not.toContain('metadata');
   });
 
   it('should flag unsupported tags field', () => {

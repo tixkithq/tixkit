@@ -27,7 +27,7 @@ describe('messaging provider extension registry', () => {
     const email = discoverMessagingProviderExtensions('email');
     const sms = discoverMessagingProviderExtensions('sms');
 
-    expect(email.map(({ providerType }) => providerType)).toEqual(['capture', 'resend']);
+    expect(email.map(({ providerType }) => providerType)).toEqual(['capture', 'resend', 'smtp']);
     expect(sms.map(({ providerType }) => providerType)).toEqual([
       'capture',
       'plivo',

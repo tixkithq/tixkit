@@ -180,8 +180,8 @@ export const EXPECTED_CAPABILITY_DECISIONS = Object.freeze({
   ),
   'smtp-email-adapter': acceptedDecision(
     'public-provider-adapter',
-    'planned',
-    plannedEverywhere,
+    'stable',
+    availableEverywhere,
     'packages/email-transport/src/index.ts',
     ['SmtpEmailTransport'],
     'caller-or-operator',

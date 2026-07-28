@@ -15,9 +15,11 @@
   "dependencies": {
     "@tixkit/domain": "workspace:*",
     "@tixkit/provider-clients": "workspace:*",
+    "nodemailer": "9.0.3",
     "ulid": "^2.3.0"
   },
   "devDependencies": {
+    "@types/nodemailer": "8.0.1",
     "typescript": "7.0.2",
     "vitest": "^4.1.0"
   },

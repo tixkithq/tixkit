@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { EmailTransport, SendEmailInput, SendEmailResult } from '@tixkit/domain';
 import {
   createEmailProviderTransport,
@@ -19,7 +20,10 @@ import {
   TwilioMessagingClient,
   VonageMessagingClient,
   type ProviderClientRuntime,
+  type ProviderFailureKind,
 } from '@tixkit/provider-clients';
+import nodemailer, { type Transporter } from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport/index.js';
 import { ulid } from 'ulid';
 
 export {
@@ -419,20 +423,335 @@ export class OpenCoreEmailSdkTransport implements EmailTransport {
   }
 }
 
+export type SmtpEmailTransportOptions = Readonly<{
+  allowInsecureLoopback?: boolean;
+}>;
+
+type SmtpFailure = Error & {
+  code?: string;
+  command?: string;
+  responseCode?: number;
+};
+
+function smtpConfigurationError(code: 'configuration_invalid' | 'configuration_missing') {
+  return new ProviderOperationError(
+    `smtp.send-email failed: validation`,
+    'smtp',
+    'send-email',
+    'validation',
+    false,
+    'not-sent',
+    false,
+    { providerCode: code },
+  );
+}
+
+function smtpDeadline(runtime: ProviderClientRuntime): number {
+  const deadline = runtime.deadlineMs ?? 10_000;
+  if (!Number.isSafeInteger(deadline) || deadline < 1 || deadline > 120_000) {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+  return deadline;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+function smtpTransportOptions(
+  connectionUrl: string,
+  runtime: ProviderClientRuntime,
+  options: SmtpEmailTransportOptions,
+): SMTPTransport.Options {
+  if (!connectionUrl) throw smtpConfigurationError('configuration_missing');
+  if (
+    connectionUrl !== connectionUrl.trim() ||
+    connectionUrl.includes('\\') ||
+    [...connectionUrl].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 32 || codePoint === 127;
+    })
+  ) {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(connectionUrl);
+  } catch {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+
+  const secure = parsed.protocol === 'smtps:';
+  if (
+    (!secure && parsed.protocol !== 'smtp:') ||
+    !parsed.hostname ||
+    (parsed.pathname !== '' && parsed.pathname !== '/') ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+
+  let username: string;
+  let password: string;
+  try {
+    username = decodeURIComponent(parsed.username);
+    password = decodeURIComponent(parsed.password);
+  } catch {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+  if (Boolean(username) !== Boolean(password)) {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+
+  const allowInsecureLoopback = options.allowInsecureLoopback === true;
+  if (
+    allowInsecureLoopback &&
+    (process.env.NODE_ENV === 'production' || !isLoopbackHostname(parsed.hostname))
+  ) {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+
+  const port = parsed.port ? Number(parsed.port) : secure ? 465 : 587;
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw smtpConfigurationError('configuration_invalid');
+  }
+
+  const deadline = smtpDeadline(runtime);
+  return {
+    host: parsed.hostname,
+    port,
+    secure,
+    requireTLS: !secure && !allowInsecureLoopback,
+    ignoreTLS: false,
+    ...(username ? { auth: { user: username, pass: password } } : {}),
+    connectionTimeout: deadline,
+    greetingTimeout: deadline,
+    socketTimeout: deadline,
+    tls: {
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: true,
+    },
+  };
+}
+
+function smtpCredentialValue(credentialsRef: string): string {
+  const fromRef = process.env[credentialsRef];
+  if (fromRef?.trim()) return fromRef.trim();
+  const fallback = process.env.SMTP_URL;
+  if (fallback?.trim()) return fallback.trim();
+  return '';
+}
+
+function configuredSmtpTransportOptions(): SmtpEmailTransportOptions {
+  return {
+    allowInsecureLoopback:
+      process.env.NODE_ENV !== 'production' && process.env.SMTP_ALLOW_INSECURE_LOOPBACK === '1',
+  };
+}
+
+function smtpMessageId(input: SendEmailInput): string {
+  const senderDomain = input.from.email.split('@').at(-1)?.toLowerCase() ?? 'tixkit.invalid';
+  const safeDomain = /^[a-z0-9.-]+$/u.test(senderDomain) ? senderDomain : 'tixkit.invalid';
+  const digest = createHash('sha256')
+    .update(`${input.providerRouteId}:${input.idempotencyKey}`, 'utf8')
+    .digest('hex');
+  return `<${digest}@${safeDomain}>`;
+}
+
+function smtpAddress(address: { email: string; name?: string }): string {
+  return address.name ? `${address.name} <${address.email}>` : address.email;
+}
+
+function smtpFailureKind(error: SmtpFailure): ProviderFailureKind {
+  if (error.code === 'ETIMEDOUT') return 'timeout';
+  if (error.responseCode !== undefined) {
+    if (error.responseCode >= 400 && error.responseCode < 500) return 'server';
+    if (error.responseCode >= 500) return 'validation';
+  }
+  if (error.code === 'EAUTH' || error.code === 'EENVELOPE' || error.code === 'EMESSAGE') {
+    return 'validation';
+  }
+  if (
+    error.code === 'ECONNECTION' ||
+    error.code === 'ESOCKET' ||
+    error.code === 'EDNS' ||
+    error.code === 'ETLS' ||
+    error.code === 'EPROTOCOL'
+  ) {
+    return 'transport';
+  }
+  return 'transport';
+}
+
+function smtpOperationError(error: unknown): ProviderOperationError {
+  if (error instanceof ProviderOperationError) return error;
+  const failure: SmtpFailure = error instanceof Error ? error : new Error('SMTP failure');
+  const command = failure.command?.toUpperCase();
+  const responseCode =
+    Number.isSafeInteger(failure.responseCode) &&
+    failure.responseCode !== undefined &&
+    failure.responseCode >= 100 &&
+    failure.responseCode <= 599
+      ? failure.responseCode
+      : undefined;
+  const afterSubmission = command === 'DATA';
+  const knownPreSubmission = new Set([
+    'AUTH',
+    'EHLO',
+    'HELO',
+    'MAIL FROM',
+    'RCPT TO',
+    'STARTTLS',
+  ]).has(command ?? '');
+  const rejected = responseCode !== undefined && responseCode >= 500;
+  const kind = smtpFailureKind(failure);
+  const retryable =
+    !afterSubmission &&
+    (knownPreSubmission || responseCode !== undefined) &&
+    (kind === 'timeout' || kind === 'transport' || kind === 'server');
+  const ambiguousTransportFailure =
+    !rejected &&
+    responseCode === undefined &&
+    (afterSubmission || !knownPreSubmission) &&
+    (kind === 'timeout' || kind === 'transport');
+
+  return new ProviderOperationError(
+    `smtp.send-email failed: ${kind}`,
+    'smtp',
+    'send-email',
+    kind,
+    retryable,
+    ambiguousTransportFailure ? 'unknown' : rejected ? 'rejected' : 'not-sent',
+    !ambiguousTransportFailure,
+    {
+      ...(responseCode === undefined ? {} : { status: responseCode }),
+      ...(responseCode === undefined ? {} : { providerCode: String(responseCode) }),
+    },
+    failure,
+  );
+}
+
+function emitSmtpTelemetry(
+  runtime: ProviderClientRuntime,
+  input: {
+    durationMs: number;
+    outcome: 'success' | ProviderFailureKind;
+    retryable: boolean;
+    status?: number;
+  },
+): void {
+  try {
+    runtime.onTelemetry?.(
+      Object.freeze({
+        dependency: 'smtp',
+        operation: 'send-email',
+        method: 'SMTP',
+        outcome: input.outcome,
+        serviceOutcome: input.outcome === 'success' ? 'success' : 'platform_failure',
+        durationMs: input.durationMs,
+        retryable: input.retryable,
+        ...(input.status === undefined ? {} : { status: input.status }),
+      }),
+    );
+  } catch {
+    // Telemetry listeners cannot alter provider delivery outcomes.
+  }
+}
+
 /**
  * SMTP transport adapter for direct SMTP sending.
  */
 export class SmtpEmailTransport implements EmailTransport {
-  private smtpConfig: { host: string; port: number; username: string; password: string };
+  providerName = 'smtp';
+  private transporter: Transporter<SMTPTransport.SentMessageInfo, SMTPTransport.Options>;
 
-  constructor(host: string, port: number, username: string, password: string) {
-    this.smtpConfig = { host, port, username, password };
+  constructor(
+    connectionUrl: string,
+    private runtime: ProviderClientRuntime = {},
+    options: SmtpEmailTransportOptions = {},
+  ) {
+    this.transporter = nodemailer.createTransport(
+      smtpTransportOptions(connectionUrl, runtime, options),
+    );
   }
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
-    void input;
-    void this.smtpConfig;
-    throw new UnsupportedProviderRouteError('email', 'smtp');
+    const startedAt = Date.now();
+    try {
+      const result = await this.transporter.sendMail({
+        from: smtpAddress(input.from),
+        to: input.to.map(smtpAddress),
+        replyTo: input.replyTo ? smtpAddress(input.replyTo) : undefined,
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+        headers: input.headers,
+        messageId: smtpMessageId(input),
+        attachments: input.attachments?.map((attachment) => ({
+          filename: attachment.filename,
+          contentType: attachment.contentType,
+          content:
+            typeof attachment.content === 'string'
+              ? attachment.content
+              : Buffer.from(attachment.content),
+          ...(attachment.contentEncoding === undefined
+            ? {}
+            : { encoding: attachment.contentEncoding }),
+        })),
+        disableFileAccess: true,
+        disableUrlAccess: true,
+      });
+
+      if (result.accepted.length === 0) {
+        throw new ProviderOperationError(
+          'smtp.send-email failed: validation',
+          'smtp',
+          'send-email',
+          'validation',
+          false,
+          'rejected',
+          true,
+          { providerCode: 'recipient_rejected' },
+        );
+      }
+      if (result.rejected.length > 0 || (result.pending?.length ?? 0) > 0) {
+        throw new ProviderOperationError(
+          'smtp.send-email failed: partial-recipient-rejection',
+          'smtp',
+          'send-email',
+          'validation',
+          false,
+          'accepted',
+          false,
+          { providerCode: 'partial_recipient_rejection' },
+        );
+      }
+
+      emitSmtpTelemetry(this.runtime, {
+        durationMs: Date.now() - startedAt,
+        outcome: 'success',
+        retryable: false,
+      });
+      return {
+        deliveryId: input.deliveryId,
+        provider: 'smtp',
+        providerMessageId: result.messageId,
+        status: 'accepted',
+        attemptedFallbackProviders: [],
+        sentAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      const normalized = smtpOperationError(error);
+      emitSmtpTelemetry(this.runtime, {
+        durationMs: Date.now() - startedAt,
+        outcome: normalized.kind,
+        retryable: normalized.retryable,
+        status: normalized.details.status,
+      });
+      throw normalized;
+    }
   }
 }
 
@@ -529,6 +848,15 @@ registerMessagingProviderExtension({
   createEmail: ({ credentialsRef }) => new ResendEmailTransport(credentialsRef),
 });
 registerMessagingProviderExtension({
+  descriptor: builtInDescriptor('smtp', 'SMTP', ['email']),
+  createEmail: ({ credentialsRef }) =>
+    new SmtpEmailTransport(
+      smtpCredentialValue(credentialsRef),
+      {},
+      configuredSmtpTransportOptions(),
+    ),
+});
+registerMessagingProviderExtension({
   descriptor: builtInDescriptor('telnyx', 'Telnyx', ['sms']),
   createSms: ({ credentialsRef }) => new TelnyxSmsTransport(credentialsRef),
 });
@@ -559,6 +887,12 @@ export function buildEmailTransport(
   if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
   if (providerType === 'resend')
     return new ResendEmailTransport(credentialsRef, undefined, runtime);
+  if (providerType === 'smtp')
+    return new SmtpEmailTransport(
+      smtpCredentialValue(credentialsRef),
+      runtime,
+      configuredSmtpTransportOptions(),
+    );
   const transport = createEmailProviderTransport(providerType, {
     credentialsRef,
     senderDomain,
@@ -652,7 +986,7 @@ export function validateProviderFields(
     ses: ['attachments', 'tags', 'metadata', 'headers'],
     sendgrid: ['attachments', 'categories', 'custom_args'],
     mailgun: ['attachments', 'tags', 'variables'],
-    smtp: ['attachments'],
+    smtp: ['attachments', 'metadata', 'headers'],
   };
 
   const caps =
