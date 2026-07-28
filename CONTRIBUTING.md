@@ -1,8 +1,16 @@
 # Contributing to Tixkit
 
-> Repository transition: the accepted target makes the public `tixkithq/tixkit` repository authoritative for the shared product and complete Self-Hosted runtime. The current private-first tree and OSS exporter are transitional. Public contributions and shared fixes must never depend on the private `tixkit-cloud` repository or introduce proprietary Cloud assumptions into shared contracts.
+This repository is authoritative for the shared product and complete Self-Hosted runtime. Shared fixes land here first. Public contributions must never depend on the private `tixkit-cloud` repository or introduce proprietary Cloud assumptions into shared contracts.
 
 Thank you for improving Tixkit. Contributions must preserve tenant isolation, contract parity, accessible user flows, and the public/private export boundary.
+
+## Team workflow
+
+1. Start from an existing issue or open a focused issue with observable acceptance criteria.
+2. Confirm ownership in the issue before implementing substantial or overlapping work.
+3. Branch from current `main` and keep the change limited to one reviewable outcome.
+4. Open a pull request using the repository template and request review from `@tixkithq/maintainers`.
+5. Merge only after required checks and requested reviews pass. Follow-up Cloud integration belongs in `tixkit-cloud` after the public commit is immutable.
 
 ## Before you start
 
@@ -46,7 +54,6 @@ bun run test:scripts
 bun run test:unit
 bun run test:integration
 bun run test:e2e
-bun run export:oss
 git diff --check
 ```
 
@@ -54,7 +61,7 @@ Do not weaken or skip a test to produce a green result. A skipped provider, brow
 
 ## Documentation and accessibility
 
-Public pages require validated frontmatter and belong under `docs/public`; implementation plans, audits, and evidence belong under `docs/internal`. Keep headings linkable, code samples executable or mechanically validated, and UI flows keyboard and screen-reader operable. Run relevant browser and axe checks for user-facing changes.
+Public pages require validated frontmatter and belong under `docs/public`. Private planning, audits, customer information, and sensitive operational evidence do not belong in this repository. Keep headings linkable, code samples executable or mechanically validated, and UI flows keyboard and screen-reader operable. Run relevant browser and axe checks for user-facing changes.
 
 ## Pull requests
 

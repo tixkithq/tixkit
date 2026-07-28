@@ -47,13 +47,13 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/contributing/repository-setup": {
     sourcePath: "docs/public/contributing/repository-setup.mdx",
-    frontmatter: {"title":"Set up the repository","description":"Clone Tixkit, install the pinned workspace, start the stack, and run focused validation without hidden assumptions.","audience":["contributor"],"product_area":"contributing","content_type":"quickstart","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-10","prerequisites":["Git, Bun 1.3+, Node.js 20+, and Docker"],"related":["/getting-started/local-quickstart","/contributing/testing"]},
+    frontmatter: {"title":"Set up the repository","description":"Clone Tixkit, install the pinned workspace, start the stack, and run focused validation without hidden assumptions.","audience":["contributor"],"product_area":"contributing","content_type":"quickstart","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-27","prerequisites":["Git, Bun 1.3+, Node.js 20+, and Docker"],"related":["/getting-started/local-quickstart","/contributing/testing"]},
     headings: [{"id":"work-safely","text":"Work safely","level":2}],
     load: () => import("../../../../docs/public/contributing/repository-setup.mdx"),
   },
   "/contributing/testing": {
     sourcePath: "docs/public/contributing/testing.mdx",
-    frontmatter: {"title":"Run validation and tests","description":"Choose focused gates during implementation and execute the complete contract-sensitive suite before release.","audience":["contributor"],"product_area":"contributing","content_type":"how-to","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-10","prerequisites":["Installed workspace dependencies"],"related":["/contributing/repository-setup","/contributing/add-documentation"]},
+    frontmatter: {"title":"Run validation and tests","description":"Choose focused gates during implementation and execute the complete contract-sensitive suite before release.","audience":["contributor"],"product_area":"contributing","content_type":"how-to","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-27","prerequisites":["Installed workspace dependencies"],"related":["/contributing/repository-setup","/contributing/add-documentation"]},
     headings: [],
     load: () => import("../../../../docs/public/contributing/testing.mdx"),
   },

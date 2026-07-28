@@ -4,7 +4,7 @@ This file is the concise map for contributors. The canonical detailed views are 
 
 ## Repository boundary
 
-The accepted target has an authoritative public `tixkithq/tixkit` repository for shared product code, contracts, integration packages and the complete Self-Hosted runtime. Proprietary Cloud operations, managed integrations and natural-language agent orchestration live in a separate private `tixkithq/tixkit-cloud` repository that consumes immutable public releases. Public code and CI must never depend on private source.
+The public `tixkithq/tixkit` repository is authoritative for shared product code, contracts, integration packages and the complete Self-Hosted runtime. Proprietary Cloud operations, managed integrations and natural-language agent orchestration live in the separate private `tixkithq/tixkit-cloud` repository, which consumes immutable public releases. Public code and CI must never depend on private source.
 
 ## Runtime applications and services
 
@@ -51,7 +51,7 @@ Checkout validates the event, sales channel, products, ticket types, prices, and
 
 `packages/openapi` is the public HTTP contract. Stable operation IDs and schemas feed the generated API reference. SDK public exports, API-version statements, snippets, demos, dashboard client types, and public docs must change in the same slice as a contract change. Validation detects drift between those surfaces.
 
-`packages/docs-core` owns canonical documentation route IDs, Help registry entries, search contracts, SDK snippet metadata, and shared readiness types. `docs/public` is the public content source; `docs/internal` is never a public navigation or search source.
+`packages/docs-core` owns canonical documentation route IDs, Help registry entries, search contracts, SDK snippet metadata, and shared readiness types. `docs/public` is the public content source. Private planning and operational evidence belong outside this repository.
 
 ## Providers and failure boundaries
 

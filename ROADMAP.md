@@ -12,7 +12,7 @@ This roadmap describes direction, not a release promise. Priorities can change a
 - Strengthen accessibility, browser coverage, observability, recovery, and deterministic release validation.
 - Make the authoritative public repository independently buildable, releasable and operable without private-repository access.
 
-The accepted operating model and remaining completion work are defined in [the open-core product and completion plan](docs/completion/open-core-platform-plan.md). Cloud is the default organizer path, Platform API is a capability of Cloud rather than a separate deployment, and Self-Hosted is the infrastructure-control path. The authoritative public repository contains the shared product and complete Self-Hosted runtime; a separate private Cloud repository consumes immutable public releases. Availability claims remain subject to release and operational proof.
+Work is coordinated through this roadmap, focused GitHub issues, and reviewed pull requests. Cloud is the default organizer path, Platform API is a capability of Cloud rather than a separate deployment, and Self-Hosted is the infrastructure-control path. This repository contains the shared product and complete Self-Hosted runtime; the private Cloud repository consumes immutable public releases. Availability claims remain subject to release and operational proof.
 
 ## How work is accepted
 

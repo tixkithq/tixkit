@@ -35,7 +35,6 @@ Use \`docs/completion/backlog.md\`.
 
 \`\`\`bash
 git status --short
-graphify query "docs/completion/backlog.md scripts/export-oss.mjs .github/workflows/ci.yml" --budget 5000
 bun run export:oss -- --out /tmp/tixkit-oss-export
 \`\`\`
 
@@ -78,7 +77,6 @@ The final completion note must include:
 - Any skipped tests and why they are acceptable or still blocking.
 - Browser artifacts summary: screenshots, axe, no-console.
 - Remaining risks or explicit deferrals.
-- Confirmation that an anchored Graphify query was used for navigation and \`graphify update .\` was run after code changes.
 `;
 
 test('validateValidationRunbookContent accepts required sections, scripts, commands, and evidence bullets', () => {

@@ -274,7 +274,6 @@ const searchableFiles = [
   ...walk('infra'),
   ...walk('packages'),
   ...walk('scripts'),
-  'AGENTS.md',
   'README.md',
   'package.json',
 ]

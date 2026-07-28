@@ -23,12 +23,10 @@ const REQUIRED_FINAL_EVIDENCE_ITEMS = [
   'Any skipped tests and why they are acceptable or still blocking.',
   'Browser artifacts summary: screenshots, axe, no-console.',
   'Remaining risks or explicit deferrals.',
-  'Confirmation that an anchored Graphify query was used for navigation and `graphify update .` was run after code changes.',
 ];
 
 const REQUIRED_COMMAND_SNIPPETS = [
   'git status --short',
-  'graphify query',
   'bun run export:oss -- --out /tmp/tixkit-oss-export',
   'bun run build',
   'bun run format:check',
@@ -84,7 +82,6 @@ const REQUIRED_PATHS = [
   '.github/workflows/sdk-release-dry-run.yml',
   'docs/completion/backlog.md',
   'docs/completion/final-evidence-checklist.md',
-  'docs/graphify-usage.md',
   'docs/public/operations/incidents.mdx',
   'docs/public/self-hosting/deployment.mdx',
   'docs/production-validation-harness.md',

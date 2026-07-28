@@ -22,7 +22,6 @@
       ".gitignore",
       ".oxfmtrc.json",
       ".oxlintrc.json",
-      "AGENTS.md",
       "ARCHITECTURE.md",
       "CODE_OF_CONDUCT.md",
       "CONTRIBUTING.md",
@@ -136,7 +135,6 @@
         ".gitignore",
         ".oxfmtrc.json",
         ".oxlintrc.json",
-        "AGENTS.md",
         "ARCHITECTURE.md",
         "CODE_OF_CONDUCT.md",
         "CONTRIBUTING.md",
@@ -206,6 +204,7 @@
     "historical": {
       "public": [
         ".prettierrc",
+        "AGENTS.md",
         "docs/admin-dashboard-user-guide.md",
         "docs/api-reference.md",
         "docs/ci/self-hosted-epyc-arc-kata.md",

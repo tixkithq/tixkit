@@ -58,4 +58,4 @@ Retry classification and provider request/response mappings are runtime contract
 
 ## Related guides
 
-[Outbound provider client ADR](../../docs/internal/architecture/outbound-provider-clients.md)
+[Contributor architecture guide](../../docs/public/contributing/architecture.mdx)

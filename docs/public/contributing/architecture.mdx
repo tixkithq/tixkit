@@ -31,7 +31,7 @@ Provider operations cross Tixkit-owned adapters. Routes, activities, and feature
 
 Vendor integrations are classified as direct HTTP, a contained SDK, or a runtime/security SDK boundary. Vendor SDKs may remain inside an adapter when they materially reduce browser, security, signing, protocol, workflow-runtime, or instrumentation risk. Stripe's server SDK currently remains contained behind `StripeGateway`; direct REST is not presumed safer and requires complete protocol/provider parity plus a measured operational benefit before migration.
 
-The provider registry and validator must reject unclassified hosts, imports and production dependencies. Test-only vendor SDKs do not belong in production dependency sets. This rule concerns upstream dependencies and does not change the public Tixkit SDKs offered to integrators. The accepted decisions are recorded in `docs/internal/architecture/outbound-provider-clients.md` and `docs/internal/architecture/sdk-consumption-and-wire-evidence.md`.
+The provider registry and validator must reject unclassified hosts, imports and production dependencies. Test-only vendor SDKs do not belong in production dependency sets. This rule concerns upstream dependencies and does not change the public Tixkit SDKs offered to integrators. The executable boundary lives in `packages/provider-clients`, its package tests, and the public dependency-validation scripts.
 
 ## Frontend and integration packages
 
@@ -39,6 +39,6 @@ Content packages own shared editors/rendering; `admin-table-core` owns reusable 
 
 ## Repository boundary
 
-The accepted target makes the public `tixkithq/tixkit` repository authoritative for shared product code, public integrations, documentation, and the complete Self-Hosted runtime. The private `tixkithq/tixkit-cloud` repository consumes immutable public releases and contains proprietary Cloud operations, managed integrations, and natural-language agent orchestration. Public source and CI never depend on private source.
+The public `tixkithq/tixkit` repository is authoritative for shared product code, public integrations, documentation, and the complete Self-Hosted runtime. The private `tixkithq/tixkit-cloud` repository consumes immutable public releases and contains proprietary Cloud operations, managed integrations, and natural-language agent orchestration. Public source and CI never depend on private source.
 
-During the C-130 cutover, `scripts/export-oss.mjs` remains a temporary extraction and leak-validation tool. It is not the long-term publication architecture.
+This public repository is the release source. Boundary-validation scripts may still inspect release contents for accidental private dependencies, but they are safety checks rather than a publication path.

@@ -69,10 +69,13 @@ test('validates the authoritative public distribution and every SDK release path
     manifest.release.contracts.includes('distribution/policy-approval-receipt.schema.json'),
   );
   const codeowners = readFileSync(resolve(root, '.github/CODEOWNERS'), 'utf8');
-  assert.match(codeowners, /^\/distribution\/public-distribution\.json @tixkit\/maintainers$/mu);
   assert.match(
     codeowners,
-    /^\/distribution\/public-distribution\.schema\.json @tixkit\/maintainers$/mu,
+    /^\/distribution\/public-distribution\.json @tixkithq\/maintainers$/mu,
+  );
+  assert.match(
+    codeowners,
+    /^\/distribution\/public-distribution\.schema\.json @tixkithq\/maintainers$/mu,
   );
   assert.deepEqual(publicDependencyBoundaryViolations(manifest, root), []);
 });
@@ -366,7 +369,7 @@ test('rejects false legal approval and missing immutable release entries', () =>
   assert.throws(() => validatePublicDistribution(approved, root), /canonical legal evidence/u);
 
   approved.licensing.mayClaimLegalApproval = true;
-  approved.licensing.legalReviewEvidence = 'LEGAL_APPROVAL.md';
+  approved.licensing.legalReviewEvidence = 'docs/completion/legal-review-approval.md';
   assert.throws(() => validatePublicDistribution(approved, root), /path does not exist/u);
 
   const missingSdkRelease = structuredClone(manifest);
