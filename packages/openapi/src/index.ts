@@ -293,6 +293,7 @@ function explicitSecurity(path: string): readonly Record<string, readonly string
   if (path === '/webhooks/stripe') return [{ StripeSignature: [] }];
   if (path === '/webhooks/clerk') return [{ SvixSignature: [] }];
   if (path === '/webhooks/telnyx/sms') return [{ TelnyxSignature: [] }];
+  if (path === '/webhooks/twilio/sms') return [{ TwilioSignature: [] }];
   if (path.startsWith('/webhooks/email/')) return [{ EmailProviderSignature: [] }];
   return [{ BearerAuth: [] }, { ApiKey: [] }];
 }
@@ -513,6 +514,13 @@ function normalizeOpenApiOperations<const T extends OpenApiDocument>(
         in: 'header',
         name: 'telnyx-signature-ed25519',
         description: 'Telnyx Ed25519 signature verified with the configured public key.',
+      },
+      TwilioSignature: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-Twilio-Signature',
+        description:
+          'Twilio HMAC-SHA1 signature verified with the configured auth token and exact public callback URL.',
       },
       EmailProviderSignature: {
         type: 'apiKey',
@@ -22728,6 +22736,46 @@ const rawOpenApiSpec = {
           },
           '503': {
             description: 'Webhook verification not configured',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/webhooks/twilio/sms': {
+      post: {
+        summary: 'Twilio SMS status webhook (HMAC-SHA1 signature verified)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/x-www-form-urlencoded': {
+              schema: {
+                type: 'object',
+                required: ['MessageSid', 'MessageStatus'],
+                properties: {
+                  MessageSid: { type: 'string' },
+                  MessageStatus: { type: 'string' },
+                  ErrorCode: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Webhook received or duplicate replay reconciled' },
+          '400': {
+            description: 'Invalid webhook or signature',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '503': {
+            description: 'Webhook verification or delivery reconciliation not ready',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },

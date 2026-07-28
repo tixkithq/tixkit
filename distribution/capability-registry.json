@@ -384,11 +384,11 @@
       "id": "twilio-sms-adapter",
       "name": "Twilio SMS adapter",
       "classification": "public-provider-adapter",
-      "lifecycle": "planned",
+      "lifecycle": "stable",
       "availability": {
-        "cloud": "planned",
-        "platformApi": "planned",
-        "selfHosted": "planned"
+        "cloud": "available",
+        "platformApi": "available",
+        "selfHosted": "available"
       },
       "extensionContract": {
         "status": "versioned",
@@ -415,7 +415,7 @@
         "idempotency": "required",
         "audit": "required"
       },
-      "notes": "A public outbound adapter exists, but production delivery and reconciliation evidence is incomplete; availability remains planned."
+      "notes": "Implemented public adapter with signed status callbacks, replay-safe delivery reconciliation, and explicit opt-out consent handling; deployments retain responsibility for provider credentials, exact callback URL registration, and account configuration."
     },
     {
       "id": "vonage-sms-adapter",

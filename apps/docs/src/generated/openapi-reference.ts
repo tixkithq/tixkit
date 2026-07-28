@@ -31350,6 +31350,87 @@ export const apiReferenceOperations = [
   },
   {
     "method": "POST",
+    "path": "/webhooks/twilio/sms",
+    "operationId": "postWebhooksTwilioSms",
+    "tags": [
+      "Provider webhooks"
+    ],
+    "summary": "Twilio SMS status webhook (HMAC-SHA1 signature verified)",
+    "description": "",
+    "security": [
+      {
+        "TwilioSignature": []
+      }
+    ],
+    "requiredPermissions": null,
+    "parameters": [],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/x-www-form-urlencoded": {
+          "schema": {
+            "type": "object",
+            "required": [
+              "MessageSid",
+              "MessageStatus"
+            ],
+            "properties": {
+              "MessageSid": {
+                "type": "string"
+              },
+              "MessageStatus": {
+                "type": "string"
+              },
+              "ErrorCode": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Webhook received or duplicate replay reconciled"
+      },
+      "400": {
+        "description": "Invalid webhook or signature",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "Webhook verification or delivery reconciliation not ready",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
     "path": "/webhooks/email/{provider}",
     "operationId": "postWebhooksEmailByProvider",
     "tags": [

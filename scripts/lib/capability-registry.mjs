@@ -198,8 +198,8 @@ export const EXPECTED_CAPABILITY_DECISIONS = Object.freeze({
   ),
   'twilio-sms-adapter': acceptedDecision(
     'public-provider-adapter',
-    'planned',
-    plannedEverywhere,
+    'stable',
+    availableEverywhere,
     'packages/email-transport/src/index.ts',
     ['TwilioSmsTransport'],
     'caller-or-operator',

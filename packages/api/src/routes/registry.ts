@@ -28,6 +28,7 @@ import { shortLinkRedirectRoutes, shortLinkRoutes } from './modules/short-links.
 import { clerkWebhookRoutes } from './modules/clerk-webhooks.js';
 import { stripeWebhookRoutes } from './modules/stripe-webhooks.js';
 import { telnyxWebhookRoutes } from './modules/telnyx-webhooks.js';
+import { twilioWebhookRoutes } from './modules/twilio-webhooks.js';
 import { tenantRoutes } from './modules/tenant.js';
 import { ticketingRoutes } from './modules/ticketing.js';
 import { publicUploadRoutes, uploadRoutes } from './modules/uploads.js';
@@ -45,6 +46,7 @@ export const signedWebhookRouteModules: readonly RouteModuleRegistration[] = [
   { plugin: clerkWebhookRoutes, prefix: '/v1/webhooks/clerk' },
   { plugin: stripeWebhookRoutes, prefix: '/v1/webhooks/stripe' },
   { plugin: telnyxWebhookRoutes, prefix: '/v1/webhooks/telnyx' },
+  { plugin: twilioWebhookRoutes, prefix: '/v1/webhooks/twilio' },
   { plugin: emailWebhookRoutes, prefix: '/v1/webhooks/email' },
 ];
 

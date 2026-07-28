@@ -68,6 +68,8 @@ secrets:
   stripeConnectClientId: ''
   telnyxApiKey: ''
   telnyxWebhookPublicKey: ''
+  twilioAccountSid: ''
+  twilioAuthToken: ''
   qrSigningSecret: ''
   offlineManifestSigningKey: ''
   offlineManifestKeyId: manifest:production

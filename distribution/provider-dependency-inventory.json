@@ -3,7 +3,7 @@
   "schemaVersion": 2,
   "registry": {
     "path": "distribution/provider-integration-registry.json",
-    "sha256": "a9c8717c713ce5944f02ac3aa65d4f54da8cbfa617f7b3d7d40a2ad28ef49665"
+    "sha256": "b9055fd2c6acca97282528c6ce0e0f74f4d0653203601b345f80d5436f9d437c"
   },
   "declarations": [
     {
@@ -88,6 +88,24 @@
       "usage": "test"
     },
     {
+      "classifications": ["contained-sdk"],
+      "declaredVersion": "8.0.1",
+      "dependency": "@types/nodemailer",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/email-transport/package.json",
+      "integrationIds": ["smtp-transport"],
+      "usage": "unreferenced"
+    },
+    {
+      "classifications": ["contained-sdk"],
+      "declaredVersion": "9.0.3",
+      "dependency": "nodemailer",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/email-transport/package.json",
+      "integrationIds": ["smtp-transport"],
+      "usage": "runtime"
+    },
+    {
       "classifications": ["runtime-boundary"],
       "declaredVersion": "1.9.1",
       "dependency": "@opentelemetry/api",
@@ -116,7 +134,7 @@
     },
     {
       "classifications": ["runtime-boundary"],
-      "declaredVersion": "0.219.0",
+      "declaredVersion": "0.221.0",
       "dependency": "@opentelemetry/exporter-trace-otlp-http",
       "dependencyClass": "dependencies",
       "dependencyOwner": "packages/shared/package.json",
@@ -125,7 +143,7 @@
     },
     {
       "classifications": ["runtime-boundary"],
-      "declaredVersion": "2.8.0",
+      "declaredVersion": "2.10.0",
       "dependency": "@opentelemetry/resources",
       "dependencyClass": "dependencies",
       "dependencyOwner": "packages/shared/package.json",
@@ -134,7 +152,7 @@
     },
     {
       "classifications": ["runtime-boundary"],
-      "declaredVersion": "0.219.0",
+      "declaredVersion": "0.221.0",
       "dependency": "@opentelemetry/sdk-node",
       "dependencyClass": "dependencies",
       "dependencyOwner": "packages/shared/package.json",
@@ -143,7 +161,7 @@
     },
     {
       "classifications": ["runtime-boundary"],
-      "declaredVersion": "2.8.0",
+      "declaredVersion": "2.10.0",
       "dependency": "@opentelemetry/sdk-trace-base",
       "dependencyClass": "dependencies",
       "dependencyOwner": "packages/shared/package.json",
@@ -1247,6 +1265,16 @@
       "importPath": "packages/workflows/src/workflows/webhook-delivery.ts",
       "integrationIds": ["temporal-runtime"],
       "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["contained-sdk"],
+      "dependency": "nodemailer",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/email-transport/package.json",
+      "importPath": "packages/email-transport/src/index.ts",
+      "integrationIds": ["smtp-transport"],
+      "integrationOwners": ["packages/email-transport/package.json"],
       "usage": "runtime"
     },
     {

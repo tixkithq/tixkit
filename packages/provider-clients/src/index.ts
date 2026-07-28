@@ -911,6 +911,10 @@ export class TwilioMessagingClient {
   async sendSms(input: SmsMessageInput): Promise<ProviderMessageResult> {
     requireCredential(this.config.accountSid, 'twilio', 'send-sms');
     requireCredential(this.config.authToken, 'twilio', 'send-sms');
+    requireHttpIdempotencyKey(
+      { dependency: 'twilio', operation: 'send-sms' },
+      input.idempotencyKey,
+    );
     const form = new URLSearchParams({
       From: input.from,
       To: input.to,
@@ -933,7 +937,7 @@ export class TwilioMessagingClient {
         Authorization: `Basic ${Buffer.from(`${this.config.accountSid}:${this.config.authToken}`).toString('base64')}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      idempotency: { key: input.idempotencyKey },
+      requestIdHeaders: ['twilio-request-id', 'x-twilio-request-id'],
       incidentScope: input.incidentScope,
       body: form,
       parse: twilioMessageResult,
@@ -1115,8 +1119,22 @@ function telnyxMessageResult(value: unknown): ProviderMessageResult {
 }
 
 function twilioMessageResult(value: unknown): ProviderMessageResult {
-  const providerMessageId = optionalString(recordBody(value), 'sid');
+  const body = recordBody(value);
+  const providerMessageId = optionalString(body, 'sid');
   if (!providerMessageId) throw malformedProviderPayload('twilio', 'send-sms');
+  const status = optionalString(body, 'status')?.toLowerCase();
+  if (status === 'failed' || status === 'undelivered' || status === 'canceled') {
+    throw new ProviderOperationError(
+      'twilio.send-sms failed: rejected',
+      'twilio',
+      'send-sms',
+      'validation',
+      false,
+      'rejected',
+      true,
+      {},
+    );
+  }
   return { providerMessageId, accepted: true };
 }
 

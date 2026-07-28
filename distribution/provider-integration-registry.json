@@ -375,7 +375,7 @@
         "type": "workspace-export",
         "path": "packages/provider-clients/src/index.ts",
         "export": "providerBaseUrl",
-        "sha256": "03e5bfa4311d9b1ea8afc705db0eae794de9093106222c6fea947016bbe438cc"
+        "sha256": "95b7279b88f67fce5bfd874a094e480baa6d348dd4922670a495e10056be0c1b"
       },
       "allowedSinks": [
         {
@@ -393,7 +393,7 @@
         "type": "workspace-export",
         "path": "packages/provider-clients/src/index.ts",
         "export": "executeProviderHttp",
-        "sha256": "03e5bfa4311d9b1ea8afc705db0eae794de9093106222c6fea947016bbe438cc"
+        "sha256": "95b7279b88f67fce5bfd874a094e480baa6d348dd4922670a495e10056be0c1b"
       },
       "allowedSinks": [
         {
@@ -490,7 +490,7 @@
       "id": "migration-media-object-store",
       "path": "packages/workflows/src/activities/migration-domain-committers.ts",
       "typeName": "MigrationMediaObjectStore",
-      "sha256": "60386d2d5e442f9e0f5b6b979c8fc5e802bdb8822a57b5fb70fb9c85324a20e9",
+      "sha256": "d1bec52ee46a06b728394bd5133577fa059766f726617200b23f8ae4cf5ae996",
       "allowedMethods": ["delete"],
       "runtimeEvidencePaths": [
         "packages/workflows/src/__tests__/migration-domain-committers.integration.test.ts"
@@ -984,6 +984,45 @@
         "ordinaryTelemetry": "runtime-owned"
       },
       "reviewDate": "2026-07-16"
+    },
+    {
+      "id": "smtp-transport",
+      "provider": "SMTP",
+      "classification": "contained-sdk",
+      "ownerPackages": ["packages/email-transport/package.json"],
+      "providerHosts": [],
+      "allowedHostPaths": [],
+      "allowedNonExecutionHostPaths": [],
+      "allowedImports": [
+        {
+          "package": "@types/nodemailer",
+          "paths": ["packages/email-transport/src/index.ts"]
+        },
+        {
+          "package": "nodemailer",
+          "paths": ["packages/email-transport/src/index.ts"]
+        }
+      ],
+      "allowedDependencies": [
+        {
+          "package": "@types/nodemailer",
+          "packagePath": "packages/email-transport/package.json",
+          "dependencyClass": "devDependencies"
+        },
+        {
+          "package": "nodemailer",
+          "packagePath": "packages/email-transport/package.json",
+          "dependencyClass": "dependencies"
+        }
+      ],
+      "rationale": "Nodemailer owns SMTP protocol negotiation, TLS handling, authentication, MIME encoding, and relay response parsing.",
+      "retryOwner": "caller-or-workflow",
+      "diagnosticPolicy": {
+        "correlation": "hash-only",
+        "rawBodies": "prohibited",
+        "ordinaryTelemetry": "bounded-redacted"
+      },
+      "reviewDate": "2026-07-27"
     },
     {
       "id": "stripe-browser-runtime",

@@ -1237,7 +1237,13 @@ describe('messaging clients', () => {
       providerMessageId: 'plivo_1',
     });
     expect(requests).toHaveLength(3);
-    expect(new Headers(requests[0]?.init.headers).get('idempotency-key')).toBe('sms_idem_1');
+    expect(new Headers(requests[0]?.init.headers).get('idempotency-key')).toBeNull();
+    expect(Object.fromEntries(new URLSearchParams(String(requests[0]?.init.body)))).toEqual({
+      From: '+15550000001',
+      To: '+15550000002',
+      Body: 'Tixkit update',
+      StatusCallback: 'https://hooks.test/status',
+    });
     expect(new Headers(requests[1]?.init.headers).get('content-type')).toBe(
       'application/x-www-form-urlencoded',
     );
@@ -1254,6 +1260,32 @@ describe('messaging clients', () => {
       'sms_idem_1',
     );
     expect(requests.map(({ init }) => init.redirect)).toEqual(['error', 'error', 'error']);
+  });
+
+  it('normalizes a successful Twilio response that already reports terminal rejection', async () => {
+    const client = new TwilioMessagingClient(
+      { accountSid: 'AC123', authToken: 'secret' },
+      {
+        fetch: async () =>
+          Response.json({
+            sid: 'SM123',
+            status: 'failed',
+            error_code: 21610,
+            error_message: 'recipient details must not escape',
+          }),
+      },
+    );
+
+    const error = await operationError(client.sendSms(sms));
+    expect(error).toMatchObject({
+      dependency: 'twilio',
+      operation: 'send-sms',
+      kind: 'validation',
+      retryable: false,
+      deliveryState: 'rejected',
+      safeToFailover: true,
+    });
+    expect(JSON.stringify(error)).not.toContain('recipient details');
   });
 
   it('records malformed accepted payloads as one failure for every messaging client', async () => {

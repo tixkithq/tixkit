@@ -63,6 +63,26 @@ is recorded as unknown and is not automatically retried; reconcile it by Message
 send. `SMTP_ALLOW_INSECURE_LOOPBACK=1` exists only for explicit non-production loopback tests and is
 ignored in production.
 
+## Configure Twilio SMS delivery
+
+Set `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` in the API and worker secret environment. Store
+those variable names, never their values, in the Twilio provider route credentials reference. Set
+the route webhook URL to the exact external callback:
+
+```text
+https://api.example.com/v1/webhooks/twilio/sms
+```
+
+The callback URL normally derives from `API_BASE_URL`. If an external proxy exposes a different
+URL, set `TWILIO_WEBHOOK_PUBLIC_URL` to the exact URL registered with Twilio, including its scheme,
+host, port, path, and query string. A mismatch causes signature verification to fail closed.
+
+Tixkit reconciles Twilio status callbacks by `MessageSid`, deduplicates each status transition, and
+stores only normalized status and error-code fields. Twilio does not offer a portable outbound
+idempotency key, so Tixkit does not retry ambiguous submission attempts. Error code `21610`
+explicitly revokes local SMS consent; other delivery failures remain delivery failures and do not
+silently alter consent.
+
 ## Enable provider incident evidence only for an active incident
 
 Exact outbound provider request IDs are excluded from normal logs, traces, API errors, and Temporal history. For a support escalation that requires the provider's exact correlation value, operators may temporarily enable the encrypted incident sink with:
