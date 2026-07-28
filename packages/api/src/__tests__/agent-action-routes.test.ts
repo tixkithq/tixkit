@@ -1478,6 +1478,31 @@ describe('agent action routes', () => {
     await app.close();
   });
 
+  it.each(['AGENT_APPROVAL_INVALID', 'AGENT_APPROVAL_CONSUMED'])(
+    'returns conflict for unusable execution approval %s',
+    async (code) => {
+      const execute = vi.fn(async () => {
+        throw new Error(code);
+      });
+      const { app } = await setup({ service: { execute } });
+      const actionId = `act_${'d'.repeat(48)}`;
+      const approvalId = `apr_${'e'.repeat(48)}`;
+      const actionDigest = 'b'.repeat(64);
+      const confirmation = `execute:${actionId}:${approvalId}:${actionDigest}`;
+      const response = await app.inject({
+        method: 'POST',
+        url: `/agent/actions/${actionId}/executions`,
+        headers: {
+          'idempotency-key': confirmation,
+          'x-tixkit-confirmation': confirmation,
+        },
+        payload: { approvalId, actionDigest },
+      });
+      expect(response.statusCode).toBe(409);
+      await app.close();
+    },
+  );
+
   it('rejects human callers and never invokes preparation', async () => {
     const { app, service } = await setup({ actor: principal('user') });
     const response = await app.inject({

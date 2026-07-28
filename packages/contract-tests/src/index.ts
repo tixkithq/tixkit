@@ -1308,6 +1308,141 @@ export async function runAgentPlatformContract(
     });
     return result(findings);
   }
+  const revocationPrepareResponse = await request(
+    'event-update-revocation-prepare',
+    {
+      method: 'POST',
+      path: '/v1/agent/event-updates',
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.event.update.revocation.prepare`,
+      },
+      body: {
+        delegationGrantId: input.delegationGrantId,
+        resourceId: input.resourceId,
+        changes: { description: 'Revocation-only conformance candidate.' },
+      },
+    },
+    201,
+  );
+  const revocationPrepared = objectBody(revocationPrepareResponse?.body);
+  const revocationAction = objectBody(revocationPrepared?.action) as unknown as
+    | AgentAction
+    | undefined;
+  const revocationPreview = objectBody(revocationPrepared?.preview);
+  let revocationActionDigest: string | undefined;
+  try {
+    if (!revocationAction || !revocationPreview) throw new Error('invalid revocation preparation');
+    validateAgentEventUpdatePreview(
+      revocationAction,
+      revocationPreview as unknown as AgentEventUpdatePreview,
+    );
+    revocationActionDigest = agentActionDigest(revocationAction);
+  } catch {
+    revocationActionDigest = undefined;
+  }
+  if (
+    !revocationAction ||
+    revocationAction.kind !== 'event.update' ||
+    revocationAction.autonomy !== 'execute_with_approval' ||
+    revocationAction.agentPrincipalId !== eventUpdateAction.agentPrincipalId ||
+    revocationAction.sponsorPrincipalId !== eventUpdateAction.sponsorPrincipalId ||
+    revocationAction.delegationGrantId !== eventUpdateAction.delegationGrantId ||
+    revocationAction.target.resourceId !== eventUpdateAction.target.resourceId ||
+    revocationAction.target.resourceVersion !==
+      objectBody(eventUpdateExecution.result)?.resourceVersion ||
+    revocationActionDigest !== revocationPrepared?.actionDigest ||
+    objectBody(revocationPrepared?.authorization)?.eligibleForApproval !== true ||
+    revocationPrepared?.previewSha256 !== agentSha256(revocationPreview)
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_APPROVAL_REVOCATION_SCHEMA',
+      message: 'Revocation candidate is not an exact approval-bound event update.',
+    });
+    return result(findings);
+  }
+  const revocationApprovalResponse = await request(
+    'event-update-revocation-approve',
+    {
+      method: 'POST',
+      path: `/v1/agent/event-updates/${encodeURIComponent(revocationAction.id)}/approvals`,
+      headers: {
+        ...headers(input.sponsorAccessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.event.update.revocation.approve`,
+        'X-Tixkit-Confirmation': `approve:${revocationAction.id}:${revocationActionDigest}`,
+      },
+      body: { actionDigest: revocationActionDigest },
+    },
+    201,
+  );
+  const revocationApproval = objectBody(revocationApprovalResponse?.body) as unknown as
+    | AgentApproval
+    | undefined;
+  if (
+    !revocationApproval ||
+    revocationApproval.actionDigest !== revocationActionDigest ||
+    revocationApproval.approverPrincipalId !== revocationAction.sponsorPrincipalId ||
+    revocationApproval.approverPermissionSnapshot?.join(',') !== 'events:write' ||
+    revocationApproval.revokedAt !== undefined ||
+    revocationApproval.consumedAt !== undefined
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_APPROVAL_REVOCATION_SCHEMA',
+      message: 'Revocation candidate approval is not bound to the exact sponsor and action.',
+    });
+    return result(findings);
+  }
+  const revocationRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: `/v1/agent/event-updates/${encodeURIComponent(revocationAction.id)}/approvals/${encodeURIComponent(revocationApproval.id)}/revoke`,
+    headers: {
+      ...headers(input.sponsorAccessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.event.update.revocation`,
+      'X-Tixkit-Confirmation': `revoke:${revocationAction.id}:${revocationApproval.id}:${revocationActionDigest}`,
+    },
+    body: { actionDigest: revocationActionDigest },
+  };
+  const revocationResponse = await request('event-update-revocation', revocationRequest, 200);
+  const revocationReplay = await request('event-update-revocation-replay', revocationRequest, 200);
+  const revokedApproval = objectBody(revocationResponse?.body) as unknown as
+    | AgentApproval
+    | undefined;
+  if (
+    !revokedApproval ||
+    revokedApproval.id !== revocationApproval.id ||
+    revokedApproval.actionDigest !== revocationActionDigest ||
+    revokedApproval.approverPrincipalId !== revocationAction.sponsorPrincipalId ||
+    revokedApproval.consumedAt !== undefined ||
+    !revokedApproval.revokedAt ||
+    !Number.isFinite(Date.parse(revokedApproval.revokedAt)) ||
+    Date.parse(revokedApproval.revokedAt) < Date.parse(revocationApproval.approvedAt) ||
+    agentSha256(revocationResponse?.body) !== agentSha256(revocationReplay?.body)
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_APPROVAL_REVOCATION_SCHEMA',
+      message: 'Approval revocation is not immutable, replay-safe, or correctly bound.',
+    });
+    return result(findings);
+  }
+  const revokedExecutionConfirmation = `execute:${revocationAction.id}:${revocationApproval.id}:${revocationActionDigest}`;
+  await request(
+    'event-update-revoked-execution-rejected',
+    {
+      method: 'POST',
+      path: `/v1/agent/event-updates/${encodeURIComponent(revocationAction.id)}/executions`,
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': revokedExecutionConfirmation,
+        'X-Tixkit-Confirmation': revokedExecutionConfirmation,
+      },
+      body: {
+        approvalId: revocationApproval.id,
+        actionDigest: revocationActionDigest,
+      },
+    },
+    409,
+    false,
+  );
   const readinessRequest: AgentPlatformContractRequest = {
     method: 'POST',
     path: '/v1/agent/readiness',

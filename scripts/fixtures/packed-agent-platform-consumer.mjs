@@ -69,6 +69,8 @@ const executionId = `exec_${'c'.repeat(48)}`;
 const eventUpdateActionId = `act_${'f'.repeat(48)}`;
 const eventUpdateApprovalId = `apr_${'d'.repeat(48)}`;
 const eventUpdateExecutionId = `exec_${'e'.repeat(48)}`;
+const revocationActionId = `act_${'7'.repeat(48)}`;
+const revocationApprovalId = `apr_${'8'.repeat(48)}`;
 const reportReadActionId = `act_${'6'.repeat(48)}`;
 const agentPrincipalId = `agt_${'1'.repeat(48)}`;
 const delegationGrantId = `dlg_${'2'.repeat(48)}`;
@@ -345,6 +347,50 @@ if (
   !validateEventUpdatePayload(eventUpdateAction.payload)
 )
   throw new Error('packed agent schemas rejected a valid approval-bound event.update action');
+const revocationAfter = {
+  description: 'Revocation-only conformance candidate.',
+};
+const revocationPreviewMaterial = {
+  resourceId: initialTarget.resourceId,
+  resourceVersion: target.resourceVersion,
+  changedFields: ['description'],
+  before: { description: eventUpdateAfter.description },
+  after: revocationAfter,
+};
+const revocationPreview = {
+  ...revocationPreviewMaterial,
+  changePreviewSha256: agentSha256(revocationPreviewMaterial),
+  observedAt: '2026-07-14T11:59:20.000Z',
+  untrustedContentPaths: ['before.description', 'after.description'],
+};
+const revocationAction = {
+  id: revocationActionId,
+  ...base,
+  kind: 'event.update',
+  autonomy: 'execute_with_approval',
+  target: { ...target, apiOperation: 'events.update' },
+  payload: {
+    changePreviewSha256: revocationPreview.changePreviewSha256,
+    changes: revocationAfter,
+  },
+  idempotencyKey: 'agent.conformance.packed.event.update.revocation.prepare',
+  preparedAt: '2026-07-14T11:59:20.000Z',
+};
+const revocationActionDigest = agentSha256(revocationAction);
+const revocationApproval = {
+  id: revocationApprovalId,
+  tenantId: target.tenantId,
+  actionDigest: revocationActionDigest,
+  approverPrincipalId: base.sponsorPrincipalId,
+  approverPermissionSnapshot: ['events:write'],
+  policyVersion: base.expectedPolicyVersion,
+  approvedAt: '2026-07-14T11:59:25.000Z',
+  expiresAt: '2026-07-14T12:03:20.000Z',
+};
+const revokedApproval = {
+  ...revocationApproval,
+  revokedAt: '2026-07-14T11:59:26.000Z',
+};
 const readinessAction = {
   id: `act_${'r'.repeat(48)}`,
   ...base,
@@ -613,6 +659,20 @@ const execute = async (request) => {
     });
   }
   if (request.path === '/v1/agent/event-updates') {
+    if (request.body?.changes?.description === revocationAfter.description)
+      return response(201, {
+        action: revocationAction,
+        actionDigest: revocationActionDigest,
+        expiresAt: '2026-07-14T12:04:20.000Z',
+        authorization: {
+          eligibleForApproval: true,
+          reasons: ['approval_required'],
+          snapshotSha256: 'b'.repeat(64),
+          checkedAt: '2026-07-14T11:59:20.000Z',
+        },
+        preview: revocationPreview,
+        previewSha256: agentSha256(revocationPreview),
+      });
     eventUpdateCalls += 1;
     const returnedPreview = {
       ...eventUpdatePreview,
@@ -714,6 +774,13 @@ const execute = async (request) => {
       expiresAt: '2026-07-14T12:03:00.000Z',
       ...(mutation === 'update_approval_extra' ? { planSha256: '9'.repeat(64) } : {}),
     });
+  if (request.path === `/v1/agent/event-updates/${revocationActionId}/approvals`)
+    return response(201, revocationApproval);
+  if (
+    request.path ===
+    `/v1/agent/event-updates/${revocationActionId}/approvals/${revocationApprovalId}/revoke`
+  )
+    return response(200, revokedApproval);
   if (
     request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
     request.path === `/v1/agent/actions/${contentPrepareActionId}/executions` ||
@@ -770,6 +837,8 @@ const execute = async (request) => {
       ...(mutation === 'update_execution_extra' ? { planSha256: '9'.repeat(64) } : {}),
     });
   }
+  if (request.path === `/v1/agent/event-updates/${revocationActionId}/executions`)
+    return response(409, { code: 'CONFLICT' });
   if (request.path.endsWith('/executions'))
     return response(200, {
       id: executionId,

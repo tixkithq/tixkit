@@ -440,7 +440,7 @@ if (validatePortableContentDocument('event_page', unsafe)) throw new Error('Pack
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
-    'Built and executed 5 packed contract profiles, including agent event-read/report-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, the packed SDK wire contract, and canonical portable event-page validation through clean Bun and npm installs.',
+    'Built and executed 5 packed contract profiles, including agent event-read/report-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, replay-safe approval revocation with rejected execution, fail-closed credential handling, the packed SDK wire contract, and canonical portable event-page validation through clean Bun and npm installs.',
   );
 } finally {
   await rm(temp, { recursive: true, force: true });

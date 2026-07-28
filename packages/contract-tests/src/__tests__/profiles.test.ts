@@ -282,6 +282,8 @@ describe('third-party contract profiles', () => {
     const eventUpdateActionId = `act_${'f'.repeat(48)}`;
     const eventUpdateApprovalId = `apr_${'d'.repeat(48)}`;
     const eventUpdateExecutionId = `exec_${'e'.repeat(48)}`;
+    const revocationActionId = `act_${'7'.repeat(48)}`;
+    const revocationApprovalId = `apr_${'8'.repeat(48)}`;
     const reportReadActionId = `act_${'6'.repeat(48)}`;
     const agentPrincipalId = `agt_${'1'.repeat(48)}`;
     const delegationGrantId = `dlg_${'2'.repeat(48)}`;
@@ -652,6 +654,64 @@ describe('third-party contract profiles', () => {
       },
       createdAt: '2026-07-14T11:59:16.000Z',
       updatedAt: '2026-07-14T11:59:17.000Z',
+    };
+    const revocationBefore = {
+      description: eventUpdateAfter.description,
+    };
+    const revocationAfter = {
+      description: 'Revocation-only conformance candidate.',
+    };
+    const revocationPreviewMaterial = {
+      resourceId: 'event_primary',
+      resourceVersion: 8,
+      changedFields: ['description'],
+      before: revocationBefore,
+      after: revocationAfter,
+    };
+    const revocationChangePreviewSha256 = agentSha256(revocationPreviewMaterial);
+    const revocationAction = {
+      id: revocationActionId,
+      protocolVersion: '2026-07-22' as const,
+      agentPrincipalId,
+      sponsorPrincipalId: 'sponsor_primary',
+      delegationGrantId,
+      kind: 'event.update' as const,
+      autonomy: 'execute_with_approval' as const,
+      target: {
+        tenantId: 'tenant_primary',
+        resourceType: 'event',
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        apiOperation: 'events.update',
+      },
+      payload: {
+        changePreviewSha256: revocationChangePreviewSha256,
+        changes: revocationAfter,
+      },
+      idempotencyKey: 'agent.conformance.0001.event.update.revocation.prepare',
+      expectedPolicyVersion: 3,
+      preparedAt: '2026-07-14T11:59:20.000Z',
+    };
+    const revocationActionDigest = agentSha256(revocationAction);
+    const revocationPreview = {
+      ...revocationPreviewMaterial,
+      changePreviewSha256: revocationChangePreviewSha256,
+      observedAt: '2026-07-14T11:59:20.000Z',
+      untrustedContentPaths: ['before.description', 'after.description'],
+    };
+    const revocationApproval = {
+      id: revocationApprovalId,
+      tenantId: 'tenant_primary',
+      actionDigest: revocationActionDigest,
+      approverPrincipalId: 'sponsor_primary',
+      approverPermissionSnapshot: ['events:write'],
+      policyVersion: 3,
+      approvedAt: '2026-07-14T11:59:25.000Z',
+      expiresAt: '2026-07-14T12:03:20.000Z',
+    };
+    const revokedApproval = {
+      ...revocationApproval,
+      revokedAt: '2026-07-14T11:59:26.000Z',
     };
     let planSha256 = '';
     let substituteApprovalDigest = false;
@@ -1107,6 +1167,23 @@ describe('third-party contract profiles', () => {
           });
         }
         if (request.path === '/v1/agent/event-updates') {
+          if (
+            (request.body as { changes?: { description?: string } })?.changes?.description ===
+            revocationAfter.description
+          )
+            return response(201, {
+              action: revocationAction,
+              actionDigest: revocationActionDigest,
+              expiresAt: '2026-07-14T12:04:20.000Z',
+              authorization: {
+                eligibleForApproval: true,
+                reasons: ['approval_required'],
+                snapshotSha256: 'b'.repeat(64),
+                checkedAt: '2026-07-14T11:59:20.000Z',
+              },
+              preview: revocationPreview,
+              previewSha256: agentSha256(revocationPreview),
+            });
           eventUpdatePrepareCall += 1;
           const returnedAction =
             eventUpdateMutation === 'action'
@@ -1257,6 +1334,13 @@ describe('third-party contract profiles', () => {
               : {}),
             ...(eventUpdateMutation === 'approval_extra' ? { planSha256: '9'.repeat(64) } : {}),
           });
+        if (request.path === `/v1/agent/event-updates/${revocationActionId}/approvals`)
+          return response(201, revocationApproval);
+        if (
+          request.path ===
+          `/v1/agent/event-updates/${revocationActionId}/approvals/${revocationApprovalId}/revoke`
+        )
+          return response(200, revokedApproval);
         if (
           request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
           request.path === `/v1/agent/actions/${contentPrepareActionId}/executions` ||
@@ -1313,6 +1397,8 @@ describe('third-party contract profiles', () => {
           if (eventUpdateMutation === 'execution_envelope') delete returnedExecution.tenantId;
           return response(200, returnedExecution);
         }
+        if (request.path === `/v1/agent/event-updates/${revocationActionId}/executions`)
+          return response(409, { code: 'CONFLICT' });
         if (request.path.endsWith('/executions'))
           return response(200, {
             id: executionId,
@@ -1436,7 +1522,7 @@ describe('third-party contract profiles', () => {
       ),
     ).toHaveLength(2);
     expect(requests.filter((request) => request.path === '/v1/agent/event-updates')).toHaveLength(
-      2,
+      3,
     );
     expect(
       requests.filter(
@@ -1453,6 +1539,28 @@ describe('third-party contract profiles', () => {
     expect(eventUpdateApprovalRequest.headers['X-Tixkit-Confirmation']).toBe(
       `approve:${eventUpdateActionId}:${eventUpdateActionDigest}`,
     );
+    const revocationRequest = requests.find(
+      (request) =>
+        request.path ===
+        `/v1/agent/event-updates/${revocationActionId}/approvals/${revocationApprovalId}/revoke`,
+    )!;
+    expect(revocationRequest.headers).toMatchObject({
+      'Idempotency-Key': 'agent.conformance.0001.event.update.revocation',
+      'X-Tixkit-Confirmation': `revoke:${revocationActionId}:${revocationApprovalId}:${revocationActionDigest}`,
+    });
+    expect(revocationRequest.body).toEqual({ actionDigest: revocationActionDigest });
+    expect(
+      requests.filter(
+        (request) =>
+          request.path ===
+          `/v1/agent/event-updates/${revocationActionId}/approvals/${revocationApprovalId}/revoke`,
+      ),
+    ).toHaveLength(2);
+    expect(
+      requests.filter(
+        (request) => request.path === `/v1/agent/event-updates/${revocationActionId}/executions`,
+      ),
+    ).toHaveLength(1);
     const approvalRequest = requests.find(
       (request) => request.path === `/v1/agent/actions/${actionId}/approvals`,
     )!;

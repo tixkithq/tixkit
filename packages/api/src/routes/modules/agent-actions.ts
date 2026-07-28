@@ -265,6 +265,10 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new NotFoundError('AgentActionExecution', 'requested');
   if (message === 'AGENT_ACTION_EXECUTION_DIGEST_MISMATCH')
     throw new ConflictError('Agent action digest no longer matches the approved action');
+  if (message === 'AGENT_APPROVAL_INVALID')
+    throw new ConflictError('Agent action approval is revoked, expired, consumed, or invalid');
+  if (message === 'AGENT_APPROVAL_CONSUMED')
+    throw new ConflictError('Agent action approval has already been consumed');
   throw error;
 }
 
