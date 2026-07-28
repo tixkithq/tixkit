@@ -1,13 +1,13 @@
 {
   "releaseVersion": "2026-09-03",
   "apiVersion": "2026-09-03",
-  "commit": null,
-  "timestamp": null,
+  "commit": "7b4e9fdcd5c80d11e105f99d8b235ee400d81130",
+  "timestamp": "2026-07-27T19:38:00-05:00",
   "provenance": {
-    "sourceCommit": "4a14fcd3a5aed991f67dacc9e9c6bbfc8c598b49",
-    "headTreeHash": "bfe379c8069269782492ae6e2c8fa8e43c7f15e1",
-    "sourceTreeHash": "0aedda39cbf914d6508db20070e920e72e019dd9e4506046af79a9612261ab0d",
-    "trackedFileCount": 2318,
+    "sourceCommit": "7b4e9fdcd5c80d11e105f99d8b235ee400d81130",
+    "headTreeHash": "f20eb04dc10b48e637b3f7515d4fd2acade5d1a2",
+    "sourceTreeHash": "a04fe71d1598bfc8e58b5575ffa0d85a211c0145599bd4e6ac2f1dc217426ba3",
+    "trackedFileCount": 2241,
     "excludedGeneratedPaths": [
       "apps/admin-dashboard/next-env.d.ts",
       "apps/docs/public/contracts/",
@@ -18,9 +18,9 @@
       "distribution/public-distribution.json",
       "graphify-out/"
     ],
-    "worktreeState": "modified",
+    "worktreeState": "clean",
     "reproducible": true,
-    "publishable": false
+    "publishable": true
   },
   "artifacts": [
     {

@@ -3,7 +3,7 @@
   "generator": "@tixkit/api-integration-skill:local-evaluation:v1",
   "apiVersion": "2026-09-03",
   "generationMode": "local-evaluation",
-  "sourceReleaseManifestSha256": "eebce50cea0697817eff54fa4c6ff0c9f947230b4a1b92fb11f6ff5b22539ff7",
+  "sourceReleaseManifestSha256": "e461831cddce8d2e6a01c8e45c6a3c6c9ebf78902ebbfd429b539078fd477f56",
   "artifacts": [
     {
       "name": "agents/openai.yaml",
@@ -12,7 +12,7 @@
     },
     {
       "name": "references/contract.json",
-      "sha256": "22569191fe899a9d2ceccab85e732cc2c82e2e179665fc9490b346d81e31174e",
+      "sha256": "89c57e5a057e0ca3fe3c123422beedb30d938891d1ecb4775ac1a1b6a7e9f44b",
       "size": 2959
     },
     {
