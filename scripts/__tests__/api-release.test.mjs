@@ -107,7 +107,7 @@ test('refuses to rebind API provenance outside the authoritative public reposito
         env: { ...process.env, REBIND_PUBLIC_API_PROVENANCE: '1' },
         stdio: 'pipe',
       }),
-    /may be rebound only in github\.com\/tixkit\/tixkit/u,
+    /may be rebound only in github\.com\/tixkithq\/tixkit/u,
   );
 });
 

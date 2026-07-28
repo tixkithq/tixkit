@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validatePublicDistribution } from './public-distribution.mjs';
 
-const authoritativeRepository = 'github.com/tixkit/tixkit';
+const authoritativeRepository = 'github.com/tixkithq/tixkit';
 const forbiddenTrackedPaths = [
   'CLAUDE.md',
   'implementation-plan.md',

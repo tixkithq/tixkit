@@ -408,10 +408,10 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
     kind: 'tixkit-compact-clean-host-proof',
     result: 'passed',
     startedFromFreshEnvironment: true,
-    authoritativePublicRepository: 'github.com/tixkit/tixkit',
+    authoritativePublicRepository: 'github.com/tixkithq/tixkit',
     source: { commit, tree: commit },
     remote: {
-      url: 'https://github.com/tixkit/tixkit.git',
+      url: 'https://github.com/tixkithq/tixkit.git',
       ref: 'refs/heads/main',
       refObject: commit,
       object: commit,

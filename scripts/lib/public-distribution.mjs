@@ -670,7 +670,7 @@ function validateNpmReleaseMetadata(entry, manifest, root, violations) {
   const packageManifest = JSON.parse(readFileSync(packagePath, 'utf8'));
   const expectedRepository = {
     type: 'git',
-    url: 'git+https://github.com/tixkit/tixkit.git',
+    url: 'git+https://github.com/tixkithq/tixkit.git',
     directory: entry.path,
   };
   if (packageManifest.private === true)
@@ -683,19 +683,19 @@ function validateNpmReleaseMetadata(entry, manifest, root, violations) {
     violations.push(`${entry.path}: license must be ${expectedLicense}`);
   }
   if (JSON.stringify(packageManifest.repository) !== JSON.stringify(expectedRepository)) {
-    violations.push(`${entry.path}: repository metadata must point to tixkit/tixkit`);
+    violations.push(`${entry.path}: repository metadata must point to tixkithq/tixkit`);
   }
   if (
     packageManifest.homepage &&
-    packageManifest.homepage !== 'https://github.com/tixkit/tixkit#readme'
+    packageManifest.homepage !== 'https://github.com/tixkithq/tixkit#readme'
   ) {
-    violations.push(`${entry.path}: homepage metadata must point to tixkit/tixkit`);
+    violations.push(`${entry.path}: homepage metadata must point to tixkithq/tixkit`);
   }
   if (
     packageManifest.bugs?.url &&
-    packageManifest.bugs.url !== 'https://github.com/tixkit/tixkit/issues'
+    packageManifest.bugs.url !== 'https://github.com/tixkithq/tixkit/issues'
   ) {
-    violations.push(`${entry.path}: bugs metadata must point to tixkit/tixkit`);
+    violations.push(`${entry.path}: bugs metadata must point to tixkithq/tixkit`);
   }
   if (!Array.isArray(packageManifest.files) || packageManifest.files.length === 0) {
     violations.push(`${entry.path}: files must define the published package boundary`);
@@ -767,10 +767,10 @@ export function validatePublicDistribution(manifest, root, schema) {
     );
   }
 
-  if (manifest.authority.publicRepository !== 'tixkit/tixkit')
-    violations.push('publicRepository must be tixkit/tixkit');
-  if (manifest.authority.cloudRepository !== 'tixkit/tixkit-cloud')
-    violations.push('cloudRepository must be tixkit/tixkit-cloud');
+  if (manifest.authority.publicRepository !== 'tixkithq/tixkit')
+    violations.push('publicRepository must be tixkithq/tixkit');
+  if (manifest.authority.cloudRepository !== 'tixkithq/tixkit-cloud')
+    violations.push('cloudRepository must be tixkithq/tixkit-cloud');
   if (manifest.authority.sharedFixPolicy !== 'public-first')
     violations.push('sharedFixPolicy must be public-first');
   if (manifest.authority.cloudConsumption !== 'immutable-artifacts-only')

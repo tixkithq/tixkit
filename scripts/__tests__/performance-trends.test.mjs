@@ -31,7 +31,7 @@ const budgetConfig = JSON.parse(
   readFileSync(path.join(root, 'performance-budgets.integration.json'), 'utf8'),
 );
 const scenario = scenarioConfig.scenarios[0];
-const repository = 'tixkit/tixkit';
+const repository = 'tixkithq/tixkit';
 const defaultBranch = 'main';
 const temporaryDirectories = new Set();
 

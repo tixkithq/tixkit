@@ -4,7 +4,7 @@ This file is the concise map for contributors. The canonical detailed views are 
 
 ## Repository boundary
 
-The accepted target has an authoritative public `tixkit/tixkit` repository for shared product code, contracts, integration packages and the complete Self-Hosted runtime. Proprietary Cloud operations, managed integrations and natural-language agent orchestration live in a separate private `tixkit/tixkit-cloud` repository that consumes immutable public releases. Public code and CI must never depend on private source.
+The accepted target has an authoritative public `tixkithq/tixkit` repository for shared product code, contracts, integration packages and the complete Self-Hosted runtime. Proprietary Cloud operations, managed integrations and natural-language agent orchestration live in a separate private `tixkithq/tixkit-cloud` repository that consumes immutable public releases. Public code and CI must never depend on private source.
 
 ## Runtime applications and services
 

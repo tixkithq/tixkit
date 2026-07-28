@@ -29,7 +29,7 @@ export function publicRepositoryValidationCommands({ createSnapshot = false } = 
   const repositoryPreparation = createSnapshot
     ? [
         ['git', ['init', '-q']],
-        ['git', ['remote', 'add', 'origin', 'https://github.com/tixkit/tixkit.git']],
+        ['git', ['remote', 'add', 'origin', 'https://github.com/tixkithq/tixkit.git']],
         ['git', ['add', '-A']],
         [
           'git',

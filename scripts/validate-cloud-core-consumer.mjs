@@ -311,7 +311,7 @@ function bunInstallConfigurationViolations(cloudRoot) {
 }
 
 function referencesPublicRepository(value) {
-  return /(?:(?:github\.com[/:]|api\.github\.com\/repos\/)?tixkit\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$)|(?:^|[\s='"])\.\.\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$))/iu.test(
+  return /(?:(?:github\.com[/:]|api\.github\.com\/repos\/)?tixkithq\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$)|(?:^|[\s='"])\.\.\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$))/iu.test(
     value,
   );
 }

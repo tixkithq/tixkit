@@ -294,7 +294,7 @@ test('scans workflow and script references throughout the public boundary', () =
     mkdirSync(resolve(fixtureRoot, 'managed'), { recursive: true });
     writeFileSync(
       resolve(fixtureRoot, '.github/workflows/ci.yml'),
-      'steps:\n  - uses: tixkit/tixkit-cloud-action@v1\n',
+      'steps:\n  - uses: tixkithq/tixkit-cloud-action@v1\n',
     );
     writeFileSync(
       resolve(fixtureRoot, 'scripts/build.mjs'),
@@ -321,7 +321,7 @@ test('scans workflow and script references throughout the public boundary', () =
     symlinkSync(resolve(fixtureRoot, 'managed'), resolve(fixtureRoot, 'scripts/private-dir'));
     writeFileSync(
       resolve(fixtureRoot, 'scripts/build/private.sh'),
-      'git clone https://github.com/tixkit/tixkit-cloud\n',
+      'git clone https://github.com/tixkithq/tixkit-cloud\n',
     );
     execFileSync('/usr/bin/git', ['init', '--quiet'], { cwd: fixtureRoot });
     execFileSync('/usr/bin/git', ['add', '.'], { cwd: fixtureRoot });

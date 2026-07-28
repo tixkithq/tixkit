@@ -82,6 +82,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing contracts or public beha
 
 ## License and repository transition
 
-This repository is currently in a transitional private-first layout and is marked `UNLICENSED`; possession of it does not grant redistribution rights. The accepted target is an authoritative public `tixkit/tixkit` repository containing the complete Self-Hosted runtime and integration packages under the intended MIT license, subject to legal review, plus a separate proprietary `tixkit/tixkit-cloud` repository that consumes immutable public releases.
+This repository is currently in a transitional private-first layout and is marked `UNLICENSED`; possession of it does not grant redistribution rights. The accepted target is an authoritative public `tixkithq/tixkit` repository containing the complete Self-Hosted runtime and integration packages under the intended MIT license, subject to legal review, plus a separate proprietary `tixkithq/tixkit-cloud` repository that consumes immutable public releases.
 
 Until that cutover is complete, `bun run export:oss` remains a temporary safety and extraction tool. After cutover, public releases will be built directly from public commits and the exporter will be reduced to any still-useful boundary and secret validation.

@@ -1,6 +1,6 @@
 # Contributing to Tixkit
 
-> Repository transition: the accepted target makes the public `tixkit/tixkit` repository authoritative for the shared product and complete Self-Hosted runtime. The current private-first tree and OSS exporter are transitional. Public contributions and shared fixes must never depend on the private `tixkit-cloud` repository or introduce proprietary Cloud assumptions into shared contracts.
+> Repository transition: the accepted target makes the public `tixkithq/tixkit` repository authoritative for the shared product and complete Self-Hosted runtime. The current private-first tree and OSS exporter are transitional. Public contributions and shared fixes must never depend on the private `tixkit-cloud` repository or introduce proprietary Cloud assumptions into shared contracts.
 
 Thank you for improving Tixkit. Contributions must preserve tenant isolation, contract parity, accessible user flows, and the public/private export boundary.
 

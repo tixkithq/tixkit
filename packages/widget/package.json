@@ -5,11 +5,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tixkit/tixkit.git",
+    "url": "git+https://github.com/tixkithq/tixkit.git",
     "directory": "packages/widget"
   },
-  "homepage": "https://github.com/tixkit/tixkit#readme",
-  "bugs": "https://github.com/tixkit/tixkit/issues",
+  "homepage": "https://github.com/tixkithq/tixkit#readme",
+  "bugs": "https://github.com/tixkithq/tixkit/issues",
   "type": "module",
   "sideEffects": [
     "./dist/index.js",

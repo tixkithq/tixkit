@@ -145,7 +145,7 @@ function fixture(policyRecordId = 'data-residency') {
     kind: 'tixkit.policy-approval-receipt',
     policyRecordId,
     source: {
-      repository: 'tixkit/tixkit',
+      repository: 'tixkithq/tixkit',
       commit: sourceCommit,
       tree: sourceTree,
     },

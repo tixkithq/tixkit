@@ -107,7 +107,7 @@ export const sdkParityCatalog = [
   },
   {
     id: 'go',
-    packageName: 'github.com/tixkit/tixkit-go',
+    packageName: 'github.com/tixkithq/tixkit-go',
     packagePath: 'packages/sdk-go',
     sourceFiles: ['packages/sdk-go/client.go', 'packages/sdk-go/services.go'],
     requiredExports: ['NewClient'],

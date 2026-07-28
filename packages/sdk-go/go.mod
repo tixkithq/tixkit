@@ -1,3 +1,3 @@
-module github.com/tixkit/tixkit-go
+module github.com/tixkithq/tixkit-go
 
 go 1.26

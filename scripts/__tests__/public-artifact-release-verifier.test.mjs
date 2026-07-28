@@ -17,7 +17,7 @@ import {
   verifyPublicArtifactRelease,
 } from '../verify-public-artifact-release.mjs';
 
-const repository = 'tixkit/tixkit';
+const repository = 'tixkithq/tixkit';
 const sourceRef = 'refs/tags/v1.2.3';
 const sourceDigest = 'a'.repeat(40);
 const digest = `sha256:${'b'.repeat(64)}`;
@@ -26,7 +26,7 @@ function fixture(layout = 'nested') {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-attestation-verifier-'));
   writeFileSync(
     join(directory, 'images.json'),
-    `${JSON.stringify([{ name: 'api', reference: `ghcr.io/tixkit/tixkit-api@${digest}`, digest }])}\n`,
+    `${JSON.stringify([{ name: 'api', reference: `ghcr.io/tixkithq/tixkit-api@${digest}`, digest }])}\n`,
   );
   writeFileSync(join(directory, 'public-release-manifest.json'), '{}\n');
   writeFileSync(
@@ -48,7 +48,7 @@ function options(directory) {
   return {
     directory,
     repository,
-    signerWorkflow: 'tixkit/tixkit/.github/workflows/public-artifact-release.yml',
+    signerWorkflow: 'tixkithq/tixkit/.github/workflows/public-artifact-release.yml',
     sourceRef,
     sourceDigest,
   };
@@ -96,7 +96,7 @@ test('githubAttestationVerifyArgs emits the exact fail-closed authority argv', (
   assert.deepEqual(
     githubAttestationVerifyArgs('/tmp/release.tgz', {
       repository,
-      signerWorkflow: 'tixkit/tixkit/.github/workflows/public-artifact-release.yml',
+      signerWorkflow: 'tixkithq/tixkit/.github/workflows/public-artifact-release.yml',
       sourceRef,
       sourceDigest,
       predicateType: GITHUB_SPDX_PREDICATE,
@@ -108,7 +108,7 @@ test('githubAttestationVerifyArgs emits the exact fail-closed authority argv', (
       '--repo',
       repository,
       '--signer-workflow',
-      'tixkit/tixkit/.github/workflows/public-artifact-release.yml',
+      'tixkithq/tixkit/.github/workflows/public-artifact-release.yml',
       '--source-ref',
       sourceRef,
       '--source-digest',
@@ -140,7 +140,7 @@ test('verifies every nested-layout file and npm and OCI predicates with exact ar
     assert.ok(verifications.every(({ args }) => args.includes(sourceDigest)));
     assert.ok(
       verifications.every(({ args }) =>
-        args.includes('tixkit/tixkit/.github/workflows/public-artifact-release.yml'),
+        args.includes('tixkithq/tixkit/.github/workflows/public-artifact-release.yml'),
       ),
     );
     assert.equal(
@@ -152,7 +152,7 @@ test('verifies every nested-layout file and npm and OCI predicates with exact ar
       2,
     );
     assert.ok(
-      verifications.some(({ args }) => args[2] === `oci://ghcr.io/tixkit/tixkit-api@${digest}`),
+      verifications.some(({ args }) => args[2] === `oci://ghcr.io/tixkithq/tixkit-api@${digest}`),
     );
     assert.ok(verifications.every(({ execution }) => execution.stdio[0] === 'ignore'));
   } finally {
@@ -208,10 +208,10 @@ test('propagates gh verification failure as a fail-closed release error', () => 
 
 test('rejects malformed, tagged, foreign, mismatched, and extra-field OCI records', () => {
   for (const image of [
-    { name: 'api', reference: 'ghcr.io/tixkit/tixkit-api:latest', digest },
+    { name: 'api', reference: 'ghcr.io/tixkithq/tixkit-api:latest', digest },
     { name: 'api', reference: `ghcr.io/attacker/tixkit-api@${digest}`, digest },
-    { name: 'api', reference: `ghcr.io/tixkit/tixkit-api@sha256:${'c'.repeat(64)}`, digest },
-    { name: 'api', reference: `ghcr.io/tixkit/tixkit-api@${digest}`, digest, tag: 'latest' },
+    { name: 'api', reference: `ghcr.io/tixkithq/tixkit-api@sha256:${'c'.repeat(64)}`, digest },
+    { name: 'api', reference: `ghcr.io/tixkithq/tixkit-api@${digest}`, digest, tag: 'latest' },
   ]) {
     const directory = fixture();
     try {
@@ -258,7 +258,7 @@ test('strict CLI parsing rejects signer, source, predicate, option, and argv sub
     '--repository',
     repository,
     '--signer-workflow',
-    'tixkit/tixkit/.github/workflows/public-artifact-release.yml',
+    'tixkithq/tixkit/.github/workflows/public-artifact-release.yml',
     '--source-ref',
     sourceRef,
     '--source-digest',
@@ -271,7 +271,7 @@ test('strict CLI parsing rejects signer, source, predicate, option, and argv sub
   );
   for (const argv of [
     valid.map((value) =>
-      value === 'tixkit/tixkit/.github/workflows/public-artifact-release.yml'
+      value === 'tixkithq/tixkit/.github/workflows/public-artifact-release.yml'
         ? 'attacker/repo/.github/workflows/release.yml'
         : value,
     ),
@@ -287,14 +287,14 @@ test('strict CLI parsing rejects signer, source, predicate, option, and argv sub
 test('helper rejects signer, repository, source ref, source digest, predicate, and subject substitutions', () => {
   const valid = {
     repository,
-    signerWorkflow: 'tixkit/tixkit/.github/workflows/public-artifact-release.yml',
+    signerWorkflow: 'tixkithq/tixkit/.github/workflows/public-artifact-release.yml',
     sourceRef,
     sourceDigest,
     predicateType: GITHUB_BUILD_PROVENANCE_PREDICATE,
   };
   for (const [field, value] of [
     ['signerWorkflow', 'attacker/repo/.github/workflows/public-artifact-release.yml'],
-    ['repository', 'tixkit/tixkit\n--repo=attacker/repo'],
+    ['repository', 'tixkithq/tixkit\n--repo=attacker/repo'],
     ['sourceRef', 'refs/tags/v1.2.3/../evil'],
     ['sourceDigest', 'A'.repeat(40)],
     ['predicateType', '--format=json'],
@@ -308,7 +308,7 @@ test('fails closed for old gh, empty JSON, malformed JSON, wrong predicates, and
   const subject = join(directory, 'tixkit-api-1.2.3.tgz');
   const authority = {
     repository,
-    signerWorkflow: 'tixkit/tixkit/.github/workflows/public-artifact-release.yml',
+    signerWorkflow: 'tixkithq/tixkit/.github/workflows/public-artifact-release.yml',
     sourceRef,
     sourceDigest,
     predicateType: GITHUB_SPDX_PREDICATE,
@@ -373,17 +373,17 @@ test('fails closed for old gh, empty JSON, malformed JSON, wrong predicates, and
 });
 
 test('OCI JSON evidence must bind both the exact reference name and digest', () => {
-  const subject = `oci://ghcr.io/tixkit/tixkit-api@${digest}`;
+  const subject = `oci://ghcr.io/tixkithq/tixkit-api@${digest}`;
   const authority = {
     repository,
-    signerWorkflow: 'tixkit/tixkit/.github/workflows/public-artifact-release.yml',
+    signerWorkflow: 'tixkithq/tixkit/.github/workflows/public-artifact-release.yml',
     sourceRef,
     sourceDigest,
     predicateType: GITHUB_BUILD_PROVENANCE_PREDICATE,
   };
   for (const candidate of [
     { name: 'ghcr.io/attacker/tixkit-api', digest: { sha256: digest.slice(7) } },
-    { name: 'ghcr.io/tixkit/tixkit-api', digest: { sha256: 'c'.repeat(64) } },
+    { name: 'ghcr.io/tixkithq/tixkit-api', digest: { sha256: 'c'.repeat(64) } },
   ])
     assert.throws(() =>
       verifyGithubAttestation(subject, authority, (_command, args) =>

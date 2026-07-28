@@ -67,9 +67,9 @@ afterEvaluate {
             }
           }
           scm {
-            connection.set("scm:git:https://github.com/tixkit/tixkit.git")
-            developerConnection.set("scm:git:ssh://git@github.com:tixkit/tixkit.git")
-            url.set("https://github.com/tixkit/tixkit")
+            connection.set("scm:git:https://github.com/tixkithq/tixkit.git")
+            developerConnection.set("scm:git:ssh://git@github.com:tixkithq/tixkit.git")
+            url.set("https://github.com/tixkithq/tixkit")
           }
         }
       }

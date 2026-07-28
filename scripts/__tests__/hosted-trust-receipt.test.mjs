@@ -58,16 +58,16 @@ function unsignedReceipt() {
     trustRecordId: 'performance-evidence',
     scope: 'public-core',
     source: {
-      repository: 'tixkit/tixkit',
+      repository: 'tixkithq/tixkit',
       commit: 'a'.repeat(40),
       tree: 'b'.repeat(40),
     },
     workflow: {
-      repository: 'tixkit/tixkit',
+      repository: 'tixkithq/tixkit',
       path: '.github/workflows/performance-capacity.yml',
       runId: '987654321',
       attempt: 1,
-      url: 'https://github.com/tixkit/tixkit/actions/runs/987654321',
+      url: 'https://github.com/tixkithq/tixkit/actions/runs/987654321',
     },
     artifact: {
       kind: 'performance-capacity',
@@ -231,8 +231,8 @@ test('rejects wrong record, scope, workflow, validator, repository, and run URL 
     (receipt) => (receipt.workflow.path = '.github/workflows/performance-fault.yml'),
     (receipt) =>
       (receipt.validation.validator = 'scripts/performance-fault.mjs#validateFaultEvidence'),
-    (receipt) => (receipt.workflow.repository = 'tixkit/tixkit-cloud'),
-    (receipt) => (receipt.workflow.url = 'https://github.com/tixkit/tixkit/actions/runs/123'),
+    (receipt) => (receipt.workflow.repository = 'tixkithq/tixkit-cloud'),
+    (receipt) => (receipt.workflow.url = 'https://github.com/tixkithq/tixkit/actions/runs/123'),
   ]) {
     assert.notEqual(violations(signedReceipt(mutate)), '');
   }

@@ -171,10 +171,10 @@ export const sdkSnippetRegistry = [
   {
     id: 'go',
     label: 'Go',
-    packageName: 'github.com/tixkit/tixkit-go',
+    packageName: 'github.com/tixkithq/tixkit-go',
     runtime: 'backend',
     requiredEnvironment: ['TIXKIT_API_KEY', 'TIXKIT_API_BASE_URL'],
-    install: 'go get github.com/tixkit/tixkit-go',
+    install: 'go get github.com/tixkithq/tixkit-go',
     initialization: 'client, err := tixkit.NewClient(os.Getenv("TIXKIT_API_KEY"))',
     firstRequest: 'events, err := client.Events.List(ctx, nil)',
     demoPath: 'packages/sdk-go/examples/checkout',

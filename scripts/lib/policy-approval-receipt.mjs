@@ -396,8 +396,8 @@ function artifactViolations(receipt, repositoryRoot, sourceCommit) {
     violations.push(...distributionSchemaViolations);
     if (distributionSchemaViolations.length > 0) {
       distribution = undefined;
-    } else if (distribution.authority.publicRepository !== 'tixkit/tixkit') {
-      violations.push('committed public distribution does not declare tixkit/tixkit authority');
+    } else if (distribution.authority.publicRepository !== 'tixkithq/tixkit') {
+      violations.push('committed public distribution does not declare tixkithq/tixkit authority');
     }
   } catch (error) {
     violations.push(

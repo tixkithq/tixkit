@@ -25,7 +25,7 @@
       "type": "object",
       "required": ["repository", "commit", "tree"],
       "properties": {
-        "repository": { "const": "tixkit/tixkit" },
+        "repository": { "const": "tixkithq/tixkit" },
         "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
         "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
       },
@@ -35,7 +35,7 @@
       "type": "object",
       "required": ["repository", "path", "runId", "attempt", "url"],
       "properties": {
-        "repository": { "const": "tixkit/tixkit" },
+        "repository": { "const": "tixkithq/tixkit" },
         "path": {
           "enum": [
             ".github/workflows/performance-capacity.yml",
@@ -50,7 +50,7 @@
         "attempt": { "type": "integer", "minimum": 1 },
         "url": {
           "type": "string",
-          "pattern": "^https://github\\.com/tixkit/tixkit/actions/runs/[1-9][0-9]{0,19}$"
+          "pattern": "^https://github\\.com/tixkithq/tixkit/actions/runs/[1-9][0-9]{0,19}$"
         }
       },
       "additionalProperties": false

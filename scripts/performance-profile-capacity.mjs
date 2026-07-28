@@ -124,7 +124,7 @@ function validateReleaseManifest(releaseManifest, releaseManifestBytes, sourceCo
   const images = new Map();
   for (const image of parsed.core.images) {
     if (images.has(image.name)) throw new Error(`public release manifest duplicates ${image.name}`);
-    if (image.reference !== `ghcr.io/tixkit/tixkit-${image.name}@${image.digest}`) {
+    if (image.reference !== `ghcr.io/tixkithq/tixkit-${image.name}@${image.digest}`) {
       throw new Error(`public release manifest ${image.name} reference is not authoritative`);
     }
     images.set(image.name, image.digest);

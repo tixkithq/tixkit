@@ -39,6 +39,6 @@ Content packages own shared editors/rendering; `admin-table-core` owns reusable 
 
 ## Repository boundary
 
-The accepted target makes the public `tixkit/tixkit` repository authoritative for shared product code, public integrations, documentation, and the complete Self-Hosted runtime. The private `tixkit/tixkit-cloud` repository consumes immutable public releases and contains proprietary Cloud operations, managed integrations, and natural-language agent orchestration. Public source and CI never depend on private source.
+The accepted target makes the public `tixkithq/tixkit` repository authoritative for shared product code, public integrations, documentation, and the complete Self-Hosted runtime. The private `tixkithq/tixkit-cloud` repository consumes immutable public releases and contains proprietary Cloud operations, managed integrations, and natural-language agent orchestration. Public source and CI never depend on private source.
 
 During the C-130 cutover, `scripts/export-oss.mjs` remains a temporary extraction and leak-validation tool. It is not the long-term publication architecture.

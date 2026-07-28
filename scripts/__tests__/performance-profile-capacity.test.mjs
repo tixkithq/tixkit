@@ -80,7 +80,7 @@ after(() => {
 function publicReleaseManifest(commit = sourceCommit) {
   const image = (name) => {
     const digest = `sha256:${sha256(Buffer.from(`${commit}:${name}:public-image`))}`;
-    return { name, digest, reference: `ghcr.io/tixkit/tixkit-${name}@${digest}` };
+    return { name, digest, reference: `ghcr.io/tixkithq/tixkit-${name}@${digest}` };
   };
   return {
     schemaVersion: 1,
@@ -179,13 +179,13 @@ function signedReceipt(evidenceBytes, mutate = () => undefined, signingKey = pri
     kind: 'tixkit.hosted-trust-receipt',
     trustRecordId: 'performance-evidence',
     scope: 'public-core',
-    source: { repository: 'tixkit/tixkit', commit: sourceCommit, tree: 'b'.repeat(40) },
+    source: { repository: 'tixkithq/tixkit', commit: sourceCommit, tree: 'b'.repeat(40) },
     workflow: {
-      repository: 'tixkit/tixkit',
+      repository: 'tixkithq/tixkit',
       path: '.github/workflows/performance-profile-capacity.yml',
       runId: '987654321',
       attempt: 1,
-      url: 'https://github.com/tixkit/tixkit/actions/runs/987654321',
+      url: 'https://github.com/tixkithq/tixkit/actions/runs/987654321',
     },
     artifact: {
       kind: 'performance-profile-capacity',
@@ -835,7 +835,7 @@ test('release manifest and every runtime image remain independently bound', () =
     ({ name }) => name === 'api',
   );
   apiImage.digest = alternateDigest;
-  apiImage.reference = `ghcr.io/tixkit/tixkit-api@${alternateDigest}`;
+  apiImage.reference = `ghcr.io/tixkithq/tixkit-api@${alternateDigest}`;
   manifestSubstitution.releaseManifestBytes = Buffer.from(
     `${canonicalJson(manifestSubstitution.releaseManifest)}\n`,
   );

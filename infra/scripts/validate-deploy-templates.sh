@@ -1073,7 +1073,7 @@ command -v helm >/dev/null 2>&1 || fail 'helm is required for deployment templat
 helm lint infra/helm/tixkit -f infra/helm/tixkit/values-evaluation.yaml >/dev/null
 helm template tixkit infra/helm/tixkit \
   -f infra/helm/tixkit/values-production.yaml \
-  --set global.imageRegistry=ghcr.io/tixkit/tixkit \
+  --set global.imageRegistry=ghcr.io/tixkithq/tixkit \
   --set secrets.name=tixkit-production-secrets \
   --set api.imageDigest=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --set worker.imageDigest=sha256:123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0 \

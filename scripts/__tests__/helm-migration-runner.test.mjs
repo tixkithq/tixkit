@@ -68,7 +68,7 @@ fi
   const productionValues = parse(
     readFileSync(resolve(root, 'infra/helm/tixkit/values-production.yaml'), 'utf8'),
   );
-  productionValues.global = { imageRegistry: 'ghcr.io/tixkit/tixkit' };
+  productionValues.global = { imageRegistry: 'ghcr.io/tixkithq/tixkit' };
   for (const [component, digest] of Object.entries({
     api: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     worker: 'sha256:123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0',

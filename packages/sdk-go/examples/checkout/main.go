@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	tixkit "github.com/tixkit/tixkit-go"
+	tixkit "github.com/tixkithq/tixkit-go"
 )
 
 func main() {

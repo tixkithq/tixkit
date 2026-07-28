@@ -1,5 +1,5 @@
 const DEFAULT_SITE_URL = 'http://localhost:3002';
-const DEFAULT_REPOSITORY_URL = 'https://github.com/tixkit/tixkit';
+const DEFAULT_REPOSITORY_URL = 'https://github.com/tixkithq/tixkit';
 const DEFAULT_API_BASE_URL = 'http://localhost:4000';
 
 function httpUrl(name: string, value: string): string {

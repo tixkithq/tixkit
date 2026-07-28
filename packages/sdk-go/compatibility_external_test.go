@@ -3,7 +3,7 @@ package tixkit_test
 import (
 	"context"
 
-	tixkit "github.com/tixkit/tixkit-go"
+	tixkit "github.com/tixkithq/tixkit-go"
 )
 
 type legacyTicketTypeBatchUpdater interface {

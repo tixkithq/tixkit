@@ -81,7 +81,7 @@ function resources(output) {
 
 test('Production Helm render excludes evaluation services and plaintext secrets', () => {
   const output = render(production, [
-    'global.imageRegistry=ghcr.io/tixkit/tixkit',
+    'global.imageRegistry=ghcr.io/tixkithq/tixkit',
     'secrets.name=tixkit-production-secrets',
   ]);
   const rendered = resources(output);
@@ -465,7 +465,7 @@ test('Production requires a bounded external ClamAV scanner contract', () => {
   for (const host of ['192.0.2.10', '2001:db8::10'])
     assert.doesNotThrow(() =>
       render(production, [
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         'secrets.name=tixkit-production-secrets',
         `uploads.malwareScanner.host=${host}`,
       ]),
@@ -505,13 +505,13 @@ test('Chart refuses Kubernetes versions without stable minDomains scheduling', (
 test('Production config changes deterministically roll every workload', () => {
   const base = resources(
     render(production, [
-      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'global.imageRegistry=ghcr.io/tixkithq/tixkit',
       'secrets.name=tixkit-production-secrets',
     ]),
   );
   const changed = resources(
     render(production, [
-      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'global.imageRegistry=ghcr.io/tixkithq/tixkit',
       'secrets.name=tixkit-production-secrets',
       'global.apiBaseUrl=https://api.changed.example',
     ]),
@@ -575,7 +575,7 @@ test('Production rejects availability settings that permit a single-instance out
     assert.throws(
       () =>
         render(production, [
-          'global.imageRegistry=ghcr.io/tixkit/tixkit',
+          'global.imageRegistry=ghcr.io/tixkithq/tixkit',
           'secrets.name=tixkit-production-secrets',
           ...overrides,
         ]),
@@ -765,7 +765,7 @@ test('Production Helm render rejects bundled services and chart-created secrets'
         '--values',
         production,
         '--set',
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         '--set',
         'secrets.name=tixkit-production-secrets',
         ...productionRuntime.flatMap((value) => ['--set', value]),
@@ -808,7 +808,7 @@ test('Production Helm render requires release-provided image digests', () => {
       '--values',
       production,
       '--set',
-      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'global.imageRegistry=ghcr.io/tixkithq/tixkit',
       '--set',
       'secrets.name=tixkit-production-secrets',
       ...productionNetwork.flatMap((value) => ['--set', value]),
@@ -834,7 +834,7 @@ test('Production Helm render requires bounded operator-selected egress CIDRs', (
         '--values',
         production,
         '--set',
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         '--set',
         'secrets.name=tixkit-production-secrets',
         ...productionImages.flatMap((value) => ['--set', value]),
@@ -856,7 +856,7 @@ test('Production Helm render requires bounded operator-selected egress CIDRs', (
 test('External Secrets mode renders a provider-neutral SecretStore reference', () => {
   const rendered = resources(
     render(production, [
-      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'global.imageRegistry=ghcr.io/tixkithq/tixkit',
       'secrets.mode=external',
       'migrations.strategy=manual',
       'secrets.name=tixkit-production-secrets',
@@ -877,7 +877,7 @@ test('External Secrets mode rejects an incomplete required-key inventory', () =>
   assert.throws(
     () =>
       render(production, [
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         'secrets.mode=external',
         'migrations.strategy=manual',
         'secrets.name=tixkit-production-secrets',
@@ -922,7 +922,7 @@ test('External Secrets requires the provider incident keyring only when capture 
   assert.throws(
     () =>
       render(production, [
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         'secrets.mode=external',
         'migrations.strategy=manual',
         'secrets.name=tixkit-production-secrets',
@@ -959,7 +959,7 @@ test('External Secret inventory follows MySQL, workload identity, and Temporal C
   ];
   const rendered = resources(
     render(production, [
-      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'global.imageRegistry=ghcr.io/tixkithq/tixkit',
       'database.driver=mysql',
       'temporalConnection.mode=cloud',
       'secrets.temporalTlsEnabled=true',
@@ -1069,7 +1069,7 @@ test('Temporal Cloud mode fails closed without TLS', () => {
   assert.throws(
     () =>
       render(production, [
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         'secrets.name=tixkit-production-secrets',
         'temporalConnection.mode=cloud',
       ]),
@@ -1080,7 +1080,7 @@ test('Temporal Cloud mode fails closed without TLS', () => {
 test('manual migration execution renders one non-hook Job after secret reconciliation', () => {
   const rendered = resources(
     render(production, [
-      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'global.imageRegistry=ghcr.io/tixkithq/tixkit',
       'secrets.name=tixkit-production-secrets',
       'migrations.strategy=manual',
       'migrations.execution=manual-run',
@@ -1100,7 +1100,7 @@ test('manual migration names remain unique and Kubernetes-safe at boundaries', (
     render(
       production,
       [
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         'secrets.name=tixkit-production-secrets',
         'migrations.execution=manual-run',
         'migrations.invocation=abcdefghijklmnop',
@@ -1114,7 +1114,7 @@ test('manual migration names remain unique and Kubernetes-safe at boundaries', (
   assert.throws(
     () =>
       render(production, [
-        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'global.imageRegistry=ghcr.io/tixkithq/tixkit',
         'secrets.name=tixkit-production-secrets',
         'migrations.execution=manual-run',
         'migrations.invocation=abcdefghijklmnopq',
@@ -1128,7 +1128,7 @@ test('Production rejects unrestricted database egress CIDRs', () => {
     assert.throws(
       () =>
         render(production, [
-          'global.imageRegistry=ghcr.io/tixkit/tixkit',
+          'global.imageRegistry=ghcr.io/tixkithq/tixkit',
           'secrets.name=tixkit-production-secrets',
           `networkPolicy.databaseEgressCidrs[0]=${cidr}`,
         ]),
@@ -1178,7 +1178,7 @@ test('Production rejects observability thresholds that disable meaningful alerts
     assert.throws(
       () =>
         render(production, [
-          'global.imageRegistry=ghcr.io/tixkit/tixkit',
+          'global.imageRegistry=ghcr.io/tixkithq/tixkit',
           'secrets.name=tixkit-production-secrets',
           override,
         ]),
@@ -1197,7 +1197,7 @@ test('External Secrets mode rejects an unsafe pre-install migration race', () =>
       '--values',
       production,
       '--set',
-      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'global.imageRegistry=ghcr.io/tixkithq/tixkit',
       '--set',
       'secrets.mode=external',
       '--set',

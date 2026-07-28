@@ -2,8 +2,8 @@
   "$schema": "./public-distribution.schema.json",
   "schemaVersion": 1,
   "authority": {
-    "publicRepository": "tixkit/tixkit",
-    "cloudRepository": "tixkit/tixkit-cloud",
+    "publicRepository": "tixkithq/tixkit",
+    "cloudRepository": "tixkithq/tixkit-cloud",
     "sharedFixPolicy": "public-first",
     "cloudConsumption": "immutable-artifacts-only"
   },

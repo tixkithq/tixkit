@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           test "${GITHUB_EVENT_NAME}" = workflow_dispatch
-          test "${GITHUB_REPOSITORY}" = tixkit/tixkit
+          test "${GITHUB_REPOSITORY}" = tixkithq/tixkit
           test -n "${TIXKIT_DR_DEFAULT_BRANCH}"
           test "${GITHUB_REF_NAME}" = "${TIXKIT_DR_DEFAULT_BRANCH}"
           [[ "${TIXKIT_DR_RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]

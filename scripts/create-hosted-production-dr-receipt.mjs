@@ -207,13 +207,13 @@ export function createHostedProductionDrReceipt(argv = process.argv.slice(2), no
     kind: 'tixkit.hosted-production-dr-receipt',
     trustRecordId: 'dr-evidence',
     scope: 'self-hosted',
-    source: { repository: 'tixkit/tixkit', commit, tree },
+    source: { repository: 'tixkithq/tixkit', commit, tree },
     workflow: {
-      repository: 'tixkit/tixkit',
+      repository: 'tixkithq/tixkit',
       path: '.github/workflows/production-dr.yml',
       runId,
       attempt: runAttempt,
-      url: `https://github.com/tixkit/tixkit/actions/runs/${runId}`,
+      url: `https://github.com/tixkithq/tixkit/actions/runs/${runId}`,
     },
     artifact: {
       kind: 'production-dr',

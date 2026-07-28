@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tixkit/tixkit.git",
+    "url": "git+https://github.com/tixkithq/tixkit.git",
     "directory": "packages/sdk-js"
   },
   "type": "module",

@@ -1,4 +1,4 @@
-# `github.com/tixkit/tixkit-go`
+# `github.com/tixkithq/tixkit-go`
 
 ## Purpose
 
@@ -16,7 +16,7 @@ Resale writes require `ResaleTermsAcceptance` with the exact `2026-07-16` contra
 
 ## Installation
 
-`go get github.com/tixkit/tixkit-go`.
+`go get github.com/tixkithq/tixkit-go`.
 
 ## Example
 

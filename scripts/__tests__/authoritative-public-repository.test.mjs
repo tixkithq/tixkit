@@ -12,18 +12,18 @@ import {
 
 test('normalizes only supported GitHub repository remotes', () => {
   assert.equal(
-    canonicalGitHubRepository('https://github.com/Tixkit/Tixkit.git'),
-    'github.com/tixkit/tixkit',
+    canonicalGitHubRepository('https://github.com/Tixkithq/Tixkit.git'),
+    'github.com/tixkithq/tixkit',
   );
   assert.equal(
-    canonicalGitHubRepository('git@github.com:tixkit/tixkit.git'),
-    'github.com/tixkit/tixkit',
+    canonicalGitHubRepository('git@github.com:tixkithq/tixkit.git'),
+    'github.com/tixkithq/tixkit',
   );
   assert.equal(
-    canonicalGitHubRepository('ssh://git@github.com/tixkit/tixkit.git'),
-    'github.com/tixkit/tixkit',
+    canonicalGitHubRepository('ssh://git@github.com/tixkithq/tixkit.git'),
+    'github.com/tixkithq/tixkit',
   );
-  assert.equal(canonicalGitHubRepository('https://example.com/tixkit/tixkit.git'), undefined);
+  assert.equal(canonicalGitHubRepository('https://example.com/tixkithq/tixkit.git'), undefined);
   assert.equal(canonicalGitHubRepository('file:///tmp/tixkit'), undefined);
 });
 
@@ -119,7 +119,7 @@ test('rejects provenance rebinding unless every authoritative public-root invari
     ]);
   try {
     git(['init', '-q']);
-    git(['remote', 'add', 'origin', 'https://github.com/tixkit/tixkit.git']);
+    git(['remote', 'add', 'origin', 'https://github.com/tixkithq/tixkit.git']);
     mkdirSync(join(directory, 'distribution'));
     writeFileSync(
       join(directory, 'distribution/public-distribution.json'),
@@ -190,7 +190,7 @@ test('rejects provenance rebinding unless every authoritative public-root invari
     git(['remote', 'set-url', 'origin', 'https://github.com/example/tixkit.git']);
     assert.throws(
       () => assertAuthoritativePublicRepository(directory),
-      /may be rebound only in github\.com\/tixkit\/tixkit/u,
+      /may be rebound only in github\.com\/tixkithq\/tixkit/u,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });

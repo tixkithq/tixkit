@@ -59,9 +59,9 @@ Before creating or updating any public OSS remote:
 `;
 
 const c035CompleteEvidence =
-  'https://github.com/tixkit/tixkit/actions/runs/987654321 plus rulesets/98765 branch protection API proof for refs/heads/main requiring pull-request and required-status-check rules for Lint & Typecheck, Build, Unit Tests, Integration Tests (PostgreSQL), Integration Tests (MySQL), E2E Browser Matrix (chromium), E2E Browser Matrix (firefox), and E2E Browser Matrix (webkit).';
+  'https://github.com/tixkithq/tixkit/actions/runs/987654321 plus rulesets/98765 branch protection API proof for refs/heads/main requiring pull-request and required-status-check rules for Lint & Typecheck, Build, Unit Tests, Integration Tests (PostgreSQL), Integration Tests (MySQL), E2E Browser Matrix (chromium), E2E Browser Matrix (firefox), and E2E Browser Matrix (webkit).';
 const c082CompleteEvidence =
-  'Fresh hosted CI https://github.com/tixkit/tixkit/actions/runs/987654321 Unit Tests validates 100% user-story test coverage via the traceability matrix, `bun run test:scripts`, `docs/completion/user-story-test-matrix.md`, `Validated 146 user-story rows`, and `133 evidence paths` output without cached Turbo-only proof.';
+  'Fresh hosted CI https://github.com/tixkithq/tixkit/actions/runs/987654321 Unit Tests validates 100% user-story test coverage via the traceability matrix, `bun run test:scripts`, `docs/completion/user-story-test-matrix.md`, `Validated 146 user-story rows`, and `133 evidence paths` output without cached Turbo-only proof.';
 const c082RequiredEvidence =
   'Fresh hosted CI run URL validating 100% user-story test coverage via the traceability matrix, `bun run test:scripts`, `docs/completion/user-story-test-matrix.md`, `Validated 146 user-story rows`, and `133 evidence paths` without cached Turbo-only proof.';
 const c082BlockingRow = `| C-082 | User-story matrix final proof | Blocking | ${c082RequiredEvidence} | Blocking: local matrix passes; fresh hosted CI proof depends on C-035. |`;
@@ -218,7 +218,7 @@ test('validateFinalEvidenceChecklist rejects checklist rows without backlog scop
 test('validateFinalEvidenceChecklist rejects done backlog rows in the final checklist', () => {
   const expandedChecklist = validChecklist.replace(
     c082BlockingRow,
-    `${c082BlockingRow}\n| C-099 | Extra done gate | Complete | Hosted proof. | https://github.com/tixkit/tixkit/actions/runs/987654321 proof. |`,
+    `${c082BlockingRow}\n| C-099 | Extra done gate | Complete | Hosted proof. | https://github.com/tixkithq/tixkit/actions/runs/987654321 proof. |`,
   );
   const expandedBacklog = matchingBacklog
     .replace('Total rows: 6.', 'Total rows: 7.')
@@ -267,7 +267,7 @@ test('validateFinalEvidenceChecklist rejects generic proof for row-specific comp
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-036 | Hosted Stripe provider gates | Blocking | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | Blocking: hosted Stripe test-mode secrets are not configured. |',
-      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkit/tixkit/actions/runs/987654321 plus generic branch protection API proof. |',
+      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkithq/tixkit/actions/runs/987654321 plus generic branch protection API proof. |',
     ),
   );
 
@@ -291,7 +291,7 @@ test('validateFinalEvidenceChecklist rejects blocking rows that already contain 
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-035 | Hosted CI and branch protection | Blocking | Hosted GitHub Actions run URL, required check names, and branch protection proof. | Blocking: GitHub Actions billing limits still prevent hosted CI runners. |',
-      '| C-035 | Hosted CI and branch protection | Blocking | Hosted GitHub Actions run URL, required check names, and branch protection proof. | Blocking: https://github.com/tixkit/tixkit/actions/runs/987654321 is available but status was not advanced. |',
+      '| C-035 | Hosted CI and branch protection | Blocking | Hosted GitHub Actions run URL, required check names, and branch protection proof. | Blocking: https://github.com/tixkithq/tixkit/actions/runs/987654321 is available but status was not advanced. |',
     ),
   );
 
@@ -329,7 +329,7 @@ test('validateFinalEvidenceChecklist rejects C-035 completion without main branc
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-035 | Hosted CI and branch protection | Blocking | Hosted GitHub Actions run URL, required check names, and branch protection proof. | Blocking: GitHub Actions billing limits still prevent hosted CI runners. |',
-      '| C-035 | Hosted CI and branch protection | Complete | Hosted GitHub Actions run URL, required check names, and branch protection proof. | https://github.com/tixkit/tixkit/actions/runs/987654321 plus rulesets/98765 branch protection API proof requiring Lint & Typecheck, Build, Unit Tests, Integration Tests (PostgreSQL), Integration Tests (MySQL), E2E Browser Matrix (chromium), E2E Browser Matrix (firefox), and E2E Browser Matrix (webkit). |',
+      '| C-035 | Hosted CI and branch protection | Complete | Hosted GitHub Actions run URL, required check names, and branch protection proof. | https://github.com/tixkithq/tixkit/actions/runs/987654321 plus rulesets/98765 branch protection API proof requiring Lint & Typecheck, Build, Unit Tests, Integration Tests (PostgreSQL), Integration Tests (MySQL), E2E Browser Matrix (chromium), E2E Browser Matrix (firefox), and E2E Browser Matrix (webkit). |',
     ),
   );
 
@@ -344,7 +344,7 @@ test('validateFinalEvidenceChecklist accepts C-036 completion with all provider 
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-036 | Hosted Stripe provider gates | Blocking | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | Blocking: hosted Stripe test-mode secrets are not configured. |',
-      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkit/tixkit/actions/runs/987654321 Provider Tests (Stripe) Step Summary: provider-secrets available=true, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, and STRIPE_CONNECT_CLIENT_ID were configured. Stripe provider tests passed. Direct Stripe create/confirm/refund activity validation ran. Hosted Stripe Elements checkout/refund browser validation ran. Stripe Connect account creation/status refresh validation ran. Provider gates were non-skipped and secret values redacted. |',
+      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkithq/tixkit/actions/runs/987654321 Provider Tests (Stripe) Step Summary: provider-secrets available=true, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, and STRIPE_CONNECT_CLIENT_ID were configured. Stripe provider tests passed. Direct Stripe create/confirm/refund activity validation ran. Hosted Stripe Elements checkout/refund browser validation ran. Stripe Connect account creation/status refresh validation ran. Provider gates were non-skipped and secret values redacted. |',
     ),
   );
 
@@ -355,7 +355,7 @@ test('validateFinalEvidenceChecklist rejects C-036 completion without secret-gat
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-036 | Hosted Stripe provider gates | Blocking | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | Blocking: hosted Stripe test-mode secrets are not configured. |',
-      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkit/tixkit/actions/runs/987654321 Provider Tests (Stripe) Step Summary: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, and STRIPE_CONNECT_CLIENT_ID were present. Stripe provider tests passed. Direct Stripe create/confirm/refund activity validation ran. Hosted Stripe Elements checkout/refund browser validation ran. Stripe Connect account creation/status refresh validation ran. Provider gates were non-skipped. |',
+      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkithq/tixkit/actions/runs/987654321 Provider Tests (Stripe) Step Summary: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, and STRIPE_CONNECT_CLIENT_ID were present. Stripe provider tests passed. Direct Stripe create/confirm/refund activity validation ran. Hosted Stripe Elements checkout/refund browser validation ran. Stripe Connect account creation/status refresh validation ran. Provider gates were non-skipped. |',
     ),
   );
 
@@ -369,7 +369,7 @@ test('validateFinalEvidenceChecklist rejects raw secret values in current eviden
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-036 | Hosted Stripe provider gates | Blocking | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | Blocking: hosted Stripe test-mode secrets are not configured. |',
-      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkit/tixkit/actions/runs/987654321 Provider Tests (Stripe) Step Summary: provider-secrets available=true, STRIPE_SECRET_KEY=sk_test_1234567890abcdef1234567890abcdef, STRIPE_WEBHOOK_SECRET, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, and STRIPE_CONNECT_CLIENT_ID were configured. Stripe provider tests passed. Direct Stripe create/confirm/refund activity validation ran. Hosted Stripe Elements checkout/refund browser validation ran. Stripe Connect account creation/status refresh validation ran. Provider gates were non-skipped and secret values redacted. |',
+      '| C-036 | Hosted Stripe provider gates | Complete | Hosted `Provider Tests (Stripe)` run URL and Step Summary proving `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and `STRIPE_CONNECT_CLIENT_ID` were configured in GitHub Actions, provider gates passed without skips, and secret values were redacted. | https://github.com/tixkithq/tixkit/actions/runs/987654321 Provider Tests (Stripe) Step Summary: provider-secrets available=true, STRIPE_SECRET_KEY=sk_test_1234567890abcdef1234567890abcdef, STRIPE_WEBHOOK_SECRET, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, and STRIPE_CONNECT_CLIENT_ID were configured. Stripe provider tests passed. Direct Stripe create/confirm/refund activity validation ran. Hosted Stripe Elements checkout/refund browser validation ran. Stripe Connect account creation/status refresh validation ran. Provider gates were non-skipped and secret values redacted. |',
     ),
   );
 
@@ -396,7 +396,7 @@ test('validateFinalEvidenceChecklist accepts C-037 completion with managed DR pr
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-037 | Hosted release dry-run and managed DR | Blocking | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | Blocking: hosted release dry-run and managed database rehearsal require hosted runners. |',
-      '| C-037 | Hosted release dry-run and managed DR | Complete | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | https://github.com/tixkit/tixkit/actions/runs/987654321 proves `.github/workflows/release-dry-run.yml`, managed Postgres backup, managed Postgres restore, managed MySQL backup, managed MySQL restore, restore-based rollback, migration rollback rehearsal, RPO/RTO, `docs/production-deployment-guide.md`, and `docs/incident-runbooks.md`. |',
+      '| C-037 | Hosted release dry-run and managed DR | Complete | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | https://github.com/tixkithq/tixkit/actions/runs/987654321 proves `.github/workflows/release-dry-run.yml`, managed Postgres backup, managed Postgres restore, managed MySQL backup, managed MySQL restore, restore-based rollback, migration rollback rehearsal, RPO/RTO, `docs/production-deployment-guide.md`, and `docs/incident-runbooks.md`. |',
     ),
   );
 
@@ -407,7 +407,7 @@ test('validateFinalEvidenceChecklist rejects C-035 completion without required c
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-035 | Hosted CI and branch protection | Blocking | Hosted GitHub Actions run URL, required check names, and branch protection proof. | Blocking: GitHub Actions billing limits still prevent hosted CI runners. |',
-      '| C-035 | Hosted CI and branch protection | Complete | Hosted GitHub Actions run URL, required check names, and branch protection proof. | https://github.com/tixkit/tixkit/actions/runs/987654321 plus branch protection API proof for refs/heads/main requiring pull-request and required-status-check rules. |',
+      '| C-035 | Hosted CI and branch protection | Complete | Hosted GitHub Actions run URL, required check names, and branch protection proof. | https://github.com/tixkithq/tixkit/actions/runs/987654321 plus branch protection API proof for refs/heads/main requiring pull-request and required-status-check rules. |',
     ),
   );
 
@@ -427,7 +427,7 @@ test('validateFinalEvidenceChecklist rejects C-037 completion with generic DR pr
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-037 | Hosted release dry-run and managed DR | Blocking | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | Blocking: hosted release dry-run and managed database rehearsal require hosted runners. |',
-      '| C-037 | Hosted release dry-run and managed DR | Complete | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | https://github.com/tixkit/tixkit/actions/runs/987654321 proves `.github/workflows/release-dry-run.yml`, managed database backup, restore, migration rollback, and RPO/RTO. |',
+      '| C-037 | Hosted release dry-run and managed DR | Complete | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | https://github.com/tixkithq/tixkit/actions/runs/987654321 proves `.github/workflows/release-dry-run.yml`, managed database backup, restore, migration rollback, and RPO/RTO. |',
     ),
   );
 
@@ -448,7 +448,7 @@ test('validateFinalEvidenceChecklist rejects C-037 completion without per-databa
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       '| C-037 | Hosted release dry-run and managed DR | Blocking | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | Blocking: hosted release dry-run and managed database rehearsal require hosted runners. |',
-      '| C-037 | Hosted release dry-run and managed DR | Complete | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | https://github.com/tixkit/tixkit/actions/runs/987654321 proves `.github/workflows/release-dry-run.yml`, managed Postgres backup, managed MySQL backup, restore-based rollback, migration rollback rehearsal, RPO/RTO, `docs/production-deployment-guide.md`, and `docs/incident-runbooks.md`. |',
+      '| C-037 | Hosted release dry-run and managed DR | Complete | Hosted `.github/workflows/release-dry-run.yml` run URL plus managed Postgres backup/restore, managed MySQL backup/restore, restore-based migration rollback rehearsal, and RPO/RTO evidence. | https://github.com/tixkithq/tixkit/actions/runs/987654321 proves `.github/workflows/release-dry-run.yml`, managed Postgres backup, managed MySQL backup, restore-based rollback, migration rollback rehearsal, RPO/RTO, `docs/production-deployment-guide.md`, and `docs/incident-runbooks.md`. |',
     ),
   );
 
@@ -487,7 +487,7 @@ test('validateFinalEvidenceChecklist rejects C-082 completion without row-count 
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       c082BlockingRow,
-      `| C-082 | User-story matrix final proof | Complete | ${c082RequiredEvidence} | Fresh hosted CI https://github.com/tixkit/tixkit/actions/runs/987654321 validates 100% user-story test coverage via the traceability matrix, \`bun run test:scripts\`, and \`docs/completion/user-story-test-matrix.md\` without cached Turbo-only proof. |`,
+      `| C-082 | User-story matrix final proof | Complete | ${c082RequiredEvidence} | Fresh hosted CI https://github.com/tixkithq/tixkit/actions/runs/987654321 validates 100% user-story test coverage via the traceability matrix, \`bun run test:scripts\`, and \`docs/completion/user-story-test-matrix.md\` without cached Turbo-only proof. |`,
     ),
   );
 
@@ -502,7 +502,7 @@ test('validateFinalEvidenceChecklist rejects obsolete C-082 evidence-path counts
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       c082BlockingRow,
-      `| C-082 | User-story matrix final proof | Complete | ${c082RequiredEvidence} | Fresh hosted CI https://github.com/tixkit/tixkit/actions/runs/987654321 Unit Tests validates 100% user-story test coverage via the traceability matrix, \`bun run test:scripts\`, \`docs/completion/user-story-test-matrix.md\`, \`Validated 146 user-story rows\`, and \`78 evidence paths\` output without cached Turbo-only proof. |`,
+      `| C-082 | User-story matrix final proof | Complete | ${c082RequiredEvidence} | Fresh hosted CI https://github.com/tixkithq/tixkit/actions/runs/987654321 Unit Tests validates 100% user-story test coverage via the traceability matrix, \`bun run test:scripts\`, \`docs/completion/user-story-test-matrix.md\`, \`Validated 146 user-story rows\`, and \`78 evidence paths\` output without cached Turbo-only proof. |`,
     ),
   );
 
@@ -513,7 +513,7 @@ test('validateFinalEvidenceChecklist rejects C-082 completion with only cached p
   const result = validateFinalEvidenceChecklist(
     validChecklist.replace(
       c082BlockingRow,
-      `| C-082 | User-story matrix final proof | Complete | ${c082RequiredEvidence} | Fresh hosted CI https://github.com/tixkit/tixkit/actions/runs/987654321 Unit Tests validates 100% user-story test coverage via the traceability matrix, \`bun run test:scripts\`, \`docs/completion/user-story-test-matrix.md\`, \`Validated 146 user-story rows\`, and \`133 evidence paths\` output. |`,
+      `| C-082 | User-story matrix final proof | Complete | ${c082RequiredEvidence} | Fresh hosted CI https://github.com/tixkithq/tixkit/actions/runs/987654321 Unit Tests validates 100% user-story test coverage via the traceability matrix, \`bun run test:scripts\`, \`docs/completion/user-story-test-matrix.md\`, \`Validated 146 user-story rows\`, and \`133 evidence paths\` output. |`,
     ),
   );
 

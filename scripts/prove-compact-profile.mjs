@@ -951,7 +951,7 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
       kind: 'tixkit-compact-clean-host-proof',
       result: 'passed',
       startedFromFreshEnvironment: true,
-      authoritativePublicRepository: 'github.com/tixkit/tixkit',
+      authoritativePublicRepository: 'github.com/tixkithq/tixkit',
       source: { commit, tree: sourceTree },
       remote,
       host,

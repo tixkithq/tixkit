@@ -113,7 +113,7 @@
               "name": { "type": "string", "minLength": 1 },
               "reference": {
                 "type": "string",
-                "pattern": "^ghcr\\.io/tixkit/tixkit-(?:api|worker|admin|checkout)@sha256:[a-f0-9]{64}$"
+                "pattern": "^ghcr\\.io/tixkithq/tixkit-(?:api|worker|admin|checkout)@sha256:[a-f0-9]{64}$"
               },
               "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
             },

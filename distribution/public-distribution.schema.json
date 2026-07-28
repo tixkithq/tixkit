@@ -19,8 +19,8 @@
       "type": "object",
       "required": ["publicRepository", "cloudRepository", "sharedFixPolicy", "cloudConsumption"],
       "properties": {
-        "publicRepository": { "const": "tixkit/tixkit" },
-        "cloudRepository": { "const": "tixkit/tixkit-cloud" },
+        "publicRepository": { "const": "tixkithq/tixkit" },
+        "cloudRepository": { "const": "tixkithq/tixkit-cloud" },
         "sharedFixPolicy": { "const": "public-first" },
         "cloudConsumption": { "const": "immutable-artifacts-only" }
       },

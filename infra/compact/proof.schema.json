@@ -34,7 +34,7 @@
     "kind": { "const": "tixkit-compact-clean-host-proof" },
     "result": { "const": "passed" },
     "startedFromFreshEnvironment": { "const": true },
-    "authoritativePublicRepository": { "const": "github.com/tixkit/tixkit" },
+    "authoritativePublicRepository": { "const": "github.com/tixkithq/tixkit" },
     "source": { "$ref": "#/$defs/source" },
     "remote": { "$ref": "#/$defs/remote" },
     "host": { "$ref": "#/$defs/host" },
@@ -129,7 +129,7 @@
       "properties": {
         "url": {
           "type": "string",
-          "pattern": "(?:github\\.com)(?::|/)tixkit/tixkit(?:\\.git)?$"
+          "pattern": "(?:github\\.com)(?::|/)tixkithq/tixkit(?:\\.git)?$"
         },
         "ref": {
           "type": "string",

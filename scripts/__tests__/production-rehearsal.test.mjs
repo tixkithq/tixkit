@@ -40,16 +40,16 @@ const validateHostedProductionDrReceipt = new Ajv2020({
   strict: true,
 }).compile(hostedProductionDrReceiptSchema);
 const beforeImages = {
-  api: 'ghcr.io/tixkit/tixkit-api@sha256:' + '1'.repeat(64),
-  worker: 'ghcr.io/tixkit/tixkit-worker@sha256:' + '2'.repeat(64),
-  checkout: 'ghcr.io/tixkit/tixkit-checkout@sha256:' + '3'.repeat(64),
-  admin: 'ghcr.io/tixkit/tixkit-admin@sha256:' + '4'.repeat(64),
+  api: 'ghcr.io/tixkithq/tixkit-api@sha256:' + '1'.repeat(64),
+  worker: 'ghcr.io/tixkithq/tixkit-worker@sha256:' + '2'.repeat(64),
+  checkout: 'ghcr.io/tixkithq/tixkit-checkout@sha256:' + '3'.repeat(64),
+  admin: 'ghcr.io/tixkithq/tixkit-admin@sha256:' + '4'.repeat(64),
 };
 const targetImages = {
-  api: 'ghcr.io/tixkit/tixkit-api@sha256:' + '5'.repeat(64),
-  worker: 'ghcr.io/tixkit/tixkit-worker@sha256:' + '6'.repeat(64),
-  checkout: 'ghcr.io/tixkit/tixkit-checkout@sha256:' + '7'.repeat(64),
-  admin: 'ghcr.io/tixkit/tixkit-admin@sha256:' + '8'.repeat(64),
+  api: 'ghcr.io/tixkithq/tixkit-api@sha256:' + '5'.repeat(64),
+  worker: 'ghcr.io/tixkithq/tixkit-worker@sha256:' + '6'.repeat(64),
+  checkout: 'ghcr.io/tixkithq/tixkit-checkout@sha256:' + '7'.repeat(64),
+  admin: 'ghcr.io/tixkithq/tixkit-admin@sha256:' + '8'.repeat(64),
 };
 
 function releaseManifest(images) {
@@ -143,14 +143,14 @@ components=(api worker checkout admin)
 if [[ "$args" == *"get deployments"* ]]; then
   if [[ "$phase" == target ]]; then revision=2; elif [[ "$phase" == rollback ]]; then revision=3; else revision=1; fi
   printf '{"items":['
-  for index in 0 1 2 3; do component="${'${'}components[$index]}"; digest="$(printf '%064d' 0 | tr 0 "${'${'}prefix[$index]}")"; [[ $index == 0 ]] || printf ','; printf '{"metadata":{"uid":"deployment-%s","generation":2,"annotations":{"deployment.kubernetes.io/revision":"%s"},"labels":{"app.kubernetes.io/component":"%s"}},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":"ghcr.io/tixkit/tixkit-%s@sha256:%s"}]}}},"status":{"observedGeneration":2,"availableReplicas":2,"readyReplicas":2,"updatedReplicas":2,"unavailableReplicas":0}}' "$component" "$revision" "$component" "$component" "$digest"; done
+  for index in 0 1 2 3; do component="${'${'}components[$index]}"; digest="$(printf '%064d' 0 | tr 0 "${'${'}prefix[$index]}")"; [[ $index == 0 ]] || printf ','; printf '{"metadata":{"uid":"deployment-%s","generation":2,"annotations":{"deployment.kubernetes.io/revision":"%s"},"labels":{"app.kubernetes.io/component":"%s"}},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":"ghcr.io/tixkithq/tixkit-%s@sha256:%s"}]}}},"status":{"observedGeneration":2,"availableReplicas":2,"readyReplicas":2,"updatedReplicas":2,"unavailableReplicas":0}}' "$component" "$revision" "$component" "$component" "$digest"; done
   printf ']}'
   exit
 fi
 if [[ "$args" == *"get replicasets"* ]]; then
   if [[ "$phase" == target ]]; then revision=2; elif [[ "$phase" == rollback ]]; then revision=3; else revision=1; fi
   printf '{"items":['
-  for index in 0 1 2 3; do component="${'${'}components[$index]}"; digest="$(printf '%064d' 0 | tr 0 "${'${'}prefix[$index]}")"; [[ $index == 0 ]] || printf ','; printf '{"metadata":{"uid":"replicaset-%s-%s","annotations":{"deployment.kubernetes.io/revision":"%s"},"labels":{"app.kubernetes.io/component":"%s"},"ownerReferences":[{"kind":"Deployment","uid":"deployment-%s","controller":true}]},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":"ghcr.io/tixkit/tixkit-%s@sha256:%s"}]}}},"status":{"readyReplicas":2,"availableReplicas":2}}' "$component" "$revision" "$revision" "$component" "$component" "$component" "$digest"; done
+  for index in 0 1 2 3; do component="${'${'}components[$index]}"; digest="$(printf '%064d' 0 | tr 0 "${'${'}prefix[$index]}")"; [[ $index == 0 ]] || printf ','; printf '{"metadata":{"uid":"replicaset-%s-%s","annotations":{"deployment.kubernetes.io/revision":"%s"},"labels":{"app.kubernetes.io/component":"%s"},"ownerReferences":[{"kind":"Deployment","uid":"deployment-%s","controller":true}]},"spec":{"replicas":2,"template":{"spec":{"containers":[{"image":"ghcr.io/tixkithq/tixkit-%s@sha256:%s"}]}}},"status":{"readyReplicas":2,"availableReplicas":2}}' "$component" "$revision" "$revision" "$component" "$component" "$component" "$digest"; done
   printf ']}'
   exit
 fi
@@ -159,7 +159,7 @@ if [[ "$args" == *"get pods"* ]]; then
   if [[ "$pod_phase" == target ]]; then pod_prefix=(5 6 7 8); else pod_prefix=(1 2 3 4); fi
   printf '{"items":['; first=1
   if [[ "$phase" == target ]]; then pod_revision=2; elif [[ "$phase" == rollback ]]; then pod_revision=3; else pod_revision=1; fi
-  for index in 0 1 2 3; do component="${'${'}components[$index]}"; digest="$(printf '%064d' 0 | tr 0 "${'${'}pod_prefix[$index]}")"; for suffix in a b; do [[ $first == 1 ]] || printf ','; first=0; printf '{"metadata":{"uid":"uid-%s-%s","ownerReferences":[{"kind":"ReplicaSet","uid":"replicaset-%s-%s","controller":true}],"labels":{"app.kubernetes.io/component":"%s"}},"spec":{"nodeName":"node-%s","containers":[{"image":"ghcr.io/tixkit/tixkit-%s@sha256:%s"}]},"status":{"conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"ready":true,"image":"ghcr.io/tixkit/tixkit-%s@sha256:%s","imageID":"containerd://ghcr.io/tixkit/tixkit-%s@sha256:%s"}]}}' "$component" "$suffix" "$component" "$pod_revision" "$component" "$suffix" "$component" "$digest" "$component" "$digest" "$component" "$digest"; done; done
+  for index in 0 1 2 3; do component="${'${'}components[$index]}"; digest="$(printf '%064d' 0 | tr 0 "${'${'}pod_prefix[$index]}")"; for suffix in a b; do [[ $first == 1 ]] || printf ','; first=0; printf '{"metadata":{"uid":"uid-%s-%s","ownerReferences":[{"kind":"ReplicaSet","uid":"replicaset-%s-%s","controller":true}],"labels":{"app.kubernetes.io/component":"%s"}},"spec":{"nodeName":"node-%s","containers":[{"image":"ghcr.io/tixkithq/tixkit-%s@sha256:%s"}]},"status":{"conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"ready":true,"image":"ghcr.io/tixkithq/tixkit-%s@sha256:%s","imageID":"containerd://ghcr.io/tixkithq/tixkit-%s@sha256:%s"}]}}' "$component" "$suffix" "$component" "$pod_revision" "$component" "$suffix" "$component" "$digest" "$component" "$digest" "$component" "$digest"; done; done
   printf ']}'
   exit
 fi
@@ -349,7 +349,7 @@ test('rehearsal rejects unreviewed inputs and unsafe evidence directories before
       mutate(value) {
         const manifest = JSON.parse(readFileSync(value.config.beforeReleaseManifest, 'utf8'));
         const image = manifest.core.images.find(({ name }) => name === 'api');
-        image.reference = 'ghcr.io/tixkit/tixkit-api@sha256:' + '9'.repeat(64);
+        image.reference = 'ghcr.io/tixkithq/tixkit-api@sha256:' + '9'.repeat(64);
         image.digest = 'sha256:' + '9'.repeat(64);
         writeFileSync(value.config.beforeReleaseManifest, JSON.stringify(manifest));
       },
@@ -361,7 +361,7 @@ test('rehearsal rejects unreviewed inputs and unsafe evidence directories before
       mutate(value) {
         const manifest = JSON.parse(readFileSync(value.config.targetReleaseManifest, 'utf8'));
         const image = manifest.core.images.find(({ name }) => name === 'worker');
-        image.reference = 'ghcr.io/tixkit/tixkit-worker@sha256:' + '9'.repeat(64);
+        image.reference = 'ghcr.io/tixkithq/tixkit-worker@sha256:' + '9'.repeat(64);
         image.digest = 'sha256:' + '9'.repeat(64);
         writeFileSync(value.config.targetReleaseManifest, JSON.stringify(manifest));
       },
@@ -797,13 +797,13 @@ function hostedInput(value, evidencePath) {
     kind: 'tixkit.hosted-production-dr-receipt',
     trustRecordId: 'dr-evidence',
     scope: 'self-hosted',
-    source: { repository: 'tixkit/tixkit', commit, tree },
+    source: { repository: 'tixkithq/tixkit', commit, tree },
     workflow: {
-      repository: 'tixkit/tixkit',
+      repository: 'tixkithq/tixkit',
       path: '.github/workflows/production-dr.yml',
       runId: '123456789',
       attempt: 1,
-      url: 'https://github.com/tixkit/tixkit/actions/runs/123456789',
+      url: 'https://github.com/tixkithq/tixkit/actions/runs/123456789',
     },
     artifact: {
       kind: 'production-dr',

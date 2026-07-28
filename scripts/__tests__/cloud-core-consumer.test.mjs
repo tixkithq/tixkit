@@ -21,7 +21,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import test, { after } from 'node:test';
 import {
-  assertPublicReleaseContext,
   buildPublicReleaseManifestFromArchive,
   packFromSourceArchive,
   publicContractPins,
@@ -120,7 +119,7 @@ function compatibilityManifest() {
       packages,
       images: distribution.release.images.map(({ name }) => ({
         name,
-        reference: `ghcr.io/tixkit/tixkit-${name}@sha256:${'d'.repeat(64)}`,
+        reference: `ghcr.io/tixkithq/tixkit-${name}@sha256:${'d'.repeat(64)}`,
         digest: `sha256:${'d'.repeat(64)}`,
       })),
       contracts: [
@@ -601,7 +600,7 @@ test(
       );
       assert.ok(committedActiveApiContract);
       const realDistribution = {
-        authority: { publicRepository: 'tixkit/tixkit' },
+        authority: { publicRepository: 'tixkithq/tixkit' },
         release: {
           packages: [{ path: 'packages/domain', ecosystem: 'npm' }],
           images: committedDistribution.release.images,
@@ -613,7 +612,7 @@ test(
         return {
           name,
           digest,
-          reference: `ghcr.io/tixkit/tixkit-${name}@${digest}`,
+          reference: `ghcr.io/tixkithq/tixkit-${name}@${digest}`,
         };
       });
       const release = buildPublicReleaseManifestFromArchive({
@@ -1009,7 +1008,21 @@ test('public release schema rejects an unconstrained core envelope', () => {
 });
 
 test('public release preflight remains blocked while legal approval is pending', () => {
-  assert.throws(() => assertPublicReleaseContext(), /blocked until legal approval is recorded/u);
+  const pendingDistribution = structuredClone(distribution);
+  pendingDistribution.licensing = {
+    intendedPublicLicense: 'MIT',
+    status: 'pending-legal-review',
+    mayClaimLegalApproval: false,
+    legalReviewEvidence: 'docs/completion/legal-review-approval.md',
+  };
+  assert.ok(
+    publicReleaseContextViolations(pendingDistribution, {
+      origin: 'https://github.com/tixkithq/tixkit.git',
+      status: '',
+      githubActions: true,
+      githubRepository: 'tixkithq/tixkit',
+    }).includes('public artifact release is blocked until legal approval is recorded'),
+  );
 });
 
 test('approved public-only exported repository passes release-context policy', () => {
@@ -1025,10 +1038,10 @@ test('approved public-only exported repository passes release-context policy', (
   publicDistribution.classification.docs.internalPlanning = [];
   assert.deepEqual(
     publicReleaseContextViolations(publicDistribution, {
-      origin: 'https://github.com/tixkit/tixkit.git',
+      origin: 'https://github.com/tixkithq/tixkit.git',
       status: '',
       githubActions: true,
-      githubRepository: 'tixkit/tixkit',
+      githubRepository: 'tixkithq/tixkit',
     }),
     [],
   );
@@ -1036,7 +1049,7 @@ test('approved public-only exported repository passes release-context policy', (
 
 test('public image contract rejects a self-consistent digest in a foreign registry', () => {
   const images = compatibilityManifest().core.images;
-  images[0].reference = images[0].reference.replace('ghcr.io/tixkit/', 'evil.example/');
+  images[0].reference = images[0].reference.replace('ghcr.io/tixkithq/', 'evil.example/');
   assert.ok(
     publicImageViolations(images, distribution).some((message) =>
       message.includes('must use authoritative image repository'),
@@ -1114,7 +1127,7 @@ test('public packages are packed from the Git archive, excluding stale working o
     const candidateDirectory = resolve(directory, 'candidate');
     const packageArtifacts = resolve(candidateDirectory, 'packages');
     const syntheticDistribution = {
-      authority: { publicRepository: 'tixkit/tixkit' },
+      authority: { publicRepository: 'tixkithq/tixkit' },
       release: {
         packages: [{ path: 'packages/example', ecosystem: 'npm' }],
         images: ['admin', 'api', 'checkout', 'worker'].map((name) => ({ name })),
@@ -1126,7 +1139,7 @@ test('public packages are packed from the Git archive, excluding stale working o
       return {
         name,
         digest: imageDigest,
-        reference: `ghcr.io/tixkit/tixkit-${name}@${imageDigest}`,
+        reference: `ghcr.io/tixkithq/tixkit-${name}@${imageDigest}`,
       };
     });
     const assembled = buildPublicReleaseManifestFromArchive({
@@ -1367,12 +1380,12 @@ test('GitHub release reconciliation stages a draft before finalization', () => {
         ? { status: 1, stdout: '', stderr: 'release not found' }
         : { status: 0, stdout: '', stderr: '' };
     };
-    assert.deepEqual(stagePublicGithubRelease('v1.0.0', 'tixkit/tixkit', directory, run), {
+    assert.deepEqual(stagePublicGithubRelease('v1.0.0', 'tixkithq/tixkit', directory, run), {
       created: true,
       uploaded: ['CHECKSUMS.sha256', 'public-release-manifest.json'],
     });
     assert.ok(calls[1][1].includes('--draft'));
-    finalizePublicGithubRelease('v1.0.0', 'tixkit/tixkit', run);
+    finalizePublicGithubRelease('v1.0.0', 'tixkithq/tixkit', run);
     assert.ok(calls[2][1].includes('--draft=false'));
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -1396,7 +1409,7 @@ test('GitHub release reconciliation rejects a rebuilt candidate after staging', 
       writeFileSync(resolve(destination, 'public-release-manifest.json'), 'attempt-one\n');
     };
     assert.throws(
-      () => stagePublicGithubRelease('v1.0.0', 'tixkit/tixkit', directory, run, download),
+      () => stagePublicGithubRelease('v1.0.0', 'tixkithq/tixkit', directory, run, download),
       /published GitHub release asset differs/u,
     );
   } finally {
@@ -1492,7 +1505,7 @@ test('rejects ranges, copied core source, private patches, and inconsistent imag
     writeFileSync(controlPlanePath, `${JSON.stringify(controlPlane, null, 2)}\n`);
     writeFileSync(resolve(cloudRoot, 'bunfig.toml'), '[install]\nlinker = "hoisted"\n');
     mkdirSync(resolve(cloudRoot, 'packages/domain'), { recursive: true });
-    manifest.core.images[0].reference = `ghcr.io/tixkit/tixkit-api@sha256:${'f'.repeat(64)}`;
+    manifest.core.images[0].reference = `ghcr.io/tixkithq/tixkit-api@sha256:${'f'.repeat(64)}`;
 
     const violations = validateCloudCoreConsumer(
       manifest,
@@ -2710,14 +2723,14 @@ test('scans generated-looking paths and rejects remote public source acquisition
     }
     const controlPlanePath = resolve(controlPlaneRoot, 'package.json');
     const controlPlane = JSON.parse(readFileSync(controlPlanePath, 'utf8'));
-    controlPlane.dependencies.forked = 'tixkit/tixkit#main';
+    controlPlane.dependencies.forked = 'tixkithq/tixkit#main';
     controlPlane.dependencies.localFork = '../tixkit';
     controlPlane.devDependencies = {
-      snapshot: `https://github.com/tixkit/tixkit/archive/${'a'.repeat(40)}.tar.gz`,
+      snapshot: `https://github.com/tixkithq/tixkit/archive/${'a'.repeat(40)}.tar.gz`,
     };
     controlPlane.scripts = {
-      build: 'gh repo clone tixkit/tixkit vendor/core',
-      postbuild: 'bun add github:tixkit/tixkit',
+      build: 'gh repo clone tixkithq/tixkit vendor/core',
+      postbuild: 'bun add github:tixkithq/tixkit',
     };
     writeFileSync(controlPlanePath, `${JSON.stringify(controlPlane, null, 2)}\n`);
     writeFileSync(
@@ -2726,12 +2739,12 @@ test('scans generated-looking paths and rejects remote public source acquisition
     );
     writeFileSync(
       resolve(controlPlaneRoot, 'Dockerfile'),
-      'FROM node:24\nRUN git clone https://github.com/tixkit/tixkit.git /src/core\n',
+      'FROM node:24\nRUN git clone https://github.com/tixkithq/tixkit.git /src/core\n',
     );
     mkdirSync(resolve(cloudRoot, '.github/workflows'), { recursive: true });
     writeFileSync(
       resolve(cloudRoot, '.github/workflows/build.yml'),
-      'jobs:\n  core:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          repository: tixkit/tixkit\n',
+      'jobs:\n  core:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          repository: tixkithq/tixkit\n',
     );
 
     const violations = validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot);
@@ -2882,7 +2895,7 @@ test('Cloud consumer CLIs fail before consumption when release attestation is no
     const argumentsUsed = readFileSync(ghArguments, 'utf8');
     assert.match(
       argumentsUsed,
-      /--signer-workflow\ntixkit\/tixkit\/\.github\/workflows\/public-artifact-release\.yml/u,
+      /--signer-workflow\ntixkithq\/tixkit\/\.github\/workflows\/public-artifact-release\.yml/u,
     );
     assert.match(argumentsUsed, /--source-ref\nrefs\/tags\/v0\.1\.0/u);
     assert.match(argumentsUsed, new RegExp(`--source-digest\\n${'b'.repeat(40)}`, 'u'));

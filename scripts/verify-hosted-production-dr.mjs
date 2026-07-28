@@ -265,8 +265,8 @@ function verifyDedicatedReceipt({
     receipt.kind !== 'tixkit.hosted-production-dr-receipt' ||
     receipt.trustRecordId !== contract.trustRecordId ||
     receipt.scope !== contract.scope ||
-    receipt.source.repository !== 'tixkit/tixkit' ||
-    receipt.workflow.repository !== 'tixkit/tixkit' ||
+    receipt.source.repository !== 'tixkithq/tixkit' ||
+    receipt.workflow.repository !== 'tixkithq/tixkit' ||
     receipt.workflow.path !== contract.workflow ||
     receipt.artifact.kind !== contract.artifactKind ||
     receipt.validation.validator !== contract.validator ||
@@ -286,7 +286,7 @@ function verifyDedicatedReceipt({
     receipt.workflow.attempt < 1 ||
     receipt.workflow.attempt > 100 ||
     receipt.workflow.url !==
-      `https://github.com/tixkit/tixkit/actions/runs/${receipt.workflow.runId}`
+      `https://github.com/tixkithq/tixkit/actions/runs/${receipt.workflow.runId}`
   ) {
     throw new Error('hosted production DR workflow identity is invalid');
   }
