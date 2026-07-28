@@ -38,7 +38,7 @@
     "embed:generate": "bun run --filter tixkit embed:generate",
     "sync:widget-public": "node scripts/sync-widget-public.mjs",
     "sync:embed-fixtures": "bun scripts/generate-embed-fixtures.mjs",
-    "setup:check": "bun run --env-file=.env.local --filter tixkit setup:check",
+    "setup:check": "turbo run build --filter='tixkit^...' && bun run --env-file=.env.local packages/cli/src/index.ts setup:check",
     "dev:webhooks": "bun run --env-file=.env.local --filter tixkit dev:webhooks",
     "dev:docs": "bun run --filter @tixkit/docs dev",
     "docs:build": "bun run --filter @tixkit/docs build",
