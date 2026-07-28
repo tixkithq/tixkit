@@ -84,6 +84,10 @@
       "types": "./dist/eligibility/index.d.ts",
       "import": "./dist/eligibility/index.js"
     },
+    "./observability": {
+      "types": "./dist/observability/index.d.ts",
+      "import": "./dist/observability/index.js"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {

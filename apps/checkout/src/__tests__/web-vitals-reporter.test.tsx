@@ -1,6 +1,10 @@
 import './test-dom';
 import { cleanup, render, waitFor } from '@testing-library/react';
-import { RUM_MAXIMUM_VALUES, RUM_SCHEMA_VERSION, RUM_WEB_VITALS } from '@tixkit/domain';
+import {
+  RUM_MAXIMUM_VALUES,
+  RUM_SCHEMA_VERSION,
+  RUM_WEB_VITALS,
+} from '@tixkit/domain/observability';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   classifyBuyerSurface,

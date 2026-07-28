@@ -1,7 +1,11 @@
 'use client';
 
 import { useReportWebVitals } from 'next/web-vitals';
-import { RUM_MAXIMUM_VALUES, RUM_SCHEMA_VERSION, type RumWebVital } from '@tixkit/domain';
+import {
+  RUM_MAXIMUM_VALUES,
+  RUM_SCHEMA_VERSION,
+  type RumWebVital,
+} from '@tixkit/domain/observability';
 import { apiBaseUrl } from '@/lib/api';
 import { isSharedCheckoutHost } from '@/lib/hosts';
 import { useRuntimeConfig } from '@/context/runtime-config-provider';
