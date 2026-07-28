@@ -47,6 +47,7 @@ export default async function CheckoutPage({
         prefilledItemsParam={firstParam(params.items)}
         productFilterParam={firstParam(params.products)}
         resaleListingId={firstParam(params.resaleListing)}
+        initialLocale={firstParam(params.locale)}
       />
     </Suspense>
   );

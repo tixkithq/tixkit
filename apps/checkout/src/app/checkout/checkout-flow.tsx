@@ -80,7 +80,7 @@ import {
   transportFailureMessage,
   type ConnectivityStatus,
 } from '@/lib/network-recovery';
-import { checkoutCopy } from '@/lib/checkout-copy';
+import { getCheckoutCopy, resolveCheckoutLocale } from '@/lib/checkout-copy';
 
 type Props = {
   initialEventId: string;
@@ -98,6 +98,7 @@ type Props = {
   prefilledItemsParam?: string;
   productFilterParam?: string;
   resaleListingId?: string;
+  initialLocale?: string;
 };
 
 /** Browser clock may only trigger revalidation; server status is authoritative. */
@@ -230,8 +231,11 @@ export default function CheckoutFlow({
   prefilledItemsParam,
   productFilterParam,
   resaleListingId,
+  initialLocale,
 }: Props) {
   const { push } = useRouter();
+  const checkoutLocale = useMemo(() => resolveCheckoutLocale(initialLocale), [initialLocale]);
+  const checkoutCopy = useMemo(() => getCheckoutCopy(initialLocale), [initialLocale]);
   useEffect(() => initializeEmbedHandshake(), []);
   const [eventId, setEventId] = useState(initialEventId);
   const [sessionId, setSessionId] = useState(initialSessionId);
@@ -355,12 +359,13 @@ export default function CheckoutFlow({
       if (!nextSessionId) return;
       const params = new URLSearchParams({ sessionId: nextSessionId });
       if (orderId) params.set('orderId', orderId);
+      if (initialLocale) params.set('locale', initialLocale);
       const destination = `/checkout/confirmation?${params.toString()}`;
       if (confirmationNavigationRef.current === destination) return;
       confirmationNavigationRef.current = destination;
       push(destination);
     },
-    [push],
+    [initialLocale, push],
   );
 
   const applyServerSessionState = useCallback(
@@ -1846,7 +1851,7 @@ export default function CheckoutFlow({
 
   if (initialLoading) {
     return (
-      <Surface brand={brand}>
+      <Surface brand={brand} locale={checkoutLocale}>
         <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
           <Skeleton className="h-8 w-48" />
           <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -1865,7 +1870,7 @@ export default function CheckoutFlow({
   if (error && !event && !session) {
     const notFound = error === 'Event not found' || (error.length > 0 && /not found/i.test(error));
     return (
-      <Surface brand={brand}>
+      <Surface brand={brand} locale={checkoutLocale}>
         <div className="mx-auto w-full max-w-2xl px-4 py-16 sm:px-6">
           <EmptyState
             icon={AlertCircleIcon}
@@ -1883,7 +1888,7 @@ export default function CheckoutFlow({
   }
 
   return (
-    <Surface brand={brand}>
+    <Surface brand={brand} locale={checkoutLocale}>
       <RefreshNotifier eventId={eventId} />
       <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
         <header className="space-y-3">
@@ -1894,18 +1899,22 @@ export default function CheckoutFlow({
                 {brand.name}
               </Badge>
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                {event?.title ?? 'Checkout'}
+                {event?.title ?? checkoutCopy.checkout}
               </h1>
             </div>
             {phase === 'select' && eventId ? (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => push(`/e/${eventId}`)}
+                onClick={() =>
+                  push(
+                    `/e/${eventId}${initialLocale ? `?locale=${encodeURIComponent(initialLocale)}` : ''}`,
+                  )
+                }
                 className="gap-1.5"
               >
                 <ArrowLeftIcon className="size-4" />
-                Back to event
+                {checkoutCopy.backToEvent}
               </Button>
             ) : phase === 'confirm' || phase === 'payment' ? (
               <Button
@@ -1916,7 +1925,7 @@ export default function CheckoutFlow({
                 className="gap-1.5"
               >
                 <ArrowLeftIcon className="size-4" />
-                Edit order
+                {checkoutCopy.editOrder}
               </Button>
             ) : null}
           </div>
@@ -1941,7 +1950,7 @@ export default function CheckoutFlow({
             {phase === 'select' ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>Select tickets</CardTitle>
+                  <CardTitle>{checkoutCopy.selectTickets}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-5">
                   {resaleListing ? (
@@ -2039,21 +2048,19 @@ export default function CheckoutFlow({
             {(phase === 'select' || phase === 'confirm') && event ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>Your details</CardTitle>
+                  <CardTitle>{checkoutCopy.yourDetails}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {questionsLoading ? (
                     <Alert>
                       <LoaderCircleIcon className="animate-spin" />
-                      <AlertTitle>Loading checkout fields</AlertTitle>
-                      <AlertDescription>
-                        Required buyer and attendee fields are loading before checkout can continue.
-                      </AlertDescription>
+                      <AlertTitle>{checkoutCopy.loadingCheckoutFieldsTitle}</AlertTitle>
+                      <AlertDescription>{checkoutCopy.loadingCheckoutFieldsBody}</AlertDescription>
                     </Alert>
                   ) : questionsError ? (
                     <Alert variant="destructive">
                       <AlertCircleIcon />
-                      <AlertTitle>Checkout fields unavailable</AlertTitle>
+                      <AlertTitle>{checkoutCopy.checkoutFieldsUnavailableTitle}</AlertTitle>
                       <AlertDescription className="space-y-3">
                         <span>{questionsError}</span>
                         <Button
@@ -2063,7 +2070,7 @@ export default function CheckoutFlow({
                           className="w-fit"
                           onClick={() => setQuestionsRetryKey((current) => current + 1)}
                         >
-                          Retry checkout fields
+                          {checkoutCopy.retryCheckoutFields}
                         </Button>
                       </AlertDescription>
                     </Alert>
@@ -2107,7 +2114,7 @@ export default function CheckoutFlow({
             {phase === 'payment' && confirmResult && !('order' in confirmResult) ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>Payment</CardTitle>
+                  <CardTitle>{checkoutCopy.payment}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {sessionHoldStatus === 'checking' ? (
@@ -2118,11 +2125,10 @@ export default function CheckoutFlow({
                       <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
                       <span className="space-y-1">
                         <span className="block font-medium tracking-tight">
-                          Checking reservation
+                          {checkoutCopy.checkingReservation}
                         </span>
                         <span className="block text-muted-foreground">
-                          {sessionHoldMessage ??
-                            'Checking whether your ticket reservation is still valid…'}
+                          {sessionHoldMessage ?? checkoutCopy.checkingReservationDetail}
                         </span>
                       </span>
                     </output>
@@ -2132,14 +2138,11 @@ export default function CheckoutFlow({
                       <AlertCircleIcon />
                       <AlertTitle>
                         {sessionHoldStatus === 'expired'
-                          ? 'Checkout expired'
-                          : 'Checkout unavailable'}
+                          ? checkoutCopy.checkoutExpiredTitle
+                          : checkoutCopy.checkoutUnavailableTitle}
                       </AlertTitle>
                       <AlertDescription className="space-y-3">
-                        <p>
-                          {sessionHoldMessage ??
-                            'Your checkout session expired. Start a new order to reserve tickets again.'}
-                        </p>
+                        <p>{sessionHoldMessage ?? checkoutCopy.checkoutExpiredBody}</p>
                         <Button
                           ref={expiryRestartButtonRef}
                           type="button"
@@ -2148,7 +2151,7 @@ export default function CheckoutFlow({
                           className="w-fit"
                           onClick={restartCheckoutAfterExpiry}
                         >
-                          Start new order
+                          {checkoutCopy.startNewOrder}
                         </Button>
                       </AlertDescription>
                     </Alert>
@@ -2156,12 +2159,9 @@ export default function CheckoutFlow({
                   {sessionHoldStatus === 'revalidation_failed' ? (
                     <Alert variant="destructive">
                       <AlertCircleIcon />
-                      <AlertTitle>Reservation could not be verified</AlertTitle>
+                      <AlertTitle>{checkoutCopy.reservationUnverifiedTitle}</AlertTitle>
                       <AlertDescription className="space-y-3">
-                        <p>
-                          {sessionHoldMessage ??
-                            'We could not confirm your ticket reservation. Payment is paused until the reservation is revalidated.'}
-                        </p>
+                        <p>{sessionHoldMessage ?? checkoutCopy.reservationUnverifiedBody}</p>
                         <Button
                           ref={expiryRetryButtonRef}
                           type="button"
@@ -2170,7 +2170,7 @@ export default function CheckoutFlow({
                           className="w-fit"
                           onClick={() => void revalidateSessionHold({ manual: true })}
                         >
-                          Retry reservation check
+                          {checkoutCopy.retryReservationCheck}
                         </Button>
                       </AlertDescription>
                     </Alert>
@@ -2184,7 +2184,7 @@ export default function CheckoutFlow({
                       // Return URL contains only sessionId, no token.
                       // The confirmation page resolves the session via
                       // sessionId using the token from sessionStorage.
-                      returnUrl={`${window.location.origin}/checkout/confirmation?sessionId=${encodeURIComponent(sessionId)}`}
+                      returnUrl={`${window.location.origin}/checkout/confirmation?sessionId=${encodeURIComponent(sessionId)}${initialLocale ? `&locale=${encodeURIComponent(initialLocale)}` : ''}`}
                       onError={handlePaymentError}
                     />
                   ) : null}
@@ -2196,8 +2196,10 @@ export default function CheckoutFlow({
               <Card>
                 <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
                   <CheckCircle2Icon className="size-10 text-emerald-600" />
-                  <h2 className="text-lg font-semibold">Order complete</h2>
-                  <p className="text-sm text-muted-foreground">Redirecting to your confirmation…</p>
+                  <h2 className="text-lg font-semibold">{checkoutCopy.orderComplete}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {checkoutCopy.redirectingConfirmation}
+                  </p>
                   <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
                 </CardContent>
               </Card>
@@ -2207,7 +2209,7 @@ export default function CheckoutFlow({
           <aside className="lg:sticky lg:top-6 lg:self-start">
             <Card>
               <CardHeader>
-                <CardTitle>Order summary</CardTitle>
+                <CardTitle>{checkoutCopy.orderSummary}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <OrderSummary
@@ -2362,13 +2364,12 @@ export default function CheckoutFlow({
                   <div className="space-y-2" aria-live="polite">
                     {sessionHoldStatus === 'ok' && parseSessionExpiresAtMs(session.expiresAt) ? (
                       <p className="text-xs text-muted-foreground">
-                        Session reserved until{' '}
-                        {new Date(session.expiresAt).toLocaleTimeString([], {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                        . Your tickets are held while you complete checkout. We re-check the
-                        reservation with the server when that time is reached.
+                        {checkoutCopy.sessionReservedUntil(
+                          new Date(session.expiresAt).toLocaleTimeString(checkoutLocale, {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          }),
+                        )}
                       </p>
                     ) : null}
                     {sessionHoldStatus === 'checking' ? (
@@ -2379,11 +2380,10 @@ export default function CheckoutFlow({
                         <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
                         <span className="space-y-1">
                           <span className="block font-medium tracking-tight">
-                            Checking reservation
+                            {checkoutCopy.checkingReservation}
                           </span>
                           <span className="block text-muted-foreground">
-                            {sessionHoldMessage ??
-                              'Checking whether your ticket reservation is still valid…'}
+                            {sessionHoldMessage ?? checkoutCopy.checkingReservationDetail}
                           </span>
                         </span>
                       </output>
@@ -2393,14 +2393,11 @@ export default function CheckoutFlow({
                         <AlertCircleIcon />
                         <AlertTitle>
                           {sessionHoldStatus === 'expired'
-                            ? 'Checkout expired'
-                            : 'Checkout unavailable'}
+                            ? checkoutCopy.checkoutExpiredTitle
+                            : checkoutCopy.checkoutUnavailableTitle}
                         </AlertTitle>
                         <AlertDescription className="space-y-3">
-                          <p>
-                            {sessionHoldMessage ??
-                              'Your checkout session expired. Start a new order to reserve tickets again.'}
-                          </p>
+                          <p>{sessionHoldMessage ?? checkoutCopy.checkoutExpiredBody}</p>
                           <Button
                             ref={phase === 'confirm' ? expiryRestartButtonRef : undefined}
                             type="button"
@@ -2409,7 +2406,7 @@ export default function CheckoutFlow({
                             className="w-fit"
                             onClick={restartCheckoutAfterExpiry}
                           >
-                            Start new order
+                            {checkoutCopy.startNewOrder}
                           </Button>
                         </AlertDescription>
                       </Alert>
@@ -2417,12 +2414,9 @@ export default function CheckoutFlow({
                     {sessionHoldStatus === 'revalidation_failed' ? (
                       <Alert variant="destructive">
                         <AlertCircleIcon />
-                        <AlertTitle>Reservation could not be verified</AlertTitle>
+                        <AlertTitle>{checkoutCopy.reservationUnverifiedTitle}</AlertTitle>
                         <AlertDescription className="space-y-3">
-                          <p>
-                            {sessionHoldMessage ??
-                              'We could not confirm your ticket reservation. Payment is paused until the reservation is revalidated.'}
-                          </p>
+                          <p>{sessionHoldMessage ?? checkoutCopy.reservationUnverifiedBody}</p>
                           <Button
                             ref={phase === 'confirm' ? expiryRetryButtonRef : undefined}
                             type="button"
@@ -2431,7 +2425,7 @@ export default function CheckoutFlow({
                             className="w-fit"
                             onClick={() => void revalidateSessionHold({ manual: true })}
                           >
-                            Retry reservation check
+                            {checkoutCopy.retryReservationCheck}
                           </Button>
                         </AlertDescription>
                       </Alert>
@@ -2452,7 +2446,7 @@ export default function CheckoutFlow({
                     onClick={createSession}
                   >
                     {loading ? <LoaderCircleIcon className="size-4 animate-spin" /> : null}
-                    Continue
+                    {checkoutCopy.continue}
                   </Button>
                 ) : phase === 'confirm' ? (
                   <Button
@@ -2466,10 +2460,10 @@ export default function CheckoutFlow({
                       <LoaderCircleIcon className="size-4 animate-spin" />
                     ) : null}
                     {sessionHoldStatus === 'checking'
-                      ? 'Checking reservation…'
+                      ? `${checkoutCopy.checkingReservation}…`
                       : isFreeOrder
-                        ? 'Place free order'
-                        : `Pay ${formatCurrency(session?.quote.totalCents ?? previewTotal, session?.currency ?? displayCurrency)}`}
+                        ? checkoutCopy.placeFreeOrder
+                        : `${checkoutCopy.payPrefix} ${formatCurrency(session?.quote.totalCents ?? previewTotal, session?.currency ?? displayCurrency)}`}
                   </Button>
                 ) : null}
               </CardContent>
@@ -2483,10 +2477,24 @@ export default function CheckoutFlow({
   );
 }
 
-function Surface({ brand, children }: { brand: ResolvedBrand; children: React.ReactNode }) {
+function Surface({
+  brand,
+  locale,
+  children,
+}: {
+  brand: ResolvedBrand;
+  locale: string;
+  children: React.ReactNode;
+}) {
   return (
-    <BrandThemeSurface as="main" className="min-h-svh bg-background text-foreground" brand={brand}>
-      {children}
-    </BrandThemeSurface>
+    <div lang={locale}>
+      <BrandThemeSurface
+        as="main"
+        className="min-h-svh bg-background text-foreground"
+        brand={brand}
+      >
+        {children}
+      </BrandThemeSurface>
+    </div>
   );
 }

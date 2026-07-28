@@ -18,6 +18,7 @@ type Props = {
   prefilledItemsParam?: string;
   productFilterParam?: string;
   resaleListingId?: string;
+  initialLocale?: string;
 };
 
 export default function CheckoutFlowClient(props: Props) {

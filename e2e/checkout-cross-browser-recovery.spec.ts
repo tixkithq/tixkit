@@ -14,8 +14,10 @@ import {
 } from './helpers/checkout-recovery-mocks';
 import { requireReachable } from './fixtures/validation-test';
 
-async function openCheckout(page: Page, eventId: string) {
-  await page.goto(`${checkoutBaseUrl}/checkout?eventId=${encodeURIComponent(eventId)}`);
+async function openCheckout(page: Page, eventId: string, locale?: string) {
+  const params = new URLSearchParams({ eventId });
+  if (locale) params.set('locale', locale);
+  await page.goto(`${checkoutBaseUrl}/checkout?${params.toString()}`);
   await expect(page.getByText('General Admission')).toBeVisible({
     timeout: 15_000,
   });
@@ -125,16 +127,17 @@ test.describe('checkout cross-browser recovery (mocked frontend)', () => {
     try {
       const state = createRecoveryMockState();
       await installCheckoutRecoveryMocks(page, state);
-      await openCheckout(page, state.eventId);
+      await openCheckout(page, state.eventId, 'es-MX');
       await selectTicketAndBuyer(page, 'offline@example.com');
       await page.context().setOffline(true);
       await page.evaluate(() => window.dispatchEvent(new Event('offline')));
-      await expect(page.getByText('You are offline')).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
+      await expect(page.locator('[lang="es"]')).toBeVisible();
+      await expect(page.getByText('No tienes conexión')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Continuar' })).toBeDisabled();
       expect(state.createCalls).toBe(0);
       await page.context().setOffline(false);
       await page.evaluate(() => window.dispatchEvent(new Event('online')));
-      const continueButton = page.getByRole('button', { name: 'Continue' });
+      const continueButton = page.getByRole('button', { name: 'Continuar' });
       await expect(continueButton).toBeEnabled();
       await expect
         .poll(
