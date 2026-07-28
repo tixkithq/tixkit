@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
-  // TypeScript 7 is enforced by the workspace typecheck; Next 16's embedded
-  // checker still imports TypeScript internals removed in TS 7.
+  experimental: { useTypeScriptCli: true },
+  // TypeScript 7 is enforced by the workspace typecheck before every CI build.
   typescript: { ignoreBuildErrors: true },
 };
 

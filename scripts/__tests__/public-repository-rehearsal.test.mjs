@@ -21,33 +21,6 @@ test('defines the complete independent public repository validation sequence', (
     ['git', ['diff', '--exit-code', 'HEAD', '--']],
     ['git', ['diff', '--cached', '--exit-code', 'HEAD', '--']],
   ];
-  assert.deepEqual(publicRepositoryValidationCommands({ createSnapshot: true }), [
-    ['git', ['init', '-q']],
-    ['git', ['remote', 'add', 'origin', 'https://github.com/tixkithq/tixkit.git']],
-    ['git', ['add', '-A']],
-    [
-      'git',
-      [
-        '-c',
-        'user.name=Tixkit Public Rehearsal',
-        '-c',
-        'user.email=public-rehearsal@tixkit.invalid',
-        'commit',
-        '-qm',
-        'Public repository rehearsal snapshot',
-      ],
-    ],
-    ...commonPrefix,
-    [
-      'bun',
-      [
-        'scripts/validate-api-release-provenance.ts',
-        '--allow-recorded-source',
-        '--allow-derived-export',
-      ],
-    ],
-    ...commonSuffix,
-  ]);
   assert.deepEqual(publicRepositoryValidationCommands(), [
     ['git', ['rev-parse', '--verify', 'HEAD']],
     ['git', ['diff', '--quiet', 'HEAD', '--']],
@@ -59,9 +32,9 @@ test('defines the complete independent public repository validation sequence', (
 });
 
 test('requires one explicit repository source', async () => {
-  await assert.rejects(rehearsePublicRepository([]), /Use --export <path>/u);
+  await assert.rejects(rehearsePublicRepository([]), /Use --repository <clone>/u);
   await assert.rejects(
-    rehearsePublicRepository(['--export', '/tmp/export', '--repository', '/tmp/repository']),
-    /either --export or --repository/u,
+    rehearsePublicRepository(['--export', '/tmp/export']),
+    /no longer supports derived OSS exports/u,
   );
 });

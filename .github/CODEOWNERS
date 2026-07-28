@@ -3,7 +3,6 @@
 /.github/CODEOWNERS @tixkithq/maintainers
 /package.json @tixkithq/maintainers
 /bun.lock @tixkithq/maintainers
-/pnpm-lock.yaml @tixkithq/maintainers
 /infra/ci/scripts/verify-github-action-pins.sh @tixkithq/maintainers
 /infra/scripts/validate-deploy-templates.sh @tixkithq/maintainers
 /scripts/public-remote-guardrails.mjs @tixkithq/maintainers

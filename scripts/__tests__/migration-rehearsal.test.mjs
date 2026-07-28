@@ -26,7 +26,7 @@ const newRelease = `ghcr.io/tixkithq/migrations@sha256:${'b'.repeat(64)}`;
 const signingKey = 'migration-proof-test-signing-key';
 const signingKeyId = 'migration-proof-test-key';
 const environmentExample = resolve(root, 'infra/production/migration-rehearsal.env.example');
-const validationRunbook = resolve(root, 'docs/completion/validation-runbook.md');
+const migrationRunbook = resolve(root, 'docs/public/self-hosting/backups-and-restore.mdx');
 
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -56,12 +56,9 @@ test('published rehearsal environment contract covers both drivers without stori
   ])
     assert.match(contents, new RegExp(`^${name}=`, 'mu'));
   assert.doesNotMatch(contents, /^DR_MANIFEST_SIGNING_KEY=/mu);
-  const runbook = readFileSync(validationRunbook, 'utf8');
-  assert.match(runbook, /set -a; \. \/absolute\/path\/to\/migration-rehearsal\.env; set \+a/u);
-  assert.match(
-    runbook,
-    /DR_RECOVERY_POINT_AT="\$REHEARSAL_ANCHOR" DR_INCIDENT_AT="\$REHEARSAL_ANCHOR"/u,
-  );
+  const runbook = readFileSync(migrationRunbook, 'utf8');
+  assert.match(runbook, /export the file with `set -a` while sourcing it/u);
+  assert.match(runbook, /pass it as both `DR_RECOVERY_POINT_AT` and `DR_INCIDENT_AT`/u);
 });
 
 function executable(path, contents) {

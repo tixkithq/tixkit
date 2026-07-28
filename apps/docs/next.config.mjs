@@ -21,6 +21,7 @@ const nextConfig = {
   pageExtensions: ['ts', 'tsx', 'md', 'mdx'],
   reactStrictMode: true,
   trailingSlash: staticExport,
+  experimental: { useTypeScriptCli: true },
   transpilePackages: ['@tixkit/docs-core'],
   typescript: { ignoreBuildErrors: true },
   turbopack: {

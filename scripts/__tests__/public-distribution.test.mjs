@@ -69,10 +69,7 @@ test('validates the authoritative public distribution and every SDK release path
     manifest.release.contracts.includes('distribution/policy-approval-receipt.schema.json'),
   );
   const codeowners = readFileSync(resolve(root, '.github/CODEOWNERS'), 'utf8');
-  assert.match(
-    codeowners,
-    /^\/distribution\/public-distribution\.json @tixkithq\/maintainers$/mu,
-  );
+  assert.match(codeowners, /^\/distribution\/public-distribution\.json @tixkithq\/maintainers$/mu);
   assert.match(
     codeowners,
     /^\/distribution\/public-distribution\.schema\.json @tixkithq\/maintainers$/mu,

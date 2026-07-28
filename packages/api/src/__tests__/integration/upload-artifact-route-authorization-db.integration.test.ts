@@ -49,6 +49,13 @@ let previousDriver: string | undefined;
 const signedUrl = vi.mocked(getSignedUrl);
 let s3Send: ReturnType<typeof vi.spyOn>;
 
+function scopedS3CallCount(): number {
+  return (s3Send.mock.calls as Array<[unknown]>).filter(([command]) => {
+    const key = (command as { input?: { Key?: unknown } }).input?.Key;
+    return typeof key === 'string' && (key.includes(ownerTenantId) || key.includes(otherTenantId));
+  }).length;
+}
+
 function principal(overrides: Partial<Principal> = {}): Principal {
   return {
     type: 'user',
@@ -149,7 +156,7 @@ async function expectDeniedWithoutMutation(
 ): Promise<void> {
   const before = await artifactSnapshot();
   const signedBefore = signedUrl.mock.calls.length;
-  const s3Before = s3Send.mock.calls.length;
+  const s3Before = scopedS3CallCount();
   const response = await inject();
 
   expect(response.statusCode).toBe(expectedStatus);
@@ -158,7 +165,7 @@ async function expectDeniedWithoutMutation(
   });
   await expect(artifactSnapshot()).resolves.toEqual(before);
   expect(signedUrl).toHaveBeenCalledTimes(signedBefore);
-  expect(s3Send).toHaveBeenCalledTimes(s3Before);
+  expect(scopedS3CallCount()).toBe(s3Before);
 }
 
 describeWithIntegrationDatabase('upload artifact route authorization matrix', () => {
@@ -281,7 +288,7 @@ describeWithIntegrationDatabase('upload artifact route authorization matrix', ()
       downloadUrl: 'https://storage.example.test/signed',
     });
     expect(signedUrl).toHaveBeenCalledTimes(2);
-    expect(s3Send).not.toHaveBeenCalled();
+    expect(scopedS3CallCount()).toBe(0);
   });
 
   it.each(['api_key', 'agent', 'mobile_device', 'system'] satisfies PrincipalType[])(

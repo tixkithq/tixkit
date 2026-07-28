@@ -266,6 +266,29 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
               ];
             });
           }
+          if (table === 'ticket_types' && joinedTable === 'events') {
+            rows = rows.flatMap((row) => {
+              const joined = getRows('events').find((event) =>
+                mockValuesEqual(
+                  getMockColumnValue(event, leftColumn),
+                  getMockColumnValue(row, rightColumn),
+                ),
+              );
+              if (!joined) return [];
+              return [
+                {
+                  ...row,
+                  tenant_id: joined.tenant_id,
+                  organization_id: joined.organization_id,
+                  brand_id: joined.brand_id,
+                  'events.id': joined.id,
+                  'events.organization_id': joined.organization_id,
+                  'events.brand_id': joined.brand_id,
+                  'events.tenant_id': joined.tenant_id,
+                },
+              ];
+            });
+          }
           if (table === 'organization_members' && joinedTable === 'user_profiles') {
             rows = rows.flatMap((row) => {
               // Kysely: innerJoin('user_profiles', 'user_profiles.id', 'organization_members.user_id')
@@ -1498,6 +1521,17 @@ describe('brand domain creation', () => {
         },
       ],
       brands: [],
+      permission_grants: [
+        {
+          id: 'grant_settings_write',
+          tenant_id: 'tnt_1',
+          principal_type: 'user',
+          principal_id: 'usr_1',
+          permission: 'settings.write',
+          scope_type: 'organization',
+          scope_id: organizationId,
+        },
+      ],
     };
     const app = await setupApp(
       tenantRoutes,
@@ -1564,6 +1598,17 @@ describe('brand domain creation', () => {
       ],
       brands: [],
       audit_logs: [],
+      permission_grants: [
+        {
+          id: 'grant_settings_write',
+          tenant_id: 'tnt_1',
+          principal_type: 'user',
+          principal_id: 'usr_1',
+          permission: 'settings.write',
+          scope_type: 'organization',
+          scope_id: organizationId,
+        },
+      ],
     };
     const app = await setupApp(
       tenantRoutes,

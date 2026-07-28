@@ -184,36 +184,6 @@ test('redirect checks require every removed legacy guide to retain its canonical
   }
 });
 
-test('documentation inventory ignores static export output', () => {
-  withRoot((root) => {
-    write(root, 'README.md', '# Fixture\n');
-    write(root, 'docs/internal/seed.md', '# Seed\n');
-    write(root, 'docs/internal/documentation-inventory.csv', '');
-    const environment = { ...process.env, TIXKIT_DOCUMENTATION_INVENTORY_ROOT: root };
-    execFileSync('node', ['scripts/docs/generate-documentation-inventory.mjs'], {
-      cwd: process.cwd(),
-      env: environment,
-      stdio: 'pipe',
-    });
-    const cleanInventory = readFileSync(
-      join(root, 'docs/internal/documentation-inventory.csv'),
-      'utf8',
-    );
-    write(root, 'apps/docs/out/generated.html', 'docs/internal/seed.md');
-    execFileSync('node', ['scripts/docs/generate-documentation-inventory.mjs'], {
-      cwd: process.cwd(),
-      env: environment,
-      stdio: 'pipe',
-    });
-    const builtInventory = readFileSync(
-      join(root, 'docs/internal/documentation-inventory.csv'),
-      'utf8',
-    );
-    assert.equal(builtInventory, cleanInventory);
-    assert.doesNotMatch(builtInventory, /apps\/docs\/out/);
-  });
-});
-
 test('SDK guide sections stay synchronized in manifest and local search', () => {
   execFileSync('node', ['scripts/docs/generate-content-manifest.mjs'], {
     stdio: 'pipe',

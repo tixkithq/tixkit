@@ -24,21 +24,18 @@ test('rejects legacy documentation links on active runtime and contributor surfa
   );
 });
 
-test('explicitly excludes historical evidence and the migration inventory', () => {
+test('excludes private or historical documentation paths', () => {
   for (const path of [
     'docs/internal/audits/example.md',
     'docs/completion/backlog.md',
     'docs/old-plan.md',
     'implementation-plan.md',
-    'scripts/docs/generate-documentation-inventory.mjs',
-    'scripts/validate-validation-runbook.mjs',
   ]) {
     assert.equal(isActiveRepositorySurface(path), false, path);
   }
   assert.deepEqual(
     findLegacyDocumentationReferences([
       { path: 'docs/internal/audits/example.md', content: 'docs/api-reference.md' },
-      { path: 'scripts/validate-validation-runbook.mjs', content: 'docs/incident-runbooks.md' },
     ]),
     [],
   );

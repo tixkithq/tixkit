@@ -16,9 +16,9 @@
   "dependencies": {
     "@mdx-js/loader": "3.1.1",
     "@mdx-js/react": "3.1.1",
-    "@next/mdx": "16.2.10",
+    "@next/mdx": "16.2.12",
     "@tixkit/docs-core": "workspace:*",
-    "next": "16.2.10",
+    "next": "16.2.12",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "remark-frontmatter": "5.0.0",

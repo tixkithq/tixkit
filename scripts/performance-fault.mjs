@@ -584,7 +584,7 @@ export async function executeFaultScenario({
     try {
       await terminateChild();
     } catch (cleanupError) {
-      // eslint-disable-next-line preserve-caught-error -- AggregateError retains both failures and sets the primary error as cause below.
+      // oxlint-disable-next-line preserve-caught-error -- AggregateError retains both failures and sets the primary error as cause below.
       throw new AggregateError(
         [error, cleanupError],
         'fault harness completion and process cleanup both failed',

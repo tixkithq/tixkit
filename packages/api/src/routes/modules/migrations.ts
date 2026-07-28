@@ -285,6 +285,7 @@ const migrationDigestKeys = new Set([
   'beforeCanonicalSha256',
   'checksumSha256',
   'claimOwnerSha256',
+  'configurationHash',
   'configurationSha256',
   'inputHash',
   'inputSha256',

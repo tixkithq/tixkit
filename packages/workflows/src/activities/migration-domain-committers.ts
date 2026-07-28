@@ -426,7 +426,7 @@ export async function processMigrationMediaCleanupJobs(
         await store.delete(job.object_key, deleteAbortController.signal);
         if (deleteTimedOut) throw new Error('MIGRATION_MEDIA_CLEANUP_DELETE_TIMEOUT');
       } catch (error) {
-        // eslint-disable-next-line preserve-caught-error -- provider abort errors can contain request identifiers and must not escape the redaction boundary.
+        // oxlint-disable-next-line preserve-caught-error -- provider abort errors can contain request identifiers and must not escape the redaction boundary.
         if (deleteTimedOut) throw new Error('MIGRATION_MEDIA_CLEANUP_DELETE_TIMEOUT');
         throw error;
       } finally {

@@ -50,6 +50,7 @@ jobs:
     name: Static Security Analysis (javascript-typescript)
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       packages: read
       security-events: write

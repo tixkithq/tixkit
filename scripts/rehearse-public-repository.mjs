@@ -25,49 +25,18 @@ function valueAfter(args, name) {
   return value;
 }
 
-export function publicRepositoryValidationCommands({ createSnapshot = false } = {}) {
-  const repositoryPreparation = createSnapshot
-    ? [
-        ['git', ['init', '-q']],
-        ['git', ['remote', 'add', 'origin', 'https://github.com/tixkithq/tixkit.git']],
-        ['git', ['add', '-A']],
-        [
-          'git',
-          [
-            '-c',
-            'user.name=Tixkit Public Rehearsal',
-            '-c',
-            'user.email=public-rehearsal@tixkit.invalid',
-            'commit',
-            '-qm',
-            'Public repository rehearsal snapshot',
-          ],
-        ],
-      ]
-    : [
-        ['git', ['rev-parse', '--verify', 'HEAD']],
-        ['git', ['diff', '--quiet', 'HEAD', '--']],
-        ['git', ['diff', '--cached', '--quiet', 'HEAD', '--']],
-      ];
-  const provenanceValidation = createSnapshot
-    ? [
-        'bun',
-        [
-          'scripts/validate-api-release-provenance.ts',
-          '--allow-recorded-source',
-          '--allow-derived-export',
-        ],
-      ]
-    : ['bun', ['scripts/validate-api-release-provenance.ts']];
+export function publicRepositoryValidationCommands() {
   return [
-    ...repositoryPreparation,
+    ['git', ['rev-parse', '--verify', 'HEAD']],
+    ['git', ['diff', '--quiet', 'HEAD', '--']],
+    ['git', ['diff', '--cached', '--quiet', 'HEAD', '--']],
     ['node', ['scripts/validate-public-distribution.mjs']],
     ['bun', ['install', '--frozen-lockfile']],
     ['bun', ['run', 'format:check']],
     ['bun', ['run', 'lint', '--force']],
     ['bun', ['run', 'typecheck', '--force']],
     ['bun', ['run', 'test:unit']],
-    provenanceValidation,
+    ['bun', ['scripts/validate-api-release-provenance.ts']],
     ['git', ['restore', '--worktree', '--', 'artifacts/api', 'apps/docs/public/contracts']],
     ['bun', ['run', 'build']],
     ['node', ['packages/cli/dist/index.js', '--help']],
@@ -302,27 +271,17 @@ export function verifyPackedNpmRelease(repository, environment = process.env) {
 }
 
 export async function rehearsePublicRepository(argv = process.argv.slice(2)) {
-  const requestedExport = valueAfter(argv, '--export');
   const requestedRepository = valueAfter(argv, '--repository');
-  if (requestedExport && requestedRepository) {
-    throw new Error('Use either --export or --repository, not both');
+  if (argv.includes('--export')) {
+    throw new Error('The authoritative public repository no longer supports derived OSS exports');
   }
-  if (!requestedExport && !requestedRepository) {
-    throw new Error('Use --export <path> during transition or --repository <clone> after cutover');
-  }
+  if (!requestedRepository) throw new Error('Use --repository <clone>');
 
-  const repository = resolve(requestedExport ?? requestedRepository);
-  if (requestedExport) {
-    const { exportOss } = await import('./export-oss.mjs');
-    await exportOss(['--out', repository]);
-  }
-
+  const repository = resolve(requestedRepository);
   const environment = { ...process.env, CI: '1' };
   delete environment.DATABASE_URL;
   delete environment.DATABASE_URL_MYSQL;
-  for (const [command, args] of publicRepositoryValidationCommands({
-    createSnapshot: Boolean(requestedExport),
-  })) {
+  for (const [command, args] of publicRepositoryValidationCommands()) {
     execFileSync(command, args, { cwd: repository, env: environment, stdio: 'inherit' });
   }
   verifyPackedNpmRelease(repository, environment);

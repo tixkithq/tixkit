@@ -35,30 +35,12 @@ export const LEGACY_DOCUMENTATION_REDIRECTS = Object.freeze({
   '/docs/widget-embed-guide': '/developers/widget/embedding',
 });
 
-const HISTORICAL_EVIDENCE_SCRIPTS = [
-  'scripts/validate-completion-backlog.mjs',
-  'scripts/validate-final-evidence-checklist.mjs',
-  'scripts/validate-high-care-ledger.mjs',
-  'scripts/validate-user-story-matrix.mjs',
-  'scripts/validate-validation-runbook.mjs',
-];
-
 export function isActiveRepositorySurface(path) {
   if (path.startsWith('docs/')) return path.startsWith('docs/public/');
   if (path === 'implementation-plan.md') return false;
-  if (path === 'scripts/docs/generate-documentation-inventory.mjs') return false;
   if (path === 'scripts/docs/lib/legacy-references.mjs') return false;
   if (path === 'scripts/docs/check-legacy-references.mjs') return false;
   if (path === 'scripts/__tests__/legacy-documentation-references.test.mjs') return false;
-  if (HISTORICAL_EVIDENCE_SCRIPTS.includes(path)) return false;
-  if (
-    path.startsWith('scripts/__tests__/validate-completion-backlog') ||
-    path.startsWith('scripts/__tests__/validate-final-evidence-checklist') ||
-    path.startsWith('scripts/__tests__/validate-high-care-ledger') ||
-    path.startsWith('scripts/__tests__/validate-user-story-matrix') ||
-    path.startsWith('scripts/__tests__/validate-validation-runbook')
-  )
-    return false;
   return (
     /^(?:apps|packages|scripts|\.github)\//.test(path) ||
     /^(?:README|ARCHITECTURE|CONTRIBUTING|SECURITY|SUPPORT|CODE_OF_CONDUCT|ROADMAP)\.md$/.test(

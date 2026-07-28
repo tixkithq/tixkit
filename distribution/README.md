@@ -1,28 +1,26 @@
 # Public distribution contract
 
-`public-distribution.json` is the machine-readable source of truth for the authoritative public Tixkit repository boundary. Transitional OSS export, SDK parity, package/image release inventory, contract publication, and Self-Hosted profile validation consume this manifest.
+`public-distribution.json` is the machine-readable source of truth for the authoritative public Tixkit repository boundary. SDK parity, package/image release inventory, contract publication, and Self-Hosted profile validation consume this manifest.
 
 The manifest distinguishes:
 
 - public shared product and Self-Hosted source;
-- private Cloud-only source under `managed/` during extraction;
-- internal planning documents that are not public product documentation;
+- forbidden private Cloud dependencies and source paths;
+- private planning documents that must not enter the public repository;
 - generated public release artifacts that must be reproduced by their generators rather than edited manually.
 
-The public license is MIT. The repository owner authorization and technical provenance/license audit are recorded in `docs/completion/legal-review-approval.md`. Approved exports bind that exact file by SHA-256, emit the canonical root license and approval receipt, normalize every public package and SDK license surface to MIT, and continue to reject private or unclassified content.
+The public license is MIT. The repository owner authorization and technical provenance/license audit are preserved in the root `LEGAL_APPROVAL.md` receipt. Public release validation binds the canonical root license and approval receipt, requires every public package and SDK license surface to use MIT, and rejects private or unclassified content.
 
 Run:
 
 ```bash
 bun run validate:public-distribution
-bun run export:oss -- --out /tmp/tixkit-public
+bun run validate:public-repository -- --repository .
 ```
 
-Adding an app, package, SDK, image, contract, or deployment profile without classifying it fails validation. Public applications and packages may not depend on `managed`, `tixkit-cloud`, or private package names. Until C-130 cutover is proven, `scripts/export-oss.mjs` remains an extraction and leak-validation bridge; direct releases from `tixkithq/tixkit` replace it after cutover.
+Adding an app, package, SDK, image, contract, or deployment profile without classifying it fails validation. Public applications and packages may not depend on `managed`, `tixkit-cloud`, or private package names. Releases originate directly from this repository.
 
-`scripts/rehearse-repository-cutover.mjs` is a transitional local extraction control and is never included in the public output. It binds both staged repositories to a clean source commit, requires explicit review of ignored private inputs, rejects cross-boundary source copying and writes a local-only inventory attestation. It cannot substitute for legal approval, hosted history review, protected repository evidence, immutable prerelease publication or a real private Cloud compatibility pin.
-
-The C-130 cutover rehearsals commit the rewritten public tree first, then rebind the active API release manifest and its documentation mirror to that exact public-root commit. Rebinding is accepted only for a clean clone whose `origin` is `tixkithq/tixkit`, changes only the paired release manifests and checksums, and produces a second reviewed commit. Transitional exports may use recorded-source/derived-export validation only as non-publishable integrity evidence; `validate:public-repository -- --repository .` requires strict reconstructable, publishable provenance and must never use those transition flags.
+The repository rehearsal requires a clean clone whose `origin` is `tixkithq/tixkit`, strict reconstructable publishable provenance, a complete build and test sequence, and an unchanged tracked tree after generation.
 
 Private Cloud releases consume `cloud-core-compatibility.schema.json` without copying it into private history. The protected `public-artifact-release.yml` tag workflow emits a provenance-attested manifest conforming to `public-release-manifest.schema.json`; it contains the exact source commit/tree, npm tarball integrity, a canonical digest of every packaged path, byte sequence and executable mode, registry image digests and published contracts. It is fail-closed while legal approval is pending or while private/internal source remains in the checkout. The workflow publishes those same tarballs, uses unique candidate image tags while contracts consume digests, and supports safe retries only when an existing npm version has identical bytes.
 

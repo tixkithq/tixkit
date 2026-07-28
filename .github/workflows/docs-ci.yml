@@ -22,10 +22,8 @@ on:
       - 'packages/**/README.md'
       - 'scripts/docs/**'
       - 'scripts/__tests__/docs-validation.test.mjs'
-      - 'scripts/__tests__/export-oss.test.mjs'
       - 'scripts/__tests__/legacy-documentation-references.test.mjs'
       - 'scripts/__tests__/sdk-parity.test.mjs'
-      - 'scripts/export-oss.mjs'
       - 'scripts/lib/sdk-parity.mjs'
       - 'scripts/sdk-demo-matrix.mjs'
       - 'scripts/sdk-parity-matrix.mjs'
@@ -73,8 +71,8 @@ jobs:
         run: |
           bun run sdk:parity
           bun run sdk:demos:check
-      - name: Validate documentation, export, and SDK script failure cases
-        run: node --test scripts/__tests__/docs-validation.test.mjs scripts/__tests__/export-oss.test.mjs scripts/__tests__/legacy-documentation-references.test.mjs scripts/__tests__/sdk-parity.test.mjs
+      - name: Validate documentation and SDK script failure cases
+        run: node --test scripts/__tests__/docs-validation.test.mjs scripts/__tests__/legacy-documentation-references.test.mjs scripts/__tests__/sdk-parity.test.mjs
       - name: Reject generated drift and whitespace errors
         run: git diff --exit-code -- apps/docs/public apps/docs/src/generated && git diff --check
 
@@ -144,16 +142,3 @@ jobs:
       - name: Stop dashboard test infrastructure
         if: always()
         run: docker compose -f infra/docker-compose.yml down -v
-
-  oss-export:
-    name: Sanitized OSS Documentation Build
-    runs-on: ubuntu-latest
-    needs: validate
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: ./.github/actions/setup-js
-      - run: bun install --frozen-lockfile
-      - name: Export and build the sanitized public tree
-        run: bun run export:oss -- --out /tmp/tixkit-docs-oss-export
-      - name: Verify internal documentation is absent
-        run: test ! -e /tmp/tixkit-docs-oss-export/docs/internal

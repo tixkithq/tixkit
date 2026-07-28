@@ -40,8 +40,8 @@ jobs:
       - run: bunx turbo run build
       - run: bun run check:performance-budgets
 
-  oss-export:
-    name: OSS Export
+  public-repository:
+    name: Public Repository Rehearsal
     runs-on: tixkit-epyc-trusted
     needs: lint-typecheck
     steps:
@@ -49,7 +49,7 @@ jobs:
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Rehearse an independent public repository
-        run: bun run validate:public-repository -- --export /tmp/tixkit-oss-export
+        run: bun run validate:public-repository -- --repository .
 
   unit-tests:
     name: Unit Tests
@@ -147,7 +147,7 @@ jobs:
     # not turn the committed latency budgets into scheduler-noise checks.
     needs:
       - build
-      - oss-export
+      - public-repository
       - unit-tests
       - flutter-sdk
       - android-sdk

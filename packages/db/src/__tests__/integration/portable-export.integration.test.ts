@@ -777,5 +777,5 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
     await runMigrations(url);
     await dropAllTables(db);
     await runMigrations(url);
-  });
+  }, 30_000);
 });

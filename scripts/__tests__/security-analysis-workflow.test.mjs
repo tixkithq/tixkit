@@ -64,6 +64,7 @@ const EXPECTED_JOB_CONTRACTS = {
     name: 'Static Security Analysis (javascript-typescript)',
     'runs-on': 'ubuntu-latest',
     permissions: {
+      actions: 'read',
       contents: 'read',
       packages: 'read',
       'security-events': 'write',
@@ -179,12 +180,15 @@ function validateSecurityAnalysisWorkflow(text) {
   }
   if (
     !permissionsEqual(jobs.codeql?.permissions, {
+      actions: 'read',
       contents: 'read',
       packages: 'read',
       'security-events': 'write',
     })
   ) {
-    errors.push('CodeQL permissions must be contents/packages read and security-events write');
+    errors.push(
+      'CodeQL permissions must be actions/contents/packages read and security-events write',
+    );
   }
 
   const steps = Object.values(jobs).flatMap((job) => job?.steps ?? []);
