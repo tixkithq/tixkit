@@ -25,7 +25,6 @@ const protectedSourcePaths = Object.freeze([
   '.github/workflows/production-dr.yml',
   'distribution/hosted-production-dr-receipt.schema.json',
   'distribution/hosted-trust-keyring.schema.json',
-  'distribution/hosted-trust-receipt.schema.json',
   'distribution/public-distribution.schema.json',
   'infra/production/rehearsal-expectations.schema.json',
   'infra/production/rehearsal-proof.schema.json',

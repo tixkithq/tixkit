@@ -27,6 +27,6 @@ test('performance evidence code and deployment inputs require maintainer review'
   ];
 
   for (const pattern of protectedPatterns) {
-    assert.deepEqual(rules.get(pattern), ['@tixkit/maintainers'], `${pattern} is not CODEOWNED`);
+    assert.deepEqual(rules.get(pattern), ['@tixkithq/maintainers'], `${pattern} is not CODEOWNED`);
   }
 });

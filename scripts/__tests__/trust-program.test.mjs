@@ -333,12 +333,12 @@ test('rejects omitted, unmapped, missing and renamed trust surfaces or evidence'
   );
 
   for (const replacement of [
-    'performance-capacity.missing.json',
-    '.github/workflows/performance-capacity-missing.yml',
+    'performance-budget.missing.json',
+    '.github/workflows/performance-budget-missing.yml',
   ]) {
     const missing = structuredClone(program);
     const record = missing.records.find(({ id }) => id === 'performance-evidence');
-    record.publicArtifacts[record.publicArtifacts.indexOf('performance-capacity.trusted.json')] =
+    record.publicArtifacts[record.publicArtifacts.indexOf('performance-budgets.json')] =
       replacement;
     const violations = trustProgramViolations(missing, root, publicDistribution);
     assert.ok(violations.some((violation) => /accepted public artifacts/u.test(violation)));
@@ -621,8 +621,8 @@ test('rejects pending-state escalation and future verification across mapped pub
 
   const trust = readFileSync(resolve(root, 'docs/public/reference/trust.mdx'), 'utf8');
   for (const disclosure of [
-    'A keyring supplied by the same untrusted party as the receipt does not establish trust.',
-    'does not execute the named semantic evidence validator',
+    'No hosted production DR receipt or trusted public keyring is currently published.',
+    'The result is only `eligibleForReview`.',
   ]) {
     assert.ok(
       trustSurfaceContentViolations(

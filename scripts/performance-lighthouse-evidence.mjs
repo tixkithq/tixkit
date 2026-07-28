@@ -8,7 +8,7 @@ import {
   assertValidPerformanceBudgetConfig,
   evaluateBudgets,
 } from './check-performance-budgets.mjs';
-import { canonicalJson, sha256 } from './performance-evidence.mjs';
+import { canonicalHostedTrustJson as canonicalJson, sha256 } from './lib/hosted-trust-receipt.mjs';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MAX_CONFIG_BYTES = 1024 * 1024;

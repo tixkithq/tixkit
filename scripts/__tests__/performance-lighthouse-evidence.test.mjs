@@ -20,7 +20,7 @@ import {
   verifyLighthouseEvidence,
   writeLighthouseEvidence,
 } from '../performance-lighthouse-evidence.mjs';
-import { canonicalJson, sha256 } from '../performance-evidence.mjs';
+import { canonicalHostedTrustJson as canonicalJson, sha256 } from '../lib/hosted-trust-receipt.mjs';
 
 const gitSha = 'a'.repeat(40);
 const reports = [

@@ -1144,10 +1144,10 @@ test('hosted production DR combines semantic and receipt proof over one exact ar
 
     await t.test('dedicated record, artifact, workflow, and validator tuple is exact', () => {
       const cases = [
-        ['trustRecordId', 'performance-evidence'],
-        ['artifact.kind', 'performance-capacity'],
-        ['workflow.path', '.github/workflows/performance-capacity.yml'],
-        ['validation.validator', 'scripts/performance-capacity.mjs#validateCapacityEvidence'],
+        ['trustRecordId', 'release-provenance'],
+        ['artifact.kind', 'release-bundle'],
+        ['workflow.path', '.github/workflows/public-artifact-release.yml'],
+        ['validation.validator', 'scripts/verify-public-artifact-release.mjs'],
       ];
       for (const [path, replacement] of cases) {
         const [parent, child] = path.split('.');

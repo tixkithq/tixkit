@@ -61,7 +61,6 @@ test('validates the authoritative public distribution and every SDK release path
     manifest.release.contracts.includes('distribution/hosted-production-dr-receipt.schema.json'),
   );
   assert.ok(manifest.release.contracts.includes('distribution/hosted-trust-keyring.schema.json'));
-  assert.ok(manifest.release.contracts.includes('distribution/hosted-trust-receipt.schema.json'));
   assert.ok(
     manifest.release.contracts.includes('distribution/policy-approval-keyring.schema.json'),
   );

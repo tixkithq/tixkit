@@ -641,8 +641,8 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/reference/performance": {
     sourcePath: "docs/public/reference/performance.mdx",
-    frontmatter: {"title":"Performance budgets","description":"Review documentation and platform performance contracts and the commands that reproduce them.","audience":["developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"platform-operations","last_verified":"2026-07-15","prerequisites":["A production build for browser measurements"],"related":["/self-hosting/observability","/contributing/testing"]},
-    headings: [{"id":"real-user-monitoring-contract","text":"Real-user monitoring contract","level":2},{"id":"payment-provider-service-signals","text":"Payment-provider service signals","level":2}],
+    frontmatter: {"title":"Performance budgets","description":"Review documentation and platform performance contracts and the commands that reproduce them.","audience":["developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"platform-operations","last_verified":"2026-07-27","prerequisites":["A production build for browser measurements"],"related":["/self-hosting/observability","/contributing/testing"]},
+    headings: [{"id":"real-user-monitoring-contract","text":"Real-user monitoring contract","level":2},{"id":"payment-provider-service-signals","text":"Payment-provider service signals","level":2},{"id":"browser-measurements","text":"Browser measurements","level":2}],
     load: () => import("../../../../docs/public/reference/performance.mdx"),
   },
   "/reference/privacy-and-retention": {
@@ -654,7 +654,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   "/reference/trust": {
     sourcePath: "docs/public/reference/trust.mdx",
     frontmatter: {"title":"Trust and evidence","description":"Verify Tixkit policies, local proof, managed-service gaps, and claims that still require external evidence.","audience":["operator","developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"security","last_verified":"2026-07-16","prerequisites":[],"related":["/reference/privacy-and-retention","/reference/performance","/support"]},
-    headings: [{"id":"how-to-read-the-states","text":"How to read the states","level":2},{"id":"verify-hosted-performance-evidence","text":"Verify hosted performance evidence","level":2},{"id":"verify-a-policy-publication-decision","text":"Verify a policy publication decision","level":2},{"id":"verify-release-material","text":"Verify release material","level":2}],
+    headings: [{"id":"how-to-read-the-states","text":"How to read the states","level":2},{"id":"verify-hosted-dr-evidence","text":"Verify hosted DR evidence","level":2},{"id":"verify-a-policy-publication-decision","text":"Verify a policy publication decision","level":2},{"id":"verify-release-material","text":"Verify release material","level":2}],
     load: () => import("../../../../docs/public/reference/trust.mdx"),
   },
   "/reference/webhook-events": {

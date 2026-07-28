@@ -12,7 +12,6 @@
 /scripts/__tests__/public-remote-guardrails.test.mjs @tixkithq/maintainers
 /scripts/__tests__/public-release-verifier.test.mjs @tixkithq/maintainers
 /scripts/__tests__/security-analysis-workflow.test.mjs @tixkithq/maintainers
-/scripts/__tests__/hosted-trust-receipt.test.mjs @tixkithq/maintainers
 /scripts/__tests__/policy-approval-receipt.test.mjs @tixkithq/maintainers
 /scripts/__tests__/production-rehearsal.test.mjs @tixkithq/maintainers
 /scripts/__tests__/production-dr-workflow.test.mjs @tixkithq/maintainers
@@ -32,7 +31,6 @@
 /scripts/validate-public-distribution.mjs @tixkithq/maintainers
 /scripts/validate-staged-public-release.mjs @tixkithq/maintainers
 /scripts/validate-widget-release-pins.mjs @tixkithq/maintainers
-/scripts/validate-hosted-trust-receipt.mjs @tixkithq/maintainers
 /scripts/validate-policy-promotion.mjs @tixkithq/maintainers
 /scripts/verify-hosted-production-dr.mjs @tixkithq/maintainers
 /scripts/verify-production-rehearsal.mjs @tixkithq/maintainers

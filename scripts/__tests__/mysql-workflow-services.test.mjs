@@ -12,10 +12,6 @@ const MYSQL_COMMAND = '--log-bin-trust-function-creators=1';
 
 const workflowContracts = [
   { path: '.github/workflows/ci.yml', serviceCount: 1 },
-  { path: '.github/workflows/performance-capacity.yml', serviceCount: 1 },
-  { path: '.github/workflows/performance-fault.yml', serviceCount: 1 },
-  { path: '.github/workflows/performance-nightly.yml', serviceCount: 1 },
-  { path: '.github/workflows/performance-soak.yml', serviceCount: 1 },
   { path: '.github/workflows/release-dry-run.yml', serviceCount: 1 },
   { path: '.github/workflows/trusted-ci.yml', serviceCount: 1 },
   { path: '.github/workflows/trusted-release-dry-run.yml', serviceCount: 1 },

@@ -78,7 +78,7 @@ export const EXPECTED_TRUST_CLAIMS = Object.freeze({
     'No independent security assessment or remediation summary has been published.',
   'managed-sla': 'Managed support plans and SLA commitments are not published.',
   'performance-evidence':
-    'Performance budgets, decline-separated payment signals and trusted single-host regression, trend, capacity, fault and soak workflow contracts are locally validated; no hosted or production result is published.',
+    'Performance budgets, Lighthouse evidence validation and decline-separated payment signals are locally validated; no hosted or production result is published.',
   'privacy-roles':
     'Managed Cloud controller, processor and retention responsibilities are not published.',
   'release-provenance':
@@ -108,7 +108,7 @@ export const EXPECTED_TRUST_BLOCKERS = Object.freeze({
   'managed-sla':
     'Commercial, operational and legal owners must approve managed support commitments.',
   'performance-evidence':
-    'Supported-profile capacity, approved service objectives, routed-alert proof and hosted production evidence remain incomplete.',
+    'Representative real-user monitoring, approved service objectives, routed-alert proof and hosted production evidence remain incomplete.',
   'privacy-roles': 'The managed operating model requires product, privacy and legal approval.',
   'release-provenance':
     'The protected public release workflow has not published an approved release.',
@@ -163,16 +163,12 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
   'managed-sla': [[], []],
   'performance-evidence': [
     [
-      '.github/workflows/performance-capacity.yml',
-      '.github/workflows/performance-fault.yml',
-      '.github/workflows/performance-nightly.yml',
-      '.github/workflows/performance-soak.yml',
-      '.github/workflows/performance-temporal-fault.yml',
       'apps/checkout/src/__tests__/web-vitals-reporter.test.tsx',
       'apps/checkout/src/app/layout.tsx',
       'apps/checkout/src/components/web-vitals-reporter.tsx',
       'docs/public/reference/performance.mdx',
       'docs/public/self-hosting/observability.mdx',
+      'e2e/performance-lighthouse.spec.ts',
       'infra/helm/tixkit/templates/_helpers.tpl',
       'infra/helm/tixkit/templates/monitoring.yaml',
       'infra/helm/tixkit/values.yaml',
@@ -192,22 +188,14 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
       'packages/workflows/src/activities/checkout.ts',
       'packages/workflows/src/activities/refund.ts',
       'packages/workflows/src/observability.ts',
+      'performance-budgets.integration.json',
       'performance-budgets.json',
-      'performance-capacity.trusted.json',
-      'performance-faults.trusted.json',
-      'performance-scenarios.nightly.json',
-      'performance-soak.trusted.json',
-      'performance-temporal-fault.trusted.json',
-      'performance-trends.trusted.json',
+      'performance-budgets.lighthouse.json',
       'scripts/__tests__/check-performance-budgets.test.mjs',
       'scripts/__tests__/helm-production-profile.test.mjs',
+      'scripts/__tests__/performance-lighthouse-evidence.test.mjs',
       'scripts/check-performance-budgets.mjs',
-      'scripts/performance-capacity.mjs',
-      'scripts/performance-fault.mjs',
-      'scripts/performance-scenario.mjs',
-      'scripts/performance-soak.mjs',
-      'scripts/performance-temporal-fault.mjs',
-      'scripts/performance-trends.mjs',
+      'scripts/performance-lighthouse-evidence.mjs',
     ],
     [
       validationCommand(
@@ -215,17 +203,7 @@ export const EXPECTED_TRUST_EVIDENCE = Object.freeze({
         30_000,
       ),
       validationCommand(
-        [
-          'node',
-          '--test',
-          'scripts/__tests__/performance-capacity.test.mjs',
-          'scripts/__tests__/performance-evidence.test.mjs',
-          'scripts/__tests__/performance-fault.test.mjs',
-          'scripts/__tests__/performance-scenario.test.mjs',
-          'scripts/__tests__/performance-soak.test.mjs',
-          'scripts/__tests__/performance-temporal-fault.test.mjs',
-          'scripts/__tests__/performance-trends.test.mjs',
-        ],
+        ['node', '--test', 'scripts/__tests__/performance-lighthouse-evidence.test.mjs'],
         120_000,
       ),
     ],
@@ -301,8 +279,8 @@ const SURFACE_REQUIRED_DISCLOSURES = Object.freeze({
     'No product-wide supported-version, end-of-life, or deprecation window is approved or published',
   ],
   'docs/public/reference/performance.mdx': [
-    'The trend implementation is locally validated, but no hosted trend artifact is claimed',
-    'A committed executable workflow is not a hosted soak result',
+    'Repository budgets cover the configured application routes and documentation-specific search/reference behavior.',
+    'it does not claim representative production traffic',
   ],
   'docs/public/reference/privacy-and-retention.mdx': [
     'Managed Cloud controller, processor, retention, residency, transfer, and subprocessor commitments are not approved or published.',
@@ -311,8 +289,8 @@ const SURFACE_REQUIRED_DISCLOSURES = Object.freeze({
   'docs/public/reference/trust.mdx': [
     'it does not mean a hosted production run occurred',
     'are not generally available',
-    'A keyring supplied by the same untrusted party as the receipt does not establish trust.',
-    'does not execute the named semantic evidence validator',
+    'No hosted production DR receipt or trusted public keyring is currently published.',
+    'The result is only `eligibleForReview`.',
   ],
   'docs/public/self-hosting/backups-and-restore.mdx': [
     'This is real local provider proof, not production-like Kubernetes',
