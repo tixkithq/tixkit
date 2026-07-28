@@ -31,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { EventMarketingView } from './event-marketing-view';
 import { EventScheduleView } from './event-schedule-view';
@@ -706,11 +706,9 @@ export function EventForm({
         unresolvedConflicts: plan.conflicts,
       } satisfies EventFormRecoverySnapshot),
     );
-    toast.info(
-      plan.conflicts.length > 0
-        ? 'The latest event is loaded. Choose a value for each field changed in both versions.'
-        : 'Your edits were safely merged with the latest event.',
-    );
+    if (plan.conflicts.length === 0) {
+      toast.info('Your edits were safely merged with the latest event.');
+    }
   };
 
   const resolveMergeConflict = (field: EventFormConflictKey, resolution: 'local' | 'latest') => {
@@ -1170,6 +1168,8 @@ export function EventForm({
                       Multiple occurrences
                     </TabsTrigger>
                   </TabsList>
+                  <TabsContent value="one-time" forceMount className="sr-only" />
+                  <TabsContent value="multiple" forceMount className="sr-only" />
                 </Tabs>
               )}
 
@@ -1685,7 +1685,7 @@ export function EventForm({
             aria-labelledby="event-merge-conflicts-heading"
           >
             <div>
-              <h3
+              <h2
                 ref={conflictHeadingRef}
                 id="event-merge-conflicts-heading"
                 className="font-medium"
@@ -1693,8 +1693,8 @@ export function EventForm({
               >
                 Choose values for {mergeConflicts.length} conflicting{' '}
                 {mergeConflicts.length === 1 ? 'field' : 'fields'}
-              </h3>
-              <p className="text-sm text-muted-foreground" role="alert">
+              </h2>
+              <p className="text-sm text-foreground" role="alert">
                 These fields changed both here and in the newer event version. Nothing will save
                 until you choose which value to keep.
               </p>

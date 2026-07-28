@@ -41,6 +41,8 @@ type ClerkSessionClaims = {
 export const DEV_TENANT_ID = 'tnt_dev_local';
 export const DEV_ORG_ID = 'org_dev_local';
 export const DEV_BRAND_ID = 'brd_dev_local';
+export const DEV_USER_ID = 'usr_dev_local';
+export const DEV_ORGANIZATION_MEMBER_ID = 'om_dev_local';
 
 /** Strip inline `#` comments/quotes from env values (common .env.local footgun). */
 function sanitizeEnvText(value: string | undefined, fallback: string): string {
@@ -340,7 +342,105 @@ export class ClerkAuthService {
         .execute();
     }
 
+    if (this.isLocalDevMode()) await this.ensureDevPrincipalAccess();
     await this.ensureDevResendProviderRoute();
+  }
+
+  private async ensureDevPrincipalAccess(): Promise<void> {
+    const now = new Date();
+    const existingUser = await this.db
+      .selectFrom('user_profiles')
+      .selectAll()
+      .where('id', '=', DEV_USER_ID)
+      .executeTakeFirst();
+    if (!existingUser) {
+      await this.db
+        .insertInto('user_profiles')
+        .values({
+          id: DEV_USER_ID,
+          tenant_id: DEV_TENANT_ID,
+          clerk_user_id: 'dev_local',
+          email: 'organizer@localhost',
+          first_name: 'Local',
+          last_name: 'Organizer',
+          avatar_url: null,
+          status: 'active',
+          last_seen_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    }
+
+    const existingMembership = await this.db
+      .selectFrom('organization_members')
+      .selectAll()
+      .where('id', '=', DEV_ORGANIZATION_MEMBER_ID)
+      .executeTakeFirst();
+    if (!existingMembership) {
+      await this.db
+        .insertInto('organization_members')
+        .values({
+          id: DEV_ORGANIZATION_MEMBER_ID,
+          tenant_id: DEV_TENANT_ID,
+          organization_id: DEV_ORG_ID,
+          user_id: DEV_USER_ID,
+          role: 'owner',
+          invited_at: now,
+          accepted_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    }
+
+    const existingGrants = await this.db
+      .selectFrom('permission_grants')
+      .selectAll()
+      .where('principal_id', '=', DEV_USER_ID)
+      .execute()
+      .then((grants) =>
+        grants.filter(
+          (grant) =>
+            grant.tenant_id === DEV_TENANT_ID &&
+            grant.principal_type === 'user' &&
+            grant.scope_type === 'organization' &&
+            grant.scope_id === DEV_ORG_ID,
+        ),
+      );
+    const grantsByPermission = new Map(existingGrants.map((grant) => [grant.permission, grant]));
+
+    for (const [index, permission] of ALL_PERMISSIONS.entries()) {
+      const existingGrant = grantsByPermission.get(permission);
+      if (existingGrant) {
+        if (existingGrant.organization_member_id !== DEV_ORGANIZATION_MEMBER_ID) {
+          await this.db
+            .updateTable('permission_grants')
+            .set({
+              organization_member_id: DEV_ORGANIZATION_MEMBER_ID,
+              updated_at: now,
+            })
+            .where('id', '=', existingGrant.id)
+            .execute();
+        }
+        continue;
+      }
+      await this.db
+        .insertInto('permission_grants')
+        .values({
+          id: `pg_dev_${index}`,
+          tenant_id: DEV_TENANT_ID,
+          principal_type: 'user',
+          principal_id: DEV_USER_ID,
+          permission,
+          scope_type: 'organization',
+          scope_id: DEV_ORG_ID,
+          organization_member_id: DEV_ORGANIZATION_MEMBER_ID,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    }
   }
 
   /**
@@ -1033,7 +1133,7 @@ export class ClerkAuthService {
 export function createLocalDevPrincipal(): Principal {
   return {
     type: 'user',
-    id: 'usr_dev_local',
+    id: DEV_USER_ID,
     clerkUserId: undefined,
     tenantId: DEV_TENANT_ID,
     organizationIds: [DEV_ORG_ID],

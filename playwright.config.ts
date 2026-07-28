@@ -235,6 +235,7 @@ function createWalletPassEnv(apiBaseUrl: string): Record<string, string> {
 
 export default defineConfig({
   testDir: './e2e',
+  tsconfig: './tsconfig.base.json',
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,

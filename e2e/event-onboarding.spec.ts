@@ -83,7 +83,10 @@ test.describe('State-driven event onboarding', () => {
     const created = await page.evaluate(async (venueName) => {
       const response = await fetch('http://localhost:4200/v1/venues', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `e2e-saved-venue-${Date.now()}`,
+        },
         body: JSON.stringify({
           organizationId: 'org_dev_local',
           name: venueName,
@@ -100,14 +103,78 @@ test.describe('State-driven event onboarding', () => {
     await expect(page.getByRole('combobox', { name: 'Timezone' })).toHaveValue('America/Chicago');
   });
 
+  test('recovers a real concurrent event edit with explicit field ownership', async ({
+    page,
+    consoleErrors,
+  }, testInfo) => {
+    await page.goto(`${adminBaseUrl}/events/new`);
+    if (new URL(page.url()).pathname === '/sign-in') {
+      test.skip(true, 'runtime admin server requires live Clerk authentication');
+    }
+    const originalTitle = `Conflict recovery ${testInfo.project.name} ${Date.now()}`;
+    await page.getByLabel('Title').fill(originalTitle);
+    await page.getByRole('button', { name: 'Create draft' }).click();
+    await expect(page).toHaveURL(/\/events\/(?!new$)[^/]+$/, { timeout: 30_000 });
+    const eventId = new URL(page.url()).pathname.split('/').at(-1)!;
+
+    await page.goto(`${adminBaseUrl}/events/${eventId}/settings#basics`);
+    const basics = page.locator('#basics');
+    await expect(basics.getByLabel('Title')).toHaveValue(originalTitle);
+    const remoteTitle = `${originalTitle} remote`;
+    const remoteUpdate = await page.evaluate(
+      async ({ id, title }) => {
+        const current = await fetch(`http://localhost:4200/v1/events/${id}`);
+        const currentBody = (await current.json()) as { version?: number; error?: unknown };
+        if (!current.ok || typeof currentBody.version !== 'number') {
+          return { ok: false, status: current.status, body: JSON.stringify(currentBody) };
+        }
+        const response = await fetch(`http://localhost:4200/v1/events/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            expectedVersion: currentBody.version,
+          }),
+        });
+        return { ok: response.ok, status: response.status, body: await response.text() };
+      },
+      { id: eventId, title: remoteTitle },
+    );
+    expect(remoteUpdate.ok, remoteUpdate.body).toBe(true);
+
+    const localTitle = `${originalTitle} local`;
+    await basics.getByLabel('Title').fill(localTitle);
+    await basics.getByRole('button', { name: 'Save Changes' }).click();
+    const conflictHeading = page.getByRole('heading', {
+      name: 'Choose values for 1 conflicting field',
+    });
+    await expect(conflictHeading).toBeFocused();
+    await expect(page.getByText(`Title: ${localTitle}`)).toBeVisible();
+    await expect(page.getByText(`Title: ${remoteTitle}`)).toBeVisible();
+    for (let index = consoleErrors.length - 1; index >= 0; index -= 1) {
+      const message = consoleErrors[index] ?? '';
+      if (message.includes('409 (Conflict)') && message.includes(`/v1/events/${eventId}`)) {
+        consoleErrors.splice(index, 1);
+      }
+    }
+    await expectNoAxeViolations(page, testInfo);
+
+    await page.getByRole('button', { name: 'Keep my Title change' }).click();
+    await basics.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(basics.getByText('Saved', { exact: true })).toBeVisible();
+    const persistedTitle = await page.evaluate(async (id) => {
+      const response = await fetch(`http://localhost:4200/v1/events/${id}`);
+      const body = (await response.json()) as { title?: string };
+      return response.ok ? body.title : undefined;
+    }, eventId);
+    expect(persistedTitle).toBe(localTitle);
+    expect(consoleErrors).toEqual([]);
+  });
+
   test('completes free ticket, preview review, safe test order, preflight, and publish', async ({
     page,
   }, testInfo) => {
     test.setTimeout(90_000);
-    const consoleErrors: string[] = [];
-    page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text());
-    });
     await page.goto(`${adminBaseUrl}/events/new`);
     const title = `Launch workflow ${testInfo.project.name} ${Date.now()}`;
     const freeRsvp = page.getByRole('radio', { name: /Free RSVP/i });
@@ -154,6 +221,12 @@ test.describe('State-driven event onboarding', () => {
     await expect(page.getByRole('heading', { name: 'Publish preflight' })).toBeVisible();
     await page.getByRole('button', { name: 'Confirm publish' }).click();
     await expect(page.getByText('Published', { exact: true }).first()).toBeVisible();
-    expect(consoleErrors).toEqual([]);
+    await expect(page.getByRole('heading', { name: 'Your event is live' })).toBeVisible();
+    await expect(page.getByLabel('Public event URL')).toHaveValue(/^https?:\/\//u);
+    await expect(page.getByRole('list', { name: 'Event operational health' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open public page' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open monitor sales' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open verify another checkout' })).toBeVisible();
+    await expectNoAxeViolations(page, testInfo);
   });
 });
