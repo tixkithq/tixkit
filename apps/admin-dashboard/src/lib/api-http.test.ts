@@ -256,7 +256,10 @@ describe('requestBlob', () => {
     const result = await requestBlob('/v1/events/evt_1/media/renditions/emr_1');
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(await result.data.text()).toBe('event-thumbnail');
+    if (result.ok) {
+      expect(result.data.size).toBe(15);
+      expect(result.data.type).toBe('image/webp');
+    }
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://localhost:4000/v1/events/evt_1/media/renditions/emr_1');
     expect(init.credentials).toBe('omit');

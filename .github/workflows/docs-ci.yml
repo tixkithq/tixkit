@@ -57,6 +57,8 @@ jobs:
         run: infra/ci/scripts/verify-github-action-pins.sh
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
+      - name: Build generated reference dependencies
+        run: bunx turbo run build --filter=@tixkit/openapi
       - name: Validate generated reference drift before builds
         run: bun run docs:reference
       - name: Validate documentation contracts and content

@@ -249,6 +249,12 @@ export function packFromSourceArchive(
         stdio: ['ignore', 'ignore', 'pipe'],
         maxBuffer: 32 * 1024 * 1024,
       });
+    if (install)
+      execFileSync('bun', ['run', 'build'], {
+        cwd: sourceRoot,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        maxBuffer: 32 * 1024 * 1024,
+      });
     return packPublicPackages(distribution, sourceRoot, artifactDirectory);
   } finally {
     rmSync(sourceRoot, { recursive: true, force: true });

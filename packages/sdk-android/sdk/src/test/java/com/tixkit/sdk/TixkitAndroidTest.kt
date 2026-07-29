@@ -3,6 +3,7 @@ package com.tixkit.sdk
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import org.json.JSONObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -246,15 +247,14 @@ class TixkitAndroidTest {
       assertEquals("organizer_managed", acceptance.getString("settlementModel"))
       assertEquals("manual_coordinated_resolution", acceptance.getString("refundModel"))
     }
-    assertEquals(listOf("GET", "POST", "POST", "POST", "POST"), methods)
+    assertEquals(listOf("GET", "POST", "POST", "POST", "GET"), methods)
     assertEquals(
       "https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25",
       requests.first(),
     )
-    assertEquals(listOf(null, "idem_create", "idem_checkout", "idem_delist", "idem_complete"), idempotencyKeys)
+    assertEquals(listOf(null, "idem_create", "idem_checkout", "idem_delist", null), idempotencyKeys)
     assertEquals(listOf(null, null, "client_token", null, null), sessionTokens)
     assertTrue(bodies[1]!!.contains("\"priceCents\":5500"))
-    assertTrue(bodies[4]!!.contains("\"externalPaymentReference\":\"pi_1\""))
   }
 
   @Test

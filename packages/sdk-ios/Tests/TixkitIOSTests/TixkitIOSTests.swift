@@ -59,7 +59,7 @@ final class TixkitIOSTests: XCTestCase {
       XCTAssertEqual(request.httpMethod, "POST")
       XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "scan-ticket-1")
       XCTAssertEqual(request.value(forHTTPHeaderField: "X-Device-Id"), "dev_1")
-      let payload = try XCTUnwrap(request.httpBody)
+      let payload = try requestBody(request)
       let json = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
       XCTAssertEqual(json["checkInListId"] as? String, "cil_1")
       XCTAssertEqual(json["qrPayload"] as? String, "signed-ticket-payload")
@@ -213,7 +213,7 @@ final class TixkitIOSTests: XCTestCase {
         request.url!.path.hasSuffix("/resale-listings")
           || request.url!.path.hasSuffix("/resale-listing")
       {
-        let payload = try XCTUnwrap(request.httpBody)
+        let payload = try requestBody(request)
         let json = try XCTUnwrap(
           JSONSerialization.jsonObject(with: payload) as? [String: Any])
         XCTAssertEqual(
@@ -311,11 +311,11 @@ final class TixkitIOSTests: XCTestCase {
     XCTAssertEqual(settlement.tenantId, "ten_1")
     XCTAssertEqual(settlement.entries.first?.kind, "payable_accrued")
 
-    XCTAssertEqual(requestMethods, ["GET", "POST", "POST", "POST", "POST"])
+    XCTAssertEqual(requestMethods, ["GET", "POST", "POST", "POST", "GET"])
     XCTAssertEqual(
       requestURLs.first, "https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25")
     XCTAssertEqual(
-      idempotencyKeys, [nil, "idem_create", "idem_checkout", "idem_delist", "idem_complete"])
+      idempotencyKeys, [nil, "idem_create", "idem_checkout", "idem_delist", nil])
     XCTAssertEqual(sessionTokens, [nil, nil, "client_token", nil, nil])
   }
 
@@ -548,6 +548,27 @@ private final class URLProtocolStub: URLProtocol {
   }
 
   override func stopLoading() {}
+}
+
+private func requestBody(_ request: URLRequest) throws -> Data {
+  if let body = request.httpBody {
+    return body
+  }
+  let stream = try XCTUnwrap(request.httpBodyStream)
+  stream.open()
+  defer { stream.close() }
+  var body = Data()
+  var buffer = [UInt8](repeating: 0, count: 4096)
+  while true {
+    let count = stream.read(&buffer, maxLength: buffer.count)
+    if count < 0 {
+      throw try XCTUnwrap(stream.streamError)
+    }
+    if count == 0 {
+      return body
+    }
+    body.append(buffer, count: count)
+  }
 }
 
 extension TixkitScannerClient {

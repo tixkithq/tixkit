@@ -21,6 +21,18 @@ if (checkOnly) {
 const outputDirectory = resolve(root, 'public-release-provenance');
 mkdirSync(outputDirectory, { recursive: true });
 
+const build = spawnSync('bun', ['run', 'build'], {
+  cwd: root,
+  encoding: 'utf8',
+  env: process.env,
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+writeFileSync(resolve(outputDirectory, 'workspace-build.log'), build.stdout || build.stderr);
+if (build.status !== 0) {
+  process.stderr.write(build.stderr);
+  throw new Error('workspace build failed before npm pack dry-run');
+}
+
 for (const entry of packages) {
   const packageDirectory = resolve(root, entry.path);
   const packageManifest = JSON.parse(
