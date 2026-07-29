@@ -127,6 +127,7 @@ jobs:
         browser: [chromium, firefox, webkit]
     env:
       CI: 'true'
+      E2E_ADMIN_DEV_SERVER: '0'
       TEMPORAL_TASK_QUEUE: tixkit-docs-e2e-${{ matrix.browser }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
