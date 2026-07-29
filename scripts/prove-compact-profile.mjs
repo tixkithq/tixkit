@@ -373,10 +373,17 @@ function assertTranscriptSafe(bytes, environment) {
     throw new Error('Compact proof transcript contains credential-bearing output.');
 }
 
-export async function proveCompactProfile({ outputPath, publicRef, commandRunner } = {}) {
+export async function proveCompactProfile({
+  outputPath,
+  publicRef,
+  apiPort = 4000,
+  commandRunner,
+} = {}) {
   if (!outputPath) throw new Error('Compact proof requires --out <directory>.');
   if (!/^refs\/(?:heads\/main|tags\/v[0-9][A-Za-z0-9._-]*)$/u.test(publicRef ?? ''))
     throw new Error('Compact proof requires --ref refs/heads/main or an explicit version tag.');
+  if (!Number.isSafeInteger(apiPort) || apiPort < 1024 || apiPort > 65_535)
+    throw new Error('Compact proof API port must be an integer from 1024 through 65535.');
   assertAuthoritativePublicRepository(root);
   if ((await git(['rev-parse', '--is-shallow-repository'])) !== 'false')
     throw new Error('Compact proof requires a complete, non-shallow public clone.');
@@ -590,6 +597,14 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
     validateOperatingEnvironment(host, docker);
 
     await run('bun', ['run', 'compact:init']);
+    if (apiPort !== 4000) {
+      const environmentPath = join(root, 'infra/compact/.env');
+      const environmentBytes = readFileSync(environmentPath, 'utf8');
+      const configured = environmentBytes.replace(/^API_PORT=4000$/mu, `API_PORT=${apiPort}`);
+      if (configured === environmentBytes)
+        throw new Error('Compact proof could not configure the requested API port.');
+      writeFileSync(environmentPath, configured, { mode: 0o600 });
+    }
     await run('bun', ['run', 'compact:up']);
     const inspectState = async () => {
       const result = await run('docker', composeArguments('ps', '--all', '--format', 'json'), {
@@ -620,7 +635,7 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
     };
     const initial = await inspectState();
     await assertSeed();
-    await run('curl', ['-fsS', 'http://127.0.0.1:4000/ready']);
+    await run('curl', ['-fsS', `http://127.0.0.1:${apiPort}/ready`]);
     const scannerClassification = await run(
       'docker',
       composeArguments(
@@ -952,6 +967,7 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
       result: 'passed',
       startedFromFreshEnvironment: true,
       authoritativePublicRepository: 'github.com/tixkithq/tixkit',
+      apiPort,
       source: { commit, tree: sourceTree },
       remote,
       host,
@@ -1040,17 +1056,29 @@ function parseArguments(arguments_) {
   for (let index = 0; index < arguments_.length; index += 2) {
     const name = arguments_[index];
     const value = arguments_[index + 1];
-    if (!['--out', '--ref'].includes(name) || !value || values.has(name))
+    if (!['--out', '--ref', '--api-port'].includes(name) || !value || values.has(name))
       throw new Error(
-        'Usage: bun run compact:prove -- --ref <public-ref> --out <new-absolute-directory>',
+        'Usage: bun run compact:prove -- --ref <public-ref> --out <new-absolute-directory> [--api-port <port>]',
       );
     values.set(name, value);
   }
-  if (values.size !== 2 || !isAbsolute(values.get('--out')))
+  if (
+    !values.has('--out') ||
+    !values.has('--ref') ||
+    !isAbsolute(values.get('--out')) ||
+    (values.has('--api-port') &&
+      (!/^[0-9]+$/u.test(values.get('--api-port')) ||
+        Number(values.get('--api-port')) < 1024 ||
+        Number(values.get('--api-port')) > 65_535))
+  )
     throw new Error(
-      'Usage: bun run compact:prove -- --ref <public-ref> --out <new-absolute-directory>',
+      'Usage: bun run compact:prove -- --ref <public-ref> --out <new-absolute-directory> [--api-port <port>]',
     );
-  return { outputPath: resolve(values.get('--out')), publicRef: values.get('--ref') };
+  return {
+    outputPath: resolve(values.get('--out')),
+    publicRef: values.get('--ref'),
+    apiPort: Number(values.get('--api-port') ?? 4000),
+  };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

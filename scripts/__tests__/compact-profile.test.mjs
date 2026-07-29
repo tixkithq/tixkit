@@ -295,6 +295,7 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
       'result',
       'startedFromFreshEnvironment',
       'authoritativePublicRepository',
+      'apiPort',
       'source',
       'remote',
       'host',
@@ -409,6 +410,7 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
     result: 'passed',
     startedFromFreshEnvironment: true,
     authoritativePublicRepository: 'github.com/tixkithq/tixkit',
+    apiPort: 4000,
     source: { commit, tree: commit },
     remote: {
       url: 'https://github.com/tixkithq/tixkit.git',
