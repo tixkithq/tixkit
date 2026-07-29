@@ -166,6 +166,7 @@
     },
     "docs": {
       "public": [
+        "docs/embed-generator.html",
         "docs/navigation.ts",
         "docs/public",
         "docs/redirects.json",
