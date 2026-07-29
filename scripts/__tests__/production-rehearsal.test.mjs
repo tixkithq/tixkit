@@ -706,7 +706,7 @@ test('adapter timeout terminates the full process group before recovery', async 
     const orphan = join(value.directory, 'orphan');
     executable(
       value.config.adapters.inject,
-      '(trap "" TERM; exec </dev/null >/dev/null 2>&1; sleep 1.4; printf orphan >"$MOCK_ORPHAN") & printf inject >>"$MOCK_CALLS"; printf fault >"$MOCK_STATE"; sleep 10',
+      '(trap "" TERM; exec </dev/null >/dev/null 2>&1; sleep 2; printf orphan >"$MOCK_ORPHAN") & printf inject >>"$MOCK_CALLS"; printf fault >"$MOCK_STATE"; sleep 10',
     );
     value.config.thresholds.adapterTimeoutSeconds = 1;
     value.expectations.thresholds.adapterTimeoutSeconds = 1;

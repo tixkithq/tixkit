@@ -100,6 +100,8 @@ jobs:
         with:
           playwright-cache: 'true'
       - run: bun install --frozen-lockfile
+      - name: Build documentation runtime dependencies
+        run: bunx turbo run build --filter=@tixkit/openapi... --filter=@tixkit/docs-core...
       - name: Install Playwright browser
         run: bunx playwright install --with-deps ${{ matrix.browser }}
       - name: Run documentation accessibility and responsive tests
