@@ -219,7 +219,7 @@ test.describe('admin product workflow coverage', () => {
 
     await page.goto(`${adminBaseUrl}/events`);
     await expect(page.getByRole('heading', { name: 'Events' })).toBeVisible();
-    await page.getByRole('button', { name: 'Create event' }).click();
+    await page.getByRole('link', { name: 'Create event' }).first().click();
 
     const createEventDialog = page.getByRole('dialog', { name: 'Create Event' });
     await expect(createEventDialog).toBeVisible();

@@ -36,6 +36,11 @@ async function fillDoorOrderForm(
   await page.getByLabel('Operator notes').fill(`E2E ${tender} door sale`);
 }
 
+async function openBoxOffice(page: Page): Promise<void> {
+  await page.getByRole('tab', { name: 'Box Office' }).click();
+  await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+}
+
 test.describe('admin box-office POS workflows', () => {
   test('operator creates a manual-card door order across the browser matrix', async ({
     page,
@@ -50,7 +55,7 @@ test.describe('admin box-office POS workflows', () => {
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
     await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+    await openBoxOffice(page);
     await expect(page.getByText('Expected total')).toBeVisible();
 
     await fillDoorOrderForm(page, 'manual_card');
@@ -111,7 +116,7 @@ test.describe('admin box-office POS workflows', () => {
 
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
-    await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+    await openBoxOffice(page);
     await fillDoorOrderForm(page, 'cash');
 
     const orderResponsePromise = page.waitForResponse(
@@ -177,7 +182,7 @@ test.describe('admin box-office POS workflows', () => {
 
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
-    await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+    await openBoxOffice(page);
     await fillDoorOrderForm(page, 'cash');
     await page.getByRole('button', { name: 'Issue door order' }).click();
     await expect(page.getByRole('alert').getByText('Order issued', { exact: true })).toBeVisible();
@@ -218,7 +223,13 @@ test.describe('admin box-office POS workflows', () => {
     });
     const metrics = evaluation.result.value as Record<
       string,
-      { width: number; height: number; top: number; left: number; visible: boolean } | null
+      {
+        width: number;
+        height: number;
+        top: number;
+        left: number;
+        visible: boolean;
+      } | null
     >;
 
     for (const key of ['panel', 'result', 'submit', 'tender', 'amount'] as const) {
@@ -248,7 +259,7 @@ test.describe('admin box-office POS workflows', () => {
 
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
-    await expect(page.getByRole('heading', { name: 'Sell at door' })).toBeVisible();
+    await openBoxOffice(page);
     await fillDoorOrderForm(page, 'comp');
 
     const orderResponsePromise = page.waitForResponse(

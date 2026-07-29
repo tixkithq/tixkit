@@ -261,7 +261,7 @@ test.describe('Admin data table filters', () => {
       await filterButton.click();
 
       // Select "paid" from the filter options
-      const paidOption = page.getByRole('dialog').getByRole('button', { name: /^paid$/i });
+      const paidOption = page.getByRole('option', { name: /^paid/i });
       await expect(paidOption).toBeVisible({ timeout: 5_000 });
       await paidOption.click();
 

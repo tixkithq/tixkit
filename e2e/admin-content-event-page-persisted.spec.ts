@@ -2,7 +2,12 @@ import { type APIResponse, type CDPSession, type Page, type TestInfo } from '@pl
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
-import { devBrandId, devOrganizationId } from './helpers/seed';
+import {
+  devBrandId,
+  devOrganizationId,
+  seedPublishedEventPageContent,
+  seedPublishedOrderConfirmationContent,
+} from './helpers/seed';
 
 const desktopViewport = { width: 1440, height: 1000 } as const;
 const mobileViewport = { width: 390, height: 844 } as const;
@@ -150,6 +155,15 @@ async function seedContentEvent(page: Page, suffix: string): Promise<SeededConte
         maxPerOrder: 4,
       },
     }),
+    201,
+  );
+  await seedPublishedEventPageContent({ event, suffix });
+  await seedPublishedOrderConfirmationContent({ eventId: event.id, suffix });
+  await jsonResponse(
+    await page.request.post(
+      `${apiBaseUrl}/v1/events/${event.id}/readiness-acknowledgements/checkout_consent`,
+      { data: {} },
+    ),
     201,
   );
   await jsonResponse<Omit<SeededContentEvent, 'ticketType'>>(

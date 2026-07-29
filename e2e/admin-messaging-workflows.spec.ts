@@ -139,7 +139,7 @@ test.describe('admin messaging workflow coverage', () => {
     await page.getByRole('button', { name: 'Send Campaign' }).click();
 
     await expect(page.getByText(emailTemplateKey, { exact: true })).toBeVisible();
-    await expect(page.getByText(/all attendees .* 1 queued/i)).toBeVisible();
+    await expect(page.getByText('All attendees · 1 queued', { exact: true })).toBeVisible();
 
     await page.reload();
     await expect(page.getByText(emailTemplateKey, { exact: true })).toBeVisible();

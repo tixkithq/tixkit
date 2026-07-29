@@ -277,7 +277,7 @@ test.describe('admin export workflow coverage', () => {
       expect(completedExport.format).toBe('csv');
       expect(completedExport.status).toBe('completed');
       expect(completedExport.downloadUrl).toBe(`/v1/exports/${queuedExport.exportId}/download`);
-      expect(completedExport.fileUrl).toContain(`/exports/${queuedExport.exportId}.csv`);
+      expect(completedExport.fileUrl).toBeUndefined();
 
       const redirectResponse = await fetch(href!, { redirect: 'manual' });
       expect(redirectResponse.status).toBe(302);

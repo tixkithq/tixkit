@@ -20,6 +20,11 @@ export const metadata = {
 
 export const dynamic = 'force-dynamic';
 
+function runtimeStyleNonceBootstrap(nonce: string | undefined): string {
+  if (!nonce) return '';
+  return `(()=>{const nonce=document.currentScript?.nonce;if(!nonce)return;const createElement=Document.prototype.createElement;Document.prototype.createElement=function(tagName,options){const element=createElement.call(this,tagName,options);if(String(tagName).toLowerCase()==='style')element.setAttribute('nonce',nonce);return element;};})();`;
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection();
   const runtimeConfig = parseCheckoutRuntimeConfig();
@@ -34,6 +39,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       {...runtimeConfigDataAttributes(runtimeConfig)}
     >
       <body>
+        <script
+          id="runtime-style-nonce-bootstrap"
+          nonce={nonce}
+          dangerouslySetInnerHTML={{ __html: runtimeStyleNonceBootstrap(nonce) }}
+        />
         <script
           nonce={nonce}
           dangerouslySetInnerHTML={{
