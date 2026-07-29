@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/migration-core",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Framework-neutral migration contracts, normalization, dry-run analysis, and rollback safety for Tixkit",
   "license": "MIT",
   "repository": {
@@ -49,7 +49,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/portability": "0.1.0"
+    "@tixkit/portability": "1.0.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

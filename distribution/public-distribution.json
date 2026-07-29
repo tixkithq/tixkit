@@ -358,6 +358,7 @@
       }
     ],
     "contracts": [
+      "artifacts/api/2026-09-04",
       "artifacts/api/2026-09-03",
       "artifacts/api/2026-09-02",
       "artifacts/api/2026-09-01",
@@ -447,6 +448,11 @@
       "packages/embed-core/schemas/lifecycle.schema.json"
     ],
     "agentIntegrationSkills": [
+      {
+        "path": "artifacts/api-integration-skills/tixkit-api-2026-09-04",
+        "apiVersion": "2026-09-04",
+        "releaseManifestSha256": "833372241dbb6aba71f6ae1eff6173a6296815ac415056f57e06ede295c34a51"
+      },
       {
         "path": "artifacts/api-integration-skills/tixkit-api-2026-09-03",
         "apiVersion": "2026-09-03",

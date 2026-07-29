@@ -152,7 +152,7 @@ class TixkitAndroidTest {
       urls,
     )
     headersSeen.forEach { headers ->
-      assertEquals("2026-09-03", headers["X-Tixkit-Version"])
+      assertEquals("2026-09-04", headers["X-Tixkit-Version"])
       assertFalse(headers.containsKey("Authorization"))
       assertFalse(headers.containsKey("X-Device-Id"))
       assertFalse(headers.containsKey("X-Device-Secret"))
@@ -172,7 +172,7 @@ class TixkitAndroidTest {
       idempotencyKeys.add(headers["Idempotency-Key"])
       sessionTokens.add(headers["X-Checkout-Session-Token"])
       bodies.add(body)
-      assertEquals("2026-09-03", headers["X-Tixkit-Version"])
+      assertEquals("2026-09-04", headers["X-Tixkit-Version"])
       assertEquals("Bearer tk_test_123", headers["Authorization"])
 
       when {

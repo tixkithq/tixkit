@@ -12,9 +12,23 @@ const manifest = validatePublicDistribution(loadPublicDistribution(root), root);
 const packages = manifest.release.packages.filter(
   ({ ecosystem }) => ecosystem === 'npm' || ecosystem === 'npm-and-cdn',
 );
+const releaseVersion = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version;
+const packageVersions = packages.map(({ path }) => {
+  const packageManifest = JSON.parse(readFileSync(resolve(root, path, 'package.json'), 'utf8'));
+  return { name: packageManifest.name, version: packageManifest.version };
+});
+const unsynchronized = packageVersions.filter(({ version }) => version !== releaseVersion);
+if (unsynchronized.length > 0)
+  throw new Error(
+    `public npm package versions must equal release ${releaseVersion}: ${unsynchronized
+      .map(({ name, version }) => `${name}@${version}`)
+      .join(', ')}`,
+  );
 
 if (checkOnly) {
-  process.stdout.write(`Validated ${packages.length} manifest-driven npm release packages.\n`);
+  process.stdout.write(
+    `Validated ${packages.length} manifest-driven npm release packages at ${releaseVersion}.\n`,
+  );
   process.exit(0);
 }
 

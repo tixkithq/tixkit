@@ -282,6 +282,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-09-03 redacted access-rule reads',
         routeId: 'apiMigration20260902To20260903',
       },
+      {
+        label: 'Adopt 2026-09-04 reporting permissions and Twilio SMS webhooks',
+        routeId: 'apiMigration20260903To20260904',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

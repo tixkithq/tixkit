@@ -57,7 +57,7 @@ type MarketingEventName = 'view_item' | 'begin_checkout' | 'purchase';
 const IFRAME_SANDBOX =
   'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
 const IFRAME_ALLOW = 'payment; publickey-credentials-create *; publickey-credentials-get *';
-export const TIXKIT_WIDGET_VERSION = '0.1.1';
+export const TIXKIT_WIDGET_VERSION = '1.0.0';
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const handshakeTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
 const widgetStartedAt = new WeakMap<HTMLElement, number>();

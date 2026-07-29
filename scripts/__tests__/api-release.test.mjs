@@ -9,7 +9,7 @@ import { acquireRepositoryMutationLock } from './helpers/repository-mutation-loc
 const root = resolve(import.meta.dirname, '../..');
 const releaseRepositoryMutationLock = await acquireRepositoryMutationLock(root);
 after(releaseRepositoryMutationLock);
-const currentVersion = '2026-09-03';
+const currentVersion = '2026-09-04';
 const currentReleaseManifest = JSON.parse(
   readFileSync(resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`), 'utf8'),
 );
@@ -68,7 +68,7 @@ function withDisposableApiCandidate(run) {
   );
   const originalOpenApi = readFileSync(openApiPath, 'utf8');
   const candidateOpenApi = originalOpenApi.replace(
-    "version: '2026-09-03'",
+    "version: '2026-09-04'",
     `version: '${disposableCandidateVersion}'`,
   );
   assert.notEqual(candidateOpenApi, originalOpenApi, 'OpenAPI version declaration was not found');

@@ -618,7 +618,7 @@ test(
       const release = buildPublicReleaseManifestFromArchive({
         distribution: realDistribution,
         images,
-        releaseVersion: '0.1.0',
+        releaseVersion: '1.0.0',
         sourceCommit,
         sourceArchive,
         packageArtifactDirectory: publicArtifacts,

@@ -194,7 +194,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/public/tixkit-widget.js",
         "export": "issueWidgetRuntimeUrl",
-        "sha256": "ea97a3a11ae791c004f0fbb484fdd8a80c0a66ad94c3bab125bc3227e04ae71c"
+        "sha256": "0eaf285cdf882a9baa24c1c17a9263fdb049c1ba51085d09adc83736abe9116c"
       },
       "allowedSinks": [
         {
@@ -429,7 +429,7 @@
         "type": "workspace-export",
         "path": "packages/sdk-js/src/index.ts",
         "export": "issueTixkitApiRequestUrl",
-        "sha256": "4d490b58f06d0e70097208e2cd3e6f4cd4ea55f21233c42e689a86bb6a03977e"
+        "sha256": "46a0e33a02f324f7e0506c79506064e818e888f1f80e790d0055e8010828eb3e"
       },
       "allowedSinks": [
         {
@@ -465,7 +465,7 @@
         "type": "workspace-export",
         "path": "packages/widget/src/index.ts",
         "export": "issueWidgetRuntimeUrl",
-        "sha256": "20590d2d9d32be523704c912fe2351f3bf2574727f8e7fd961b6ce5bd3fda610"
+        "sha256": "622aad22288fb69835892ca366411723200d7b7fff1d918af6748967a382b1c5"
       },
       "allowedSinks": [
         {
@@ -482,7 +482,7 @@
       "id": "checkout-headless-storage",
       "path": "packages/checkout-headless/src/index.ts",
       "typeName": "CheckoutStorage",
-      "sha256": "0574d1d181209266cabd5f8993f7e2c513e7f85ccfc11e7078dcea48694d73fb",
+      "sha256": "eead54bc278e0a36fbf337eed2e30823962b600de2e485768ea66cc792907669",
       "allowedMethods": ["get"],
       "runtimeEvidencePaths": ["packages/checkout-headless/src/__tests__/controller.test.ts"]
     },

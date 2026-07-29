@@ -14,7 +14,7 @@
   "dependencies": {
     "@sveltejs/adapter-node": "^5.3.3",
     "@sveltejs/kit": "^2.49.0",
-    "@tixkit/sveltekit": "^0.1.0",
+    "@tixkit/sveltekit": "^1.0.0",
     "svelte": "^5.43.3",
     "vite": "^8.1.0"
   },

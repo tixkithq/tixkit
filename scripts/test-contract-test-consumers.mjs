@@ -204,7 +204,7 @@ try {
     JSON.stringify({
       baseUrl: 'http://api.example.test',
       conformanceTarget: 'platform-api',
-      apiVersion: '2026-09-03',
+      apiVersion: '2026-09-04',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
@@ -325,7 +325,7 @@ try {
           JSON.stringify({
             profile: 'agent-platform',
             conformanceTarget: 'platform-api',
-            apiVersion: '2026-09-03',
+            apiVersion: '2026-09-04',
             agentProtocolVersion: '2026-07-22',
             agentPlatformProtocolVersion: '2026-07-27',
             principalKind: 'third_party',
@@ -363,7 +363,7 @@ try {
       JSON.stringify({
         profile: 'agent-platform',
         conformanceTarget: 'self-hosted',
-        apiVersion: '2026-09-03',
+        apiVersion: '2026-09-04',
         agentProtocolVersion: '2026-07-22',
         agentPlatformProtocolVersion: '2026-07-27',
         principalKind: 'self_hosted',
@@ -438,7 +438,7 @@ if (validatePortableContentDocument('event_page', unsafe)) throw new Error('Pack
   const installed = JSON.parse(
     await readFile(join(temp, 'node_modules/@tixkit/contract-tests/package.json'), 'utf8'),
   );
-  if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
+  if (installed.version !== '1.0.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
     'Built and executed 5 packed contract profiles, including agent event-read/report-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, replay-safe approval revocation with rejected execution, fail-closed credential handling, the packed SDK wire contract, and canonical portable event-page validation through clean Bun and npm installs.',
   );

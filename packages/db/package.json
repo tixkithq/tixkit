@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/db",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Tixkit database schema, migrations, and tenant-safe repositories",
   "license": "MIT",
   "repository": {
@@ -60,10 +60,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/admin-table-core": "0.1.0",
-    "@tixkit/agent-protocol": "0.1.0",
-    "@tixkit/content-core": "0.1.0",
-    "@tixkit/domain": "0.1.0",
+    "@tixkit/admin-table-core": "1.0.0",
+    "@tixkit/agent-protocol": "1.0.0",
+    "@tixkit/content-core": "1.0.0",
+    "@tixkit/domain": "1.0.0",
     "kysely": "^0.29.0",
     "pg": "^8.22.0",
     "mysql2": "^3.22.0",

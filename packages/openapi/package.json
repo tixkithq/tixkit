@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/openapi",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Versioned Tixkit OpenAPI contract and generated schema helpers",
   "license": "MIT",
   "repository": {
@@ -39,8 +39,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/agent-protocol": "0.1.0",
-    "@tixkit/domain": "0.1.0"
+    "@tixkit/agent-protocol": "1.0.0",
+    "@tixkit/domain": "1.0.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

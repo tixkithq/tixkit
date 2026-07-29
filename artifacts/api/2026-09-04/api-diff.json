@@ -1,0 +1,54 @@
+{
+  "from": "2026-09-03",
+  "to": "2026-09-04",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 7
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /events/{eventId}/reports/tax",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /events/{eventId}/reports/attendance",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /events/{eventId}/reports/promo",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /events/{eventId}/reports/conversion",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /organizations/{organizationId}/reports/affiliate",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "required-permission-metadata-added",
+      "path": "GET /organizations/{organizationId}/reports/affiliate",
+      "message": "Explicit required-permission metadata was added for the existing operation."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /webhooks/twilio/sms",
+      "message": "Operation was added."
+    }
+  ]
+}

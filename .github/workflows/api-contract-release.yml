@@ -60,6 +60,8 @@ jobs:
         run: infra/ci/scripts/verify-github-action-pins.sh
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
+      - name: Build OpenAPI runtime dependencies
+        run: bunx turbo run build --filter=@tixkit/openapi...
       - name: Build release artifacts and fail on breaking changes
         run: bun run scripts/build-api-release.ts
       - name: Build version-bound API integration skill
@@ -111,6 +113,8 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
+      - name: Build OpenAPI runtime dependencies
+        run: bunx turbo run build --filter=@tixkit/openapi...
       - name: Rebuild the approved commit with breaking override
         env:
           ALLOW_BREAKING_API_RELEASE: '1'

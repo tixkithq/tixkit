@@ -370,6 +370,14 @@ export function buildPublicReleaseManifestFromArchive({
         stdio: ['ignore', 'ignore', 'pipe'],
         maxBuffer: 32 * 1024 * 1024,
       });
+    const packages = packPublicPackages(distribution, sourceRoot, packageArtifactDirectory);
+    const unsynchronizedPackages = packages.filter(({ version }) => version !== releaseVersion);
+    if (unsynchronizedPackages.length > 0)
+      throw new Error(
+        `public npm package versions must equal release ${releaseVersion}: ${unsynchronizedPackages
+          .map(({ name, version }) => `${name}@${version}`)
+          .join(', ')}`,
+      );
     const manifest = {
       schemaVersion: 1,
       releaseVersion,
@@ -384,7 +392,7 @@ export function buildPublicReleaseManifestFromArchive({
               version: basename(agentContract, '.json').replace(/^agent-protocol-/u, ''),
             }
           : { status: 'unavailable', version: '' },
-        packages: packPublicPackages(distribution, sourceRoot, packageArtifactDirectory),
+        packages,
         images: [...images].sort((left, right) => left.name.localeCompare(right.name)),
         contracts: publicContractPins(distribution, apiContract, sourceRoot),
       },

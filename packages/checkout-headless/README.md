@@ -10,7 +10,7 @@ Custom storefronts, framework adapters, and the maintained checkout applications
 
 ## Status
 
-Beta at package version `0.1.0`. Its HTTP transport targets the public checkout contract and API version `2026-01-01`.
+Package version `1.0.0`. Its HTTP transport targets the public checkout contract and API version `2026-01-01`.
 
 ## Installation
 

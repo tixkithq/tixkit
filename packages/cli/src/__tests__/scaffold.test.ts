@@ -49,7 +49,7 @@ describe('scaffold', () => {
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
     };
-    expect(pkg.dependencies['@tixkit/next']).toBe('^0.1.0');
+    expect(pkg.dependencies['@tixkit/next']).toBe('^1.0.0');
     expect(pkg.devDependencies.typescript).toBe('7.0.2');
     const tsconfig = await readFile(path.join(targetDir, 'tsconfig.json'), 'utf8');
     expect(tsconfig).not.toContain('tsconfig.base.json');
@@ -114,7 +114,7 @@ describe('scaffold inside repo', () => {
       dependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-event-app');
-    expect(pkg.dependencies['@tixkit/next']).toBe('^0.1.0');
+    expect(pkg.dependencies['@tixkit/next']).toBe('^1.0.0');
 
     const tsconfig = await readFile(path.join(targetDir, 'tsconfig.json'), 'utf8');
     expect(tsconfig).not.toContain('tsconfig.base.json');
@@ -157,7 +157,7 @@ describe('scaffold inside repo', () => {
       dependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-vue-app');
-    expect(pkg.dependencies['@tixkit/vue']).toBe('^0.1.0');
+    expect(pkg.dependencies['@tixkit/vue']).toBe('^1.0.0');
 
     const appVue = await readFile(path.join(targetDir, 'app.vue'), 'utf8');
     expect(appVue).toContain('useTixkitDemoState');
@@ -205,7 +205,7 @@ describe('scaffold inside repo', () => {
       devDependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-astro-app');
-    expect(pkg.dependencies['@tixkit/astro']).toBe('^0.1.0');
+    expect(pkg.dependencies['@tixkit/astro']).toBe('^1.0.0');
     expect(pkg.devDependencies['@astrojs/node']).toBeDefined();
 
     const config = await readFile(path.join(targetDir, 'astro.config.mjs'), 'utf8');
@@ -251,7 +251,7 @@ describe('scaffold inside repo', () => {
       dependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-remix-app');
-    expect(pkg.dependencies['@tixkit/remix']).toBe('^0.1.0');
+    expect(pkg.dependencies['@tixkit/remix']).toBe('^1.0.0');
 
     const index = await readFile(path.join(targetDir, 'app', 'routes', '_index.tsx'), 'utf8');
     expect(index).toContain('brd_remix');
@@ -297,7 +297,7 @@ describe('scaffold inside repo', () => {
       devDependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-sveltekit-app');
-    expect(pkg.dependencies['@tixkit/sveltekit']).toBe('^0.1.0');
+    expect(pkg.dependencies['@tixkit/sveltekit']).toBe('^1.0.0');
     expect(pkg.devDependencies.typescript).toBe('7.0.2');
 
     const page = await readFile(path.join(targetDir, 'src', 'routes', '+page.svelte'), 'utf8');

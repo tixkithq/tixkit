@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
-const apiVersion = '2026-09-03';
+const apiVersion = '2026-09-04';
 const distribution = JSON.parse(
   await readFile(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
 );

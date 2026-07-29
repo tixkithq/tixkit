@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/api-integration-skill",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Generate a version-bound coding-agent skill from an immutable Tixkit API release",
   "license": "MIT",
   "repository": {

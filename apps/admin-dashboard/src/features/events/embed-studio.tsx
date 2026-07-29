@@ -24,7 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiErrorState } from '@/components/api-error-state';
 import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
-const WIDGET_URL = 'https://cdn.tixkit.com/widget/v0.1.0/tixkit-widget-0.1.0.js';
+const WIDGET_URL = 'https://cdn.tixkit.com/widget/v1.0.0/tixkit-widget-1.0.0.js';
 const WIDGET_INTEGRITY = 'sha384-dekV7a3DQg8bDdculs4uy24zS9CiyMfb4QpROp1Pb878LK63cHRC212CsRjzESAB';
 const inputClass =
   'h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';

@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/sveltekit",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Official SvelteKit integration for Tixkit",
   "license": "MIT",
   "repository": {
@@ -53,7 +53,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/js": "0.1.0"
+    "@tixkit/js": "1.0.0"
   },
   "peerDependencies": {
     "svelte": "^5.0.0"
