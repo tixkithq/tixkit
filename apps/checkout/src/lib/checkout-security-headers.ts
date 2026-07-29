@@ -1,5 +1,7 @@
 import type { PublicCheckoutRuntimeConfig } from './runtime-config-contract';
 
+const INERT_CAPTURE_STYLE_HASH = "'sha256-YjaKGiklmzC6wjXA513HAMmzus8VE61XCOT+SmwNZWA='";
+
 export function checkoutContentSecurityPolicy(
   config: PublicCheckoutRuntimeConfig,
   nonce: string,
@@ -19,7 +21,7 @@ export function checkoutContentSecurityPolicy(
     `frame-ancestors 'self' https:${localProfile ? ' http://localhost:* http://127.0.0.1:*' : ''}`,
     `img-src 'self' data: blob: ${config.apiBaseUrl} ${config.mediaOrigin} https://*.stripe.com`,
     "font-src 'self' data:",
-    `style-src 'self' 'nonce-${nonce}'`,
+    `style-src 'self' 'nonce-${nonce}' ${INERT_CAPTURE_STYLE_HASH}`,
     "style-src-attr 'unsafe-inline'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://js.stripe.com https://*.js.stripe.com ${developmentSources.join(' ')}`.trim(),
     `connect-src 'self' ${config.apiBaseUrl} ${config.mediaOrigin} https://api.stripe.com https://r.stripe.com ${developmentSources.join(' ')}`.trim(),

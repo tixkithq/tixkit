@@ -276,8 +276,10 @@ test.describe('admin check-in workflows', () => {
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/check-in`);
     await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
-    await expect(page.getByText('Check-in', { exact: true })).toBeVisible();
-    await expect(page.getByText(checkInList.name)).toBeVisible();
+    await expect(
+      page.getByRole('main').getByText('Check-in', { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByLabel('Check-in list', { exact: true })).toContainText(checkInList.name);
     // Camera mode is the default when the browser supports it; switch to
     // Manual so the scanner input is visible for the e2e test.
     await page.getByRole('tab', { name: 'Manual' }).click();

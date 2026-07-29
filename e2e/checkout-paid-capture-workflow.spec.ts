@@ -308,12 +308,14 @@ test.describe('paid checkout capture workflow', () => {
       await requiredCheckbox.check();
       await page.getByRole('button', { name: 'Continue' }).click();
       await expect(memberId).toHaveJSProperty('validationMessage', 'Member ID format is invalid');
-      await expect(page.getByText('Member ID format is invalid.')).toBeVisible();
+      await expect(page.getByText('Member ID format is invalid.').first()).toBeVisible();
       await memberId.fill('MEM-1234');
       await expect(memberId).toHaveJSProperty('validationMessage', '');
       await requiredCheckbox.uncheck();
       await page.getByRole('button', { name: 'Continue' }).click();
-      await expect(page.getByText('Please check I agree to the venue photo policy.')).toBeVisible();
+      await expect(
+        page.getByText('Please check I agree to the venue photo policy.').first(),
+      ).toBeVisible();
       await attachScreenshot(page, testInfo, `hosted-required-checkbox-${viewport.name}`);
     }
   });

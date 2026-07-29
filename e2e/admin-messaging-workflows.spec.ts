@@ -142,8 +142,11 @@ test.describe('admin messaging workflow coverage', () => {
     await expect(page.getByText('All attendees · 1 queued', { exact: true })).toBeVisible();
 
     await page.reload();
-    await expect(page.getByText(emailTemplateKey, { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Details' }).click();
+    const campaignRow = page
+      .locator('[data-slot="card"]')
+      .filter({ has: page.getByText(emailTemplateKey, { exact: true }) });
+    await expect(campaignRow).toBeVisible();
+    await campaignRow.getByRole('button', { name: 'Details' }).click();
 
     const detailPanel = page.locator('[data-slot="card"]').filter({ hasText: 'Email jobs' });
     await expect(detailPanel.getByText(emailTemplateKey, { exact: true })).toBeVisible();

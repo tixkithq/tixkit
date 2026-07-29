@@ -5,7 +5,7 @@ import {
   checkoutSecurityHeaders,
 } from '@/lib/checkout-security-headers';
 import type { PublicCheckoutRuntimeConfig } from '@/lib/runtime-config-contract';
-import { proxy } from '@/proxy';
+import { config as proxyConfig, proxy } from '@/proxy';
 
 function config(apiBaseUrl: string): PublicCheckoutRuntimeConfig {
   return {
@@ -31,7 +31,9 @@ describe('checkoutContentSecurityPolicy', () => {
     const policy = checkoutContentSecurityPolicy(config('https://api.example.test'), 'nonce-value');
     expect(policy).toContain("script-src 'self' 'nonce-nonce-value'");
     expect(policy).toContain("'strict-dynamic'");
-    expect(policy).toContain("style-src 'self' 'nonce-nonce-value'");
+    expect(policy).toContain(
+      "style-src 'self' 'nonce-nonce-value' 'sha256-YjaKGiklmzC6wjXA513HAMmzus8VE61XCOT+SmwNZWA='",
+    );
     expect(policy).toContain("style-src-attr 'unsafe-inline'");
     expect(policy).not.toMatch(/script-src[^;]*'unsafe-inline'/u);
     expect(policy).not.toMatch(/connect-src[^;]*\shttps:\s/);
@@ -121,5 +123,17 @@ describe('checkoutContentSecurityPolicy', () => {
     expect(response.headers.get('referrer-policy')).toBe('no-referrer');
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('content-security-policy')).toContain('https://media.example.test');
+  });
+
+  it('excludes router prefetches from per-document nonce generation', () => {
+    expect(proxyConfig.matcher).toEqual([
+      {
+        source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
+        missing: [
+          { type: 'header', key: 'next-router-prefetch' },
+          { type: 'header', key: 'purpose', value: 'prefetch' },
+        ],
+      },
+    ]);
   });
 });

@@ -31,7 +31,7 @@ describe('admin request-time security headers', () => {
     expect(policy).toContain("script-src-attr 'none'");
     expect(policy).toContain("style-src 'self' 'nonce-request-nonce'");
     expect(policy).toContain(
-      "style-src-elem 'self' 'nonce-request-nonce' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=' 'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY=' 'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='",
+      "style-src-elem 'self' 'nonce-request-nonce' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=' 'sha256-YjaKGiklmzC6wjXA513HAMmzus8VE61XCOT+SmwNZWA=' 'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY=' 'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='",
     );
     expect(policy).toContain("style-src-attr 'unsafe-inline'");
   });

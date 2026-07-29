@@ -38,12 +38,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       suppressHydrationWarning
       {...runtimeConfigDataAttributes(runtimeConfig)}
     >
-      <body>
+      <head>
         <script
           id="runtime-style-nonce-bootstrap"
           nonce={nonce}
           dangerouslySetInnerHTML={{ __html: runtimeStyleNonceBootstrap(nonce) }}
         />
+      </head>
+      <body>
         <script
           nonce={nonce}
           dangerouslySetInnerHTML={{

@@ -56,7 +56,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       suppressHydrationWarning
       {...runtimeConfigDataAttributes(runtimeConfig)}
     >
-      <body>
+      <head>
         <script
           id="runtime-style-nonce-bootstrap"
           nonce={nonce}
@@ -64,6 +64,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             __html: runtimeStyleNonceBootstrap(nonce),
           }}
         />
+      </head>
+      <body>
         <script
           id="zod-jitless-config"
           nonce={nonce}

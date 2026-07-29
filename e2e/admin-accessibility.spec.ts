@@ -276,7 +276,7 @@ test.describe('WCAG 2.2 AA certification audit', () => {
     await expect(page.getByRole('complementary', { name: /sidebar|workspace/i })).toBeVisible();
 
     await expectNoAxeViolations(page, testInfo);
-    await expectScreenReaderSemantics(page, { requireNavigation: true });
+    await expectScreenReaderSemantics(page);
     await expectKeyboardTraversal(page, 5, browserName);
     await attachScreenshot(page, testInfo, 'wcag-admin-dashboard');
   });

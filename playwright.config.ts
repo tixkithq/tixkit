@@ -253,14 +253,17 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: /docs-platform\.spec\.ts/u,
       use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'firefox',
+      testIgnore: /docs-platform\.spec\.ts/u,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'webkit',
+      testIgnore: /docs-platform\.spec\.ts/u,
       use: { ...devices['Desktop Safari'] },
     },
     {
