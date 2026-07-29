@@ -72,6 +72,7 @@ const signedWebhookSchemes = new Set([
   'EmailProviderSignature',
   'StripeSignature',
   'TelnyxSignature',
+  'TwilioSignature',
 ]);
 const authenticatedSchemes = new Set(['AgentOAuth', 'ApiKey', 'BearerAuth', 'ScannerDeviceAuth']);
 const eventScopeGuards = new Set([
@@ -96,6 +97,7 @@ const signedWebhookRejections: Readonly<Record<string, { code: string; status: n
   StripeSignature: { code: 'WEBHOOK_SIGNATURE_INVALID', status: 400 },
   SvixSignature: { code: 'WEBHOOK_SIGNATURE_INVALID', status: 401 },
   TelnyxSignature: { code: 'WEBHOOK_SIGNATURE_INVALID', status: 400 },
+  TwilioSignature: { code: 'WEBHOOK_SIGNATURE_INVALID', status: 400 },
 };
 
 function invalidCredentialHeaders(scheme: string): Record<string, string> {
@@ -126,6 +128,7 @@ function invalidCredentialHeaders(scheme: string): Record<string, string> {
   if (scheme === 'EmailProviderSignature') {
     return { 'x-tixkit-provider-signature': 'sha256=invalid-signature' };
   }
+  if (scheme === 'TwilioSignature') return { 'x-twilio-signature': 'invalid-signature' };
   throw new Error(`Unsupported authenticated credential scheme: ${scheme}`);
 }
 
@@ -902,11 +905,13 @@ describe('API route access inventory (C-123)', () => {
       EMAIL_WEBHOOK_SECRET: process.env.EMAIL_WEBHOOK_SECRET,
       STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
       TELNYX_WEBHOOK_PUBLIC_KEY: process.env.TELNYX_WEBHOOK_PUBLIC_KEY,
+      TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN,
     };
     process.env.CLERK_WEBHOOK_SECRET = 'whsec_test-secret-for-route-inventory';
     process.env.EMAIL_WEBHOOK_SECRET = 'email-secret-for-route-inventory';
     process.env.STRIPE_WEBHOOK_SECRET = 'whsec_stripe_route_inventory';
     process.env.TELNYX_WEBHOOK_PUBLIC_KEY = Buffer.alloc(32, 1).toString('base64');
+    process.env.TWILIO_AUTH_TOKEN = 'twilio-route-inventory-token';
     const { app } = await buildAuthenticatedRouteTestApp();
     const failures: string[] = [];
 
