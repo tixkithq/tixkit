@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { expectNoAxeViolations } from './helpers/axe';
 import { apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
+  currentResaleTermsAcceptance,
   devOrganizationId,
   readCheckoutSessionArtifactAnswerState,
   readOrphanPaymentCompensationState,
@@ -622,7 +623,10 @@ test.describe('paid checkout capture workflow', () => {
     const listing = (await expectJsonResponse(
       await request.post(`${apiBaseUrl}/v1/tickets/${sellerState.ticketIds[0]}/resale-listings`, {
         headers: { 'Idempotency-Key': `resale-public-list-${suffix}` },
-        data: { priceCents: 2500 },
+        data: {
+          priceCents: 2500,
+          termsAcceptance: currentResaleTermsAcceptance,
+        },
       }),
       201,
     )) as { id: string; priceCents: number; status: string };
@@ -679,11 +683,13 @@ test.describe('paid checkout capture workflow', () => {
     await page.getByLabel('Email').fill(`resale-buyer+${suffix}@example.com`);
     await page.getByLabel('First name').fill('Resale');
     await page.getByLabel('Last name').fill('Buyer');
+    await page.getByRole('checkbox', { name: /Accept resale purchase terms/ }).check();
     await attachScreenshot(page, testInfo, 'hosted-resale-checkout-select');
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByRole('button', { name: 'Pay $25.00' })).toBeVisible();
+    await page.getByRole('button', { name: /I understand — update my selection/ }).click();
     await page.getByRole('button', { name: 'Pay $25.00' }).click();
     await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
     await attachScreenshot(page, testInfo, 'hosted-resale-checkout-confirmed');
@@ -1204,6 +1210,7 @@ test.describe('paid checkout capture workflow', () => {
 
     await page.getByRole('button', { name: 'List for resale' }).click();
     await page.getByLabel('Resale price').fill('25.00');
+    await page.getByLabel('Accept organizer-managed settlement terms').check();
     const resaleResponse = page.waitForResponse(
       (response) =>
         response

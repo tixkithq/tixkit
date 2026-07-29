@@ -3,6 +3,7 @@ import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
+  currentResaleTermsAcceptance,
   seedFreeCheckoutEvent,
   seedPaidRefundableOrder,
   seedTicketVariantCheckoutEvent,
@@ -667,7 +668,10 @@ test.describe('admin product workflow coverage', () => {
       faceValueCents: number;
     }>(
       await request.post(`${apiBaseUrl}/v1/tickets/${seeded.ticketIds[0]}/resale-listings`, {
-        data: { priceCents: 5500 },
+        data: {
+          priceCents: 5500,
+          termsAcceptance: currentResaleTermsAcceptance,
+        },
         headers: { 'Idempotency-Key': `e2e-resale-list-${suffix}` },
         failOnStatusCode: false,
       }),
@@ -683,11 +687,12 @@ test.describe('admin product workflow coverage', () => {
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/tickets`);
     await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Fees & Resale' }).click();
     const resalePanel = page.getByTestId('resale-policy-panel');
     await expect(resalePanel.getByRole('heading', { name: 'Resale' })).toBeVisible();
     await expect(resalePanel.getByRole('switch', { name: 'Resale policy' })).toBeChecked();
     await expect(resalePanel.getByLabel('Max markup')).toHaveValue('1.2');
-    await expect(resalePanel.getByLabel('Absolute cap')).toHaveValue('6000');
+    await expect(resalePanel.getByLabel('Absolute cap ($)')).toHaveValue('60');
 
     const listingRow = resalePanel.getByRole('row').filter({ hasText: seeded.ticketIds[0] });
     await expect(listingRow).toBeVisible();
@@ -697,7 +702,7 @@ test.describe('admin product workflow coverage', () => {
 
     await resalePanel.getByRole('switch', { name: 'Resale policy' }).click();
     await resalePanel.getByLabel('Max markup').fill('1.1');
-    await resalePanel.getByLabel('Absolute cap').fill('5500');
+    await resalePanel.getByLabel('Absolute cap ($)').fill('55');
     const policyResponsePromise = page.waitForResponse((response) => {
       return (
         response.url() === `${apiBaseUrl}/v1/events/${seeded.event.id}/resale-policy` &&

@@ -2,12 +2,24 @@ import { createHash } from 'node:crypto';
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { createDefaultEventPageDocument } from '../../packages/content-event-page/src/index';
 import { createDb, type Database } from '../../packages/db/src/client';
+import {
+  RESALE_REFUND_MODEL,
+  RESALE_SETTLEMENT_MODEL,
+  RESALE_TERMS_VERSION,
+  type ResaleTermsAcceptance,
+} from '../../packages/domain/src/ticketing/resale';
 import { QrService } from '../../packages/domain/src/tickets/index';
 import { apiBaseUrl } from './env';
 
 const devTenantId = 'tnt_dev_local';
 export const devOrganizationId = 'org_dev_local';
 export const devBrandId = 'brd_dev_local';
+export const currentResaleTermsAcceptance = {
+  accepted: true,
+  termsVersion: RESALE_TERMS_VERSION,
+  settlementModel: RESALE_SETTLEMENT_MODEL,
+  refundModel: RESALE_REFUND_MODEL,
+} satisfies ResaleTermsAcceptance;
 
 export type SeededCheckoutEvent = {
   event: { id: string; title: string };
@@ -1378,6 +1390,15 @@ export async function seedTicketVariantCheckoutEvent(
     201,
   );
 
+  await seedPublishedEventPageContent({ event, suffix });
+  await seedPublishedOrderConfirmationContent({ eventId: event.id, suffix });
+  await expectJsonResponse(
+    await request.post(
+      `${apiBaseUrl}/v1/events/${event.id}/readiness-acknowledgements/checkout_consent`,
+      { data: {} },
+    ),
+    201,
+  );
   await expectJsonResponse(await publishEventWithRetry(request, event.id), 200);
 
   const soldOutSession = (await expectJsonResponse(
