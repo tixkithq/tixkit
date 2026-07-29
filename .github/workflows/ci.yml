@@ -383,8 +383,6 @@ jobs:
       ADMIN_DASHBOARD_URL: http://localhost:3202
       CHECKOUT_URL: http://localhost:3201
       TIXKIT_API_URL: http://localhost:4200
-      E2E_ADMIN_DEV_SERVER: '0'
-      E2E_ADMIN_RUNTIME: production
       TEMPORAL_TASK_QUEUE: tixkit-e2e-${{ matrix.browser }}
       DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
       DATABASE_URL_MYSQL: mysql://tixkit:tixkit@localhost:3306/tixkit

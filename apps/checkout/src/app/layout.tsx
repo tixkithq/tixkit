@@ -42,12 +42,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <script
           id="runtime-style-nonce-bootstrap"
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: runtimeStyleNonceBootstrap(nonce) }}
         />
       </head>
       <body>
         <script
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html:
               'globalThis.__zod_globalConfig={...(globalThis.__zod_globalConfig||{}),jitless:true}',
@@ -60,12 +62,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <Toaster position="bottom-right" />
           </ThemeProvider>
         </RuntimeConfigProvider>
-        {runtimeConfig.deploymentProfile === 'development' ? (
+        {runtimeConfig.deploymentProfile === 'development' &&
+        process.env.TIXKIT_DISABLE_REFINE_INJECTOR !== '1' ? (
           <script
             id="transitions-refine-injector"
             type="module"
             src="http://localhost:7331/inject.js"
             nonce={nonce}
+            suppressHydrationWarning
           />
         ) : null}
       </body>

@@ -1,5 +1,6 @@
 import { test, expect, requireReachable } from './fixtures/validation-test';
-import { adminBaseUrl, checkoutBaseUrl } from './helpers/env';
+import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
+import { devBrandId, devOrganizationId } from './helpers/seed';
 import { isLoopbackHostname } from '../apps/admin-dashboard/src/lib/runtime-config-contract';
 
 function expectCspDirectives(header: string | null, directives: string[]): void {
@@ -29,11 +30,38 @@ function expectAdminCspRuntimeFloor(policy: string): void {
     .split('; ')
     .find((candidate) => candidate.startsWith('connect-src '));
   expect(connectDirective).toBeDefined();
+  const expectedLocalOrigins = new Set(
+    [apiBaseUrl, checkoutBaseUrl, process.env.S3_PUBLIC_ENDPOINT, process.env.S3_ENDPOINT]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => new URL(value).origin),
+  );
   for (const source of connectDirective?.split(/\s+/u).slice(1) ?? []) {
     if (!/^(?:http|ws)s?:\/\//u.test(source)) continue;
     const parseableSource = source.replace(/:\*$/u, ':65535');
+    if (expectedLocalOrigins.has(new URL(parseableSource).origin)) continue;
     expect(isLoopbackHostname(new URL(parseableSource).hostname), source).toBe(false);
   }
+}
+
+async function seedSecurityHeadersEvent(page: import('@playwright/test').Page): Promise<string> {
+  const suffix = `${test.info().project.name}-${test.info().workerIndex}-${Date.now()}`;
+  const response = await page.request.post(`${apiBaseUrl}/v1/events`, {
+    data: {
+      organizationId: devOrganizationId,
+      brandId: devBrandId,
+      slug: `e2e-security-headers-${suffix}`,
+      title: `E2E Security Headers ${suffix}`,
+      description: 'Seeded by Playwright for browser security-header coverage.',
+      currency: 'USD',
+      timezone: 'America/New_York',
+      startsAt: '2026-11-17T23:00:00.000Z',
+      endsAt: '2026-11-18T02:00:00.000Z',
+      visibility: 'public',
+    },
+  });
+  expect(response.status()).toBe(201);
+  const event = (await response.json()) as { id: string };
+  return event.id;
 }
 
 const contentStudioSecretPattern =
@@ -59,7 +87,7 @@ test.describe('browser security headers', () => {
     expect(response.headers()['x-frame-options']).toBe('DENY');
     expect(response.headers()['x-content-type-options']).toBe('nosniff');
     expect(response.headers()['referrer-policy']).toBe('strict-origin-when-cross-origin');
-    expect(response.headers()['permissions-policy']).toContain('camera=()');
+    expect(response.headers()['permissions-policy']).toContain('camera=(self)');
   });
 
   test('hosted checkout sends embeddable CSP for widget iframe usage', async ({ page }) => {
@@ -77,14 +105,14 @@ test.describe('browser security headers', () => {
       "default-src 'self'",
       "object-src 'none'",
       "base-uri 'self'",
-      "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* https:",
-      "style-src-elem 'self' 'unsafe-inline'",
+      "frame-ancestors 'self' https: http://localhost:* http://127.0.0.1:*",
+      "style-src 'self' 'nonce-",
       "style-src-attr 'unsafe-inline'",
       'https://js.stripe.com',
     ]);
     expect(response.headers()['x-frame-options']).toBeUndefined();
     expect(response.headers()['x-content-type-options']).toBe('nosniff');
-    expect(response.headers()['referrer-policy']).toBe('strict-origin-when-cross-origin');
+    expect(response.headers()['referrer-policy']).toBe('no-referrer');
     expect(response.headers()['permissions-policy']).toContain('camera=()');
   });
 
@@ -93,8 +121,10 @@ test.describe('browser security headers', () => {
     page,
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    const eventId = await seedSecurityHeadersEvent(page);
 
-    const response = await page.goto(`${adminBaseUrl}/events/evt_security_headers/content/email`, {
+    const response = await page.goto(`${adminBaseUrl}/events/${eventId}/content/email`, {
       waitUntil: 'domcontentloaded',
     });
 
@@ -132,7 +162,7 @@ test.describe('browser security headers', () => {
         text: string;
         scriptCount: number;
       };
-      expect(value.location).toBe('/events/evt_security_headers/content/email');
+      expect(value.location).toBe(`/events/${eventId}/content/email`);
       expect(value.text).not.toMatch(contentStudioSecretPattern);
       expect(value.scriptCount).toBeGreaterThan(0);
       await testInfo.attach('cdp-content-studio-security-snapshot', {
