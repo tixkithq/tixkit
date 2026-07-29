@@ -1,6 +1,6 @@
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { adminBaseUrl, checkoutBaseUrl } from './helpers/env';
-import { isLoopbackHostname } from '../apps/admin-dashboard/next.config.mjs';
+import { isLoopbackHostname } from '../apps/admin-dashboard/src/lib/runtime-config-contract';
 
 function expectCspDirectives(header: string | null, directives: string[]): void {
   expect(header).toBeTruthy();
@@ -137,7 +137,11 @@ test.describe('browser security headers', () => {
       expect(value.scriptCount).toBeGreaterThan(0);
       await testInfo.attach('cdp-content-studio-security-snapshot', {
         body: JSON.stringify(
-          { title: value.title, location: value.location, scriptCount: value.scriptCount },
+          {
+            title: value.title,
+            location: value.location,
+            scriptCount: value.scriptCount,
+          },
           null,
           2,
         ),
