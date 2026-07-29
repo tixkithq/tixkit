@@ -46,6 +46,8 @@ jobs:
     needs: lint-typecheck
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
       - name: Rehearse an independent public repository
