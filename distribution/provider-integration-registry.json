@@ -212,7 +212,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/src/components/web-vitals-reporter.tsx",
         "export": "issueBuyerRumUrl",
-        "sha256": "74f327ea05eb50a712720cba5035fee7ad303fce36c1151d98cfea5ec32062d8"
+        "sha256": "6079272cd061ddfb69e16f96fa2863302b3d96ddcfd32a195dc2e905b0faabe9"
       },
       "allowedSinks": [
         {
