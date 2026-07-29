@@ -230,7 +230,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/src/lib/api-server.ts",
         "export": "issueCheckoutServerApiUrl",
-        "sha256": "9c39c83098885a0ed31129d78e837a662edebb96fb7ad8852d1d42a0a9db216b"
+        "sha256": "8dd6ff88066a17a0dc3c567cc43b1d56df811ae57f519fa31d2bc479f030dcd0"
       },
       "allowedSinks": [
         {
