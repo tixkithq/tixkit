@@ -4,9 +4,9 @@
   "source": {
     "publication": "approval-required",
     "generationMode": "local-evaluation",
-    "publishable": false,
-    "worktreeState": "modified",
-    "releaseManifestSha256": "833372241dbb6aba71f6ae1eff6173a6296815ac415056f57e06ede295c34a51",
+    "publishable": true,
+    "worktreeState": "clean",
+    "releaseManifestSha256": "686d6ba31d0234ab1e62d545f412e1fcea5e54114eca014a2ff67cf34f3981f2",
     "openApiSha256": "e1bd4ac45aef41b20c9a5ba588bf72a58a749878d42d48b99e10b0e51964580b",
     "examplesSha256": "ec5a50aac60ff2d20f8e8d60976e2846e494d81f73aa0552a74873b1d35a115c",
     "webhookEventsSha256": "48dab81b30d9d34410e92e3b5c0008fb3fefefedf7aa46a0997331aaeea5fc01"
