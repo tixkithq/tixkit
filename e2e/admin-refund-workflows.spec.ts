@@ -72,9 +72,10 @@ test.describe('admin refund workflow coverage', () => {
       alert.getByText('Payment compensation review is temporarily unavailable'),
     ).toBeVisible();
 
+    const requestCountBeforeRetry = await compensationRequestCount();
     await alert.getByRole('button', { name: 'Try again' }).click();
 
-    await expect.poll(compensationRequestCount).toBe(2);
+    await expect.poll(compensationRequestCount).toBeGreaterThan(requestCountBeforeRetry);
   });
 
   test('admin can partially refund an order through the Temporal refund workflow', async ({

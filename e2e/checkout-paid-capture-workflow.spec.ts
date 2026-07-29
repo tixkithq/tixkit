@@ -394,7 +394,7 @@ test.describe('paid checkout capture workflow', () => {
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await expect(
-      page.getByText(`Please complete Phone Number for ${ticketType.name} attendee 1.`),
+      page.getByText(`Please complete Phone Number for ${ticketType.name} attendee 1.`).first(),
     ).toBeVisible();
 
     // Fill attendee fields and proceed to payment.

@@ -162,7 +162,7 @@ const checkoutPublicEnv = {
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: `${apiUrl}/v1`,
   NEXT_PUBLIC_ADMIN_API_BASE_URL: apiUrl,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
-  TIXKIT_DISABLE_REFINE_INJECTOR: isCI ? '1' : '',
+  TIXKIT_DISABLE_REFINE_INJECTOR: '1',
 };
 const adminPublicEnv = {
   NODE_ENV: useAdminDevServer ? 'development' : 'production',
@@ -182,7 +182,7 @@ const adminPublicEnv = {
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,
   PUBLIC_CHECKOUT_URL: checkoutUrl,
   NEXT_PUBLIC_CHECKOUT_URL: checkoutUrl,
-  TIXKIT_DISABLE_REFINE_INJECTOR: isCI ? '1' : '',
+  TIXKIT_DISABLE_REFINE_INJECTOR: '1',
   ...(useAdminDevServer ? { NEXT_DIST_DIR: adminNextDistDir } : {}),
   ...(!useLiveClerk ? { AUTH_PROVIDER: 'dev', NEXT_PUBLIC_AUTH_PROVIDER: 'dev' } : {}),
   ...(useLiveClerk && clerkPublishableKey ? { NEXT_PUBLIC_AUTH_PROVIDER: 'clerk' } : {}),

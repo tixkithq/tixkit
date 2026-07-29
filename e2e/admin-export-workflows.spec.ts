@@ -159,6 +159,7 @@ async function completeSeededPromoCheckout(
   await expect(page.getByText('Discount')).toBeVisible();
   await expect(page.getByText('-$5.00')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pay $20.00' })).toBeVisible();
+  await page.getByRole('button', { name: /I understand — update my selection/ }).click();
   await page.getByRole('button', { name: 'Pay $20.00' }).click();
   await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
 

@@ -440,10 +440,8 @@ test.describe('Admin data table filters', () => {
 
       expect(requestUrl.search).toContain('sort=');
       expect(requestUrl.search).toContain('limit=5');
-      expect(payload).toMatchObject({
-        items: expect.any(Array),
-        hasMore: expect.any(Boolean),
-      });
+      expect(payload.items).toEqual(expect.any(Array));
+      expect(payload.nextCursor == null || typeof payload.nextCursor === 'string').toBe(true);
       expect(itemIds.length).toBeLessThanOrEqual(5);
 
       await attachJsonEvidence(testInfo, 'orders-table-api-contract', {
@@ -451,7 +449,7 @@ test.describe('Admin data table filters', () => {
         status: response.status(),
         itemCount: itemIds.length,
         itemIds,
-        hasMore: payload.hasMore,
+        hasMore: typeof payload.nextCursor === 'string',
         nextCursor: payload.nextCursor ?? null,
       });
       await attachScreenshot(page, testInfo, 'orders-table-filter-sort-pagination-evidence');

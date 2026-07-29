@@ -1,6 +1,7 @@
 import type { PublicEvent, PublicEventMediaAsset } from './api';
 
 export type ResolvedEventMedia = {
+  role: PublicEventMediaAsset['role'];
   url: string;
   altText: string;
   width: number;
@@ -51,6 +52,7 @@ function resolve(
     const rendition = asset?.renditions.find((candidate) => candidate.variant === variant);
     if (asset && rendition)
       return {
+        role,
         url: rendition.url,
         altText: asset.altText,
         width: rendition.width,
@@ -77,6 +79,7 @@ export function resolveEventMediaRole(
   const rendition = asset?.renditions.find((candidate) => candidate.variant === variant);
   return asset && rendition
     ? {
+        role,
         url: rendition.url,
         altText: asset.altText,
         width: rendition.width,
@@ -107,6 +110,7 @@ export function resolveEventMediaByUrl(
     );
     if (rendition)
       return {
+        role: asset.role,
         url: rendition.url,
         altText: asset.altText,
         width: rendition.width,
