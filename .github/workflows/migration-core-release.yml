@@ -27,7 +27,7 @@ jobs:
       - name: Build, test, lint, and typecheck
         run: |
           set -euo pipefail
-          bun run --filter @tixkit/migration-core build
+          bunx turbo run build --filter=@tixkit/migration-core...
           bun run --filter @tixkit/migration-core typecheck
           bun run --filter @tixkit/migration-core lint
           bun run --filter @tixkit/migration-core test:unit
