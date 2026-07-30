@@ -380,7 +380,8 @@ jobs:
         browser: [chromium, firefox, webkit]
     env:
       CI: 'true'
-      E2E_ADMIN_DEV_SERVER: '0'
+      E2E_ADMIN_DEV_SERVER: ${{ matrix.browser == 'webkit' && '0' || '1' }}
+      E2E_ADMIN_RUNTIME: ${{ matrix.browser == 'webkit' && 'production' || 'development' }}
       ADMIN_DASHBOARD_URL: http://localhost:3202
       CHECKOUT_URL: http://localhost:3201
       TIXKIT_API_URL: http://localhost:4200
