@@ -66,6 +66,7 @@ test.describe('State-driven event onboarding', () => {
     if (new URL(page.url()).pathname === '/sign-in')
       test.skip(true, 'live Clerk authentication required');
     const freeRsvp = page.getByRole('radio', { name: /Free RSVP/i });
+    await expect(freeRsvp).toBeEnabled();
     await freeRsvp.focus();
     await page.keyboard.press('Space');
     await expect(freeRsvp).toBeChecked();
