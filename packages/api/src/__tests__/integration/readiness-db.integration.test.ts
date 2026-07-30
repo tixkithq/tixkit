@@ -391,7 +391,11 @@ describeWithIntegrationDatabase('readiness service query and isolation budget', 
     });
     expect(mutationPage.nextCursor).not.toBeNull();
     const mutationCursor = mutationPage.nextCursor ?? '';
-    const tamperedCursor = `${mutationCursor.slice(0, -1)}${mutationCursor.endsWith('x') ? 'y' : 'x'}`;
+    const signatureStart = mutationCursor.lastIndexOf('.') + 1;
+    const signatureFirstCharacter = mutationCursor[signatureStart] ?? '';
+    const tamperedCursor = `${mutationCursor.slice(0, signatureStart)}${
+      signatureFirstCharacter === 'x' ? 'y' : 'x'
+    }${mutationCursor.slice(signatureStart + 1)}`;
     await expect(
       service.getFeed({
         tenantId: tenant.id,
