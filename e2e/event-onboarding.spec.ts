@@ -1,6 +1,6 @@
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
-import { adminBaseUrl } from './helpers/env';
+import { adminBaseUrl, apiBaseUrl } from './helpers/env';
 import {
   devBrandId,
   devOrganizationId,
@@ -148,14 +148,28 @@ test.describe('State-driven event onboarding', () => {
     expect(remoteUpdate.ok, remoteUpdate.body).toBe(true);
 
     const localTitle = `${originalTitle} local`;
+    const conflictResponse = page.waitForResponse(
+      (response) =>
+        response.url() === `${apiBaseUrl}/v1/events/${eventId}` &&
+        response.request().method() === 'PATCH' &&
+        response.status() === 409,
+    );
     await basics.getByLabel('Title').fill(localTitle);
-    await basics.getByRole('button', { name: 'Save Changes' }).click();
+    await conflictResponse;
     const conflictHeading = page.getByRole('heading', {
       name: 'Choose values for 1 conflicting field',
     });
     await expect(conflictHeading).toBeFocused();
     await expect(page.getByText(`Title: ${localTitle}`)).toBeVisible();
     await expect(page.getByText(`Title: ${remoteTitle}`)).toBeVisible();
+    await expect
+      .poll(() =>
+        consoleErrors.some(
+          (message) =>
+            message.includes('409 (Conflict)') && message.includes(`/v1/events/${eventId}`),
+        ),
+      )
+      .toBe(true);
     for (let index = consoleErrors.length - 1; index >= 0; index -= 1) {
       const message = consoleErrors[index] ?? '';
       if (message.includes('409 (Conflict)') && message.includes(`/v1/events/${eventId}`)) {
@@ -165,7 +179,9 @@ test.describe('State-driven event onboarding', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByRole('button', { name: 'Keep my Title change' }).click();
-    await basics.getByRole('button', { name: 'Save Changes' }).click();
+    const saveButton = basics.getByRole('button', { name: 'Save Changes' });
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
     await expect(basics.getByText('Saved', { exact: true })).toBeVisible();
     const persistedTitle = await page.evaluate(async (id) => {
       const response = await fetch(`http://localhost:4200/v1/events/${id}`);

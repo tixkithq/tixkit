@@ -264,16 +264,16 @@ test.describe('admin product workflow coverage', () => {
     await basicsForm
       .getByRole('textbox', { name: 'Description', exact: true })
       .fill('Updated browser edit description.');
-    await basicsForm.getByRole('combobox', { name: 'Visibility' }).click();
-    await page.getByRole('option', { name: 'Unlisted' }).click();
     const basicsResponsePromise = page.waitForResponse((response) => {
       return (
         response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
         response.request().method() === 'PATCH'
       );
     });
-    await basicsForm.getByRole('button', { name: 'Save Changes' }).click();
+    await basicsForm.getByRole('combobox', { name: 'Visibility' }).click();
+    await page.getByRole('option', { name: 'Unlisted' }).click();
     await expectJsonStatus(await basicsResponsePromise, 200);
+    await expect(basicsForm.getByText('Saved', { exact: true })).toBeVisible();
 
     const scheduleForm = page.locator('#schedule-form');
     await scheduleForm.getByLabel('Venue Name', { exact: true }).fill('Edited Browser Hall');
@@ -282,43 +282,42 @@ test.describe('admin product workflow coverage', () => {
     await scheduleForm.getByLabel('Region', { exact: true }).fill('TX');
     await scheduleForm.getByLabel('Postal Code', { exact: true }).fill('78701');
     await expect(scheduleForm.getByLabel('Postal Code', { exact: true })).toHaveValue('78701');
-    await scheduleForm.getByRole('combobox', { name: 'Country' }).click();
-    await page.getByRole('option', { name: 'United States' }).click();
     const scheduleResponsePromise = page.waitForResponse((response) => {
       return (
         response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
         response.request().method() === 'PATCH'
       );
     });
-    await scheduleForm.getByRole('button', { name: 'Save Changes' }).click();
+    await scheduleForm.getByRole('combobox', { name: 'Country' }).click();
+    await page.getByRole('option', { name: 'United States' }).click();
     await expectJsonStatus(await scheduleResponsePromise, 200);
+    await expect(scheduleForm.getByText('Saved', { exact: true })).toBeVisible();
 
     const salesForm = page.locator('#sales-form');
-    await salesForm.getByLabel('Capacity', { exact: true }).fill('250');
     const salesResponsePromise = page.waitForResponse((response) => {
       return (
         response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
         response.request().method() === 'PATCH'
       );
     });
-    await salesForm.getByRole('button', { name: 'Save Changes' }).click();
+    await salesForm.getByLabel('Capacity', { exact: true }).fill('250');
     await expectJsonStatus(await salesResponsePromise, 200);
+    await expect(salesForm.getByText('Saved', { exact: true })).toBeVisible();
 
     const marketingForm = page.locator('#marketing-form');
     await marketingForm
       .getByLabel('External URL', { exact: true })
       .fill('https://tickets.example.test/e2e-edited');
     await marketingForm.getByLabel('SEO Title', { exact: true }).fill('Edited admin lifecycle SEO');
-    await marketingForm
-      .getByLabel('SEO Description', { exact: true })
-      .fill('Edited SEO description from Playwright.');
     const updateResponsePromise = page.waitForResponse((response) => {
       return (
         response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
         response.request().method() === 'PATCH'
       );
     });
-    await marketingForm.getByRole('button', { name: 'Save Changes' }).click();
+    await marketingForm
+      .getByLabel('SEO Description', { exact: true })
+      .fill('Edited SEO description from Playwright.');
     const editedEvent = await expectJsonStatus<{
       id: string;
       title: string;
@@ -337,6 +336,7 @@ test.describe('admin product workflow coverage', () => {
       };
       externalUrl?: string | null;
     }>(await updateResponsePromise, 200);
+    await expect(marketingForm.getByText('Saved', { exact: true })).toBeVisible();
     expect(editedEvent).toMatchObject({
       id: createdEvent.id,
       title: updatedTitle,
