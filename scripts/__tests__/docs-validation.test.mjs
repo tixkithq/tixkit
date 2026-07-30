@@ -206,6 +206,10 @@ test('documentation workflows trigger for executable SDK demo changes', () => {
     const workflow = readFileSync(path, 'utf8');
     assert.match(workflow, /- ["']apps\/sdk-\*-demo\/\*\*["']/);
     assert.match(workflow, /bun run sdk:demos:check/);
+    assert.match(
+      workflow,
+      /Build dashboard runtime dependencies\s+run: bun run build\s+- name: Start dashboard test infrastructure/,
+    );
   }
 });
 

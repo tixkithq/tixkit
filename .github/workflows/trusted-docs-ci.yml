@@ -139,6 +139,8 @@ jobs:
         with:
           playwright-cache: 'true'
       - run: bun install --frozen-lockfile
+      - name: Build dashboard runtime dependencies
+        run: bun run build
       - name: Start dashboard test infrastructure
         run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
       - name: Install Playwright browser

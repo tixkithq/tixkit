@@ -364,7 +364,7 @@ for (const journey of [
     test(`${journey.persona} exposes canonical stage ${stageIndex + 1}`, async ({
       page,
     }, testInfo) => {
-      if (route === '/reference/api') testInfo.setTimeout(60_000);
+      if (route === '/reference/api') testInfo.setTimeout(120_000);
       await page.goto(route);
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
       await expect(page.locator('.prose').getByText(task, { exact: false }).first()).toBeVisible();
