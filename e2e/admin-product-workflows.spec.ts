@@ -38,6 +38,7 @@ async function expectAdminPrimaryRouteMatrix(page: Page, testInfo: TestInfo): Pr
   for (const route of adminPrimaryRoutes) {
     await page.goto(`${adminBaseUrl}${route.path}`);
     await expect(page.getByRole('heading', { name: route.heading }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
     await attachScreenshot(page, testInfo, `admin-primary-${route.name}-desktop`);
     await expectNoAxeViolations(page, testInfo);
   }
@@ -46,6 +47,7 @@ async function expectAdminPrimaryRouteMatrix(page: Page, testInfo: TestInfo): Pr
   for (const route of adminPrimaryRoutes) {
     await page.goto(`${adminBaseUrl}${route.path}`);
     await expect(page.getByRole('heading', { name: route.heading }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
     await attachScreenshot(page, testInfo, `admin-primary-${route.name}-mobile`);
     await expectNoAxeViolations(page, testInfo);
   }

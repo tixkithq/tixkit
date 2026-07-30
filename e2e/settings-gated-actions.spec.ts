@@ -46,6 +46,7 @@ test.describe('admin settings validation', () => {
       await expect(
         page.getByRole('navigation').getByRole('link', { name: 'Workspace' }),
       ).toBeVisible();
+      await page.waitForLoadState('networkidle');
       await attachScreenshot(page, testInfo, `settings-${route.name}-desktop`);
       await expectNoAxeViolations(page, testInfo);
     }
@@ -54,6 +55,7 @@ test.describe('admin settings validation', () => {
     for (const route of settingsRoutes) {
       await page.goto(`${adminBaseUrl}${route.path}`);
       await expect(page.getByRole('heading', { name: route.heading })).toBeVisible();
+      await page.waitForLoadState('networkidle');
       await attachScreenshot(page, testInfo, `settings-${route.name}-mobile`);
     }
     await expectNoAxeViolations(page, testInfo);

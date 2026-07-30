@@ -578,7 +578,10 @@ function applyMergeTagPreviewsToJsonNode(value: unknown): unknown {
       if (typeof match.index !== 'number') continue;
       const key = match[1].trim();
       if (match.index > cursor) {
-        parts.push({ ...previewNode, text: previewNode.text.slice(cursor, match.index) });
+        parts.push({
+          ...previewNode,
+          text: previewNode.text.slice(cursor, match.index),
+        });
       }
       parts.push({
         ...previewNode,
@@ -1066,7 +1069,13 @@ function selectVariableToken(input: {
       .setSelection(selection)
       .setStoredMarks(storedMarks)
       .setMeta(mergeTagPreviewPluginKey, {
-        active: { cursor, from: input.from, key: input.key, scope: 'text', to: input.to },
+        active: {
+          cursor,
+          from: input.from,
+          key: input.key,
+          scope: 'text',
+          to: input.to,
+        },
       }),
   );
   input.view.dom.dispatchEvent(
@@ -1389,7 +1398,12 @@ function createFloatingVariableMenu(input: { mergeTags: readonly string[]; view:
 
   const resolveTextRange = (
     currentActive: NonNullable<MergeTagPreviewPluginState['active']>,
-  ): { cursor?: number; from: number; scope?: 'row' | 'text'; to: number } | null => {
+  ): {
+    cursor?: number;
+    from: number;
+    scope?: 'row' | 'text';
+    to: number;
+  } | null => {
     if (currentActive.scope === 'node') return null;
     if (!currentActive.key) {
       return {
@@ -1608,7 +1622,9 @@ function createFloatingVariableMenu(input: { mergeTags: readonly string[]; view:
         scope: 'node' as const,
         to: Math.min(from + node.nodeSize, input.view.state.doc.content.size),
       };
-      let transaction = input.view.state.tr.setMeta(mergeTagPreviewPluginKey, { active });
+      let transaction = input.view.state.tr.setMeta(mergeTagPreviewPluginKey, {
+        active,
+      });
       if (!softRestore) {
         try {
           transaction = transaction.setSelection(NodeSelection.create(transaction.doc, from));
@@ -1637,7 +1653,11 @@ function createFloatingVariableMenu(input: { mergeTags: readonly string[]; view:
     }
     const mergeTagRange = detail.key ? findMergeTagRangeAtPosition(input.view.state, from) : null;
     const active = mergeTagRange
-      ? { ...mergeTagRange, cursor: mergeTagRange.from + 1, scope: 'text' as const }
+      ? {
+          ...mergeTagRange,
+          cursor: mergeTagRange.from + 1,
+          scope: 'text' as const,
+        }
       : { from, key: null as string | null, scope: 'text' as const, to };
     if (!active) return;
     if (softRestore) {
@@ -1967,7 +1987,10 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                     ? target.closest<HTMLElement>('.tixkit-email-variable-chip')
                     : null;
                 if (!token) {
-                  const position = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                  const position = view.posAtCoords({
+                    left: event.clientX,
+                    top: event.clientY,
+                  });
                   if (!position) return false;
                   view.dispatch(
                     view.state.tr.setMeta(mergeTagPreviewPluginKey, {
@@ -1985,7 +2008,11 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                 const mergeTagKey = token.getAttribute('data-tixkit-merge-tag');
                 const approxPos = view.posAtDOM(token, 0);
                 const markType = view.state.schema.marks[tixkitMergeTagMarkName];
-                let bestRange: { from: number; key: string; to: number } | null = null;
+                let bestRange: {
+                  from: number;
+                  key: string;
+                  to: number;
+                } | null = null;
                 let bestDist = Infinity;
                 if (mergeTagKey && markType) {
                   view.state.doc.nodesBetween(0, view.state.doc.content.size, (node, pos) => {
@@ -1995,7 +2022,11 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                       const dist = Math.abs(pos - approxPos);
                       if (dist < bestDist) {
                         bestDist = dist;
-                        bestRange = { from: pos, key: mergeTagKey, to: pos + node.nodeSize };
+                        bestRange = {
+                          from: pos,
+                          key: mergeTagKey,
+                          to: pos + node.nodeSize,
+                        };
                       }
                     }
                     return true;
@@ -2109,7 +2140,10 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
             },
           },
           view(view) {
-            const floatingMenu = createFloatingVariableMenu({ mergeTags, view });
+            const floatingMenu = createFloatingVariableMenu({
+              mergeTags,
+              view,
+            });
             let previousActive: MergeTagPreviewPluginState['active'] | undefined;
             let convertTimer: number | undefined;
             const scheduleRawMergeTagConversion = (currentView: EditorView) => {
@@ -2416,6 +2450,9 @@ export function createEmailSlashCommands(input: {
       },
     },
   ];
+  const reservedCommandTitles = new Set(
+    [...defaultSlashCommands, imageSlashCommand, ...customItems].map((command) => command.title),
+  );
 
   return [
     ...defaultSlashCommands,
@@ -2424,7 +2461,7 @@ export function createEmailSlashCommands(input: {
     ...input.mergeTags.map((tag): SlashCommandItem => {
       const presentation = variablePresentation(tag);
       const title =
-        (labelCounts[presentation.label] ?? 0) > 1
+        (labelCounts[presentation.label] ?? 0) > 1 || reservedCommandTitles.has(presentation.label)
           ? `${presentation.label} (${tag})`
           : presentation.label;
       return {
@@ -2626,7 +2663,12 @@ export function insertEmailComponent(
               attrs: {
                 style: 'color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0',
               },
-              content: [{ type: 'text', text: 'An unforgettable experience is waiting for you.' }],
+              content: [
+                {
+                  type: 'text',
+                  text: 'An unforgettable experience is waiting for you.',
+                },
+              ],
             },
           ],
         })

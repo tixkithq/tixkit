@@ -380,7 +380,6 @@ jobs:
         browser: [chromium, firefox, webkit]
     env:
       CI: 'true'
-      E2E_ADMIN_DEV_SERVER: '0'
       ADMIN_DASHBOARD_URL: http://localhost:3202
       CHECKOUT_URL: http://localhost:3201
       TIXKIT_API_URL: http://localhost:4200
