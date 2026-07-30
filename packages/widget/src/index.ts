@@ -59,7 +59,9 @@ const IFRAME_SANDBOX =
 const IFRAME_ALLOW = 'payment; publickey-credentials-create *; publickey-credentials-get *';
 export const TIXKIT_WIDGET_VERSION = '1.0.0';
 const HANDSHAKE_TIMEOUT_MS = 10_000;
+const HANDSHAKE_RETRY_MS = 250;
 const handshakeTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+const handshakeRetryTimers = new WeakMap<HTMLElement, ReturnType<typeof setInterval>>();
 const widgetStartedAt = new WeakMap<HTMLElement, number>();
 
 function recordWidgetPerformance(
@@ -90,6 +92,9 @@ function cancelHandshakeTimeout(element: HTMLElement): void {
   const timer = handshakeTimers.get(element);
   if (timer !== undefined) clearTimeout(timer);
   handshakeTimers.delete(element);
+  const retryTimer = handshakeRetryTimers.get(element);
+  if (retryTimer !== undefined) clearInterval(retryTimer);
+  handshakeRetryTimers.delete(element);
 }
 
 function scheduleHandshakeTimeout(element: HTMLElement, onTimeout: () => void): void {
@@ -98,9 +103,17 @@ function scheduleHandshakeTimeout(element: HTMLElement, onTimeout: () => void): 
     element,
     setTimeout(() => {
       handshakeTimers.delete(element);
+      const retryTimer = handshakeRetryTimers.get(element);
+      if (retryTimer !== undefined) clearInterval(retryTimer);
+      handshakeRetryTimers.delete(element);
       onTimeout();
     }, HANDSHAKE_TIMEOUT_MS),
   );
+}
+
+function scheduleHandshakeRetry(element: HTMLElement, retry: () => void): void {
+  const timer = setInterval(retry, HANDSHAKE_RETRY_MS);
+  handshakeRetryTimers.set(element, timer);
 }
 
 // Keep the embedded stylesheet compact: template-literal whitespace is shipped
@@ -360,7 +373,10 @@ function trackGa4(
 ): void {
   const measurementId = marketingConfigString(integration.config, 'measurementId');
   if (!measurementId) return;
-  const win = window as Window & { dataLayer?: unknown[]; gtag?: (...args: unknown[]) => void };
+  const win = window as Window & {
+    dataLayer?: unknown[];
+    gtag?: (...args: unknown[]) => void;
+  };
   win.dataLayer = win.dataLayer ?? [];
   win.gtag =
     win.gtag ??
@@ -389,9 +405,27 @@ function trackMeta(
     win.fbq = (...args: unknown[]) => {
       queue.push(args);
     };
-    (win.fbq as unknown as { queue: unknown[]; loaded: boolean; version: string }).queue = queue;
-    (win.fbq as unknown as { queue: unknown[]; loaded: boolean; version: string }).loaded = true;
-    (win.fbq as unknown as { queue: unknown[]; loaded: boolean; version: string }).version = '2.0';
+    (
+      win.fbq as unknown as {
+        queue: unknown[];
+        loaded: boolean;
+        version: string;
+      }
+    ).queue = queue;
+    (
+      win.fbq as unknown as {
+        queue: unknown[];
+        loaded: boolean;
+        version: string;
+      }
+    ).loaded = true;
+    (
+      win.fbq as unknown as {
+        queue: unknown[];
+        loaded: boolean;
+        version: string;
+      }
+    ).version = '2.0';
     (win as unknown as Record<string, unknown>)['_fbq'] = win.fbq;
     ensureMarketingScript('tixkit-meta-pixel', 'https://connect.facebook.net/en_US/fbevents.js');
   }
@@ -657,7 +691,9 @@ class TixkitWidget extends HTMLElement {
     // Dispatch 'closed' on host page unload.
     if (this.unloadHandler) window.removeEventListener('beforeunload', this.unloadHandler);
     this.unloadHandler = () => {
-      dispatchLifecycle(this, 'closed', this.config.event, { reason: 'navigation' });
+      dispatchLifecycle(this, 'closed', this.config.event, {
+        reason: 'navigation',
+      });
     };
     window.addEventListener('beforeunload', this.unloadHandler);
   }
@@ -666,7 +702,9 @@ class TixkitWidget extends HTMLElement {
     cancelHandshakeTimeout(this);
     this.closeModal(false);
     // Dispatch 'closed' when the widget is removed from the DOM.
-    dispatchLifecycle(this, 'closed', this.config.event, { reason: 'disconnected' });
+    dispatchLifecycle(this, 'closed', this.config.event, {
+      reason: 'disconnected',
+    });
     if (this.messageHandler) {
       window.removeEventListener('message', this.messageHandler);
       this.messageHandler = null;
@@ -855,7 +893,7 @@ class TixkitWidget extends HTMLElement {
     iframe.name = `${this.widgetId}`;
     iframe.className = 'tk-frame';
     iframe.title = 'Tixkit Tickets';
-    iframe.loading = 'lazy';
+    iframe.loading = 'eager';
     iframe.allow = IFRAME_ALLOW;
     iframe.setAttribute('sandbox', IFRAME_SANDBOX);
     iframe.src = this.buildWidgetUrl();
@@ -872,6 +910,9 @@ class TixkitWidget extends HTMLElement {
             navigator.onLine ? 'handshake-timeout' : 'checkout-offline',
           ),
         );
+        scheduleHandshakeRetry(this, () => {
+          beginHandshake(this, iframe, this.widgetId, this.config.event, this.handshakeNonce);
+        });
         // Dispatch 'opened' when the inline iframe finishes loading.
         dispatchLifecycle(this, 'opened', this.config.event);
       }
@@ -985,6 +1026,9 @@ class TixkitWidget extends HTMLElement {
           true,
         );
       });
+      scheduleHandshakeRetry(this, () => {
+        beginHandshake(this, frame, this.widgetId, this.config.event, this.handshakeNonce);
+      });
       // Dispatch 'opened' when the modal iframe finishes loading.
       dispatchLifecycle(this, 'opened', this.config.event);
     });
@@ -1031,7 +1075,10 @@ class TixkitWidget extends HTMLElement {
       this.modal.remove();
       this.modal = null;
       this.activeFrame = null;
-      if (emit) dispatchLifecycle(this, 'closed', this.config.event, { reason: 'buyer' });
+      if (emit)
+        dispatchLifecycle(this, 'closed', this.config.event, {
+          reason: 'buyer',
+        });
     }
     if (this.modalRestoreFocus?.isConnected) {
       this.modalRestoreFocus.focus();
@@ -1280,7 +1327,11 @@ class TixkitButton extends HTMLElement {
     if (!this.eventId) {
       this.dispatchEvent(
         new CustomEvent('error', {
-          detail: { message: 'Missing event attribute', event: '', eventId: '' },
+          detail: {
+            message: 'Missing event attribute',
+            event: '',
+            eventId: '',
+          },
         }),
       );
       return;
@@ -1376,6 +1427,9 @@ class TixkitButton extends HTMLElement {
           'Checkout did not complete its secure handshake.',
           navigator.onLine ? 'handshake-timeout' : 'checkout-offline',
         );
+      });
+      scheduleHandshakeRetry(this, () => {
+        beginHandshake(this, frame, this.widgetId, this.eventId, this.handshakeNonce);
       });
       dispatchLifecycle(this, 'opened', this.eventId);
     });

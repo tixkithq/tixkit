@@ -56,7 +56,7 @@ test.describe('persisted admin email inspector focus stability', () => {
     expect(paragraphPoint).not.toBeNull();
     await page.mouse.click(paragraphPoint!.x, paragraphPoint!.y);
     await page.waitForTimeout(600);
-    await expect(inspectorHost.locator('text=Selection')).toBeVisible();
+    await expect(inspectorHost.getByText('Page style', { exact: true })).toBeVisible();
 
     // The color hex input commits on every keystroke, making it the most
     // churn-prone field. Click it and verify focus is retained.

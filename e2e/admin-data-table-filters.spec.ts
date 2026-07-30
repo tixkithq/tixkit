@@ -274,7 +274,9 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/paid/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/paid/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }
@@ -339,7 +341,9 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/paid/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/paid/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }
@@ -513,8 +517,8 @@ test.describe('Admin data table filters', () => {
       await page.goto(`${adminBaseUrl}/attendees`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
-      // Apply status filter via URL
-      await page.goto(`${adminBaseUrl}/attendees?status=active`);
+      // Apply a real attendee lifecycle status via URL.
+      await page.goto(`${adminBaseUrl}/attendees?status=confirmed`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Verify visible rows match the filter
@@ -523,12 +527,14 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/active/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/active/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }
 
-      await expect(page).toHaveURL(/status=active/);
+      await expect(page).toHaveURL(/status=confirmed/);
     });
 
     test('attendee row sheet displays attendee details', async ({ page, request }, testInfo) => {
@@ -606,7 +612,9 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/active/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/active/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }

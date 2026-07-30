@@ -96,7 +96,10 @@ function postCheckoutMessage(
 function ensureFrameWindow(frame: HTMLIFrameElement): Window {
   if (frame.contentWindow) return frame.contentWindow;
   const source = { postMessage: vi.fn() } as unknown as Window;
-  Object.defineProperty(frame, 'contentWindow', { configurable: true, value: source });
+  Object.defineProperty(frame, 'contentWindow', {
+    configurable: true,
+    value: source,
+  });
   return source;
 }
 
@@ -152,7 +155,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+  Object.defineProperty(navigator, 'onLine', {
+    configurable: true,
+    value: true,
+  });
   while (mountedElements.length > 0) {
     mountedElements.pop()?.disconnectedCallback();
   }
@@ -185,6 +191,40 @@ describe('widget lifecycle events (runtime)', () => {
     expect(spy.mock.calls[0]?.[0]).toBeInstanceOf(CustomEvent);
   });
 
+  it('retries the bound hello until the checkout listener is ready', () => {
+    vi.useFakeTimers();
+    const el = createWidget();
+    const loadedSpy = vi.fn();
+    el.addEventListener('loaded', loadedSpy);
+    el.connectedCallback();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe');
+    expect(frame).not.toBeNull();
+    const source = ensureFrameWindow(frame!);
+    const postMessageSpy = vi.spyOn(source, 'postMessage');
+    frame!.dispatchEvent(new Event('load'));
+    expect(postMessageSpy).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(250);
+    expect(postMessageSpy).toHaveBeenCalledTimes(2);
+
+    const url = new URL(frame!.src);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: url.origin,
+        source,
+        data: createCheckoutReadyMessage({
+          widgetId: url.searchParams.get('embedWidgetId') ?? '',
+          eventId: url.searchParams.get('eventId') ?? '',
+          nonce: url.searchParams.get('embedNonce') ?? '',
+        }),
+      }),
+    );
+    vi.advanceTimersByTime(500);
+
+    expect(loadedSpy).toHaveBeenCalledTimes(1);
+    expect(postMessageSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('fails accessibly with a hosted fallback when the exact handshake times out', () => {
     vi.useFakeTimers();
     const el = createWidget();
@@ -211,7 +251,10 @@ describe('widget lifecycle events (runtime)', () => {
 
   it('classifies a handshake timeout as offline when the browser is offline', () => {
     vi.useFakeTimers();
-    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    Object.defineProperty(navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
     const el = createWidget();
     const errorSpy = vi.fn();
     el.addEventListener('tixkit:v1:recoverable-error', errorSpy);
@@ -492,7 +535,11 @@ describe('widget lifecycle events (runtime)', () => {
     expect(firstSpy).not.toHaveBeenCalled();
     expect(secondSpy).toHaveBeenCalledTimes(1);
     expect(secondSpy.mock.calls[0]?.[0]).toMatchObject({
-      detail: { event: 'evt_second', eventId: 'evt_second', sessionId: 'cs_second' },
+      detail: {
+        event: 'evt_second',
+        eventId: 'evt_second',
+        sessionId: 'cs_second',
+      },
     });
   });
 
@@ -541,7 +588,11 @@ describe('widget lifecycle events (runtime)', () => {
       }),
     );
     window.dispatchEvent(
-      new MessageEvent('message', { origin: CHECKOUT_BASE, source, data: message }),
+      new MessageEvent('message', {
+        origin: CHECKOUT_BASE,
+        source,
+        data: message,
+      }),
     );
     expect(spy).not.toHaveBeenCalled();
   });
@@ -563,7 +614,10 @@ describe('widget lifecycle events (runtime)', () => {
 
   it('cold-starts many inline widgets with isolated lifecycle and message delivery', () => {
     const widgets = Array.from({ length: 100 }, (_, index) =>
-      createWidget({ event: `evt_cold_${index}`, brand: `brand_cold_${index}` }),
+      createWidget({
+        event: `evt_cold_${index}`,
+        brand: `brand_cold_${index}`,
+      }),
     );
     const loadedSpies = widgets.map(() => vi.fn());
     const openedSpies = widgets.map(() => vi.fn());
@@ -649,7 +703,9 @@ describe('widget runtime target authority', () => {
   });
 
   it('does not report or load marketing configuration when reporting origin is rejected', () => {
-    const el = createWidget({ 'reporting-api-url': 'https://user:secret@api.test' });
+    const el = createWidget({
+      'reporting-api-url': 'https://user:secret@api.test',
+    });
     el.connectedCallback();
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });

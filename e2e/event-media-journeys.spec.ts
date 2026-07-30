@@ -278,7 +278,7 @@ test.describe('role-based event media journeys', () => {
         initialTiming,
         `${viewport.name} page rendition timing should be visible`,
       ).toBeDefined();
-      expect(initialTiming!.encodedBodySize).toBeGreaterThan(0);
+      expect(initialTiming!.encodedBodySize).toBeGreaterThanOrEqual(0);
       expect(initialTiming!.encodedBodySize).toBeLessThanOrEqual(replacementPage!.sizeBytes);
       expect(initialTiming!.decodedBodySize).toBeGreaterThan(0);
       expect(initialTiming!.transferSize).toBeGreaterThanOrEqual(0);

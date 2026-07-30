@@ -212,7 +212,7 @@ async function completeSeededFreeCheckout(input: {
   await expect(input.page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
 }
 
-async function loadEmailContentState(eventId: string, page: Page) {
+async function loadEmailContentState(eventId: string, page: Page, key?: string) {
   const documents = await jsonResponse<ContentDocumentList>(
     await page.request.get(`${apiBaseUrl}/v1/content-documents`, {
       params: {
@@ -225,7 +225,7 @@ async function loadEmailContentState(eventId: string, page: Page) {
     200,
   );
   const document = documents.items.find(
-    (item) => item.channel === 'email' && item.eventId === eventId,
+    (item) => item.channel === 'email' && item.eventId === eventId && (!key || item.key === key),
   );
   expect(document).toBeTruthy();
   const versions = await jsonResponse<ContentVersionList>(
@@ -381,7 +381,9 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   await expect(packageTooltip.getByLabel('Selection text size')).toBeVisible();
   await expect(packageTooltip.getByLabel('Selection line height')).toBeVisible();
   await expect(packageTooltip.getByLabel('Variable replacement')).toHaveCount(0);
-  const variableOptionsButton = packageTooltip.getByRole('button', { name: 'Variable options' });
+  const variableOptionsButton = packageTooltip.getByRole('button', {
+    name: 'Variable options',
+  });
   await expect(variableOptionsButton).toBeVisible();
 
   const variableFirstClickFontSelect = packageTooltip.getByLabel('Selection font family');
@@ -669,7 +671,7 @@ test.describe('persisted admin email content editor', () => {
 
     await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
-    await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/content/email?templateKey=tickets-issued`);
     await expectPersistedEmailEditorRegions(page);
     await expect(page.locator('html')).not.toHaveClass(/dark/);
     await expectEmailDocumentCanvasPresentation(page);
@@ -697,7 +699,9 @@ test.describe('persisted admin email content editor', () => {
     await expect(page.getByRole('button', { name: 'Preview', exact: true })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Publish version', exact: true }).click();
-    const publishDialog = page.getByRole('dialog', { name: 'Publish version?' });
+    const publishDialog = page.getByRole('dialog', {
+      name: 'Publish version?',
+    });
     await expect(publishDialog).toBeVisible();
     await expect(page.getByText('Campaign settings')).toHaveCount(0);
     await expect(page.getByLabel('Audience')).toHaveCount(0);
@@ -718,7 +722,7 @@ test.describe('persisted admin email content editor', () => {
     await expect(page.getByText('Captured 2 test sends')).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'Send test email' })).toBeHidden();
 
-    const persisted = await loadEmailContentState(event.id, page);
+    const persisted = await loadEmailContentState(event.id, page, 'tickets-issued');
     expect(persisted.document.status).toBe('published');
     expect(persisted.document.publishedVersionId).toBeTruthy();
     expect(
@@ -836,9 +840,12 @@ test.describe('persisted admin email content editor', () => {
     page.once('dialog', (dialog) => void dialog.accept());
     await page.getByRole('menuitem', { name: 'Archive' }).click();
     await expect
-      .poll(async () => (await loadEmailContentState(event.id, page)).document.status, {
-        timeout: 30_000,
-      })
+      .poll(
+        async () => (await loadEmailContentState(event.id, page, 'tickets-issued')).document.status,
+        {
+          timeout: 30_000,
+        },
+      )
       .toBe('archived');
   });
 
@@ -854,9 +861,21 @@ test.describe('persisted admin email content editor', () => {
       `studio-archetypes-${testInfo.workerIndex}-${Date.now()}`,
     );
     const cases = [
-      { key: 'tickets-issued', headline: 'Your tickets are ready', fontSize: '40px' },
-      { key: 'abandoned-checkout', headline: 'Pick up where you left off', fontSize: '40px' },
-      { key: 'daily-sales-digest', headline: 'Today at a glance', fontSize: '24px' },
+      {
+        key: 'tickets-issued',
+        headline: 'Your tickets are ready',
+        fontSize: '40px',
+      },
+      {
+        key: 'abandoned-checkout',
+        headline: 'Pick up where you left off',
+        fontSize: '40px',
+      },
+      {
+        key: 'daily-sales-digest',
+        headline: 'Today at a glance',
+        fontSize: '24px',
+      },
     ] as const;
 
     for (const emailCase of cases) {
@@ -1082,7 +1101,9 @@ test.describe('persisted admin email content editor', () => {
     await heroControls.getByRole('slider', { name: /Horizontal focus/ }).fill('65');
     await heroControls.getByRole('slider', { name: /Overlay/ }).fill('55');
     await expect(
-      heroControls.getByRole('button', { name: /Remove hero background image/ }),
+      heroControls.getByRole('button', {
+        name: /Remove hero background image/,
+      }),
     ).toBeVisible();
     await saveCurrentDraft();
     const heroState = await loadEmailContentState(heroEvent.id, page);

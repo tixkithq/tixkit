@@ -549,8 +549,7 @@ test.describe('persisted admin event-page Puck editor', () => {
 
     const suffix = `${testInfo.workerIndex}-${Date.now()}`;
     const event = await seedContentEvent(page, suffix);
-    const eventSummary =
-      event.description ?? 'Seeded by Playwright for Puck event-page editor coverage.';
+    const eventSummary = `Public resale checkout coverage for ${event.title}.`;
 
     await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
