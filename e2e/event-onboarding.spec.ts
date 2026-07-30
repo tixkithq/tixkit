@@ -81,25 +81,20 @@ test.describe('State-driven event onboarding', () => {
 
   test('selects a reusable saved venue and applies its timezone', async ({ page }, testInfo) => {
     const name = `Saved venue ${testInfo.project.name} ${Date.now()}`;
+    const createResponse = await page.request.post(`${apiBaseUrl}/v1/venues`, {
+      headers: {
+        'Idempotency-Key': `e2e-saved-venue-${Date.now()}`,
+      },
+      data: {
+        organizationId: devOrganizationId,
+        name,
+        address: { city: 'Austin', region: 'TX', country: 'US' },
+        timezone: 'America/Chicago',
+      },
+      failOnStatusCode: false,
+    });
+    expect(createResponse.ok(), await createResponse.text()).toBe(true);
     await page.goto(`${adminBaseUrl}/events/new`);
-    const created = await page.evaluate(async (venueName) => {
-      const response = await fetch('http://localhost:4200/v1/venues', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': `e2e-saved-venue-${Date.now()}`,
-        },
-        body: JSON.stringify({
-          organizationId: 'org_dev_local',
-          name: venueName,
-          address: { city: 'Austin', region: 'TX', country: 'US' },
-          timezone: 'America/Chicago',
-        }),
-      });
-      return { ok: response.ok, body: await response.text() };
-    }, name);
-    expect(created.ok, created.body).toBe(true);
-    await page.reload();
     await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     await page.getByLabel('Saved venue').selectOption({ label: name });
     await expect(page.getByLabel(/Venue name/)).toHaveValue(name);
