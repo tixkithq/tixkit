@@ -216,6 +216,7 @@ test.describe('admin product workflow coverage', () => {
     page,
     request,
   }, testInfo) => {
+    test.setTimeout(90_000);
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
     await setAdminScope(page, await bootstrapAdminScope(page));

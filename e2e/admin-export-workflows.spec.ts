@@ -43,10 +43,8 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
   });
 }
 
-async function removeToastNotifications(page: Page): Promise<void> {
-  await page.locator('[data-sonner-toast]').evaluateAll((nodes) => {
-    for (const node of nodes) node.remove();
-  });
+async function waitForToastNotificationsToDismiss(page: Page): Promise<void> {
+  await expect(page.locator('[data-sonner-toast]')).toHaveCount(0, { timeout: 10_000 });
 }
 
 async function expectJsonStatus<T>(
@@ -288,7 +286,7 @@ test.describe('admin export workflow coverage', () => {
     }
 
     await attachScreenshot(page, testInfo, 'admin-export-completed-desktop');
-    await removeToastNotifications(page);
+    await waitForToastNotificationsToDismiss(page);
     await expectNoAxeViolations(page, testInfo);
   });
 

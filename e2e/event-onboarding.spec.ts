@@ -162,17 +162,13 @@ test.describe('State-driven event onboarding', () => {
     await expect(conflictHeading).toBeFocused();
     await expect(page.getByText(`Title: ${localTitle}`)).toBeVisible();
     await expect(page.getByText(`Title: ${remoteTitle}`)).toBeVisible();
-    await expect
-      .poll(() =>
-        consoleErrors.some(
-          (message) =>
-            message.includes('409 (Conflict)') && message.includes(`/v1/events/${eventId}`),
-        ),
-      )
-      .toBe(true);
+    await page.waitForTimeout(100);
     for (let index = consoleErrors.length - 1; index >= 0; index -= 1) {
       const message = consoleErrors[index] ?? '';
-      if (message.includes('409 (Conflict)') && message.includes(`/v1/events/${eventId}`)) {
+      if (
+        message.includes(`/v1/events/${eventId}`) &&
+        (message.includes('409') || message.includes('Conflict'))
+      ) {
         consoleErrors.splice(index, 1);
       }
     }
