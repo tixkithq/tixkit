@@ -465,7 +465,7 @@
         "type": "workspace-export",
         "path": "packages/widget/src/index.ts",
         "export": "issueWidgetRuntimeUrl",
-        "sha256": "622aad22288fb69835892ca366411723200d7b7fff1d918af6748967a382b1c5"
+        "sha256": "ed609ce8b1d0abacb106889b5140642354c6962cfaaa674e30084c09f3377bde"
       },
       "allowedSinks": [
         {
