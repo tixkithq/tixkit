@@ -840,6 +840,7 @@ class TixkitWidget extends HTMLElement {
 
   private render(): void {
     cancelHandshakeTimeout(this);
+    this.errored = false;
     this.handshakeNonce = createEmbedNonce();
     this.activeFrame = null;
     this.readyReceived = false;

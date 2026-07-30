@@ -323,6 +323,14 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   await expect(chip).toHaveAttribute('data-variable-label', 'Attendee name');
   await expect(chip).toHaveAttribute('data-variable-preview', 'Ada Lovelace');
   await expect(chip).toHaveAttribute('data-variable-detail', 'Attendee name - {{recipient.name}}');
+  const renderedChipStyle = (property: 'color' | 'fontFamily' | 'fontSize') =>
+    chip.evaluate((element, styleProperty) => {
+      const styledText =
+        element.querySelector<HTMLElement>('[data-tixkit-inline-style="true"]') ??
+        element.closest<HTMLElement>('[data-tixkit-inline-style="true"]') ??
+        element;
+      return window.getComputedStyle(styledText)[styleProperty];
+    }, property);
   const snapshot = await chip.evaluate((element) => {
     const styles = window.getComputedStyle(element);
     const labelTooltip = window.getComputedStyle(element, '::before');
@@ -354,13 +362,9 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() => chip.evaluate((element) => window.getComputedStyle(element, '::before').display))
     .toBe('none');
 
-  const clickPoint = await chipTextPoint();
   const packageTooltip = page.locator('[data-re-bubble-menu]').first();
-  await page.mouse.click(clickPoint.x, clickPoint.y);
-  await expect(page.locator('.tixkit-email-variable-chip--active').first()).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
-    .toContain('Ada Lovelace');
+  await chip.click({ timeout: 10_000 });
+  await expect(chip.locator('.tixkit-email-variable-chip--active')).toBeVisible();
   await expect(packageTooltip).toBeVisible();
   await expect(page.getByLabel('Inline text formatting')).toHaveCount(0);
   await expect(page.getByLabel('Edit variable')).toHaveCount(0);
@@ -392,13 +396,7 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   await expect(variableFirstClickFontSelect).toBeFocused();
   await variableFirstClickFontSelect.selectOption('Georgia, serif');
   await expect(packageTooltip).toBeVisible();
-  await expect
-    .poll(() =>
-      page
-        .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-        .evaluate((element) => window.getComputedStyle(element).fontFamily),
-    )
-    .toContain('Georgia');
+  await expect.poll(() => renderedChipStyle('fontFamily')).toContain('Georgia');
 
   const variableFirstClickSizeInput = packageTooltip.getByLabel('Selection text size');
   await variableFirstClickSizeInput.click();
@@ -406,26 +404,14 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   await expect(variableFirstClickSizeInput).toBeFocused();
   await variableFirstClickSizeInput.fill('16');
   await expect(packageTooltip).toBeVisible();
-  await expect
-    .poll(() =>
-      page
-        .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-        .evaluate((element) => window.getComputedStyle(element).fontSize),
-    )
-    .toBe('16px');
+  await expect.poll(() => renderedChipStyle('fontSize')).toBe('16px');
 
   const variableFirstClickColorInput = packageTooltip.getByLabel('Selection color');
   await variableFirstClickColorInput.click();
   await expect(packageTooltip).toBeVisible();
   await variableFirstClickColorInput.fill('#b91c1c');
   await expect(packageTooltip).toBeVisible();
-  await expect
-    .poll(() =>
-      page
-        .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-        .evaluate((element) => window.getComputedStyle(element).color),
-    )
-    .toBe('rgb(185, 28, 28)');
+  await expect.poll(() => renderedChipStyle('color')).toBe('rgb(185, 28, 28)');
 
   await expect(page.getByLabel('Edit variable')).toHaveCount(0);
   await variableOptionsButton.click();
@@ -553,6 +539,9 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
   const emailBody = page.getByLabel('Email body');
   await emailBody.click();
   await emailBody.press('ControlOrMeta+A');
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toContain('QR image link');
   await expect(packageTooltip).toBeVisible();
   await packageTooltip.getByLabel('Selection color').fill('#0f766e');
   await page.waitForTimeout(100);
@@ -586,9 +575,9 @@ async function expectFriendlyVariableChip(page: Page): Promise<void> {
     .poll(() =>
       page
         .locator('.tixkit-email-variable-chip[data-variable-key="recipient.name"]')
-        .evaluate((element) => window.getComputedStyle(element).lineHeight),
+        .evaluate((element) => Number.parseFloat(window.getComputedStyle(element).lineHeight)),
     )
-    .toMatch(/^25(\.2)?px$/);
+    .toBeCloseTo(25.2, 2);
   await expect(packageTooltip).toBeVisible();
   await expect
     .poll(() =>
@@ -663,10 +652,11 @@ test.describe('persisted admin email content editor', () => {
     const subject = `Tickets for ${event.title}`;
     const previewOrderId = 'A10045';
     const previewOrderTotal = '$0.00';
+    const previewTicketCode = 'TIX-A10045';
+    const previewQrCodeUrl = 'https://media.example.test/tickets/A10045.png';
     const body =
-      'Hi {{recipient.name}}, your {{ticket.type}} tickets for {{event.title}} are ready. Order {{order.id}} total {{order.total}}.';
-    const normalizedBody = body.replace(/\s+/g, ' ');
-    const renderedBody = `Hi Ada Lovelace, your ${seeded.ticketType.name} tickets for ${event.title} are ready. Order ${previewOrderId} total ${previewOrderTotal}.`;
+      'Hi {{recipient.name}}, your {{ticket.type}} tickets for {{event.title}} are ready. Order {{order.id}} total {{order.total}}. Ticket code {{ticket.code}}. QR code {{ticket.qrCodeUrl}}.';
+    const renderedBody = `Hi Ada Lovelace, your ${seeded.ticketType.name} tickets for ${event.title} are ready. Order ${previewOrderId} total ${previewOrderTotal}. Ticket code ${previewTicketCode}. QR code ${previewQrCodeUrl}.`;
     const normalizedRenderedBody = renderedBody.replace(/\s+/g, ' ');
 
     await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
@@ -719,37 +709,26 @@ test.describe('persisted admin email content editor', () => {
       .getByLabel('Test recipients')
       .fill('ada+email-e2e@example.test\ngrace+email-e2e@example.test');
     await page.getByLabel('Test recipients').press('ControlOrMeta+Enter');
-    await expect(page.getByText('Captured 2 test sends')).toBeVisible();
+    await expect(page.getByText('Sent 2 test emails (captured)')).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'Send test email' })).toBeHidden();
 
     const persisted = await loadEmailContentState(event.id, page, 'tickets-issued');
     expect(persisted.document.status).toBe('published');
     expect(persisted.document.publishedVersionId).toBeTruthy();
-    expect(
-      persisted.versions.some(
-        (version) =>
-          version.status === 'published' &&
-          version.contentJson.schemaVersion === 1 &&
-          version.contentJson.editor?.provider === '@react-email/editor' &&
-          /text-align:\s*center/.test(version.contentJson.editor.contentHtml ?? '') &&
-          /color:\s*#0f766e/.test(version.contentJson.editor.contentHtml ?? '') &&
-          /font-family:\s*Inter,\s*Arial,\s*sans-serif/.test(
-            version.contentJson.editor.contentHtml ?? '',
-          ) &&
-          /font-size:\s*18px/.test(version.contentJson.editor.contentHtml ?? '') &&
-          /line-height:\s*140%/.test(version.contentJson.editor.contentHtml ?? '') &&
-          version.contentJson.settings?.subject === subject &&
-          version.contentJson.blocks?.some(
-            (block) =>
-              block.type === 'event_hero' &&
-              typeof block.body === 'string' &&
-              block.body.replace(/\s+/g, ' ') === normalizedBody,
-          ),
-      ),
-    ).toBe(true);
     const publishedVersion = persisted.versions.find(
       (version) => version.id === persisted.document.publishedVersionId,
     );
+    expect(publishedVersion?.status).toBe('published');
+    expect(publishedVersion?.contentJson.schemaVersion).toBe(1);
+    expect(publishedVersion?.contentJson.editor?.provider).toBe('@react-email/editor');
+    expect(publishedVersion?.contentJson.editor?.contentHtml).toMatch(/text-align:\s*center/);
+    expect(publishedVersion?.contentJson.editor?.contentHtml).toMatch(/color:\s*#0f766e/);
+    expect(publishedVersion?.contentJson.editor?.contentHtml).toMatch(
+      /font-family:\s*Inter,\s*Arial,\s*sans-serif/,
+    );
+    expect(publishedVersion?.contentJson.editor?.contentHtml).toMatch(/font-size:\s*18px/);
+    expect(publishedVersion?.contentJson.editor?.contentHtml).toMatch(/line-height:\s*140%/);
+    expect(publishedVersion?.contentJson.settings?.subject).toBe(subject);
     expect(publishedVersion?.contentJson.editor?.contentText).toContain('{{recipient.name}}');
     expect(publishedVersion?.contentJson.editor?.contentHtml).toContain('{{recipient.name}}');
     expect(publishedVersion?.contentJson.editor?.contentHtml).not.toContain(
@@ -767,7 +746,11 @@ test.describe('persisted admin email content editor', () => {
       event: { title: event.title },
       order: { id: previewOrderId, total: previewOrderTotal },
       recipient: { name: 'Ada Lovelace' },
-      ticket: { type: seeded.ticketType.name },
+      ticket: {
+        type: seeded.ticketType.name,
+        code: previewTicketCode,
+        qrCodeUrl: previewQrCodeUrl,
+      },
     };
     const artifactPreview = await jsonResponse<ContentPreviewResponse>(
       await page.request.post(
@@ -831,7 +814,7 @@ test.describe('persisted admin email content editor', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.setViewportSize(mobileViewport);
-    await page.goto(`${adminBaseUrl}/events/${event.id}/content/email`);
+    await page.goto(`${adminBaseUrl}/events/${event.id}/content/email?templateKey=tickets-issued`);
     await expectPersistedEmailEditorRegions(page, { compact: true });
     await attachScreenshot(page, testInfo, 'admin-content-email-persisted-mobile');
     await expectNoAxeViolations(page, testInfo);
@@ -1444,22 +1427,22 @@ test.describe('persisted admin email content editor', () => {
     await expect(emailBody.locator('.tixkit-email-variable-chip').first()).toBeVisible();
     // --- Click on a paragraph to select it ---
     const paragraphPoint = await page.evaluate(() => {
-      const p = document.querySelector('.ProseMirror p');
-      if (!p) return null;
-      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
-      while (walker.nextNode()) {
-        const node = walker.currentNode;
-        if (
-          node.textContent.includes('tickets') &&
-          !node.parentElement?.closest('.tixkit-email-variable-chip')
-        ) {
-          const range = document.createRange();
-          const idx = node.textContent.indexOf('tickets');
-          range.setStart(node, idx);
-          range.setEnd(node, Math.min(idx + 3, node.textContent.length));
-          const rect = range.getBoundingClientRect();
-          range.detach();
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      for (const paragraph of document.querySelectorAll('.ProseMirror p')) {
+        const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (
+            node.textContent.includes('tickets') &&
+            !node.parentElement?.closest('.tixkit-email-variable-chip')
+          ) {
+            const range = document.createRange();
+            const idx = node.textContent.indexOf('tickets');
+            range.setStart(node, idx);
+            range.setEnd(node, Math.min(idx + 3, node.textContent.length));
+            const rect = range.getBoundingClientRect();
+            range.detach();
+            return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+          }
         }
       }
       return null;

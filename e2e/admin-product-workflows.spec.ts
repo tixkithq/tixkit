@@ -246,7 +246,11 @@ test.describe('admin product workflow coverage', () => {
     );
     expect(createdEvent.status).toBe('draft');
 
-    await page.goto(`${adminBaseUrl}/events/${createdEvent.id}`);
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/events/${createdEvent.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\?created=1)?$`,
+      ),
+    );
     await expect(page.getByRole('heading', { name: title })).toBeVisible();
     await expect(page.getByText('Draft', { exact: true })).toBeVisible();
 

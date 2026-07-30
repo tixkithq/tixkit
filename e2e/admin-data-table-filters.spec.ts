@@ -589,20 +589,20 @@ test.describe('Admin data table filters', () => {
       await seedAdminAttendeeTableRow(request, uniqueE2eSuffix(testInfo, 'att-url'));
 
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/attendees?status=active`);
+      await page.goto(`${adminBaseUrl}/attendees?status=confirmed`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
-      await expect(page).toHaveURL(/status=active/);
+      await expect(page).toHaveURL(/status=confirmed/);
       await page.waitForLoadState('networkidle');
 
       // Navigate away within the same route
       await page.goto(`${adminBaseUrl}/attendees`);
-      await expect(page).not.toHaveURL(/status=active/);
+      await expect(page).not.toHaveURL(/status=confirmed/);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await page.waitForLoadState('networkidle');
 
       // Navigate back through browser history so URL state is restored by the app router
       await page.goBack();
-      await expect(page).toHaveURL(/status=active/);
+      await expect(page).toHaveURL(/status=confirmed/);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await page.waitForLoadState('networkidle');
 

@@ -1391,6 +1391,8 @@ function plainTextFromHtml(html: string): string {
     )
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(?:p|div|section|article|h[1-6]|li|tr)>/gi, '\n')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\/?(?:span|strong|em|s|b|i|u|code)\b[^>]*>/gi, '')
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')

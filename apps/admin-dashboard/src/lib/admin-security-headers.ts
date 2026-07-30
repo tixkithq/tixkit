@@ -18,6 +18,11 @@ const RUNTIME_STYLE_HASHES = [
   "'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='",
   "'sha256-cjSncqPVfIb25yH7ajQUnrO3XEeenBWcw3E88wYS8Y0='",
   "'sha256-R79YPbj9qhfyp6XA+aUpr67kUNjj0aWXDS6G1VaKZzE='",
+  "'sha256-gzuNz+BZ5SWt0K+wjDM1i/CJ1GJpZ55cl30W3R121NY='",
+  "'sha256-P3zrZWkaCzrI/B9T0+WLFRTTY8rvTIfnbvP5TBI9Vgo='",
+  "'sha256-E7zJXfkufcgTIQG1Th6iYnoGis+rTfZd044bgiM1kr4='",
+  "'sha256-YYLJe/bgx7gKdFc8dp3EM3/S8hpKeZs7JyhfBoZYPuk='",
+  "'sha256-sHwQzC2ZsVrt1faUYCjF/eo8aIoBlQbGjVstzanL9CU='",
 ] as const;
 
 export function adminContentSecurityPolicy(

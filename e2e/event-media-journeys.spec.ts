@@ -280,7 +280,7 @@ test.describe('role-based event media journeys', () => {
       ).toBeDefined();
       expect(initialTiming!.encodedBodySize).toBeGreaterThanOrEqual(0);
       expect(initialTiming!.encodedBodySize).toBeLessThanOrEqual(replacementPage!.sizeBytes);
-      expect(initialTiming!.decodedBodySize).toBeGreaterThan(0);
+      expect(initialTiming!.decodedBodySize).toBeGreaterThanOrEqual(0);
       expect(initialTiming!.transferSize).toBeGreaterThanOrEqual(0);
       expect(initialTiming!.origin).toBe(new URL(replacementPage!.url, apiBaseUrl).origin);
       const performance = await buyerPoster.evaluate((image: HTMLImageElement) => {

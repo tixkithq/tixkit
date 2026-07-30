@@ -151,7 +151,7 @@ describe('check-in scan normalization', () => {
         firstName: 'Avery',
         lastName: 'Stone',
         email: 'avery@example.test',
-        status: 'active',
+        status: 'confirmed',
         checkedInAt: '2026-06-29T12:04:00.000Z',
         createdAt: '2026-06-29T11:00:00.000Z',
       }),

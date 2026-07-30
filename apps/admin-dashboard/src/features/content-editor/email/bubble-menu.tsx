@@ -613,8 +613,9 @@ export function TixkitEmailBubbleMenu() {
                   aria-label="Selection font family"
                   className="tixkit-email-bubble-control tixkit-email-bubble-control--font"
                   onChange={(event) => {
+                    const fontFamily = event.currentTarget.value;
                     restoreBubbleSelection();
-                    formatCurrentSelection({ patch: { fontFamily: event.currentTarget.value } });
+                    formatCurrentSelection({ patch: { fontFamily } });
                   }}
                   onClick={handleBubbleControlInteraction}
                   onMouseDown={handleBubbleControlInteraction}

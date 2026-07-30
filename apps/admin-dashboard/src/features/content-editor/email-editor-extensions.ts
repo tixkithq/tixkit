@@ -1320,9 +1320,9 @@ function createFloatingVariableMenu(input: { mergeTags: readonly string[]; view:
   let menu: HTMLElement | null = null;
 
   const currentActiveRange = () =>
+    findSelectedTextRange(input.view.state) ??
     activeRange ??
     mergeTagPreviewPluginKey.getState(input.view.state)?.active ??
-    findSelectedTextRange(input.view.state) ??
     findCursorMergeTagRange(input.view.state) ??
     findCursorTextRowRange(input.view.state) ??
     findSelectedAlignableNodeRange(input.view.state);
@@ -1653,27 +1653,32 @@ function createFloatingVariableMenu(input: { mergeTags: readonly string[]; view:
 
   const update = (active: MergeTagPreviewPluginState['active']) => {
     activeRange = active;
+    const reportedSelection = activeRange ?? findSelectedTextRange(input.view.state);
     input.view.dom.dispatchEvent(
       new CustomEvent('tixkit-email-selection-state', {
         bubbles: true,
-        detail: activeRange
+        detail: reportedSelection
           ? {
-              cursor: activeRange.cursor,
-              from: activeRange.from,
-              key: activeRange.key,
-              nodeName: activeRange.nodeName,
-              scope: activeRange.scope,
+              cursor: reportedSelection.cursor,
+              from: reportedSelection.from,
+              key: reportedSelection.key,
+              nodeName: reportedSelection.nodeName,
+              scope: reportedSelection.scope,
               style:
-                activeRange.scope === 'node'
+                reportedSelection.scope === 'node'
                   ? {}
-                  : activeRange.cursor !== undefined
-                    ? inlineStyleAttrsAtCursor(input.view.state, activeRange.cursor, input.view)
+                  : reportedSelection.cursor !== undefined
+                    ? inlineStyleAttrsAtCursor(
+                        input.view.state,
+                        reportedSelection.cursor,
+                        input.view,
+                      )
                     : selectedInlineStyleAttrsFromView(
                         input.view,
-                        activeRange.from,
-                        activeRange.to,
+                        reportedSelection.from,
+                        reportedSelection.to,
                       ),
-              to: activeRange.to,
+              to: reportedSelection.to,
             }
           : null,
       }),
@@ -1882,8 +1887,13 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                 | undefined;
               if (meta && 'active' in meta) return { active: meta.active ?? null };
               if (transaction.selectionSet) {
+                const selectionMatchesActive =
+                  pluginState.active &&
+                  transaction.selection.from === pluginState.active.from &&
+                  transaction.selection.to === pluginState.active.to;
                 if (
                   pluginState.active &&
+                  (transaction.selection.empty || selectionMatchesActive) &&
                   (hasActiveEmailBubbleControlInteraction() || Date.now() < chipClickGuardUntil)
                 ) {
                   if (pluginState.active.scope === 'row' && transaction.selection.empty) {
@@ -2083,7 +2093,7 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                 findCursorMergeTagRange(state) ??
                 findCursorTextRowRange(state) ??
                 findSelectedAlignableNodeRange(state);
-              const active = pluginState?.active ?? activeSelection;
+              const active = findSelectedTextRange(state) ?? pluginState?.active ?? activeSelection;
               if (active?.key) {
                 const activeRange = findMergeTagRangeAtPosition(state, active.from);
                 if (activeRange && activeRange.key === active.key) {
@@ -2119,8 +2129,8 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                   scheduleRawMergeTagConversion(currentView);
                 }
                 let active =
-                  mergeTagPreviewPluginKey.getState(currentView.state)?.active ??
                   findSelectedTextRange(currentView.state) ??
+                  mergeTagPreviewPluginKey.getState(currentView.state)?.active ??
                   findCursorMergeTagRange(currentView.state) ??
                   findCursorTextRowRange(currentView.state) ??
                   findSelectedAlignableNodeRange(currentView.state);

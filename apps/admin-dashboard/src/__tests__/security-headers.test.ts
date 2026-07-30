@@ -34,6 +34,9 @@ describe('admin request-time security headers', () => {
       "style-src-elem 'self' 'nonce-request-nonce' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=' 'sha256-YjaKGiklmzC6wjXA513HAMmzus8VE61XCOT+SmwNZWA=' 'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY=' 'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='",
     );
     expect(policy).toContain("style-src-attr 'unsafe-inline'");
+    expect(policy).toContain(
+      "'sha256-gzuNz+BZ5SWt0K+wjDM1i/CJ1GJpZ55cl30W3R121NY=' 'sha256-P3zrZWkaCzrI/B9T0+WLFRTTY8rvTIfnbvP5TBI9Vgo=' 'sha256-E7zJXfkufcgTIQG1Th6iYnoGis+rTfZd044bgiM1kr4=' 'sha256-YYLJe/bgx7gKdFc8dp3EM3/S8hpKeZs7JyhfBoZYPuk=' 'sha256-sHwQzC2ZsVrt1faUYCjF/eo8aIoBlQbGjVstzanL9CU='",
+    );
   });
 
   it('retains the current explicitly bounded development posture', () => {

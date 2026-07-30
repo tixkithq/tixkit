@@ -617,6 +617,22 @@ describe('renderEmailTemplate', () => {
     expect(second.text).toBe(first.text);
   });
 
+  it('does not add spaces around inline-styled merge tag text', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<p>Hi <span style="color:#0f766e">{{recipient.name}}</span>, ticket <strong>{{ticket.code}}</strong>.</p>',
+        contentText: 'Hi {{recipient.name}}, ticket {{ticket.code}}.',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.text).toContain('Hi Ada Lovelace, ticket TKT-123.');
+  });
+
   it('appends the brand unsubscribe footer to bulk React Email editor exports', async () => {
     const template = createDefaultEmailTemplate({
       editor: {

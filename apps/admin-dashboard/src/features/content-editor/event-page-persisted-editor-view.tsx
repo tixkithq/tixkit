@@ -1541,7 +1541,7 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 selectedType
                   ? 'bg-background text-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
+                  : 'text-foreground/75 hover:text-foreground'
               }`}
               onClick={() => {
                 const selector = lastSectionSelectorRef.current;
@@ -1562,7 +1562,7 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 !selectedType
                   ? 'bg-background text-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
+                  : 'text-foreground/75 hover:text-foreground'
               }`}
               onClick={() =>
                 dispatch({

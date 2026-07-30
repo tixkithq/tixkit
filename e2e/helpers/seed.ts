@@ -597,7 +597,7 @@ function futureEventWindow(offsetDays: number): { startsAt: string; endsAt: stri
   };
 }
 
-async function publishEventWithRetry(
+export async function publishEventWithRetry(
   request: APIRequestContext,
   eventId: string,
   attempts = 5,

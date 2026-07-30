@@ -5,9 +5,18 @@ import { adminBaseUrl } from './helpers/env';
 import { devBrandId, devOrganizationId, ensureDevTenantGraph } from './helpers/seed';
 
 async function tabTo(page: Page, target: Locator, direction: 'forward' | 'backward' = 'forward') {
+  const isWebKit = page.context().browser()?.browserType().name() === 'webkit';
+  const key =
+    direction === 'forward'
+      ? isWebKit
+        ? 'Alt+Tab'
+        : 'Tab'
+      : isWebKit
+        ? 'Alt+Shift+Tab'
+        : 'Shift+Tab';
   for (let step = 0; step < 80; step += 1) {
     if (await target.evaluate((element) => element === document.activeElement)) return;
-    await page.keyboard.press(direction === 'forward' ? 'Tab' : 'Shift+Tab');
+    await page.keyboard.press(key);
   }
   throw new Error(`Keyboard focus did not reach ${await target.getAttribute('aria-label')}`);
 }
@@ -31,6 +40,7 @@ test.describe('Saved venue management', () => {
       { organizationId: devOrganizationId, brandId: devBrandId },
     );
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await page.waitForLoadState('networkidle');
   });
 
   test('creates, defaults, reuses, and safely deletes a venue with keyboard access', async ({
@@ -58,8 +68,9 @@ test.describe('Saved venue management', () => {
     await page.keyboard.press('Tab');
     await page.keyboard.type('America/Chicago');
     await expectNoAxeViolations(page, testInfo);
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'Save venue' })).toBeFocused();
+    const saveVenue = page.getByRole('button', { name: 'Save venue' });
+    await tabTo(page, saveVenue);
+    await expect(saveVenue).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.getByText('Saved venue created.')).toBeVisible();
     const venueList = page.getByRole('list', { name: 'Reusable saved venues' });
@@ -80,10 +91,12 @@ test.describe('Saved venue management', () => {
     await expectNoAxeViolations(page, testInfo);
 
     await page.goto(`${adminBaseUrl}/events/new`);
+    await page.waitForLoadState('networkidle');
     await page.reload();
     await expect(page.getByLabel('Saved venue')).toHaveValue(/ven_/u);
     await expect(page.getByLabel(/Venue name/)).toHaveValue(venueName);
     await expect(page.getByRole('combobox', { name: 'Timezone' })).toHaveValue('America/Chicago');
+    await page.waitForLoadState('networkidle');
 
     await page.goto(`${adminBaseUrl}/settings/workspace`);
     const restoredDefaultVenue = page.getByLabel('Default saved venue');

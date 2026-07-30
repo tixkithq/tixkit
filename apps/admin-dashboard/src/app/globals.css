@@ -434,6 +434,7 @@
     background: var(--re-bg);
     border-color: var(--re-border);
     color: var(--re-text);
+    translate: 0 -2rem;
   }
 
   [data-re-bubble-menu] .tixkit-email-bubble-controls {

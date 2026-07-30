@@ -225,6 +225,32 @@ describe('widget lifecycle events (runtime)', () => {
     expect(postMessageSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('starts the handshake after declarative attributes replace transient upgrade errors', () => {
+    const el = new TixkitWidget();
+    mountedElements.push(el);
+    (el as unknown as { showError(message: string): void }).showError(
+      'Transient custom-element upgrade error',
+    );
+
+    el.setAttribute('api-base-url', CHECKOUT_BASE);
+    el.setAttribute('brand', 'brand_demo');
+    el.setAttribute('event', 'evt_demo');
+    el.connectedCallback();
+
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe');
+    expect(frame).not.toBeNull();
+    const source = ensureFrameWindow(frame!);
+    const postMessageSpy = vi.spyOn(source, 'postMessage');
+    frame!.dispatchEvent(new Event('load'));
+
+    expect(postMessageSpy).toHaveBeenCalledTimes(1);
+    expect(postMessageSpy.mock.calls[0]?.[0]).toMatchObject({
+      source: 'tixkit-embed-host',
+      type: 'host:hello',
+      eventId: 'evt_demo',
+    });
+  });
+
   it('fails accessibly with a hosted fallback when the exact handshake times out', () => {
     vi.useFakeTimers();
     const el = createWidget();

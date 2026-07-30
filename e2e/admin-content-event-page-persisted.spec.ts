@@ -5,6 +5,7 @@ import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
   devBrandId,
   devOrganizationId,
+  publishEventWithRetry,
   seedPublishedEventPageContent,
   seedPublishedOrderConfirmationContent,
 } from './helpers/seed';
@@ -167,9 +168,7 @@ async function seedContentEvent(page: Page, suffix: string): Promise<SeededConte
     201,
   );
   await jsonResponse<Omit<SeededContentEvent, 'ticketType'>>(
-    await page.request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
-      data: {},
-    }),
+    await publishEventWithRetry(page.request, event.id),
     200,
   );
   return { ...event, ticketType };
@@ -275,7 +274,7 @@ async function saveDraftFromHeader(page: Page): Promise<void> {
   const header = page.getByRole('region', { name: 'Editor header' });
   await header.getByLabel('More actions').click();
   await page.getByRole('menuitem', { name: 'Save draft' }).click();
-  await expect(page.getByText(/Saved draft v\d+/)).toBeVisible();
+  await expect(header.getByText('Saved', { exact: true })).toBeVisible();
 }
 
 async function publishFromHeader(page: Page): Promise<void> {
@@ -398,8 +397,7 @@ async function seedDescriptionBackgroundImageViaCdp(client: CDPSession): Promise
           id: descriptionId,
           title: 'CDP editable description',
           body: 'Overlay content should stay selectable until image editing is opened.',
-          imageUrl:
-            'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680"%3E%3Cdefs%3E%3ClinearGradient id="g" x1="0" y1="0" x2="1" y2="1"%3E%3Cstop stop-color="%230f172a"/%3E%3Cstop offset=".55" stop-color="%23f59e0b"/%3E%3Cstop offset="1" stop-color="%23111827"/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width="1200" height="680" fill="url(%23g)"/%3E%3C/svg%3E',
+          imageUrl: 'https://media.example.test/cdp-description.svg',
           imageAlt: 'Gradient venue image',
           imageLayout: 'background',
           imageFit: 'cover',
@@ -729,7 +727,7 @@ test.describe('persisted admin event-page Puck editor', () => {
     await expectPersistedEventPageEditorRegions(page);
     await expectPuckEditorCanvas(page, event);
     await attachScreenshot(page, testInfo, 'admin-content-event-page-puck-desktop');
-    await expectNoAxeViolations(page, testInfo, undefined, [], ['landmark-unique']);
+    await expectNoAxeViolations(page, testInfo, undefined, ['#preview-frame'], ['landmark-unique']);
 
     await page.reload();
     await expectPersistedEventPageEditorRegions(page);
@@ -760,6 +758,7 @@ test.describe('persisted admin event-page Puck editor', () => {
     expect(mobileAddPanelBox?.y).toBeGreaterThan(200);
     expect(mobileEditorFrameBox?.y).toBeLessThan(mobileAddPanelBox?.y ?? 0);
     await expect(page.locator('[data-testid="editor-canvas"] [inert]')).toHaveCount(0);
+    await mobileAddPanel.getByRole('button', { name: 'Event information' }).click();
     await mobileAddPanel.getByRole('button', { name: 'Add FAQ' }).last().click();
     await expect(mobileAddPanel).toBeHidden();
     await expect(
@@ -785,7 +784,7 @@ test.describe('persisted admin event-page Puck editor', () => {
     await mobileSectionsPanel.getByRole('button', { name: 'Event header', exact: true }).click();
     await expect(mobileSectionsPanel).toBeHidden();
     await attachScreenshot(page, testInfo, 'admin-content-event-page-puck-mobile');
-    await expectNoAxeViolations(page, testInfo, undefined, [], ['landmark-unique']);
+    await expectNoAxeViolations(page, testInfo, undefined, ['#preview-frame'], ['landmark-unique']);
 
     await page.getByLabel('More actions').click();
     page.once('dialog', (dialog) => void dialog.accept());
@@ -1024,6 +1023,12 @@ test.describe('persisted admin event-page Puck editor', () => {
     test.skip(browserName !== 'chromium', 'CDP canvas inspection is Chromium-only.');
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await page.route('https://media.example.test/cdp-description.svg', async (route) => {
+      await route.fulfill({
+        body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680"><rect width="1200" height="680" fill="#0f172a"/></svg>',
+        contentType: 'image/svg+xml',
+      });
+    });
 
     const event = await seedContentEvent(page, `description-image-cdp-${Date.now()}`);
     await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));

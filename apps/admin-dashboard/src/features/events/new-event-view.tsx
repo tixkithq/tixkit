@@ -219,6 +219,7 @@ export function NewEventView() {
         const selected = scopedVenues.find((venue) => venue.id === defaultVenueId);
         if (!selected) return;
         setVenueName((current) => current || selected.name);
+        if (selected.timezone) setTimezone(selected.timezone);
       })
       .catch((cause: unknown) => {
         if (cancelled || generation !== venueLoadGeneration.current) return;
