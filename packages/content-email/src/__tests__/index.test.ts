@@ -638,18 +638,19 @@ describe('renderEmailTemplate', () => {
       editor: {
         provider: REACT_EMAIL_EDITOR_PACKAGE,
         contentHtml:
-          '<p>Hi <span>{{recipient.name}}</span><!-- hidden --></p><style>.hidden{display:none}</style><script>alert(1)</script><p><a href="https://tickets.example.test/view?one=1&amp;two=2">View tickets</a></p>',
+          '<p>Hi <span>{{recipient.name}}</span><!-- hidden --></p><style>.hidden{display:none}</style><script>alert(1)</script><p>&amp;lt;script&amp;gt; <a href="https://tickets.example.test/view?one=1&amp;two=2">View tickets</a></p>',
         contentJson: { type: 'doc' },
       },
     });
 
     expect(template.editor.contentText).toContain('Hi {{recipient.name}}');
+    expect(template.editor.contentText).toContain('&lt;script&gt;');
     expect(template.editor.contentText).toContain(
       'View tickets (https://tickets.example.test/view?one=1&two=2)',
     );
     expect(template.editor.contentText).not.toContain('hidden');
     expect(template.editor.contentText).not.toContain('alert(1)');
-    expect(template.editor.contentText).not.toContain('<script');
+    expect(template.editor.contentText).not.toContain('<script>');
   });
 
   it('appends the brand unsubscribe footer to bulk React Email editor exports', async () => {
