@@ -18,7 +18,7 @@ async function writeExecutable(path, source) {
   await chmod(path, 0o755);
 }
 
-test('installs missing Playwright libraries without sudo and persists the runtime paths', async () => {
+test('installs missing WebKit libraries without sudo and persists the runtime paths', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tixkit-playwright-runtime-'));
   temporaryDirectories.push(root);
   const binDirectory = join(root, 'bin');
@@ -39,12 +39,12 @@ echo Linux
     `#!/usr/bin/env bash
 if [[ "$*" == 'playwright --version' ]]; then
   echo 'Version 1.62.0'
-elif [[ "$*" == 'playwright install-deps --dry-run chromium' ]]; then
+elif [[ "$*" == 'playwright install-deps --dry-run webkit' ]]; then
   [[ -f "${'${APT_CONFIG:-}'}" ]] || exit 3
   echo dry-run >> "${callLog}"
   printf 'Missing system dependencies (1):\n  libnspr4\n'
   exit 1
-elif [[ "$*" == 'playwright install chromium' ]]; then
+elif [[ "$*" == 'playwright install webkit' ]]; then
   echo install >> "${callLog}"
 else
   exit 2
@@ -60,10 +60,11 @@ if [[ "$1" == 'update' ]]; then
   grep -q "Dir::State::lists \"${runnerTemp}/playwright-runtime/apt/state/lists\"" "${'${APT_CONFIG}'}"
   grep -q "Dir::Cache::archives \"${runnerTemp}/playwright-runtime/apt/cache/archives\"" "${'${APT_CONFIG}'}"
   echo update >> "${callLog}"
-elif [[ "$1" == 'download' && "$2" == 'libnspr4' ]]; then
+elif [[ "$1" == 'download' && "$2" == 'libnspr4' && "$3" == 'gstreamer1.0-libav' ]]; then
   [[ -f "${'${APT_CONFIG:-}'}" ]] || exit 3
   echo download >> "${callLog}"
   touch libnspr4_1.deb
+  touch gstreamer1.0-libav_1.deb
 else
   exit 2
 fi
@@ -84,7 +85,7 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
 `,
   );
 
-  const result = spawnSync('bash', [installerPath], {
+  const result = spawnSync('bash', [installerPath, 'webkit'], {
     cwd: repositoryRoot,
     encoding: 'utf8',
     env: {
@@ -96,8 +97,8 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Extracted 1 missing Playwright dependency packages/);
-  assert.match(result.stdout, /Playwright 1\.62\.0 chromium runtime is ready/);
+  assert.match(result.stdout, /Extracted 2 missing Playwright dependency packages/);
+  assert.match(result.stdout, /Playwright 1\.62\.0 webkit runtime is ready/);
   const persistedEnvironment = await readFile(githubEnv, 'utf8');
   assert.match(persistedEnvironment, /^LD_LIBRARY_PATH=.*playwright-runtime\/root\/usr\/lib/m);
   assert.match(

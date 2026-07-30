@@ -84,6 +84,9 @@ if ((dependency_status != 0)); then
     echo 'Playwright dependency detection failed without a parseable missing-package list' >&2
     exit 1
   fi
+  if [[ "$browser_name" == 'webkit' ]]; then
+    missing_packages+=('gstreamer1.0-libav')
+  fi
 
   (
     cd "$package_dir"
