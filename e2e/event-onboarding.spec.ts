@@ -116,6 +116,7 @@ test.describe('State-driven event onboarding', () => {
     await page.getByRole('button', { name: 'Create draft' }).click();
     await expect(page).toHaveURL(/\/events\/(?!new$)[^/]+$/, { timeout: 30_000 });
     const eventId = new URL(page.url()).pathname.split('/').at(-1)!;
+    await page.waitForLoadState('networkidle');
 
     await page.goto(`${adminBaseUrl}/events/${eventId}/settings#basics`);
     const basics = page.locator('#basics');
@@ -178,6 +179,7 @@ test.describe('State-driven event onboarding', () => {
     await page.goto(`${adminBaseUrl}/events/new`);
     const title = `Launch workflow ${testInfo.project.name} ${Date.now()}`;
     const freeRsvp = page.getByRole('radio', { name: /Free RSVP/i });
+    await expect(freeRsvp).toBeEnabled();
     await freeRsvp.focus();
     await page.keyboard.press('Space');
     await expect(freeRsvp).toBeChecked();
@@ -187,6 +189,7 @@ test.describe('State-driven event onboarding', () => {
     await createDraft.click();
     await expect(page).toHaveURL(/\/events\/(?!new$)[^/]+$/, { timeout: 30_000 });
     const eventId = new URL(page.url()).pathname.split('/').at(-1)!;
+    await page.waitForLoadState('networkidle');
     const suffix = `${testInfo.project.name}-${Date.now()}`;
     await seedPublishedEventPageContent({ event: { id: eventId, title }, suffix });
     await seedPublishedOrderConfirmationContent({ eventId, suffix });

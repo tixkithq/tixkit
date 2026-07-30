@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Inspector } from '@react-email/editor/ui';
+import { getNodeMeta, Inspector } from '@react-email/editor/ui';
 import type { InspectorNodeContext } from '@react-email/editor/ui';
 
 export type EmailThemePreset = 'brand' | 'minimal' | 'basic';
@@ -297,6 +297,34 @@ function labelNativeInspectorControls(root: HTMLElement) {
   }
 }
 
+function InspectorBreadcrumb() {
+  return (
+    <Inspector.Breadcrumb>
+      {(segments) => (
+        <nav aria-label="Selected email element">
+          <ol className="flex flex-wrap items-center gap-1">
+            {segments.map((segment, index) => (
+              <React.Fragment key={`${segment.node.nodeType}-${segment.node.nodePos.pos}`}>
+                {index > 0 ? <li aria-hidden="true">/</li> : null}
+                <li>
+                  <button
+                    className="font-semibold"
+                    onClick={segment.focus}
+                    onMouseDown={(event) => event.preventDefault()}
+                    type="button"
+                  >
+                    {getNodeMeta(segment.node.nodeType).label}
+                  </button>
+                </li>
+              </React.Fragment>
+            ))}
+          </ol>
+        </nav>
+      )}
+    </Inspector.Breadcrumb>
+  );
+}
+
 export function StyleInspector({ onUploadImage }: StyleInspectorProps) {
   const inspectorRef = React.useRef<HTMLElement>(null);
 
@@ -322,7 +350,7 @@ export function StyleInspector({ onUploadImage }: StyleInspectorProps) {
           <div className="border-b px-4 py-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Page style</p>
             <div className="mt-1 text-sm font-semibold text-foreground">
-              <Inspector.Breadcrumb />
+              <InspectorBreadcrumb />
             </div>
           </div>
           <div

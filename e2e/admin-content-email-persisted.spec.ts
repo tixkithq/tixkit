@@ -1009,8 +1009,12 @@ test.describe('persisted admin email content editor', () => {
       const emailBody = page.getByLabel('Email body');
       await emailBody.click();
       await emailBody.press('ControlOrMeta+A');
-      await page.keyboard.type('/');
-      await page.getByText(title, { exact: true }).click();
+      await page.keyboard.type(`/${title.split(' ')[0]}`);
+      const command = page
+        .locator('[data-re-slash-command]')
+        .getByRole('button', { name: title, exact: true });
+      await expect(command).toHaveAttribute('data-selected');
+      await emailBody.press('Enter');
     }
 
     async function saveCurrentDraft() {

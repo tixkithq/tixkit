@@ -129,6 +129,7 @@ export function NewEventView() {
     error?: string;
   }>({ organizationId: null, status: 'idle', venues: [] });
   const [venueLoadNonce, setVenueLoadNonce] = React.useState(0);
+  const [hydrated, setHydrated] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const [errorField, setErrorField] = React.useState<string>();
@@ -162,6 +163,9 @@ export function NewEventView() {
   const selectedVenueAvailable =
     !venueId || savedVenues.some((savedVenue) => savedVenue.id === venueId);
 
+  React.useEffect(() => {
+    setHydrated(true);
+  }, []);
   React.useEffect(() => {
     const defaults = organizations.find(
       (organization) => organization.id === organizationId,
@@ -427,6 +431,7 @@ export function NewEventView() {
               >
                 <input
                   className="sr-only"
+                  disabled={!hydrated}
                   type="radio"
                   name="startingPoint"
                   value={point.id}
@@ -455,6 +460,7 @@ export function NewEventView() {
             <label className="space-y-2 sm:col-span-2" htmlFor="new-event-title">
               <span className="text-sm font-medium">Title</span>
               <Input
+                disabled={!hydrated}
                 id="new-event-title"
                 ref={(node) => {
                   fieldRefs.current['new-event-title'] = node;
@@ -732,7 +738,7 @@ export function NewEventView() {
           <Button type="button" variant="outline" onClick={() => router.push(routes.events)}>
             Cancel
           </Button>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={!hydrated || submitting}>
             {submitting ? 'Creating draft…' : 'Create draft'}
           </Button>
         </div>
