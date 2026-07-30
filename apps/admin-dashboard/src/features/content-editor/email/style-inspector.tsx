@@ -270,13 +270,52 @@ function ImageAlignmentControls({ context }: { context: InspectorNodeContext }) 
   );
 }
 
+function labelNativeInspectorControls(root: HTMLElement) {
+  const controls = root.querySelectorAll<HTMLElement>(
+    '[data-re-inspector-color-trigger], [data-re-inspector-color-hex], [data-re-inspector-input]',
+  );
+  for (const control of controls) {
+    if (control.getAttribute('aria-label') || control.getAttribute('aria-labelledby')) continue;
+    const row = control.closest<HTMLElement>('[data-re-inspector-prop-row]');
+    const section = row?.closest<HTMLElement>('[data-re-inspector-section]');
+    const sectionLabel = section
+      ?.querySelector<HTMLElement>('[data-re-inspector-section-header] [data-re-inspector-text]')
+      ?.textContent?.trim();
+    const propertyLabel = row
+      ?.querySelector<HTMLElement>('[data-re-inspector-label]')
+      ?.textContent?.trim();
+    const controlLabel = control.hasAttribute('data-re-inspector-color-trigger')
+      ? 'picker'
+      : control.hasAttribute('data-re-inspector-color-hex')
+        ? 'hex value'
+        : 'value';
+    control.setAttribute(
+      'aria-label',
+      [sectionLabel, propertyLabel, controlLabel].filter(Boolean).join(' ') ||
+        'Style inspector value',
+    );
+  }
+}
+
 export function StyleInspector({ onUploadImage }: StyleInspectorProps) {
+  const inspectorRef = React.useRef<HTMLElement>(null);
+
+  React.useEffect(() => {
+    const inspector = inspectorRef.current;
+    if (!inspector) return;
+    labelNativeInspectorControls(inspector);
+    const observer = new MutationObserver(() => labelNativeInspectorControls(inspector));
+    observer.observe(inspector, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <aside
       aria-label="Email style inspector"
       className="fixed bottom-0 right-0 top-[60px] z-30 hidden w-80 shrink-0 border-l bg-background text-foreground shadow-xl lg:flex xl:w-[22rem]"
       data-testid="native-email-inspector-host"
       data-tixkit-email-inspector="true"
+      ref={inspectorRef}
     >
       <Inspector.Root aria-label="React Email style inspector" className="flex min-h-0 flex-1">
         <div className="tixkit-email-native-inspector flex min-h-0 flex-1 flex-col">

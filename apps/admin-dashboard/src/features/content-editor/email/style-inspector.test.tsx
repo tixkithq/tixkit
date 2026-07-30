@@ -15,7 +15,39 @@ vi.mock('@react-email/editor/ui', () => ({
     Root: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) =>
       React.createElement('div', props, children),
     Breadcrumb: () => React.createElement('span', null, 'Body'),
-    Document: () => React.createElement('section', null, 'Document styles'),
+    Document: () =>
+      React.createElement(
+        'section',
+        { 'data-re-inspector-section': '' },
+        React.createElement(
+          'div',
+          { 'data-re-inspector-section-header': '' },
+          React.createElement('span', { 'data-re-inspector-text': '' }, 'Background'),
+        ),
+        React.createElement(
+          'div',
+          { 'data-re-inspector-prop-row': '' },
+          React.createElement('label', { 'data-re-inspector-label': '' }, 'Color'),
+          React.createElement('input', {
+            'data-re-inspector-color-trigger': '',
+            type: 'color',
+          }),
+          React.createElement('input', {
+            'data-re-inspector-color-hex': '',
+            type: 'text',
+          }),
+        ),
+        React.createElement(
+          'div',
+          { 'data-re-inspector-prop-row': '' },
+          React.createElement('label', { 'data-re-inspector-label': '' }, 'Padding'),
+          React.createElement('input', {
+            'data-re-inspector-input': '',
+            type: 'text',
+          }),
+        ),
+        'Document styles',
+      ),
     Node: ({
       children,
     }: {
@@ -59,9 +91,12 @@ describe('StyleInspector', () => {
     expect(screen.getByText('Attributes')).toBeInTheDocument();
     expect(screen.getByText('Size')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Image alignment' })).toBeInTheDocument();
-    expect(screen.getByText('Background')).toBeInTheDocument();
+    expect(screen.getAllByText('Background')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: /Edit theme/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Global CSS')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Background Color picker')).toBeInTheDocument();
+    expect(screen.getByLabelText('Background Color hex value')).toBeInTheDocument();
+    expect(screen.getByLabelText('Background Padding value')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Right' }));
     expect(inspectorState.setAttr).toHaveBeenCalledWith('alignment', 'right');

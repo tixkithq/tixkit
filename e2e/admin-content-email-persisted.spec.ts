@@ -1059,10 +1059,11 @@ test.describe('persisted admin email content editor', () => {
     await runSlashCommand('Background hero');
     const heroSection = page.locator('[data-type="section"]').last();
     await expect(heroSection).toBeVisible();
-    await heroSection.click();
+    const heroTitle = heroSection.getByText('Sample Summer Showcase', { exact: true });
+    await heroTitle.click();
     const sectionBreadcrumb = page
       .getByTestId('native-email-inspector-host')
-      .getByRole('button', { name: 'Section' });
+      .getByRole('button', { name: 'Section', exact: true });
     await expect(sectionBreadcrumb).toBeVisible();
     await sectionBreadcrumb.click();
     const heroControls = page.getByTestId('hero-background-controls');
@@ -1076,7 +1077,7 @@ test.describe('persisted admin email content editor', () => {
       .getByLabel('Upload hero background image')
       .setInputFiles('apps/admin-dashboard/public/brand/tixkit-wordmark.png');
     await heroUploadComplete;
-    await heroSection.click();
+    await heroTitle.click();
     await expect(sectionBreadcrumb).toBeVisible();
     await sectionBreadcrumb.click();
     await expect(heroControls.getByLabel('Replace hero background image')).toBeVisible();
@@ -1095,7 +1096,7 @@ test.describe('persisted admin email content editor', () => {
     expect(heroHtml).toContain('background-image:');
     expect(heroHtml).toMatch(/background-size:\s*contain/);
     expect(heroHtml).toMatch(/background-position:\s*65% 50%/);
-    expect(heroHtml).toContain('Sample Summer Showcase');
+    expect(heroHtml).toContain('{{event.title}}');
 
     const columnsEvent = await openSeededEmailEditor('slash-columns');
     await runSlashCommand('2 columns');

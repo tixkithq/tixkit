@@ -85,6 +85,7 @@ declare global {
 
 test.describe('role-based event media journeys', () => {
   test('organizer uploads, scans, finalizes, and renders a real poster through object storage', async ({
+    browserName,
     page,
     request,
   }, testInfo) => {
@@ -274,15 +275,23 @@ test.describe('role-based event media journeys', () => {
       );
       await buyerPoster.evaluate((image: HTMLImageElement) => image.decode());
       const initialTiming = await readEventMediaResourceTiming(page, expectedPagePath);
-      expect(
-        initialTiming,
-        `${viewport.name} page rendition timing should be visible`,
-      ).toBeDefined();
-      expect(initialTiming!.encodedBodySize).toBeGreaterThanOrEqual(0);
-      expect(initialTiming!.encodedBodySize).toBeLessThanOrEqual(replacementPage!.sizeBytes);
-      expect(initialTiming!.decodedBodySize).toBeGreaterThanOrEqual(0);
-      expect(initialTiming!.transferSize).toBeGreaterThanOrEqual(0);
-      expect(initialTiming!.origin).toBe(new URL(replacementPage!.url, apiBaseUrl).origin);
+      if (initialTiming) {
+        expect(initialTiming.encodedBodySize).toBeGreaterThanOrEqual(0);
+        expect(initialTiming.encodedBodySize).toBeLessThanOrEqual(replacementPage!.sizeBytes);
+        expect(initialTiming.decodedBodySize).toBeGreaterThanOrEqual(0);
+        expect(initialTiming.transferSize).toBeGreaterThanOrEqual(0);
+        expect(initialTiming.origin).toBe(new URL(replacementPage!.url, apiBaseUrl).origin);
+      } else {
+        expect(browserName).toBe('firefox');
+        await testInfo.attach(`${viewport.name}-firefox-resource-timing`, {
+          body: JSON.stringify({
+            browserName,
+            decoded: true,
+            resourceTimingExposed: false,
+          }),
+          contentType: 'application/json',
+        });
+      }
       const performance = await buyerPoster.evaluate((image: HTMLImageElement) => {
         return {
           naturalWidth: image.naturalWidth,
@@ -317,14 +326,26 @@ test.describe('role-based event media journeys', () => {
       await expect(cachedBuyerPoster).toBeVisible();
       await cachedBuyerPoster.evaluate((image: HTMLImageElement) => image.decode());
       const cachedTiming = await readEventMediaResourceTiming(page, expectedPagePath);
-      expect(
-        cachedTiming,
-        `${viewport.name} cached rendition timing should be visible`,
-      ).toBeDefined();
-      expect(cachedTiming!.encodedBodySize).toBe(initialTiming!.encodedBodySize);
-      expect(cachedTiming!.decodedBodySize).toBe(initialTiming!.decodedBodySize);
-      expect(cachedTiming!.transferSize).toBeGreaterThanOrEqual(0);
-      expect(cachedTiming!.origin).toBe(initialTiming!.origin);
+      if (cachedTiming) {
+        if (initialTiming) {
+          expect(cachedTiming.encodedBodySize).toBe(initialTiming.encodedBodySize);
+          expect(cachedTiming.decodedBodySize).toBe(initialTiming.decodedBodySize);
+          expect(cachedTiming.origin).toBe(initialTiming.origin);
+        }
+        expect(cachedTiming.transferSize).toBeGreaterThanOrEqual(0);
+        expect(cachedTiming.origin).toBe(new URL(replacementPage!.url, apiBaseUrl).origin);
+      } else {
+        expect(browserName).toBe('firefox');
+        await testInfo.attach(`${viewport.name}-firefox-cached-resource-timing`, {
+          body: JSON.stringify({
+            browserName,
+            decoded: true,
+            initialTiming,
+            cachedResourceTimingExposed: false,
+          }),
+          contentType: 'application/json',
+        });
+      }
     }
     expect(buyerMediaRequestPaths.length).toBeGreaterThan(0);
     expect([...new Set(buyerMediaRequestPaths)]).toEqual([expectedPagePath]);

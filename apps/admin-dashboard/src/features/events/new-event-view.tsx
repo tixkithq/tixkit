@@ -98,13 +98,7 @@ function browserTimezone(): string {
 
 export function NewEventView() {
   const router = useRouter();
-  const {
-    organizations = [],
-    organizationId,
-    brandId,
-    brands,
-    loading: bootstrapLoading,
-  } = useBootstrap();
+  const { organizations = [], organizationId, brandId, brands } = useBootstrap();
   const { can, loading: permissionsLoading } = usePermissions();
   const [startingPoint, setStartingPoint] = React.useState<StartingPoint>('blank');
   const [sourceEventId, setSourceEventId] = React.useState('');
@@ -738,10 +732,7 @@ export function NewEventView() {
           <Button type="button" variant="outline" onClick={() => router.push(routes.events)}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            disabled={submitting || bootstrapLoading || !organizationId || !brandId}
-          >
+          <Button type="submit" disabled={submitting}>
             {submitting ? 'Creating draft…' : 'Create draft'}
           </Button>
         </div>
