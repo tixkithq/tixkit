@@ -37,6 +37,7 @@ test.describe('State-driven event onboarding', () => {
       if (new URL(page.url()).pathname === '/sign-in') {
         test.skip(true, 'runtime admin server requires live Clerk authentication');
       }
+      await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
 
       await expect(page.getByRole('heading', { name: 'Create an event' })).toBeVisible();
       await expectNoAxeViolations(page, testInfo);
@@ -65,8 +66,8 @@ test.describe('State-driven event onboarding', () => {
     await page.goto(`${adminBaseUrl}/events/new`);
     if (new URL(page.url()).pathname === '/sign-in')
       test.skip(true, 'live Clerk authentication required');
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     const freeRsvp = page.getByRole('radio', { name: /Free RSVP/i });
-    await expect(freeRsvp).toBeEnabled();
     await freeRsvp.focus();
     await page.keyboard.press('Space');
     await expect(freeRsvp).toBeChecked();
@@ -99,6 +100,7 @@ test.describe('State-driven event onboarding', () => {
     }, name);
     expect(created.ok, created.body).toBe(true);
     await page.reload();
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     await page.getByLabel('Saved venue').selectOption({ label: name });
     await expect(page.getByLabel(/Venue name/)).toHaveValue(name);
     await expect(page.getByRole('combobox', { name: 'Timezone' })).toHaveValue('America/Chicago');
@@ -112,6 +114,7 @@ test.describe('State-driven event onboarding', () => {
     if (new URL(page.url()).pathname === '/sign-in') {
       test.skip(true, 'runtime admin server requires live Clerk authentication');
     }
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     const originalTitle = `Conflict recovery ${testInfo.project.name} ${Date.now()}`;
     await page.getByLabel('Title').fill(originalTitle);
     await page.getByRole('button', { name: 'Create draft' }).click();
@@ -179,8 +182,8 @@ test.describe('State-driven event onboarding', () => {
     test.setTimeout(90_000);
     await page.goto(`${adminBaseUrl}/events/new`);
     const title = `Launch workflow ${testInfo.project.name} ${Date.now()}`;
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     const freeRsvp = page.getByRole('radio', { name: /Free RSVP/i });
-    await expect(freeRsvp).toBeEnabled();
     await freeRsvp.focus();
     await page.keyboard.press('Space');
     await expect(freeRsvp).toBeChecked();

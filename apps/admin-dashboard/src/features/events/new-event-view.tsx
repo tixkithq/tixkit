@@ -129,7 +129,6 @@ export function NewEventView() {
     error?: string;
   }>({ organizationId: null, status: 'idle', venues: [] });
   const [venueLoadNonce, setVenueLoadNonce] = React.useState(0);
-  const [hydrated, setHydrated] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const [errorField, setErrorField] = React.useState<string>();
@@ -138,6 +137,7 @@ export function NewEventView() {
   );
   const venueLoadGeneration = React.useRef(0);
   const recoveryPending = React.useRef(false);
+  const formRef = React.useRef<HTMLFormElement | null>(null);
   const fieldRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
   const {
     events: sourceEvents,
@@ -164,7 +164,7 @@ export function NewEventView() {
     !venueId || savedVenues.some((savedVenue) => savedVenue.id === venueId);
 
   React.useEffect(() => {
-    setHydrated(true);
+    formRef.current?.setAttribute('data-hydrated', 'true');
   }, []);
   React.useEffect(() => {
     const defaults = organizations.find(
@@ -420,7 +420,7 @@ export function NewEventView() {
           focused editors.
         </p>
       </header>
-      <form onSubmit={submit} className="space-y-6" noValidate>
+      <form ref={formRef} onSubmit={submit} className="space-y-6" noValidate>
         <fieldset>
           <legend className="mb-3 text-sm font-semibold">Starting point</legend>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -431,7 +431,6 @@ export function NewEventView() {
               >
                 <input
                   className="sr-only"
-                  disabled={!hydrated}
                   type="radio"
                   name="startingPoint"
                   value={point.id}
@@ -460,7 +459,6 @@ export function NewEventView() {
             <label className="space-y-2 sm:col-span-2" htmlFor="new-event-title">
               <span className="text-sm font-medium">Title</span>
               <Input
-                disabled={!hydrated}
                 id="new-event-title"
                 ref={(node) => {
                   fieldRefs.current['new-event-title'] = node;
@@ -738,7 +736,7 @@ export function NewEventView() {
           <Button type="button" variant="outline" onClick={() => router.push(routes.events)}>
             Cancel
           </Button>
-          <Button type="submit" disabled={!hydrated || submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? 'Creating draft…' : 'Create draft'}
           </Button>
         </div>
