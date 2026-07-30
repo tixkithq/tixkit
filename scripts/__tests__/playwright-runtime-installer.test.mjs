@@ -23,10 +23,12 @@ test('installs missing WebKit libraries without sudo and persists the runtime pa
   temporaryDirectories.push(root);
   const binDirectory = join(root, 'bin');
   const runnerTemp = join(root, 'runner-temp');
+  const homeDirectory = join(root, 'home');
   const githubEnv = join(root, 'github-env');
   const callLog = join(root, 'calls');
   await mkdir(binDirectory);
   await mkdir(runnerTemp);
+  await mkdir(homeDirectory);
 
   await writeExecutable(
     join(binDirectory, 'uname'),
@@ -45,6 +47,12 @@ elif [[ "$*" == 'playwright install-deps --dry-run webkit' ]]; then
   printf 'Missing system dependencies (1):\n  libnspr4\n'
   exit 1
 elif [[ "$*" == 'playwright install webkit' ]]; then
+  mkdir -p "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin"
+  cat > "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser" <<'EOF'
+#!/usr/bin/env bash
+[[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]
+EOF
+  chmod 0755 "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser"
   echo install >> "${callLog}"
 else
   exit 2
@@ -83,6 +91,7 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
     `#!/usr/bin/env bash
 [[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]
 [[ "${'${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-}'}" == '1' ]]
+"${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser"
 `,
   );
 
@@ -92,6 +101,7 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
     env: {
       ...process.env,
       GITHUB_ENV: githubEnv,
+      HOME: homeDirectory,
       PATH: `${binDirectory}:${process.env.PATH}`,
       RUNNER_TEMP: runnerTemp,
     },
@@ -102,6 +112,10 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
   assert.match(result.stdout, /Playwright 1\.62\.0 webkit runtime is ready/);
   const persistedEnvironment = await readFile(githubEnv, 'utf8');
   assert.match(persistedEnvironment, /^LD_LIBRARY_PATH=.*playwright-runtime\/root\/usr\/lib/m);
+  assert.match(
+    persistedEnvironment,
+    /^TIXKIT_PLAYWRIGHT_LD_LIBRARY_PATH=.*playwright-runtime\/root\/usr\/lib/m,
+  );
   assert.match(
     persistedEnvironment,
     /^XDG_DATA_DIRS=.*playwright-runtime\/root\/usr\/share:\/usr\/local\/share:\/usr\/share/m,
