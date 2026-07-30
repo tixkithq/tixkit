@@ -82,6 +82,7 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
     join(binDirectory, 'bun'),
     `#!/usr/bin/env bash
 [[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]
+[[ "${'${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-}'}" == '1' ]]
 `,
   );
 
@@ -105,6 +106,7 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
     persistedEnvironment,
     /^XDG_DATA_DIRS=.*playwright-runtime\/root\/usr\/share:\/usr\/local\/share:\/usr\/share/m,
   );
+  assert.match(persistedEnvironment, /^PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1$/m);
   assert.doesNotMatch(result.stdout + result.stderr, /sudo/);
   assert.equal(await readFile(callLog, 'utf8'), 'update\ndry-run\ndownload\ninstall\n');
 });

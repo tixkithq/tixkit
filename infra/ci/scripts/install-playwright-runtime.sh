@@ -119,6 +119,14 @@ if ((dependency_status != 0)); then
   if [[ -n "${GITHUB_ENV:-}" ]]; then
     printf 'XDG_DATA_DIRS=%s\n' "$XDG_DATA_DIRS" >>"$GITHUB_ENV"
   fi
+  if [[ "$browser_name" == 'webkit' ]]; then
+    # Playwright checks dlopen libraries through the system ldconfig cache, which cannot see the
+    # extracted rootless runtime. The browser launch smoke below remains the runtime validation.
+    export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+      printf 'PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1\n' >>"$GITHUB_ENV"
+    fi
+  fi
   echo "Extracted ${#missing_packages[@]} missing Playwright dependency packages into runner-temporary storage"
 fi
 
