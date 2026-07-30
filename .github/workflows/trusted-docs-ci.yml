@@ -103,7 +103,7 @@ jobs:
       - name: Build documentation runtime dependencies
         run: bunx turbo run build --filter=@tixkit/openapi... --filter=@tixkit/docs-core...
       - name: Install Playwright browser
-        run: bunx playwright install --with-deps ${{ matrix.browser }}
+        run: bash infra/ci/scripts/install-playwright-runtime.sh ${{ matrix.browser }}
       - name: Run documentation accessibility and responsive tests
         run: |
           bun run docs:test:e2e -- --project=${{ matrix.browser }}
@@ -142,7 +142,7 @@ jobs:
       - name: Start dashboard test infrastructure
         run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
       - name: Install Playwright browser
-        run: bunx playwright install --with-deps ${{ matrix.browser }}
+        run: bash infra/ci/scripts/install-playwright-runtime.sh ${{ matrix.browser }}
       - name: Run Help, readiness, and developer-console browser tests
         run: bunx playwright test e2e/admin-documentation-platform.spec.ts --project=${{ matrix.browser }}
       - name: Show service logs on failure

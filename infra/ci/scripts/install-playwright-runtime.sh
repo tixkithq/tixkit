@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly playwright_version='1.61.1'
+readonly playwright_version='1.62.0'
+readonly browser_name="${1:-chromium}"
+case "$browser_name" in
+  chromium | firefox | webkit) ;;
+  *)
+    echo "Unsupported Playwright browser: $browser_name" >&2
+    exit 1
+    ;;
+esac
 readonly runner_temp="${RUNNER_TEMP:-${TMPDIR:-/tmp}/tixkit-runner}"
 if [[ "$runner_temp" != /* || "$runner_temp" == *$'\n'* || "$runner_temp" == *'"'* ]]; then
   echo 'Runner temporary directory must be an absolute path without newlines or quotes' >&2
@@ -62,7 +70,7 @@ export APT_CONFIG="$apt_config"
 apt-get update
 
 set +e
-dependency_report="$(bunx playwright install-deps --dry-run chromium 2>&1)"
+dependency_report="$(bunx playwright install-deps --dry-run "$browser_name" 2>&1)"
 dependency_status=$?
 set -e
 
@@ -111,6 +119,6 @@ if ((dependency_status != 0)); then
   echo "Extracted ${#missing_packages[@]} missing Playwright dependency packages into runner-temporary storage"
 fi
 
-bunx playwright install chromium
-bun -e "import { chromium } from '@playwright/test'; const browser = await chromium.launch({ headless: true }); const page = await browser.newPage(); await page.setContent('<main>trusted browser smoke</main>'); if (await page.textContent('main') !== 'trusted browser smoke') process.exit(1); await browser.close();"
-echo "Playwright $playwright_version Chromium runtime is ready"
+bunx playwright install "$browser_name"
+PLAYWRIGHT_BROWSER="$browser_name" bun -e "import * as playwright from '@playwright/test'; const browserType = playwright[process.env.PLAYWRIGHT_BROWSER]; if (!browserType) process.exit(1); const browser = await browserType.launch({ headless: true }); const page = await browser.newPage(); await page.setContent('<main>trusted browser smoke</main>'); if (await page.textContent('main') !== 'trusted browser smoke') process.exit(1); await browser.close();"
+echo "Playwright $playwright_version $browser_name runtime is ready"

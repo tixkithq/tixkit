@@ -8,6 +8,7 @@ RUN apt-get update \
     clang \
     cmake \
     curl \
+    docker-compose-v2 \
     git \
     jq \
     libglu1-mesa \

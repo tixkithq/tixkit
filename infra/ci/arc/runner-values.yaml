@@ -41,7 +41,7 @@ template:
         type: RuntimeDefault
     initContainers:
       - name: init-dind-externals
-        image: localhost:5000/tixkit-arc-runner:2.335.1-flutter@sha256:e49f5d30ab66a2d25c963def78d3dd75982c8978ab23acbb4757e43aa2bec1e9
+        image: localhost:5000/tixkit-arc-runner:2.335.1-compose-v2@sha256:7ab3e9dab63d3536a88e06180b844891b1d009282096fd6cc22d8c00aff72525
         command:
           - cp
           - -r
@@ -100,7 +100,7 @@ template:
             ephemeral-storage: 80Gi
     containers:
       - name: runner
-        image: localhost:5000/tixkit-arc-runner:2.335.1-flutter@sha256:e49f5d30ab66a2d25c963def78d3dd75982c8978ab23acbb4757e43aa2bec1e9
+        image: localhost:5000/tixkit-arc-runner:2.335.1-compose-v2@sha256:7ab3e9dab63d3536a88e06180b844891b1d009282096fd6cc22d8c00aff72525
         command:
           - /home/runner/run.sh
         env:
