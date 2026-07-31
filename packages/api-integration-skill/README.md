@@ -21,7 +21,7 @@ Install the packed package from an authoritative Tixkit release workspace. Publi
 ```bash
 tixkit-api-skill \
   --release-root ./artifacts/api \
-  --api-version 2026-08-24 \
+  --api-version 2026-09-04 \
   --output ./generated-skills
 ```
 
