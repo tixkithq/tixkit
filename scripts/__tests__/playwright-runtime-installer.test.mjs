@@ -29,6 +29,13 @@ test('installs missing WebKit libraries without sudo and persists the runtime pa
   await mkdir(binDirectory);
   await mkdir(runnerTemp);
   await mkdir(homeDirectory);
+  await mkdir(join(homeDirectory, '.cache/ms-playwright/webkit-stale/minibrowser-wpe/bin'), {
+    recursive: true,
+  });
+  await writeExecutable(
+    join(homeDirectory, '.cache/ms-playwright/webkit-stale/minibrowser-wpe/bin/MiniBrowser'),
+    '#!/usr/bin/env bash\nexit 99\n',
+  );
 
   await writeExecutable(
     join(binDirectory, 'uname'),
@@ -89,6 +96,10 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
   await writeExecutable(
     join(binDirectory, 'bun'),
     `#!/usr/bin/env bash
+if [[ "$*" == *'webkit.executablePath()'* ]]; then
+  echo "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser"
+  exit 0
+fi
 [[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]
 [[ "${'${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-}'}" == '1' ]]
 "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser"

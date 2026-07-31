@@ -137,13 +137,20 @@ bunx playwright install "$browser_name"
 if [[ "$browser_name" == 'webkit' ]]; then
   readonly browser_cache="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
   mapfile -t mini_browsers < <(
-    find "$browser_cache" -path '*/webkit-*/minibrowser-*/bin/MiniBrowser' -type f -print
+    bun -e "import { webkit } from '@playwright/test'; console.log(webkit.executablePath());"
   )
   if ((${#mini_browsers[@]} != 1)); then
-    echo 'Installed WebKit runtime must contain exactly one MiniBrowser executable' >&2
+    echo 'Playwright must resolve exactly one installed WebKit MiniBrowser executable' >&2
     exit 1
   fi
   readonly mini_browser="${mini_browsers[0]}"
+  case "$mini_browser" in
+    "$browser_cache"/*) ;;
+    *)
+      echo 'Resolved WebKit MiniBrowser executable is outside the browser cache' >&2
+      exit 1
+      ;;
+  esac
   readonly mini_browser_real="${mini_browser}.real"
   if [[ ! -e "$mini_browser_real" ]]; then
     mv -- "$mini_browser" "$mini_browser_real"
