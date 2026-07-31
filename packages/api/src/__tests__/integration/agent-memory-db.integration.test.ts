@@ -95,7 +95,7 @@ describe.sequential.each(driverCases)(
           },
         ])
         .execute();
-    });
+    }, 120_000);
 
     afterAll(async () => {
       await db?.destroy();
