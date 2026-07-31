@@ -194,7 +194,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/public/tixkit-widget.js",
         "export": "issueWidgetRuntimeUrl",
-        "sha256": "0eaf285cdf882a9baa24c1c17a9263fdb049c1ba51085d09adc83736abe9116c"
+        "sha256": "03ccec846d837ce990d1e23e80432b5ffe43cdd1000392269e0c19c384707098"
       },
       "allowedSinks": [
         {
