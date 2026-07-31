@@ -55,6 +55,11 @@ elif [[ "$*" == 'playwright install-deps --dry-run webkit' ]]; then
   exit 1
 elif [[ "$*" == 'playwright install webkit' ]]; then
   mkdir -p "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin"
+  cat > "${homeDirectory}/.cache/ms-playwright/webkit-2336/pw_run.sh" <<'EOF'
+#!/usr/bin/env bash
+exec "$(dirname "$0")/minibrowser-wpe/bin/MiniBrowser" "$@"
+EOF
+  chmod 0755 "${homeDirectory}/.cache/ms-playwright/webkit-2336/pw_run.sh"
   cat > "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser" <<'EOF'
 #!/usr/bin/env bash
 [[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]
@@ -97,7 +102,7 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
     join(binDirectory, 'bun'),
     `#!/usr/bin/env bash
 if [[ "$*" == *'webkit.executablePath()'* ]]; then
-  echo "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser"
+  echo "${homeDirectory}/.cache/ms-playwright/webkit-2336/pw_run.sh"
   exit 0
 fi
 [[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]

@@ -136,21 +136,34 @@ fi
 bunx playwright install "$browser_name"
 if [[ "$browser_name" == 'webkit' ]]; then
   readonly browser_cache="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
-  mapfile -t mini_browsers < <(
+  mapfile -t webkit_launchers < <(
     bun -e "import { webkit } from '@playwright/test'; console.log(webkit.executablePath());"
   )
-  if ((${#mini_browsers[@]} != 1)); then
-    echo 'Playwright must resolve exactly one installed WebKit MiniBrowser executable' >&2
+  if ((${#webkit_launchers[@]} != 1)); then
+    echo 'Playwright must resolve exactly one installed WebKit launcher' >&2
     exit 1
   fi
-  readonly mini_browser="${mini_browsers[0]}"
-  case "$mini_browser" in
+  readonly webkit_launcher="${webkit_launchers[0]}"
+  case "$webkit_launcher" in
     "$browser_cache"/*) ;;
     *)
-      echo 'Resolved WebKit MiniBrowser executable is outside the browser cache' >&2
+      echo 'Resolved WebKit launcher is outside the browser cache' >&2
       exit 1
       ;;
   esac
+  if [[ ! -f "$webkit_launcher" || -L "$webkit_launcher" || ! -O "$webkit_launcher" ]]; then
+    echo 'Resolved WebKit launcher must be an owned, regular file' >&2
+    exit 1
+  fi
+  readonly webkit_root="${webkit_launcher%/*}"
+  mapfile -t mini_browsers < <(
+    find "$webkit_root" -path '*/minibrowser-*/bin/MiniBrowser' -type f -print
+  )
+  if ((${#mini_browsers[@]} != 1)); then
+    echo 'Active WebKit runtime must contain exactly one MiniBrowser executable' >&2
+    exit 1
+  fi
+  readonly mini_browser="${mini_browsers[0]}"
   readonly mini_browser_real="${mini_browser}.real"
   if [[ ! -e "$mini_browser_real" ]]; then
     mv -- "$mini_browser" "$mini_browser_real"
