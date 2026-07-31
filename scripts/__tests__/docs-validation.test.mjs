@@ -222,7 +222,6 @@ test('self-hosted authentication guide preserves the deployable provider contrac
     'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
     'CLERK_WEBHOOK_SECRET',
     'AUTH_PROVIDER=oidc',
-    'NEXT_PUBLIC_AUTH_PROVIDER=oidc',
     'OIDC_ISSUER_URL',
     'OIDC_AUDIENCE',
     'user.created',
@@ -241,4 +240,7 @@ test('self-hosted authentication guide preserves the deployable provider contrac
   assert.match(guide, /never.*email match/is);
   assert.match(guide, /verifier accepts one active secret/is);
   assert.match(guide, /AUTH_PROVIDER.*NEXT_PUBLIC_AUTH_PROVIDER/is);
+  assert.match(guide, /OIDC mode supplies API authentication only/is);
+  assert.match(guide, /bundled organizer dashboard.*rejects OIDC/is);
+  assert.doesNotMatch(guide, /^NEXT_PUBLIC_AUTH_PROVIDER=oidc$/mu);
 });
