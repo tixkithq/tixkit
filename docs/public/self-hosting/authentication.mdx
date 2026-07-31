@@ -15,17 +15,17 @@ related:
   - /operators/team-and-permissions
 ---
 
-Tixkit supports `clerk`, `oidc`, and the development-only `dev` provider. Product authorization always comes from Tixkit tenant memberships and permission grants; an identity-provider role or metadata value never grants product access by itself.
+The Tixkit API supports `clerk`, `oidc`, and the development-only `dev` provider. The bundled organizer dashboard supports Clerk in deployed environments and rejects OIDC because it does not include a generic OIDC browser client. Product authorization always comes from Tixkit tenant memberships and permission grants; an identity-provider role or metadata value never grants product access by itself.
 
 ## Select a provider
 
 | `AUTH_PROVIDER` | Intended use                                       | Production behavior                                                  |
 | --------------- | -------------------------------------------------- | -------------------------------------------------------------------- |
 | `clerk`         | Clerk sessions for the organizer dashboard and API | Requires all Clerk keys and a verified identity-sync webhook.        |
-| `oidc`          | Bearer JWTs from a standard OIDC issuer            | Requires an HTTPS issuer, audience, and pre-linked Tixkit profiles.  |
+| `oidc`          | API bearer JWTs from a standard OIDC issuer        | API-only; the bundled dashboard and Production chart reject OIDC.    |
 | `dev`           | Deterministic local development principal          | Refuses to start outside development and is forbidden in production. |
 
-Development defaults to `dev` when `AUTH_PROVIDER` is unset. Other environments default to `clerk`. Set `NEXT_PUBLIC_AUTH_PROVIDER` to the same value anywhere the admin browser bundle is deployed; never let the browser and API select different providers.
+Development defaults to `dev` when `AUTH_PROVIDER` is unset. Other environments default to `clerk`. Deployed environments that include the bundled admin browser must use Clerk for both `AUTH_PROVIDER` and `NEXT_PUBLIC_AUTH_PROVIDER`. API-only OIDC deployments must use a separate client that obtains and sends issuer bearer tokens.
 
 ## Configure Clerk
 
@@ -58,7 +58,6 @@ OIDC mode verifies API bearer JWTs against the issuer JWKS and the configured au
 
 ```bash
 AUTH_PROVIDER=oidc
-NEXT_PUBLIC_AUTH_PROVIDER=oidc
 OIDC_ISSUER_URL=https://id.example.com
 OIDC_AUDIENCE=tixkit-api
 ```
@@ -67,7 +66,7 @@ The token must contain a stable `sub`. Tixkit looks up the external identity as 
 
 The optional `org_id` or `organization_id` claim must match an accepted Tixkit organization membership. When one subject has profiles in multiple tenants and no organization claim selects one, the caller must send `X-Tenant-Id`; otherwise authentication fails as ambiguous. Suspended profiles, absent mappings, invalid issuer/audience, unaccepted memberships, and missing permission grants fail closed. The optional `tenant_id` claim is only a hint and does not override database grants.
 
-OIDC mode supplies API authentication. Before using it for the organizer dashboard, verify that your deployment's browser sign-in integration obtains and forwards the expected bearer token; the repository does not infer a browser session from an arbitrary issuer.
+OIDC mode supplies API authentication only. The bundled organizer dashboard does not obtain arbitrary issuer tokens, its runtime configuration rejects OIDC, and the Production Helm chart therefore rejects `auth.provider=oidc`. Use Clerk when deploying that dashboard. An API-only deployment may use OIDC with a separately implemented client that obtains and forwards the expected bearer token; the repository does not infer a browser session from an arbitrary issuer.
 
 ## Rotate credentials safely
 
