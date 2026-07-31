@@ -42,7 +42,7 @@ Keep API keys server-side; enforce tenant, organization, brand, and permission s
 
 ## Compatibility
 
-Routes must remain synchronized with `@tixkit/openapi`, SDK API version `2026-01-01`, and dashboard client types.
+Routes must remain synchronized with `@tixkit/openapi`, SDK API version `2026-09-04`, and dashboard client types.
 
 ## Related guides
 
