@@ -285,6 +285,35 @@ describe('eventPagePuckConfig', () => {
     expect(container.innerHTML).not.toContain(unsafeImageUrl);
   });
 
+  it('renders an owned runtime media rendition over a Compact HTTP origin', () => {
+    const ownedImageUrl =
+      'http://compact.local:4200/v1/public/event-media/renditions/emr_public_poster';
+    render(
+      <EventPageRuntimeProvider
+        value={{
+          brandName: 'Tixkit',
+          brandFooterLabel: 'Powered by Tixkit',
+          tickets: [],
+          eventMedia: {
+            poster: { url: ownedImageUrl, altText: 'Compact event poster' },
+          },
+          interactive: true,
+        }}
+      >
+        <MediaBlock
+          id="compact-owned-poster"
+          imageUrl={eventPageMediaReference('poster')}
+          imageAlt=""
+        />
+      </EventPageRuntimeProvider>,
+    );
+
+    expect(screen.getByRole('img', { name: 'Compact event poster' })).toHaveAttribute(
+      'src',
+      ownedImageUrl,
+    );
+  });
+
   it('exposes complete discovery settings and editable collection content', () => {
     expect(eventPagePuckConfig.root?.fields).toEqual(
       expect.objectContaining({

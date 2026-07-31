@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly playwright_version='1.61.1'
+readonly playwright_version='1.62.0'
+readonly browser_name="${1:-chromium}"
+case "$browser_name" in
+  chromium | firefox | webkit) ;;
+  *)
+    echo "Unsupported Playwright browser: $browser_name" >&2
+    exit 1
+    ;;
+esac
 readonly runner_temp="${RUNNER_TEMP:-${TMPDIR:-/tmp}/tixkit-runner}"
 if [[ "$runner_temp" != /* || "$runner_temp" == *$'\n'* || "$runner_temp" == *'"'* ]]; then
   echo 'Runner temporary directory must be an absolute path without newlines or quotes' >&2
@@ -62,7 +70,7 @@ export APT_CONFIG="$apt_config"
 apt-get update
 
 set +e
-dependency_report="$(bunx playwright install-deps --dry-run chromium 2>&1)"
+dependency_report="$(bunx playwright install-deps --dry-run "$browser_name" 2>&1)"
 dependency_status=$?
 set -e
 
@@ -75,6 +83,9 @@ if ((dependency_status != 0)); then
     printf '%s\n' "$dependency_report" >&2
     echo 'Playwright dependency detection failed without a parseable missing-package list' >&2
     exit 1
+  fi
+  if [[ "$browser_name" == 'webkit' ]]; then
+    missing_packages+=('gstreamer1.0-libav')
   fi
 
   (
@@ -100,17 +111,78 @@ if ((dependency_status != 0)); then
   if ((${#library_dirs[@]} > 0)); then
     runtime_library_path="$(IFS=:; echo "${library_dirs[*]}")"
     export LD_LIBRARY_PATH="$runtime_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export TIXKIT_PLAYWRIGHT_LD_LIBRARY_PATH="$runtime_library_path"
     if [[ -n "${GITHUB_ENV:-}" ]]; then
       printf 'LD_LIBRARY_PATH=%s\n' "$LD_LIBRARY_PATH" >>"$GITHUB_ENV"
+      printf 'TIXKIT_PLAYWRIGHT_LD_LIBRARY_PATH=%s\n' \
+        "$TIXKIT_PLAYWRIGHT_LD_LIBRARY_PATH" >>"$GITHUB_ENV"
     fi
   fi
   export XDG_DATA_DIRS="$library_root/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
   if [[ -n "${GITHUB_ENV:-}" ]]; then
     printf 'XDG_DATA_DIRS=%s\n' "$XDG_DATA_DIRS" >>"$GITHUB_ENV"
   fi
+  if [[ "$browser_name" == 'webkit' ]]; then
+    # Playwright checks dlopen libraries through the system ldconfig cache, which cannot see the
+    # extracted rootless runtime. The browser launch smoke below remains the runtime validation.
+    export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+      printf 'PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1\n' >>"$GITHUB_ENV"
+    fi
+  fi
   echo "Extracted ${#missing_packages[@]} missing Playwright dependency packages into runner-temporary storage"
 fi
 
-bunx playwright install chromium
-bun -e "import { chromium } from '@playwright/test'; const browser = await chromium.launch({ headless: true }); const page = await browser.newPage(); await page.setContent('<main>trusted browser smoke</main>'); if (await page.textContent('main') !== 'trusted browser smoke') process.exit(1); await browser.close();"
-echo "Playwright $playwright_version Chromium runtime is ready"
+bunx playwright install "$browser_name"
+if [[ "$browser_name" == 'webkit' ]]; then
+  readonly browser_cache="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+  mapfile -t webkit_launchers < <(
+    bun -e "import { webkit } from '@playwright/test'; console.log(webkit.executablePath());"
+  )
+  if ((${#webkit_launchers[@]} != 1)); then
+    echo 'Playwright must resolve exactly one installed WebKit launcher' >&2
+    exit 1
+  fi
+  readonly webkit_launcher="${webkit_launchers[0]}"
+  case "$webkit_launcher" in
+    "$browser_cache"/*) ;;
+    *)
+      echo 'Resolved WebKit launcher is outside the browser cache' >&2
+      exit 1
+      ;;
+  esac
+  if [[ ! -f "$webkit_launcher" || -L "$webkit_launcher" || ! -O "$webkit_launcher" ]]; then
+    echo 'Resolved WebKit launcher must be an owned, regular file' >&2
+    exit 1
+  fi
+  readonly webkit_root="${webkit_launcher%/*}"
+  mapfile -t mini_browsers < <(
+    find "$webkit_root" -path '*/minibrowser-*/bin/MiniBrowser' -type f -print
+  )
+  if ((${#mini_browsers[@]} != 1)); then
+    echo 'Active WebKit runtime must contain exactly one MiniBrowser executable' >&2
+    exit 1
+  fi
+  readonly mini_browser="${mini_browsers[0]}"
+  readonly mini_browser_real="${mini_browser}.real"
+  if [[ ! -e "$mini_browser_real" ]]; then
+    mv -- "$mini_browser" "$mini_browser_real"
+  fi
+  if [[ ! -f "$mini_browser_real" || -L "$mini_browser_real" || ! -O "$mini_browser_real" ]]; then
+    echo 'Installed WebKit MiniBrowser executable must be an owned, regular file' >&2
+    exit 1
+  fi
+  cat >"$mini_browser" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -z "${TIXKIT_PLAYWRIGHT_LD_LIBRARY_PATH:-}" ]]; then
+  echo 'Rootless WebKit library path is unavailable' >&2
+  exit 1
+fi
+export LD_LIBRARY_PATH="$TIXKIT_PLAYWRIGHT_LD_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "${0}.real" "$@"
+EOF
+  chmod 0755 "$mini_browser"
+fi
+PLAYWRIGHT_BROWSER="$browser_name" bun -e "import * as playwright from '@playwright/test'; const browserType = playwright[process.env.PLAYWRIGHT_BROWSER]; if (!browserType) process.exit(1); const browser = await browserType.launch({ headless: true }); const page = await browser.newPage(); await page.setContent('<main>trusted browser smoke</main>'); if (await page.textContent('main') !== 'trusted browser smoke') process.exit(1); await browser.close();"
+echo "Playwright $playwright_version $browser_name runtime is ready"

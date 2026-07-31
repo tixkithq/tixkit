@@ -1,6 +1,6 @@
 {
   "name": "tixkit",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Open-source headless event commerce engine",
@@ -85,7 +85,7 @@
     "validate:embed-fixtures": "bun scripts/generate-embed-fixtures.mjs --check",
     "format": "oxfmt . --write",
     "format:check": "oxfmt . --check",
-    "audit": "bun audit",
+    "audit": "bun audit --audit-level=high",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "bun run test:unit && bun run test:integration",

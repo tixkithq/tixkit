@@ -833,7 +833,7 @@ describe('third-party contract profiles', () => {
     }> = [];
     const contractInput = {
       conformanceTarget: 'platform-api' as const,
-      apiVersion: '2026-09-03',
+      apiVersion: '2026-09-04',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: `tk_agent_${'e'.repeat(48)}`,
       agentClientSecret: 'secret_value',
@@ -1449,7 +1449,7 @@ describe('third-party contract profiles', () => {
       evidence: {
         profile: 'agent-platform',
         conformanceTarget: 'platform-api',
-        apiVersion: '2026-09-03',
+        apiVersion: '2026-09-04',
         agentProtocolVersion: '2026-07-22',
         agentPlatformProtocolVersion: '2026-07-27',
         principalKind: 'third_party',
@@ -1921,7 +1921,7 @@ describe('third-party contract profiles', () => {
 
     const invalidTarget = await runAgentPlatformContract({
       conformanceTarget: 'managed-cloud' as never,
-      apiVersion: '2026-09-03',
+      apiVersion: '2026-09-04',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: 'agent_client',
       agentClientSecret: 'agent_secret',

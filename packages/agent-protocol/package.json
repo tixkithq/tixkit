@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/agent-protocol",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Shared agent principal, action, plan, approval, authorization, and audit safety contracts for Tixkit",
   "license": "MIT",
   "repository": {

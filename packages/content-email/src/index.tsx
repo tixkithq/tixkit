@@ -1382,25 +1382,114 @@ function escapeHtmlAttribute(value: string): string {
 }
 
 function plainTextFromHtml(html: string): string {
-  return html
-    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
-    .replace(
-      /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
-      (_match, href: string, label: string) => `${label} (${href})`,
-    )
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|section|article|h[1-6]|li|tr)>/gi, '\n')
-    .replace(/<[^>]*>/g, ' ')
+  return extractTextFromHtml(html)
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/gi, '&')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
+}
+
+function extractTextFromHtml(html: string): string {
+  const lowerHtml = html.toLowerCase();
+  const blockTags = new Set([
+    'article',
+    'div',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'li',
+    'p',
+    'section',
+    'tr',
+  ]);
+  const anchorHrefs: string[] = [];
+  let result = '';
+  let index = 0;
+
+  while (index < html.length) {
+    if (html[index] !== '<') {
+      result += html[index];
+      index += 1;
+      continue;
+    }
+
+    if (html.startsWith('<!--', index)) {
+      const commentEnd = html.indexOf('-->', index + 4);
+      index = commentEnd === -1 ? html.length : commentEnd + 3;
+      continue;
+    }
+
+    const tagEnd = findHtmlTagEnd(html, index + 1);
+    if (tagEnd === -1) {
+      result += ' ';
+      break;
+    }
+    const tag = html.slice(index + 1, tagEnd);
+    const tagMatch = tag.match(/^\s*(\/?)\s*([a-z][a-z0-9-]*)/i);
+    if (!tagMatch) {
+      result += ' ';
+      index = tagEnd + 1;
+      continue;
+    }
+
+    const closing = tagMatch[1] === '/';
+    const tagName = tagMatch[2].toLowerCase();
+    if (!closing && (tagName === 'script' || tagName === 'style')) {
+      const closingStart = lowerHtml.indexOf(`</${tagName}`, tagEnd + 1);
+      if (closingStart === -1) break;
+      const closingEnd = findHtmlTagEnd(html, closingStart + 2 + tagName.length);
+      index = closingEnd === -1 ? html.length : closingEnd + 1;
+      result += ' ';
+      continue;
+    }
+
+    if (!closing && tagName === 'a') {
+      anchorHrefs.push(readHtmlAttribute(tag, 'href') ?? '');
+    } else if (closing && tagName === 'a') {
+      const href = anchorHrefs.pop();
+      if (href) result += ` (${href})`;
+    } else if (!closing && tagName === 'br') {
+      result += '\n';
+    } else if (closing && blockTags.has(tagName)) {
+      result += '\n';
+    }
+    index = tagEnd + 1;
+  }
+
+  return result;
+}
+
+function findHtmlTagEnd(html: string, start: number): number {
+  let quote: '"' | "'" | null = null;
+  for (let index = start; index < html.length; index += 1) {
+    const character = html[index];
+    if (quote) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '>') {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function readHtmlAttribute(tag: string, name: string): string | null {
+  const attribute = new RegExp(
+    `(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>]+))`,
+    'i',
+  ).exec(tag);
+  return attribute?.[1] ?? attribute?.[2] ?? attribute?.[3] ?? null;
 }
 
 function sampleContext(): MergeTagContext {

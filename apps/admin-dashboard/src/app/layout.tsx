@@ -22,6 +22,11 @@ export const metadata = {
 
 export const dynamic = 'force-dynamic';
 
+function runtimeStyleNonceBootstrap(nonce: string | undefined): string {
+  if (!nonce) return '';
+  return `(()=>{const nonce=document.currentScript?.nonce;if(!nonce)return;const createElement=Document.prototype.createElement;Document.prototype.createElement=function(tagName,options){const element=createElement.call(this,tagName,options);if(String(tagName).toLowerCase()==='style')element.setAttribute('nonce',nonce);return element;};})();`;
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection();
   const runtimeConfig = parseAdminRuntimeConfig();
@@ -51,10 +56,21 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       suppressHydrationWarning
       {...runtimeConfigDataAttributes(runtimeConfig)}
     >
+      <head>
+        <script
+          id="runtime-style-nonce-bootstrap"
+          nonce={nonce}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{
+            __html: runtimeStyleNonceBootstrap(nonce),
+          }}
+        />
+      </head>
       <body>
         <script
           id="zod-jitless-config"
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html:
               'globalThis.__zod_globalConfig={...(globalThis.__zod_globalConfig||{}),jitless:true}',
@@ -67,12 +83,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         ) : (
           content
         )}
-        {runtimeConfig.deploymentProfile === 'development' ? (
+        {runtimeConfig.deploymentProfile === 'development' &&
+        process.env.TIXKIT_DISABLE_REFINE_INJECTOR !== '1' ? (
           <script
             id="transitions-refine-injector"
             type="module"
             src="http://localhost:7331/inject.js"
             nonce={nonce}
+            suppressHydrationWarning
           />
         ) : null}
       </body>

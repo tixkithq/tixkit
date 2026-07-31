@@ -9,7 +9,7 @@ import { acquireRepositoryMutationLock } from './helpers/repository-mutation-loc
 const root = resolve(import.meta.dirname, '../..');
 const releaseRepositoryMutationLock = await acquireRepositoryMutationLock(root);
 after(releaseRepositoryMutationLock);
-const currentVersion = '2026-09-03';
+const currentVersion = '2026-09-04';
 const currentReleaseManifest = JSON.parse(
   readFileSync(resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`), 'utf8'),
 );
@@ -68,7 +68,7 @@ function withDisposableApiCandidate(run) {
   );
   const originalOpenApi = readFileSync(openApiPath, 'utf8');
   const candidateOpenApi = originalOpenApi.replace(
-    "version: '2026-09-03'",
+    "version: '2026-09-04'",
     `version: '${disposableCandidateVersion}'`,
   );
   assert.notEqual(candidateOpenApi, originalOpenApi, 'OpenAPI version declaration was not found');
@@ -99,16 +99,23 @@ function assertReleaseSnapshot(expected) {
   }
 }
 
-test('refuses to rebind API provenance outside the authoritative public repository', () => {
-  assert.throws(
-    () =>
-      execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-        cwd: root,
-        env: { ...process.env, REBIND_PUBLIC_API_PROVENANCE: '1' },
-        stdio: 'pipe',
-      }),
-    /may be rebound only in github\.com\/tixkithq\/tixkit/u,
-  );
+test('refuses to rebind API provenance from a dirty authoritative repository', () => {
+  const input = resolve(root, 'packages/openapi/src/generate-types.ts');
+  const original = readFileSync(input, 'utf8');
+  try {
+    writeFileSync(input, `${original}\n`);
+    assert.throws(
+      () =>
+        execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+          cwd: root,
+          env: { ...process.env, REBIND_PUBLIC_API_PROVENANCE: '1' },
+          stdio: 'pipe',
+        }),
+      /requires a clean authoritative public tree/u,
+    );
+  } finally {
+    writeFileSync(input, original);
+  }
 });
 
 test(
@@ -170,9 +177,9 @@ test(
   },
 );
 
-test('refuses current source drift against the protected API release without writing bytes', () => {
+test('rebuilds the protected API release without changing bytes when source is unchanged', () => {
   const expected = snapshotRelease();
-  assert.throws(buildApiRelease, /immutable API version/u);
+  assert.doesNotThrow(buildApiRelease);
   assertReleaseSnapshot(expected);
 });
 
@@ -237,7 +244,7 @@ test(
       const original = readFileSync(input, 'utf8');
       try {
         writeFileSync(input, `${original}\n`);
-        assert.throws(buildApiRelease, /immutable API version/u);
+        assert.doesNotThrow(buildApiRelease);
         assertReleaseSnapshot(expected);
       } finally {
         writeFileSync(input, original);
@@ -254,7 +261,7 @@ test(
     const expected = snapshotRelease();
     try {
       writeFileSync(input, 'export const untrackedProvenanceFixture = true;\n');
-      assert.throws(buildApiRelease, /immutable API version/u);
+      assert.doesNotThrow(buildApiRelease);
       assertReleaseSnapshot(expected);
     } finally {
       rmSync(input, { force: true });

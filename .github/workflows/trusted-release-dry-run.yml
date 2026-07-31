@@ -66,6 +66,8 @@ jobs:
       OTEL_SDK_DISABLED: 'true'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
       - name: Verify GitHub Action refs are pinned
         run: infra/ci/scripts/verify-github-action-pins.sh
       - uses: ./.github/actions/setup-js

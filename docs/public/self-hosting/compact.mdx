@@ -89,6 +89,10 @@ bun run compact:prove -- \
   --out /private/tmp/tixkit-compact-proof-$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
+If port 4000 is occupied, add `--api-port <available-port>`. The proof initializes the fresh
+source-mode environment with that documented host-port override and records the selected port in
+the evidence.
+
 The output directory must be new, outside the repository and beneath a real non-symlink parent. The proof command refuses a dirty, shallow, non-public or already initialized clone, and requires `HEAD` to equal the object currently advertised by the named authoritative public branch or version tag. Its v2 evidence records the remote ref/object, exact commit/tree, host and Docker envelope, all 14 service states, seed persistence, restart, backup/restore, live database/object fingerprints for every negative restore case, clean-file acceptance at the 50 MiB upload limit, EICAR rejection, scanner outage and recovery through the actual API scanner transport, Temporal dependency failure/recovery, upgrade, validation commands and a mode-`0600` transcript. Scanner probe output and daemon metadata are omitted; their bounded command records and checksummed boolean outcomes remain in the proof. The transcript fails closed if it contains generated credentials. A passing local artifact is still not hosted publication, high-availability, legal or Production-profile proof.
 
 ## Trust a portability source

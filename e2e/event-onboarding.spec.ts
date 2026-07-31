@@ -1,6 +1,6 @@
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
-import { adminBaseUrl } from './helpers/env';
+import { adminBaseUrl, apiBaseUrl } from './helpers/env';
 import {
   devBrandId,
   devOrganizationId,
@@ -37,6 +37,7 @@ test.describe('State-driven event onboarding', () => {
       if (new URL(page.url()).pathname === '/sign-in') {
         test.skip(true, 'runtime admin server requires live Clerk authentication');
       }
+      await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
 
       await expect(page.getByRole('heading', { name: 'Create an event' })).toBeVisible();
       await expectNoAxeViolations(page, testInfo);
@@ -65,6 +66,7 @@ test.describe('State-driven event onboarding', () => {
     await page.goto(`${adminBaseUrl}/events/new`);
     if (new URL(page.url()).pathname === '/sign-in')
       test.skip(true, 'live Clerk authentication required');
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     const freeRsvp = page.getByRole('radio', { name: /Free RSVP/i });
     await freeRsvp.focus();
     await page.keyboard.press('Space');
@@ -79,25 +81,21 @@ test.describe('State-driven event onboarding', () => {
 
   test('selects a reusable saved venue and applies its timezone', async ({ page }, testInfo) => {
     const name = `Saved venue ${testInfo.project.name} ${Date.now()}`;
+    const createResponse = await page.request.post(`${apiBaseUrl}/v1/venues`, {
+      headers: {
+        'Idempotency-Key': `e2e-saved-venue-${Date.now()}`,
+      },
+      data: {
+        organizationId: devOrganizationId,
+        name,
+        address: { city: 'Austin', region: 'TX', country: 'US' },
+        timezone: 'America/Chicago',
+      },
+      failOnStatusCode: false,
+    });
+    expect(createResponse.ok(), await createResponse.text()).toBe(true);
     await page.goto(`${adminBaseUrl}/events/new`);
-    const created = await page.evaluate(async (venueName) => {
-      const response = await fetch('http://localhost:4200/v1/venues', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': `e2e-saved-venue-${Date.now()}`,
-        },
-        body: JSON.stringify({
-          organizationId: 'org_dev_local',
-          name: venueName,
-          address: { city: 'Austin', region: 'TX', country: 'US' },
-          timezone: 'America/Chicago',
-        }),
-      });
-      return { ok: response.ok, body: await response.text() };
-    }, name);
-    expect(created.ok, created.body).toBe(true);
-    await page.reload();
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     await page.getByLabel('Saved venue').selectOption({ label: name });
     await expect(page.getByLabel(/Venue name/)).toHaveValue(name);
     await expect(page.getByRole('combobox', { name: 'Timezone' })).toHaveValue('America/Chicago');
@@ -111,11 +109,13 @@ test.describe('State-driven event onboarding', () => {
     if (new URL(page.url()).pathname === '/sign-in') {
       test.skip(true, 'runtime admin server requires live Clerk authentication');
     }
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     const originalTitle = `Conflict recovery ${testInfo.project.name} ${Date.now()}`;
     await page.getByLabel('Title').fill(originalTitle);
     await page.getByRole('button', { name: 'Create draft' }).click();
     await expect(page).toHaveURL(/\/events\/(?!new$)[^/]+$/, { timeout: 30_000 });
     const eventId = new URL(page.url()).pathname.split('/').at(-1)!;
+    await page.waitForLoadState('networkidle');
 
     await page.goto(`${adminBaseUrl}/events/${eventId}/settings#basics`);
     const basics = page.locator('#basics');
@@ -143,24 +143,36 @@ test.describe('State-driven event onboarding', () => {
     expect(remoteUpdate.ok, remoteUpdate.body).toBe(true);
 
     const localTitle = `${originalTitle} local`;
+    const conflictResponse = page.waitForResponse(
+      (response) =>
+        response.url() === `${apiBaseUrl}/v1/events/${eventId}` &&
+        response.request().method() === 'PATCH' &&
+        response.status() === 409,
+    );
     await basics.getByLabel('Title').fill(localTitle);
-    await basics.getByRole('button', { name: 'Save Changes' }).click();
+    await conflictResponse;
     const conflictHeading = page.getByRole('heading', {
       name: 'Choose values for 1 conflicting field',
     });
     await expect(conflictHeading).toBeFocused();
     await expect(page.getByText(`Title: ${localTitle}`)).toBeVisible();
     await expect(page.getByText(`Title: ${remoteTitle}`)).toBeVisible();
+    await page.waitForTimeout(100);
     for (let index = consoleErrors.length - 1; index >= 0; index -= 1) {
       const message = consoleErrors[index] ?? '';
-      if (message.includes('409 (Conflict)') && message.includes(`/v1/events/${eventId}`)) {
+      if (
+        message.includes(`/v1/events/${eventId}`) &&
+        (message.includes('409') || message.includes('Conflict'))
+      ) {
         consoleErrors.splice(index, 1);
       }
     }
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByRole('button', { name: 'Keep my Title change' }).click();
-    await basics.getByRole('button', { name: 'Save Changes' }).click();
+    const saveButton = basics.getByRole('button', { name: 'Save Changes' });
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
     await expect(basics.getByText('Saved', { exact: true })).toBeVisible();
     const persistedTitle = await page.evaluate(async (id) => {
       const response = await fetch(`http://localhost:4200/v1/events/${id}`);
@@ -177,6 +189,7 @@ test.describe('State-driven event onboarding', () => {
     test.setTimeout(90_000);
     await page.goto(`${adminBaseUrl}/events/new`);
     const title = `Launch workflow ${testInfo.project.name} ${Date.now()}`;
+    await expect(page.locator('form[data-hydrated="true"]')).toBeAttached();
     const freeRsvp = page.getByRole('radio', { name: /Free RSVP/i });
     await freeRsvp.focus();
     await page.keyboard.press('Space');
@@ -187,6 +200,7 @@ test.describe('State-driven event onboarding', () => {
     await createDraft.click();
     await expect(page).toHaveURL(/\/events\/(?!new$)[^/]+$/, { timeout: 30_000 });
     const eventId = new URL(page.url()).pathname.split('/').at(-1)!;
+    await page.waitForLoadState('networkidle');
     const suffix = `${testInfo.project.name}-${Date.now()}`;
     await seedPublishedEventPageContent({ event: { id: eventId, title }, suffix });
     await seedPublishedOrderConfirmationContent({ eventId, suffix });

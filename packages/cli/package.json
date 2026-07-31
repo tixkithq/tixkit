@@ -1,6 +1,6 @@
 {
   "name": "tixkit",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": false,
   "type": "module",
   "description": "Tixkit developer-experience CLI: quickstart, setup validation, and local webhook automation",
@@ -49,11 +49,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/content-email": "0.1.0",
-    "@tixkit/db": "0.1.0",
-    "@tixkit/domain": "0.1.0",
+    "@tixkit/content-email": "1.0.0",
+    "@tixkit/db": "1.0.0",
+    "@tixkit/domain": "1.0.0",
     "@tixkit/embed-core": "1.0.0",
-    "@tixkit/migration-core": "0.1.0"
+    "@tixkit/migration-core": "1.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

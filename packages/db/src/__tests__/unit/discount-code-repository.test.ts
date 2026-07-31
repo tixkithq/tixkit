@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DiscountCodeRepository } from '../../repositories/pricing.js';
 import type { Database } from '../../client.js';
 
@@ -181,17 +181,18 @@ function createDiscountReservationDb() {
     return query;
   }
 
+  const transaction = vi.fn(() => ({
+    execute: async <T>(fn: (trx: typeof db) => Promise<T>) => fn(db),
+  }));
   const db = {
     selectFrom,
     updateTable,
     insertInto,
     deleteFrom,
-    transaction: () => ({
-      execute: async <T>(fn: (trx: typeof db) => Promise<T>) => fn(db),
-    }),
+    transaction,
   };
 
-  return { db: db as unknown as Database, tables, insertedRows };
+  return { db: db as unknown as Database, tables, insertedRows, transaction };
 }
 
 describe('DiscountCodeRepository', () => {
@@ -241,6 +242,21 @@ describe('DiscountCodeRepository', () => {
         tenant_id: 'tnt_1',
       },
     ]);
+  });
+
+  it('uses the caller transaction without opening a nested transaction', async () => {
+    const { db, transaction } = createDiscountReservationDb();
+    const repo = new DiscountCodeRepository(db);
+
+    const result = await repo.reserveForCheckoutInTransaction({
+      eventId: 'evt_1',
+      tenantId: 'tnt_1',
+      checkoutSessionId: 'cs_existing_transaction',
+      code: 'SAVE10',
+    });
+
+    expect(result).toEqual({ ok: true, discountCodeId: 'dc_1', existing: false });
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it('rejects exhausted discount capacity without inserting a redemption', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/portability",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Shared signed logical portability bundle contracts for Tixkit Cloud and Self-Hosted",
   "license": "MIT",
   "repository": {
@@ -51,7 +51,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/content-event-page": "0.1.0",
+    "@tixkit/content-event-page": "1.0.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1"
   },

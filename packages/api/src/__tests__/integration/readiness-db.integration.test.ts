@@ -391,6 +391,11 @@ describeWithIntegrationDatabase('readiness service query and isolation budget', 
     });
     expect(mutationPage.nextCursor).not.toBeNull();
     const mutationCursor = mutationPage.nextCursor ?? '';
+    const signatureStart = mutationCursor.lastIndexOf('.') + 1;
+    const signatureFirstCharacter = mutationCursor[signatureStart] ?? '';
+    const tamperedCursor = `${mutationCursor.slice(0, signatureStart)}${
+      signatureFirstCharacter === 'x' ? 'y' : 'x'
+    }${mutationCursor.slice(signatureStart + 1)}`;
     await expect(
       service.getFeed({
         tenantId: tenant.id,
@@ -399,7 +404,7 @@ describeWithIntegrationDatabase('readiness service query and isolation budget', 
         permissions,
         now,
         limit: 1,
-        cursor: `${mutationCursor.slice(0, -1)}x`,
+        cursor: tamperedCursor,
       }),
     ).rejects.toThrow('Dashboard action cursor is invalid');
     await expect(

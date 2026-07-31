@@ -424,7 +424,7 @@ test.describe('checkout ticket variant workflows', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: joinedEntry.id,
-          status: 'offered',
+          status: 'reserved',
         }),
       ]),
     );

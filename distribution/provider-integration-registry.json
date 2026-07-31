@@ -194,7 +194,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/public/tixkit-widget.js",
         "export": "issueWidgetRuntimeUrl",
-        "sha256": "ea97a3a11ae791c004f0fbb484fdd8a80c0a66ad94c3bab125bc3227e04ae71c"
+        "sha256": "03ccec846d837ce990d1e23e80432b5ffe43cdd1000392269e0c19c384707098"
       },
       "allowedSinks": [
         {
@@ -230,7 +230,7 @@
         "type": "workspace-export",
         "path": "apps/checkout/src/lib/api-server.ts",
         "export": "issueCheckoutServerApiUrl",
-        "sha256": "9c39c83098885a0ed31129d78e837a662edebb96fb7ad8852d1d42a0a9db216b"
+        "sha256": "8dd6ff88066a17a0dc3c567cc43b1d56df811ae57f519fa31d2bc479f030dcd0"
       },
       "allowedSinks": [
         {
@@ -429,7 +429,7 @@
         "type": "workspace-export",
         "path": "packages/sdk-js/src/index.ts",
         "export": "issueTixkitApiRequestUrl",
-        "sha256": "4d490b58f06d0e70097208e2cd3e6f4cd4ea55f21233c42e689a86bb6a03977e"
+        "sha256": "46a0e33a02f324f7e0506c79506064e818e888f1f80e790d0055e8010828eb3e"
       },
       "allowedSinks": [
         {
@@ -465,7 +465,7 @@
         "type": "workspace-export",
         "path": "packages/widget/src/index.ts",
         "export": "issueWidgetRuntimeUrl",
-        "sha256": "20590d2d9d32be523704c912fe2351f3bf2574727f8e7fd961b6ce5bd3fda610"
+        "sha256": "48f083a3bf8211fa5b350a7472604ac38d0ea903ec70d15a49d29b721ba85c1c"
       },
       "allowedSinks": [
         {
@@ -482,7 +482,7 @@
       "id": "checkout-headless-storage",
       "path": "packages/checkout-headless/src/index.ts",
       "typeName": "CheckoutStorage",
-      "sha256": "0574d1d181209266cabd5f8993f7e2c513e7f85ccfc11e7078dcea48694d73fb",
+      "sha256": "eead54bc278e0a36fbf337eed2e30823962b600de2e485768ea66cc792907669",
       "allowedMethods": ["get"],
       "runtimeEvidencePaths": ["packages/checkout-headless/src/__tests__/controller.test.ts"]
     },

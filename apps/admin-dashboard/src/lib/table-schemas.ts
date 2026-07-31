@@ -37,7 +37,13 @@ export const ordersTableSchema: TableSchema = defineTable('orders', {
   ],
 });
 
-const ATTENDEE_STATUS_PRESETS = ['active', 'cancelled', 'refunded', 'transferred'] as const;
+const ATTENDEE_STATUS_PRESETS = [
+  'pending',
+  'confirmed',
+  'cancelled',
+  'refunded',
+  'checked_in',
+] as const;
 
 const CHECK_IN_STATUS_PRESETS = ['checked_in', 'not_checked_in', 'revoked'] as const;
 

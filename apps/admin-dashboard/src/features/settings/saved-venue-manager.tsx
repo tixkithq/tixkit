@@ -98,6 +98,7 @@ export function SavedVenueManager({
   const countryInput = React.useRef<HTMLInputElement>(null);
   const addButton = React.useRef<HTMLButtonElement>(null);
   const returnFocus = React.useRef<HTMLButtonElement | null>(null);
+  const focusAddAfterDelete = React.useRef(false);
   const venuesRef = React.useRef(venues);
   venuesRef.current = venues;
 
@@ -119,11 +120,19 @@ export function SavedVenueManager({
     setNotice(null);
     createAttemptKey.current = null;
     createAttemptSubmitted.current = false;
+    focusAddAfterDelete.current = false;
   }, [organizationId]);
 
   React.useEffect(() => {
     if (editingId !== null) nameInput.current?.focus();
   }, [editingId]);
+
+  React.useEffect(() => {
+    if (deletingId !== null || !focusAddAfterDelete.current) return;
+    focusAddAfterDelete.current = false;
+    const frame = requestAnimationFrame(() => addButton.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [deletingId, venues]);
 
   const canRead = !permissionsLoading && !permissionsError && can('events.read');
   const canWrite = !permissionsLoading && !permissionsError && can('events.write');
@@ -264,7 +273,7 @@ export function SavedVenueManager({
       onVenuesChange(venuesRef.current.filter((candidate) => candidate.id !== venue.id));
       onVenueDeleted?.(venue.id);
       setNotice(`${venue.name} deleted.`);
-      requestAnimationFrame(() => addButton.current?.focus());
+      focusAddAfterDelete.current = true;
     } catch {
       if (isCurrent()) setError('The saved venue could not be deleted. Try again.');
     } finally {

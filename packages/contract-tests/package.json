@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/contract-tests",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Executable Tixkit embed, webhook, SDK/API, and agent-platform contract profiles",
   "license": "MIT",
   "repository": {
@@ -44,7 +44,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/agent-protocol": "0.1.0",
+    "@tixkit/agent-protocol": "1.0.0",
     "@tixkit/embed-core": "1.0.0"
   },
   "devDependencies": {

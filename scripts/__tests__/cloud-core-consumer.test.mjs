@@ -618,7 +618,7 @@ test(
       const release = buildPublicReleaseManifestFromArchive({
         distribution: realDistribution,
         images,
-        releaseVersion: '0.1.0',
+        releaseVersion: '1.0.0',
         sourceCommit,
         sourceArchive,
         packageArtifactDirectory: publicArtifacts,
@@ -2654,6 +2654,8 @@ test('rejects missing package pins, peers, aliases, and lockfile integrity drift
   const cloudRoot = cloudFixture();
   try {
     const baseline = compatibilityManifest();
+    const openApiPin = baseline.core.packages.find(({ name }) => name === '@tixkit/openapi');
+    assert.ok(openApiPin);
     const manifest = compatibilityManifest();
     manifest.core.packages = manifest.core.packages.filter(({ name }) => name !== '@tixkit/widget');
     const controlPlanePath = resolve(cloudRoot, 'packages/control-plane/package.json');
@@ -2680,7 +2682,11 @@ test('rejects missing package pins, peers, aliases, and lockfile integrity drift
     assert.ok(
       violations.some((message) => message.includes('bun.lock integrity for @tixkit/domain')),
     );
-    assert.ok(violations.includes('bun.lock does not resolve claimed pin @tixkit/openapi@0.1.0'));
+    assert.ok(
+      violations.includes(
+        `bun.lock does not resolve claimed pin @tixkit/openapi@${openApiPin.version}`,
+      ),
+    );
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
   }

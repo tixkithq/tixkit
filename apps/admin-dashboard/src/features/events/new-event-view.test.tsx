@@ -257,6 +257,35 @@ describe('NewEventView', () => {
     expect(screen.getByRole('combobox', { name: /Timezone/ })).toHaveValue('America/Chicago');
   });
 
+  it('applies the configured default venue timezone after venues load', async () => {
+    bootstrapState.value = {
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      brands: [],
+      organizations: [{ id: 'org_1', eventDefaults: { defaultVenueId: 'ven_1' } }],
+    };
+    listSavedVenues.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'ven_1',
+          organizationId: 'org_1',
+          name: 'Saved Hall',
+          address: { city: 'Austin', country: 'US' },
+          timezone: 'America/Chicago',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<NewEventView />);
+
+    expect(await screen.findByLabelText('Saved venue')).toHaveValue('ven_1');
+    expect(screen.getByLabelText(/Venue name/)).toHaveValue('Saved Hall');
+    expect(screen.getByRole('combobox', { name: /Timezone/ })).toHaveValue('America/Chicago');
+  });
+
   it('clears workspace defaults when switching to a workspace without defaults', async () => {
     bootstrapState.value = {
       organizationId: 'org_a',

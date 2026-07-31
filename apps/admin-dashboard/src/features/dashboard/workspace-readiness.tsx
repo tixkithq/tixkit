@@ -296,7 +296,7 @@ function ScopedWorkspaceReadiness({
               The next required step is blocked. Resolve its permission or provider prerequisite.
             </p>
           ) : null}
-          <h3 className="sr-only">Prioritized workspace actions</h3>
+          <h2 className="sr-only">Prioritized workspace actions</h2>
           {!data.complete && actionFeed.length === 0 ? (
             <div role="alert" className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-destructive">

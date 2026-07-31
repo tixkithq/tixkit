@@ -77,6 +77,45 @@ describe('withEditorExport layout preservation', () => {
     expect(exported.editor.contentHtml).not.toBe('<p>{{event.title}}</p>');
   });
 
+  it('carries paragraph-wide inline editor styles into React Email layout HTML', () => {
+    const document = createDefaultEmailTemplateForKey('tickets-issued');
+    const exported = withEditorExport(document, {
+      html: '<html><body><table><tr><td><p style="margin:0;text-align:center">Styled text</p></td></tr></table></body></html>',
+      text: 'Styled text',
+      json: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: 'Styled text',
+                marks: [
+                  {
+                    type: 'tixkitInlineStyle',
+                    attrs: {
+                      color: '#0f766e',
+                      fontFamily: 'Inter, Arial, sans-serif',
+                      fontSize: '18px',
+                      lineHeight: '140%',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(exported.editor.contentHtml).toContain('text-align:center');
+    expect(exported.editor.contentHtml).toContain('color: #0f766e');
+    expect(exported.editor.contentHtml).toContain('font-family: Inter, Arial, sans-serif');
+    expect(exported.editor.contentHtml).toContain('font-size: 18px');
+    expect(exported.editor.contentHtml).toContain('line-height: 140%');
+  });
+
   it('falls back to previous studio shell when export is blank/shell-only', () => {
     const document = createDefaultEmailTemplateForKey('order-cancelled');
     const exported = withEditorExport(document, {

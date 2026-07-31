@@ -27,7 +27,7 @@ jobs:
       - name: Build, test, lint, and typecheck
         run: |
           set -euo pipefail
-          bun run --filter @tixkit/migration-core build
+          bunx turbo run build --filter=@tixkit/migration-core...
           bun run --filter @tixkit/migration-core typecheck
           bun run --filter @tixkit/migration-core lint
           bun run --filter @tixkit/migration-core test:unit
@@ -36,11 +36,15 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/migration-core "$RUNNER_TEMP/migration-consumer"
           npm pack --dry-run --json ./packages/migration-core > artifacts/migration-core/npm-pack-dry-run.json
-          tarball="$(npm pack ./packages/migration-core --pack-destination artifacts/migration-core --json | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(JSON.parse(s)[0].filename))")"
-          (cd artifacts/migration-core && sha256sum "$tarball" > SHA256SUMS)
+          tarballs=()
+          for package_path in domain content-core content-event-page portability migration-core; do
+            tarball="$(npm pack "./packages/$package_path" --pack-destination artifacts/migration-core --json | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(JSON.parse(s)[0].filename))")"
+            tarballs+=("$GITHUB_WORKSPACE/artifacts/migration-core/$tarball")
+          done
+          (cd artifacts/migration-core && sha256sum ./*.tgz > SHA256SUMS)
           cd "$RUNNER_TEMP/migration-consumer"
           npm init -y >/dev/null
-          npm install "$GITHUB_WORKSPACE/artifacts/migration-core/$tarball" --ignore-scripts
+          npm install "${tarballs[@]}" --ignore-scripts
           node --input-type=module -e "import('@tixkit/migration-core').then(m => { if (!m.migrationAdapterCatalog || !m.parseMigrationPreparationConfiguration) process.exit(1) })"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()

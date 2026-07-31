@@ -617,6 +617,42 @@ describe('renderEmailTemplate', () => {
     expect(second.text).toBe(first.text);
   });
 
+  it('does not add spaces around inline-styled merge tag text', async () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<p>Hi <span style="color:#0f766e">{{recipient.name}}</span>, ticket <strong>{{ticket.code}}</strong>.</p>',
+        contentText: 'Hi {{recipient.name}}, ticket {{ticket.code}}.',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    const rendered = await renderEmailTemplate(template, context);
+
+    expect(rendered.text).toContain('Hi Ada Lovelace, ticket TKT-123.');
+  });
+
+  it('extracts plain text without leaking comments, active-element bodies, or tag fragments', () => {
+    const template = createDefaultEmailTemplate({
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml:
+          '<p>Hi <span>{{recipient.name}}</span><!-- hidden --></p><style>.hidden{display:none}</style><script>alert(1)</script><p>&amp;lt;script&amp;gt; <a href="https://tickets.example.test/view?one=1&amp;two=2">View tickets</a></p>',
+        contentJson: { type: 'doc' },
+      },
+    });
+
+    expect(template.editor.contentText).toContain('Hi {{recipient.name}}');
+    expect(template.editor.contentText).toContain('&lt;script&gt;');
+    expect(template.editor.contentText).toContain(
+      'View tickets (https://tickets.example.test/view?one=1&two=2)',
+    );
+    expect(template.editor.contentText).not.toContain('hidden');
+    expect(template.editor.contentText).not.toContain('alert(1)');
+    expect(template.editor.contentText).not.toContain('<script>');
+  });
+
   it('appends the brand unsubscribe footer to bulk React Email editor exports', async () => {
     const template = createDefaultEmailTemplate({
       editor: {

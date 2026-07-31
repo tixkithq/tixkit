@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/vue",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Official Vue and Nuxt integration for Tixkit",
   "license": "MIT",
   "repository": {
@@ -47,7 +47,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/js": "0.1.0"
+    "@tixkit/js": "1.0.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

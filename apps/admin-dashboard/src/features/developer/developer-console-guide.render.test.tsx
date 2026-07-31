@@ -6,7 +6,7 @@ import { DeveloperConsoleGuide } from './developer-console-guide';
 describe('DeveloperConsoleGuide integration health', () => {
   it('renders independent unavailable states without false zero claims', () => {
     render(<DeveloperConsoleGuide activeKeys={null} activeWebhooks={null} totalWebhooks={null} />);
-    expect(screen.getByText('2026-09-03')).toBeInTheDocument();
+    expect(screen.getByText('2026-09-04')).toBeInTheDocument();
     expect(screen.getByText('Credential status unavailable')).toBeInTheDocument();
     expect(screen.getByText(/Webhook status unavailable/)).toBeInTheDocument();
     expect(screen.queryByText('No active API key')).not.toBeInTheDocument();

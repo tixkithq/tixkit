@@ -166,6 +166,7 @@
     },
     "docs": {
       "public": [
+        "docs/embed-generator.html",
         "docs/navigation.ts",
         "docs/public",
         "docs/redirects.json",
@@ -358,6 +359,7 @@
       }
     ],
     "contracts": [
+      "artifacts/api/2026-09-04",
       "artifacts/api/2026-09-03",
       "artifacts/api/2026-09-02",
       "artifacts/api/2026-09-01",
@@ -447,6 +449,11 @@
       "packages/embed-core/schemas/lifecycle.schema.json"
     ],
     "agentIntegrationSkills": [
+      {
+        "path": "artifacts/api-integration-skills/tixkit-api-2026-09-04",
+        "apiVersion": "2026-09-04",
+        "releaseManifestSha256": "686d6ba31d0234ab1e62d545f412e1fcea5e54114eca014a2ff67cf34f3981f2"
+      },
       {
         "path": "artifacts/api-integration-skills/tixkit-api-2026-09-03",
         "apiVersion": "2026-09-03",

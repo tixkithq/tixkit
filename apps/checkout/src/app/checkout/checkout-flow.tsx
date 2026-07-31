@@ -233,6 +233,7 @@ export default function CheckoutFlow({
   resaleListingId,
   initialLocale,
 }: Props) {
+  initializeEmbedHandshake();
   const { push } = useRouter();
   const checkoutLocale = useMemo(() => resolveCheckoutLocale(initialLocale), [initialLocale]);
   const checkoutCopy = useMemo(() => getCheckoutCopy(initialLocale), [initialLocale]);

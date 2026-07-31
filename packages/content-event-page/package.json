@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/content-event-page",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Canonical Tixkit event-page document and validation contracts",
   "license": "MIT",
   "repository": {
@@ -43,8 +43,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/content-core": "0.1.0",
-    "@tixkit/domain": "0.1.0"
+    "@tixkit/content-core": "1.0.0",
+    "@tixkit/domain": "1.0.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

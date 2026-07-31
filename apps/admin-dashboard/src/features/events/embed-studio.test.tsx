@@ -25,7 +25,7 @@ describe('EmbedStudio', () => {
   it('generates one pinned source of truth and a sandboxed responsive preview', async () => {
     render(<EmbedStudio eventId="evt_demo" />);
     const code = screen.getByLabelText('Generated embed code') as HTMLTextAreaElement;
-    expect(code.value).toContain('tixkit-widget-0.1.0.js');
+    expect(code.value).toContain('tixkit-widget-1.0.0.js');
     expect(code.value).toContain('integrity="sha384-');
     expect(code.value).toContain('tixkit:v1:loading');
     const preview = screen.getByTitle('desktop checkout preview');

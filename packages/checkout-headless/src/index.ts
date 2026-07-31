@@ -2,7 +2,7 @@ import { issueCheckoutHeadlessRequestUrl } from './request-target.js';
 
 export { issueCheckoutHeadlessRequestUrl } from './request-target.js';
 
-export const CHECKOUT_HEADLESS_VERSION = '0.1.0' as const;
+export const CHECKOUT_HEADLESS_VERSION = '1.0.0' as const;
 
 export type CheckoutPhase =
   | 'idle'

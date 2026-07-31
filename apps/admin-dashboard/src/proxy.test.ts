@@ -155,9 +155,16 @@ describe('admin dashboard request-time proxy', () => {
     },
   );
 
-  it('keeps the route matcher contract authoritative without prefetch exclusions', () => {
+  it('keeps the route matcher contract authoritative and excludes router prefetches', () => {
     expect(proxyConfig.matcher).toEqual([
-      '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+      {
+        source:
+          '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+        missing: [
+          { type: 'header', key: 'next-router-prefetch' },
+          { type: 'header', key: 'purpose', value: 'prefetch' },
+        ],
+      },
       '/(api|trpc)(.*)',
       '/__clerk/(.*)',
     ]);

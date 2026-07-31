@@ -3,6 +3,7 @@ import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
+  currentResaleTermsAcceptance,
   seedFreeCheckoutEvent,
   seedPaidRefundableOrder,
   seedTicketVariantCheckoutEvent,
@@ -17,7 +18,7 @@ const adminPrimaryRoutes = [
   { path: '/events', heading: 'Events', name: 'events' },
   { path: '/orders', heading: 'Orders', name: 'orders' },
   { path: '/attendees', heading: 'Attendees', name: 'attendees' },
-  { path: '/check-in', heading: 'Check-in', name: 'check-in' },
+  { path: '/check-in', heading: 'Choose an event', name: 'check-in' },
   { path: '/messages', heading: 'Messages', name: 'messages' },
   { path: '/reports', heading: 'Reports', name: 'reports' },
   { path: '/developer', heading: 'Developer', name: 'developer' },
@@ -37,6 +38,7 @@ async function expectAdminPrimaryRouteMatrix(page: Page, testInfo: TestInfo): Pr
   for (const route of adminPrimaryRoutes) {
     await page.goto(`${adminBaseUrl}${route.path}`);
     await expect(page.getByRole('heading', { name: route.heading }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
     await attachScreenshot(page, testInfo, `admin-primary-${route.name}-desktop`);
     await expectNoAxeViolations(page, testInfo);
   }
@@ -45,6 +47,7 @@ async function expectAdminPrimaryRouteMatrix(page: Page, testInfo: TestInfo): Pr
   for (const route of adminPrimaryRoutes) {
     await page.goto(`${adminBaseUrl}${route.path}`);
     await expect(page.getByRole('heading', { name: route.heading }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
     await attachScreenshot(page, testInfo, `admin-primary-${route.name}-mobile`);
     await expectNoAxeViolations(page, testInfo);
   }
@@ -80,7 +83,9 @@ function collectionItems(value: unknown): Array<Record<string, unknown>> {
 
 async function bootstrapAdminScope(page: Page): Promise<BootstrapScope> {
   const [organizationsResponse, brandsResponse] = await Promise.all([
-    page.request.get(`${apiBaseUrl}/v1/organizations`, { failOnStatusCode: false }),
+    page.request.get(`${apiBaseUrl}/v1/organizations`, {
+      failOnStatusCode: false,
+    }),
     page.request.get(`${apiBaseUrl}/v1/brands`, { failOnStatusCode: false }),
   ]);
   const organizationsBody = await organizationsResponse
@@ -209,7 +214,9 @@ async function setInventoryPoolCapacity(poolId: string, totalCapacity: number): 
 test.describe('admin product workflow coverage', () => {
   test('admin can create an event and validate publish, pause, and archive status gates', async ({
     page,
+    request,
   }, testInfo) => {
+    test.setTimeout(90_000);
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     await requireReachable(page, `${apiBaseUrl}/health`, 'api');
     await setAdminScope(page, await bootstrapAdminScope(page));
@@ -219,16 +226,17 @@ test.describe('admin product workflow coverage', () => {
 
     await page.goto(`${adminBaseUrl}/events`);
     await expect(page.getByRole('heading', { name: 'Events' })).toBeVisible();
-    await page.getByRole('button', { name: 'Create event' }).click();
+    await page.getByRole('link', { name: 'Create event' }).first().click();
 
-    const createEventDialog = page.getByRole('dialog', { name: 'Create Event' });
-    await expect(createEventDialog).toBeVisible();
-    await createEventDialog.getByRole('textbox', { name: 'Title', exact: true }).fill(title);
-    await createEventDialog.getByLabel('Slug').fill(`e2e-admin-lifecycle-${suffix}`);
-    await createEventDialog.getByLabel('Start Date').fill('2026-08-21T19:00');
-    await createEventDialog.getByLabel('End Date').fill('2026-08-21T22:00');
-    await createEventDialog.getByLabel('Venue Name').fill('Browser Hall');
-    const submitCreateEvent = createEventDialog.getByRole('button', { name: 'Create Event' });
+    const createEventForm = page.getByRole('main');
+    await expect(page.getByRole('heading', { name: 'Create an event' })).toBeVisible();
+    await createEventForm.getByRole('textbox', { name: 'Title', exact: true }).fill(title);
+    await createEventForm.getByLabel('Start', { exact: true }).fill('2026-08-21T19:00');
+    await createEventForm.getByLabel('End (optional)', { exact: true }).fill('2026-08-21T22:00');
+    await createEventForm.getByLabel('Venue name (optional)', { exact: true }).fill('Browser Hall');
+    const submitCreateEvent = createEventForm.getByRole('button', {
+      name: 'Create draft',
+    });
     await expect(submitCreateEvent).toBeEnabled();
 
     const createResponsePromise = page.waitForResponse((response) =>
@@ -241,66 +249,101 @@ test.describe('admin product workflow coverage', () => {
     );
     expect(createdEvent.status).toBe('draft');
 
-    await page.goto(`${adminBaseUrl}/events/${createdEvent.id}`);
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/events/${createdEvent.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\?created=1)?$`,
+      ),
+    );
     await expect(page.getByRole('heading', { name: title })).toBeVisible();
     await expect(page.getByText('Draft', { exact: true })).toBeVisible();
 
     const updatedTitle = `${title} Edited`;
-    await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(page.getByRole('heading', { name: 'Edit Event' })).toBeVisible();
-    await page.getByRole('textbox', { name: 'Title', exact: true }).fill(updatedTitle);
-    await page
+    await page.getByRole('link', { name: 'Settings' }).click();
+    await expect(page.getByRole('heading', { name: 'Event settings' })).toBeVisible();
+    const basicsForm = page.locator('#basics-form');
+    await basicsForm.getByRole('textbox', { name: 'Title', exact: true }).fill(updatedTitle);
+    await basicsForm
       .getByRole('textbox', { name: 'Description', exact: true })
       .fill('Updated browser edit description.');
-    await page.getByRole('combobox', { name: 'Visibility' }).click();
+    const basicsResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
+        response.request().method() === 'PATCH'
+      );
+    });
+    await basicsForm.getByRole('combobox', { name: 'Visibility' }).click();
     await page.getByRole('option', { name: 'Unlisted' }).click();
-    await page.getByLabel('Capacity', { exact: true }).fill('250');
-    await page.getByLabel('Venue Name', { exact: true }).fill('Edited Browser Hall');
-    await page.getByLabel('Address', { exact: true }).fill('500 Browser Ave');
-    await page.getByLabel('City', { exact: true }).fill('Austin');
-    await page.getByLabel('Region', { exact: true }).fill('TX');
-    await page.getByLabel('Postal Code', { exact: true }).fill('78701');
-    await expect(page.getByLabel('Postal Code', { exact: true })).toHaveValue('78701');
-    await page.getByLabel('Country', { exact: true }).fill('US');
-    await page
-      .getByLabel('Cover Image URL', { exact: true })
-      .fill('https://cdn.example.test/e2e-cover.jpg');
-    await page
+    await expectJsonStatus(await basicsResponsePromise, 200);
+    await expect(basicsForm.getByText('Saved', { exact: true })).toBeVisible();
+
+    const scheduleForm = page.locator('#schedule-form');
+    await scheduleForm.getByLabel('Venue Name', { exact: true }).fill('Edited Browser Hall');
+    await scheduleForm.getByLabel('Address', { exact: true }).fill('500 Browser Ave');
+    await scheduleForm.getByLabel('City', { exact: true }).fill('Austin');
+    await scheduleForm.getByLabel('Region', { exact: true }).fill('TX');
+    await scheduleForm.getByLabel('Postal Code', { exact: true }).fill('78701');
+    await expect(scheduleForm.getByLabel('Postal Code', { exact: true })).toHaveValue('78701');
+    const scheduleResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
+        response.request().method() === 'PATCH'
+      );
+    });
+    await scheduleForm.getByRole('combobox', { name: 'Country' }).click();
+    await page.getByRole('option', { name: 'United States' }).click();
+    await expectJsonStatus(await scheduleResponsePromise, 200);
+    await expect(scheduleForm.getByText('Saved', { exact: true })).toBeVisible();
+
+    const salesForm = page.locator('#sales-form');
+    const salesResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
+        response.request().method() === 'PATCH'
+      );
+    });
+    await salesForm.getByLabel('Capacity', { exact: true }).fill('250');
+    await expectJsonStatus(await salesResponsePromise, 200);
+    await expect(salesForm.getByText('Saved', { exact: true })).toBeVisible();
+
+    const marketingForm = page.locator('#marketing-form');
+    await marketingForm
       .getByLabel('External URL', { exact: true })
       .fill('https://tickets.example.test/e2e-edited');
-    await page.getByLabel('SEO Title', { exact: true }).fill('Edited admin lifecycle SEO');
-    await page
-      .getByLabel('SEO Description', { exact: true })
-      .fill('Edited SEO description from Playwright.');
-    await page
-      .getByLabel('SEO Image URL', { exact: true })
-      .fill('https://cdn.example.test/e2e-seo.jpg');
-
+    await marketingForm.getByLabel('SEO Title', { exact: true }).fill('Edited admin lifecycle SEO');
     const updateResponsePromise = page.waitForResponse((response) => {
       return (
         response.url() === `${apiBaseUrl}/v1/events/${createdEvent.id}` &&
         response.request().method() === 'PATCH'
       );
     });
-    await page.getByRole('button', { name: 'Save Changes' }).click();
+    await marketingForm
+      .getByLabel('SEO Description', { exact: true })
+      .fill('Edited SEO description from Playwright.');
     const editedEvent = await expectJsonStatus<{
       id: string;
       title: string;
       description?: string | null;
       visibility?: string;
       capacity?: number | null;
-      venue?: { name?: string | null; address?: string | null; city?: string | null };
-      seo?: { title?: string | null; description?: string | null; imageUrl?: string | null };
-      coverImageUrl?: string | null;
+      venue?: {
+        name?: string | null;
+        address?: string | null;
+        city?: string | null;
+      };
+      seo?: {
+        title?: string | null;
+        description?: string | null;
+        imageUrl?: string | null;
+      };
       externalUrl?: string | null;
     }>(await updateResponsePromise, 200);
+    await expect(marketingForm.getByText('Saved', { exact: true })).toBeVisible();
     expect(editedEvent).toMatchObject({
       id: createdEvent.id,
       title: updatedTitle,
       description: 'Updated browser edit description.',
       visibility: 'unlisted',
       capacity: 250,
-      coverImageUrl: 'https://cdn.example.test/e2e-cover.jpg',
       externalUrl: 'https://tickets.example.test/e2e-edited',
     });
     expect(editedEvent.venue).toMatchObject({
@@ -314,12 +357,12 @@ test.describe('admin product workflow coverage', () => {
     expect(editedEvent.seo).toMatchObject({
       title: 'Edited admin lifecycle SEO',
       description: 'Edited SEO description from Playwright.',
-      imageUrl: 'https://cdn.example.test/e2e-seo.jpg',
     });
 
-    await expect(page.getByRole('heading', { name: updatedTitle })).toBeVisible();
-    await expect(page.getByText('Edited Browser Hall')).toBeVisible();
-    await expect(page.getByText('of 250')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Event settings' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue(
+      updatedTitle,
+    );
 
     const persistedEvent = await expectEventDetail(page, createdEvent.id);
     expect(persistedEvent).toMatchObject({
@@ -328,7 +371,6 @@ test.describe('admin product workflow coverage', () => {
       description: 'Updated browser edit description.',
       visibility: 'unlisted',
       capacity: 250,
-      coverImageUrl: 'https://cdn.example.test/e2e-cover.jpg',
       externalUrl: 'https://tickets.example.test/e2e-edited',
     });
     expect(persistedEvent.venue).toMatchObject({
@@ -342,19 +384,47 @@ test.describe('admin product workflow coverage', () => {
     expect(persistedEvent.seo).toMatchObject({
       title: 'Edited admin lifecycle SEO',
       description: 'Edited SEO description from Playwright.',
-      imageUrl: 'https://cdn.example.test/e2e-seo.jpg',
     });
 
-    await updateEventStatus(page, createdEvent.id, 'publish', 'published');
     await page.goto(`${adminBaseUrl}/events/${createdEvent.id}`);
+    await expect(page.getByRole('heading', { name: updatedTitle })).toBeVisible();
+    await expect(page.getByText('Edited Browser Hall')).toBeVisible();
+    await expect(page.getByText('of 250')).toBeVisible();
+
+    const blockedPublishResponse = await page.request.post(
+      `${apiBaseUrl}/v1/events/${createdEvent.id}/publish`,
+      {
+        data: {},
+        failOnStatusCode: false,
+      },
+    );
+    const blockedPublish = await expectJsonStatus<{
+      status?: string;
+      error: {
+        code: string;
+        details: { requiredBlockers: Array<{ id: string }> };
+      };
+    }>(blockedPublishResponse, 409);
+    expect(blockedPublish.error.code).toBe('launch_readiness_failed');
+    expect(blockedPublish.error.details.requiredBlockers.map((blocker) => blocker.id)).toEqual(
+      expect.arrayContaining([
+        'sellable_tickets',
+        'checkout_consent',
+        'public_content',
+        'confirmation_content',
+      ]),
+    );
+
+    const lifecycleSeed = await seedFreeCheckoutEvent(request, `lifecycle-${suffix}`);
+    await page.goto(`${adminBaseUrl}/events/${lifecycleSeed.event.id}`);
     await expect(page.getByText('Published', { exact: true })).toBeVisible();
 
-    await updateEventStatus(page, createdEvent.id, 'pause', 'paused');
-    await page.goto(`${adminBaseUrl}/events/${createdEvent.id}`);
+    await updateEventStatus(page, lifecycleSeed.event.id, 'pause', 'paused');
+    await page.goto(`${adminBaseUrl}/events/${lifecycleSeed.event.id}`);
     await expect(page.getByText('Paused', { exact: true })).toBeVisible();
 
-    await updateEventStatus(page, createdEvent.id, 'archive', 'archived');
-    await page.goto(`${adminBaseUrl}/events/${createdEvent.id}`);
+    await updateEventStatus(page, lifecycleSeed.event.id, 'archive', 'archived');
+    await page.goto(`${adminBaseUrl}/events/${lifecycleSeed.event.id}`);
     await expect(page.getByText('Archived', { exact: true })).toBeVisible();
 
     await attachScreenshot(page, testInfo, 'admin-events-lifecycle-desktop');
@@ -418,7 +488,7 @@ test.describe('admin product workflow coverage', () => {
 
     await page.goto(`${adminBaseUrl}/orders`);
     await expect(page.getByRole('heading', { name: 'Orders' })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Search orders...' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /Search by buyer/i })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Buyer' })).toBeVisible();
 
     await page.goto(`${adminBaseUrl}/reports`);
@@ -453,7 +523,7 @@ test.describe('admin product workflow coverage', () => {
         value: undefined,
       });
     });
-    await page.getByRole('button', { name: 'Copy link' }).click();
+    await page.getByRole('button', { name: 'Copy public link' }).click();
     await expect(
       page.getByText('Copy unavailable. Select and copy the public event URL manually.'),
     ).toBeVisible();
@@ -466,7 +536,7 @@ test.describe('admin product workflow coverage', () => {
         },
       });
     });
-    await page.getByRole('button', { name: 'Copy link' }).click();
+    await page.getByRole('button', { name: 'Copy public link' }).click();
     await expect(
       page.getByText('Unable to copy public event link. Select and copy it manually.'),
     ).toBeVisible();
@@ -482,7 +552,7 @@ test.describe('admin product workflow coverage', () => {
         },
       });
     });
-    await page.getByRole('button', { name: 'Copy link' }).click();
+    await page.getByRole('button', { name: 'Copy public link' }).click();
     await expect(page.getByText('Public event link copied')).toBeVisible();
     await expect
       .poll(() => page.evaluate(() => window.sessionStorage.getItem('copied-event-link')))
@@ -554,6 +624,7 @@ test.describe('admin product workflow coverage', () => {
 
     await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/tickets`);
     await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    await page.getByRole('tab', { name: /Waitlist/ }).click();
     await expect(page.getByRole('heading', { name: 'Waitlist' })).toBeVisible();
 
     const waitlistRow = page.getByRole('row').filter({ hasText: buyerEmail });
@@ -573,10 +644,10 @@ test.describe('admin product workflow coverage', () => {
       isApiResponse(response, 'PATCH', `/v1/events/${seeded.event.id}/waitlist/settings`),
     );
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    const settings = await expectJsonStatus<{ autoOfferEnabled: boolean; offerTtlMinutes: number }>(
-      await settingsResponsePromise,
-      200,
-    );
+    const settings = await expectJsonStatus<{
+      autoOfferEnabled: boolean;
+      offerTtlMinutes: number;
+    }>(await settingsResponsePromise, 200);
     expect(settings).toEqual({ autoOfferEnabled: false, offerTtlMinutes: 45 });
 
     const offerResponsePromise = page.waitForResponse((response) => {
@@ -591,7 +662,10 @@ test.describe('admin product workflow coverage', () => {
       entry: { id: string; status: string; offerExpiresAt?: string };
       claimToken: string;
     }>(await offerResponsePromise, 200);
-    expect(offer.entry).toMatchObject({ id: joinedEntry.id, status: 'offered' });
+    expect(offer.entry).toMatchObject({
+      id: joinedEntry.id,
+      status: 'offered',
+    });
     expect(offer.entry.offerExpiresAt).toBeTruthy();
     expect(offer.claimToken).toHaveLength(32);
 
@@ -667,7 +741,10 @@ test.describe('admin product workflow coverage', () => {
       faceValueCents: number;
     }>(
       await request.post(`${apiBaseUrl}/v1/tickets/${seeded.ticketIds[0]}/resale-listings`, {
-        data: { priceCents: 5500 },
+        data: {
+          priceCents: 5500,
+          termsAcceptance: currentResaleTermsAcceptance,
+        },
         headers: { 'Idempotency-Key': `e2e-resale-list-${suffix}` },
         failOnStatusCode: false,
       }),
@@ -683,11 +760,12 @@ test.describe('admin product workflow coverage', () => {
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/tickets`);
     await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Fees & Resale' }).click();
     const resalePanel = page.getByTestId('resale-policy-panel');
     await expect(resalePanel.getByRole('heading', { name: 'Resale' })).toBeVisible();
     await expect(resalePanel.getByRole('switch', { name: 'Resale policy' })).toBeChecked();
     await expect(resalePanel.getByLabel('Max markup')).toHaveValue('1.2');
-    await expect(resalePanel.getByLabel('Absolute cap')).toHaveValue('6000');
+    await expect(resalePanel.getByLabel('Absolute cap ($)')).toHaveValue('60');
 
     const listingRow = resalePanel.getByRole('row').filter({ hasText: seeded.ticketIds[0] });
     await expect(listingRow).toBeVisible();
@@ -697,7 +775,7 @@ test.describe('admin product workflow coverage', () => {
 
     await resalePanel.getByRole('switch', { name: 'Resale policy' }).click();
     await resalePanel.getByLabel('Max markup').fill('1.1');
-    await resalePanel.getByLabel('Absolute cap').fill('5500');
+    await resalePanel.getByLabel('Absolute cap ($)').fill('55');
     const policyResponsePromise = page.waitForResponse((response) => {
       return (
         response.url() === `${apiBaseUrl}/v1/events/${seeded.event.id}/resale-policy` &&
@@ -797,7 +875,13 @@ test.describe('admin product workflow coverage', () => {
       });
       const metrics = evaluation.result.value as Record<
         string,
-        { width: number; height: number; top: number; left: number; visible: boolean } | null
+        {
+          width: number;
+          height: number;
+          top: number;
+          left: number;
+          visible: boolean;
+        } | null
       >;
 
       for (const key of [
@@ -834,8 +918,7 @@ test.describe('admin product workflow coverage', () => {
     const { event } = await seedFreeCheckoutEvent(request, suffix);
     const occurrenceTitle = `Friday session ${suffix}`;
 
-    await page.goto(`${adminBaseUrl}/events/${event.id}/tickets`);
-    await expect(page.getByRole('heading', { name: 'Ticket Types' })).toBeVisible();
+    await page.goto(`${adminBaseUrl}/events/${event.id}/schedule`);
     await expect(page.getByRole('heading', { name: 'Occurrences' })).toBeVisible();
 
     await page.getByLabel('Title').fill(occurrenceTitle);
@@ -871,10 +954,9 @@ test.describe('admin product workflow coverage', () => {
     const listResponse = await page.request.get(`${apiBaseUrl}/v1/events/${event.id}/occurrences`, {
       failOnStatusCode: false,
     });
-    const listBody = await expectJsonStatus<{ items: Array<{ id: string; title: string }> }>(
-      listResponse,
-      200,
-    );
+    const listBody = await expectJsonStatus<{
+      items: Array<{ id: string; title: string }>;
+    }>(listResponse, 200);
     expect(listBody.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: occurrence.id, title: occurrenceTitle }),
@@ -903,7 +985,7 @@ test.describe('admin product workflow coverage', () => {
     await expect(page.getByRole('heading', { name: 'Create Ticket Type' })).toBeVisible();
 
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(ticketName);
-    await page.getByLabel('Price (cents)').fill('0');
+    await page.getByLabel('Price', { exact: true }).fill('0');
     await page.getByLabel('Quantity (optional)').fill('12');
     await page.getByLabel('Pool Name').fill(`${ticketName} Pool`);
     await page.getByLabel('Pool Capacity').fill('12');
@@ -935,7 +1017,11 @@ test.describe('admin product workflow coverage', () => {
     });
     expect(created.accessRules).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'code', value: accessCode, usesCount: 0 }),
+        expect.objectContaining({
+          type: 'code',
+          value: accessCode,
+          usesCount: 0,
+        }),
       ]),
     );
 
@@ -944,14 +1030,19 @@ test.describe('admin product workflow coverage', () => {
       { failOnStatusCode: false },
     );
     const accessRules = await expectJsonStatus<{
-      items: Array<{ ticketTypeId: string; type: string; value: string; usesCount: number }>;
+      items: Array<{
+        ticketTypeId: string;
+        type: string;
+        value: string;
+        usesCount: number;
+      }>;
     }>(accessRulesResponse, 200);
     expect(accessRules.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           ticketTypeId: created.ticketType.id,
           type: 'code',
-          value: accessCode,
+          value: '[redacted]',
           usesCount: 0,
         }),
       ]),

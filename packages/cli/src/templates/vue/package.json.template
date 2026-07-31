@@ -11,7 +11,7 @@
     "clean": "rm -rf .nuxt .output"
   },
   "dependencies": {
-    "@tixkit/vue": "^0.1.0",
+    "@tixkit/vue": "^1.0.0",
     "nuxt": "^3.14.0",
     "vue": "^3.5.0"
   },

@@ -13,8 +13,16 @@ export const ADMIN_SECURITY_HEADER_NAMES = [
 // arbitrary inline styles in production.
 const RUNTIME_STYLE_HASHES = [
   "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
+  "'sha256-YjaKGiklmzC6wjXA513HAMmzus8VE61XCOT+SmwNZWA='",
   "'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY='",
   "'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='",
+  "'sha256-cjSncqPVfIb25yH7ajQUnrO3XEeenBWcw3E88wYS8Y0='",
+  "'sha256-R79YPbj9qhfyp6XA+aUpr67kUNjj0aWXDS6G1VaKZzE='",
+  "'sha256-gzuNz+BZ5SWt0K+wjDM1i/CJ1GJpZ55cl30W3R121NY='",
+  "'sha256-P3zrZWkaCzrI/B9T0+WLFRTTY8rvTIfnbvP5TBI9Vgo='",
+  "'sha256-E7zJXfkufcgTIQG1Th6iYnoGis+rTfZd044bgiM1kr4='",
+  "'sha256-YYLJe/bgx7gKdFc8dp3EM3/S8hpKeZs7JyhfBoZYPuk='",
+  "'sha256-sHwQzC2ZsVrt1faUYCjF/eo8aIoBlQbGjVstzanL9CU='",
 ] as const;
 
 export function adminContentSecurityPolicy(

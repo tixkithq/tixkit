@@ -22,6 +22,7 @@ import { useResolvedBrand } from '@/lib/use-brand';
 import { trackMarketingEvent } from '@/lib/marketing';
 import {
   createDefaultEventPageDocument,
+  eventPageMediaReference,
   materializeEventPageDocument,
 } from '@tixkit/content-event-page';
 import {
@@ -332,6 +333,7 @@ export default function EventPageClient({
   const pageDocument = useMemo(() => {
     if (!event) return undefined;
     const pageMedia = resolveEventPageMedia(event);
+    const coverImageUrl = pageMedia ? eventPageMediaReference(pageMedia.role) : event.coverImageUrl;
     const input = {
       eventId: event.id,
       eventTitle: event.title,
@@ -349,7 +351,7 @@ export default function EventPageClient({
           }
         : undefined,
       brandName: brand.fallback ? undefined : brand.name,
-      coverImageUrl: pageMedia?.url ?? event.coverImageUrl,
+      coverImageUrl,
       coverImageAlt: pageMedia?.altText ?? event.title,
       publicUrl: `/e/${event.id}`,
       locale: resolvedLocale,
@@ -460,6 +462,17 @@ export default function EventPageClient({
           ? 'Powered by Tixkit'
           : `${brand.name} · Powered by Tixkit`,
       footerLinks,
+      eventMedia: event
+        ? Object.fromEntries(
+            (event.mediaAssets ?? []).flatMap((asset) => {
+              const media = resolveEventPageMedia({
+                ...event,
+                mediaAssets: [asset],
+              });
+              return media ? [[asset.role, { url: media.url, altText: media.altText }]] : [];
+            }),
+          )
+        : undefined,
       tickets: ticketItems,
       products,
       resaleListings: resaleListings.map((listing) => ({
@@ -491,6 +504,7 @@ export default function EventPageClient({
   }, [
     availabilityStatus,
     brand,
+    event,
     goToCheckout,
     hasActiveTickets,
     resaleListings,

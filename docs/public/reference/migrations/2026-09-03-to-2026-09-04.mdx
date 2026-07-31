@@ -1,0 +1,23 @@
+---
+title: Migrate API 2026-09-03 to 2026-09-04
+description: Adopt explicit reporting permissions and inbound Twilio SMS webhook handling.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-29
+prerequisites:
+  - /reference/api-versions
+related:
+  - /reference/api
+---
+
+API `2026-09-04` adds explicit `x-required-permissions` metadata to event tax, attendance, promotion, conversion, and organization affiliate report reads. Clients still use the same report routes and response shapes. Authorization-aware tooling can now determine the required read permission directly from the contract.
+
+The organization affiliate report now accepts the documented API-key authentication alternative in addition to bearer authentication. This is an additive authentication option; existing bearer clients do not need to change.
+
+`POST /webhooks/twilio/sms` is now part of the public HTTP contract. Twilio invokes this provider callback with form-encoded SMS delivery data. Application clients should not call the route directly or place provider credentials in browser code.
+
+The local `2026-09-04` artifact is an approval-gated, nonpublishable dirty-tree candidate. It is not evidence that a public release has been published or that a hosted service has adopted the contract.

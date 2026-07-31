@@ -207,7 +207,8 @@ function resolveEventPageImage(
     const safeRuntimeUrl =
       typeof runtimeUrl === 'string' &&
       ((runtime.interactive === false && runtimeUrl.startsWith('blob:')) ||
-        isSafeEventPageImageSource(runtimeUrl));
+        isSafeEventPageImageSource(runtimeUrl) ||
+        isOwnedRuntimeEventMediaSource(runtimeUrl));
     return media && safeRuntimeUrl
       ? {
           url: runtimeUrl,
@@ -221,6 +222,22 @@ function resolveEventPageImage(
     url: source,
     altText: typeof imageAlt === 'string' ? imageAlt.trim() : '',
   };
+}
+
+function isOwnedRuntimeEventMediaSource(source: string): boolean {
+  try {
+    const url = new URL(source);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      /^\/v1\/public\/event-media\/renditions\/[A-Za-z0-9_-]+$/u.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 const alignmentOptions = [

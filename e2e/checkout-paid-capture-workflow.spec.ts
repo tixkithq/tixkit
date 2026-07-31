@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { expectNoAxeViolations } from './helpers/axe';
 import { apiBaseUrl, checkoutBaseUrl } from './helpers/env';
 import {
+  currentResaleTermsAcceptance,
   devOrganizationId,
   readCheckoutSessionArtifactAnswerState,
   readOrphanPaymentCompensationState,
@@ -158,7 +159,11 @@ test.describe('paid checkout capture workflow', () => {
         data: { paymentMethodId: 'pm_card_visa' },
       }),
       200,
-    )) as { status: string; sessionId: string; order: { id: string; status: string } };
+    )) as {
+      status: string;
+      sessionId: string;
+      order: { id: string; status: string };
+    };
 
     expect(confirmation).toMatchObject({
       status: 'completed',
@@ -187,7 +192,9 @@ test.describe('paid checkout capture workflow', () => {
     expect(state.hold).toMatchObject({ status: 'converted', quantity: 1 });
     expect(state.inventoryPool.soldCount).toBe(1);
     expect(state.ticketCount).toBe(1);
-    expect(state.ticketEmailJob).toMatchObject({ templateKey: 'tickets-issued' });
+    expect(state.ticketEmailJob).toMatchObject({
+      templateKey: 'tickets-issued',
+    });
     expect(state.ticketEmailJob?.attachments).toHaveLength(1);
     const ticketPdf = state.ticketEmailJob!.attachments[0];
     expect(ticketPdf).toMatchObject({
@@ -290,7 +297,10 @@ test.describe('paid checkout capture workflow', () => {
       { name: 'desktop', width: 1440, height: 1000 },
       { name: 'mobile', width: 375, height: 812 },
     ]) {
-      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.setViewportSize({
+        width: viewport.width,
+        height: viewport.height,
+      });
       await page.goto(`${checkoutBaseUrl}/checkout?eventId=${event.id}`);
       await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
       await page.getByRole('button', { name: `Increase ${ticketType.name} quantity` }).click();
@@ -308,12 +318,14 @@ test.describe('paid checkout capture workflow', () => {
       await requiredCheckbox.check();
       await page.getByRole('button', { name: 'Continue' }).click();
       await expect(memberId).toHaveJSProperty('validationMessage', 'Member ID format is invalid');
-      await expect(page.getByText('Member ID format is invalid.')).toBeVisible();
+      await expect(page.getByText('Member ID format is invalid.').first()).toBeVisible();
       await memberId.fill('MEM-1234');
       await expect(memberId).toHaveJSProperty('validationMessage', '');
       await requiredCheckbox.uncheck();
       await page.getByRole('button', { name: 'Continue' }).click();
-      await expect(page.getByText('Please check I agree to the venue photo policy.')).toBeVisible();
+      await expect(
+        page.getByText('Please check I agree to the venue photo policy.').first(),
+      ).toBeVisible();
       await attachScreenshot(page, testInfo, `hosted-required-checkbox-${viewport.name}`);
     }
   });
@@ -391,7 +403,7 @@ test.describe('paid checkout capture workflow', () => {
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await expect(
-      page.getByText(`Please complete Phone Number for ${ticketType.name} attendee 1.`),
+      page.getByText(`Please complete Phone Number for ${ticketType.name} attendee 1.`).first(),
     ).toBeVisible();
 
     // Fill attendee fields and proceed to payment.
@@ -507,7 +519,9 @@ test.describe('paid checkout capture workflow', () => {
 
         if (url.includes(`/v1/public/events/${eventId}/page`)) {
           return new Response(
-            JSON.stringify({ error: { code: 'not_found', message: 'Missing' } }),
+            JSON.stringify({
+              error: { code: 'not_found', message: 'Missing' },
+            }),
             {
               status: 404,
               headers: { 'Content-Type': 'application/json' },
@@ -556,7 +570,7 @@ test.describe('paid checkout capture workflow', () => {
 
     await expect(page.getByRole('heading', { name: 'Resale Down Primary Sale' })).toBeVisible();
     await expect(page.getByText('Primary General Admission')).toBeVisible();
-    const alert = page.getByRole('alert').filter({
+    const alert = page.getByRole('status').filter({
       hasText: 'Resale tickets are temporarily unavailable',
     });
     await expect(alert).toBeVisible();
@@ -620,7 +634,10 @@ test.describe('paid checkout capture workflow', () => {
     const listing = (await expectJsonResponse(
       await request.post(`${apiBaseUrl}/v1/tickets/${sellerState.ticketIds[0]}/resale-listings`, {
         headers: { 'Idempotency-Key': `resale-public-list-${suffix}` },
-        data: { priceCents: 2500 },
+        data: {
+          priceCents: 2500,
+          termsAcceptance: currentResaleTermsAcceptance,
+        },
       }),
       201,
     )) as { id: string; priceCents: number; status: string };
@@ -650,7 +667,9 @@ test.describe('paid checkout capture workflow', () => {
       .filter({ has: page.getByRole('heading', { name: 'Resale tickets' }) });
     await expect(resaleSection.getByRole('heading', { name: 'Resale tickets' })).toBeVisible();
     await expect(
-      resaleSection.getByText(`Resale ticket - ${ticketType.name}`, { exact: true }),
+      resaleSection.getByText(`Resale ticket - ${ticketType.name}`, {
+        exact: true,
+      }),
     ).toBeVisible();
     await expectNoAxeViolations(page, testInfo);
 
@@ -664,7 +683,10 @@ test.describe('paid checkout capture workflow', () => {
         })()`,
         returnByValue: true,
       });
-      expect(result.value).toMatchObject({ resaleHeading: true, buyButton: true });
+      expect(result.value).toMatchObject({
+        resaleHeading: true,
+        buyButton: true,
+      });
       await client.detach();
     }
 
@@ -677,11 +699,13 @@ test.describe('paid checkout capture workflow', () => {
     await page.getByLabel('Email').fill(`resale-buyer+${suffix}@example.com`);
     await page.getByLabel('First name').fill('Resale');
     await page.getByLabel('Last name').fill('Buyer');
+    await page.getByRole('checkbox', { name: /Accept resale purchase terms/ }).check();
     await attachScreenshot(page, testInfo, 'hosted-resale-checkout-select');
     await expectNoAxeViolations(page, testInfo);
 
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByRole('button', { name: 'Pay $25.00' })).toBeVisible();
+    await page.getByRole('button', { name: /I understand — update my selection/ }).click();
     await page.getByRole('button', { name: 'Pay $25.00' }).click();
     await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
     await attachScreenshot(page, testInfo, 'hosted-resale-checkout-confirmed');
@@ -700,7 +724,10 @@ test.describe('paid checkout capture workflow', () => {
       totalCents: 2500,
     });
     expect(resaleState.lineItems).toContainEqual(
-      expect.objectContaining({ resaleListingId: listing.id, totalCents: 2500 }),
+      expect.objectContaining({
+        resaleListingId: listing.id,
+        totalCents: 2500,
+      }),
     );
     expect(resaleState.buyerTickets).toHaveLength(1);
     expect(resaleState.buyerTickets[0]).toMatchObject({ status: 'valid' });
@@ -1202,6 +1229,7 @@ test.describe('paid checkout capture workflow', () => {
 
     await page.getByRole('button', { name: 'List for resale' }).click();
     await page.getByLabel('Resale price').fill('25.00');
+    await page.getByLabel('Accept organizer-managed settlement terms').check();
     const resaleResponse = page.waitForResponse(
       (response) =>
         response
@@ -1217,7 +1245,9 @@ test.describe('paid checkout capture workflow', () => {
     const listings = (await expectJsonResponse(
       await request.get(`${apiBaseUrl}/v1/events/${event.id}/resale-listings`),
       200,
-    )) as { items: Array<{ ticketId: string; status: string; priceCents: number }> };
+    )) as {
+      items: Array<{ ticketId: string; status: string; priceCents: number }>;
+    };
     expect(listings.items).toContainEqual(
       expect.objectContaining({
         ticketId: state.ticketIds[0],
@@ -1274,6 +1304,8 @@ test.describe('paid checkout capture workflow', () => {
     await expect(page.getByText('Discount')).toBeVisible();
     await expect(page.getByText('-$5.00')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Pay $20.00' })).toBeVisible();
+    await page.getByRole('button', { name: 'I understand — update my selection' }).click();
+    await expect(page.getByRole('button', { name: 'Pay $20.00' })).toBeEnabled();
     await page.getByRole('button', { name: 'Pay $20.00' }).click();
     await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
 

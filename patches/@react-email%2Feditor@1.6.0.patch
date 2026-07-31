@@ -557,3 +557,35 @@ index 8179cdbf..6d776619 100644
 -//# sourceMappingURL=root-DzSo_3jb.mjs.map
 \ No newline at end of file
 +//# sourceMappingURL=root-DzSo_3jb.mjs.map
+diff --git a/dist/core-4eWA8YCs.mjs b/dist/core-4eWA8YCs.mjs
+--- a/dist/core-4eWA8YCs.mjs
++++ b/dist/core-4eWA8YCs.mjs
+@@ -1,6 +1,6 @@
+ import { a as inlineCssToJs, t as EmailNode } from "./email-node-otH4jZmS.mjs";
+ import { Body, Head, Html, Preview, pretty, render, toPlainText } from "react-email";
+-import { jsx, jsxs } from "react/jsx-runtime";
++import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+ import { Mark } from "@tiptap/core";
+ //#region src/core/serializer/default-base-template.tsx
+ function DefaultBaseTemplate({ children, previewText, previewMode = false }) {
+@@ -108,7 +108,7 @@ const composeReactEmail = async ({ editor, preview, previewMode = false }) => {
+ 					});
+ 				}
+ 			}
+-			return renderedNode;
++			return /* @__PURE__ */ jsx(Fragment, { children: renderedNode }, index);
+ 		});
+ 	}
+ 	const unformattedHtml = await render(/* @__PURE__ */ jsx(serializerPlugin?.BaseTemplate ?? DefaultBaseTemplate, {
+diff --git a/dist/core-DBuibK5E.cjs b/dist/core-DBuibK5E.cjs
+--- a/dist/core-DBuibK5E.cjs
++++ b/dist/core-DBuibK5E.cjs
+@@ -109,7 +109,7 @@ const composeReactEmail = async ({ editor, preview, previewMode = false }) => {
+ 					});
+ 				}
+ 			}
+-			return renderedNode;
++			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: renderedNode }, index);
+ 		});
+ 	}
+ 	const unformattedHtml = await (0, react_email.render)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)(serializerPlugin?.BaseTemplate ?? DefaultBaseTemplate, {

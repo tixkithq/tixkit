@@ -265,7 +265,7 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
             {TICKET_TAB_ITEMS.map((tab) => {
               const isActive = activeTab === tab.value;
               return (
-                <li key={tab.value}>
+                <li key={tab.value} role="presentation">
                   <button
                     type="button"
                     role="tab"

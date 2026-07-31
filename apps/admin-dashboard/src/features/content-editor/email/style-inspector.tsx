@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Inspector } from '@react-email/editor/ui';
+import { getNodeMeta, Inspector } from '@react-email/editor/ui';
 import type { InspectorNodeContext } from '@react-email/editor/ui';
 
 export type EmailThemePreset = 'brand' | 'minimal' | 'basic';
@@ -270,20 +270,87 @@ function ImageAlignmentControls({ context }: { context: InspectorNodeContext }) 
   );
 }
 
+function labelNativeInspectorControls(root: HTMLElement) {
+  const controls = root.querySelectorAll<HTMLElement>(
+    '[data-re-inspector-color-trigger], [data-re-inspector-color-hex], [data-re-inspector-input]',
+  );
+  for (const control of controls) {
+    if (control.getAttribute('aria-label') || control.getAttribute('aria-labelledby')) continue;
+    const row = control.closest<HTMLElement>('[data-re-inspector-prop-row]');
+    const section = row?.closest<HTMLElement>('[data-re-inspector-section]');
+    const sectionLabel = section
+      ?.querySelector<HTMLElement>('[data-re-inspector-section-header] [data-re-inspector-text]')
+      ?.textContent?.trim();
+    const propertyLabel = row
+      ?.querySelector<HTMLElement>('[data-re-inspector-label]')
+      ?.textContent?.trim();
+    const controlLabel = control.hasAttribute('data-re-inspector-color-trigger')
+      ? 'picker'
+      : control.hasAttribute('data-re-inspector-color-hex')
+        ? 'hex value'
+        : 'value';
+    control.setAttribute(
+      'aria-label',
+      [sectionLabel, propertyLabel, controlLabel].filter(Boolean).join(' ') ||
+        'Style inspector value',
+    );
+  }
+}
+
+function InspectorBreadcrumb() {
+  return (
+    <Inspector.Breadcrumb>
+      {(segments) => (
+        <nav aria-label="Selected email element">
+          <ol className="flex flex-wrap items-center gap-1">
+            {segments.map((segment, index) => (
+              <React.Fragment key={`${segment.node.nodeType}-${segment.node.nodePos.pos}`}>
+                {index > 0 ? <li aria-hidden="true">/</li> : null}
+                <li>
+                  <button
+                    className="font-semibold"
+                    onClick={segment.focus}
+                    onMouseDown={(event) => event.preventDefault()}
+                    type="button"
+                  >
+                    {getNodeMeta(segment.node.nodeType).label}
+                  </button>
+                </li>
+              </React.Fragment>
+            ))}
+          </ol>
+        </nav>
+      )}
+    </Inspector.Breadcrumb>
+  );
+}
+
 export function StyleInspector({ onUploadImage }: StyleInspectorProps) {
+  const inspectorRef = React.useRef<HTMLElement>(null);
+
+  React.useEffect(() => {
+    const inspector = inspectorRef.current;
+    if (!inspector) return;
+    labelNativeInspectorControls(inspector);
+    const observer = new MutationObserver(() => labelNativeInspectorControls(inspector));
+    observer.observe(inspector, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <aside
       aria-label="Email style inspector"
       className="fixed bottom-0 right-0 top-[60px] z-30 hidden w-80 shrink-0 border-l bg-background text-foreground shadow-xl lg:flex xl:w-[22rem]"
       data-testid="native-email-inspector-host"
       data-tixkit-email-inspector="true"
+      ref={inspectorRef}
     >
       <Inspector.Root aria-label="React Email style inspector" className="flex min-h-0 flex-1">
         <div className="tixkit-email-native-inspector flex min-h-0 flex-1 flex-col">
           <div className="border-b px-4 py-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Page style</p>
             <div className="mt-1 text-sm font-semibold text-foreground">
-              <Inspector.Breadcrumb />
+              <InspectorBreadcrumb />
             </div>
           </div>
           <div

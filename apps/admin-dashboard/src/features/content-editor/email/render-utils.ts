@@ -69,7 +69,14 @@ export function withEditorExport(
   document: EmailTemplateDocument,
   exported: { html: string; text: string; json: Record<string, unknown> },
 ): EmailTemplateDocument {
-  const exportedHtml = canonicalizeMergeTagPreviewHtml(exported.html.trim());
+  const rawExportedHtml = exported.html.trim();
+  const exportCanPreserveLayout =
+    hasEmailLayoutHtml(rawExportedHtml) && hasMeaningfulHtml(rawExportedHtml);
+  const exportedHtml = canonicalizeMergeTagPreviewHtml(
+    exportCanPreserveLayout
+      ? applyCommonJsonParagraphStyles(rawExportedHtml, exported.json)
+      : rawExportedHtml,
+  );
   const jsonText = tipTapPlainTextFromJson(exported.json);
   const missingMergeTagLiterals = mergeTagLiteralsFromJson(exported.json).filter(
     (literal) => !exportedHtml.includes(literal),
@@ -122,6 +129,101 @@ export function withEditorExport(
     },
     blocks: projectEditorTextToLegacyBlocks(document.blocks, contentText),
   };
+}
+
+function applyCommonJsonParagraphStyles(html: string, value: unknown): string {
+  const paragraphStyles: string[] = [];
+  const paragraphContents: string[] = [];
+  const visit = (nodeValue: unknown) => {
+    if (!nodeValue || typeof nodeValue !== 'object') return;
+    if (Array.isArray(nodeValue)) {
+      for (const child of nodeValue) visit(child);
+      return;
+    }
+    const node = nodeValue as TipTapJsonNode;
+    if (node.type === 'paragraph') {
+      paragraphContents.push(tipTapNodeHtml(node.content));
+      const textNodes: TipTapJsonNode[] = [];
+      const collectText = (childValue: unknown) => {
+        if (!childValue || typeof childValue !== 'object') return;
+        if (Array.isArray(childValue)) {
+          for (const child of childValue) collectText(child);
+          return;
+        }
+        const child = childValue as TipTapJsonNode;
+        if (typeof child.text === 'string' && child.text.length > 0) textNodes.push(child);
+        if (Array.isArray(child.content)) collectText(child.content);
+      };
+      collectText(node.content);
+      const commonStyle = commonInlineStyle(textNodes);
+      paragraphStyles.push(commonStyle ? inlineStyleAttribute(commonStyle) : '');
+    }
+    if (Array.isArray(node.content)) visit(node.content);
+  };
+  visit(value);
+  if (paragraphContents.length === 0) return html;
+
+  let paragraphIndex = 0;
+  return html.replace(/<p\b([^>]*)>[\s\S]*?<\/p>/gi, (tag, rawAttributes: string) => {
+    const content = paragraphContents[paragraphIndex];
+    if (content === undefined) return tag;
+    const style = paragraphStyles[paragraphIndex] ?? '';
+    paragraphIndex += 1;
+    if (!style) return `<p${rawAttributes}>${content}</p>`;
+    const styleMatch = rawAttributes.match(/\sstyle=("([^"]*)"|'([^']*)')/i);
+    const existingStyle = styleMatch?.[2] ?? styleMatch?.[3] ?? '';
+    const additions = style
+      .split(';')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const additionProperties = new Set(
+      additions.map((entry) => entry.slice(0, entry.indexOf(':')).trim().toLowerCase()),
+    );
+    const retained = existingStyle
+      .split(';')
+      .map((entry) => entry.trim())
+      .filter(
+        (entry) =>
+          entry && !additionProperties.has(entry.slice(0, entry.indexOf(':')).trim().toLowerCase()),
+      );
+    const mergedStyle = [...retained, ...additions].join('; ');
+    if (styleMatch) {
+      return `<p${rawAttributes.replace(
+        styleMatch[0],
+        ` style="${escapeHtmlAttribute(mergedStyle)}"`,
+      )}>${content}</p>`;
+    }
+    return `<p${rawAttributes} style="${escapeHtmlAttribute(mergedStyle)}">${content}</p>`;
+  });
+}
+
+function commonInlineStyle(nodes: TipTapJsonNode[]): Record<string, unknown> | undefined {
+  if (nodes.length === 0) return undefined;
+  const styles = nodes.map((node) => {
+    if (!Array.isArray(node.marks)) return undefined;
+    const mark = node.marks.find(
+      (candidate) =>
+        candidate &&
+        typeof candidate === 'object' &&
+        (candidate as { type?: unknown }).type === tixkitInlineStyleMarkName,
+    ) as { attrs?: Record<string, unknown> } | undefined;
+    return mark?.attrs;
+  });
+  if (styles.some((style) => !style)) return undefined;
+  const keys = ['color', 'fontFamily', 'fontSize', 'lineHeight'] as const;
+  const common = Object.fromEntries(
+    keys
+      .filter((key) => {
+        const first = styles[0]?.[key];
+        return (
+          typeof first === 'string' &&
+          first.trim().length > 0 &&
+          styles.every((style) => style?.[key] === first)
+        );
+      })
+      .map((key) => [key, styles[0]?.[key]]),
+  );
+  return Object.keys(common).length > 0 ? common : undefined;
 }
 
 function hasMeaningfulEditorStructure(value: unknown): boolean {

@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/next",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Official Next.js integration for Tixkit",
   "license": "MIT",
   "repository": {
@@ -52,7 +52,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/js": "0.1.0"
+    "@tixkit/js": "1.0.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

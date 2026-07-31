@@ -43,10 +43,8 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
   });
 }
 
-async function removeToastNotifications(page: Page): Promise<void> {
-  await page.locator('[data-sonner-toast]').evaluateAll((nodes) => {
-    for (const node of nodes) node.remove();
-  });
+async function waitForToastNotificationsToDismiss(page: Page): Promise<void> {
+  await expect(page.locator('[data-sonner-toast]')).toHaveCount(0, { timeout: 10_000 });
 }
 
 async function expectJsonStatus<T>(
@@ -159,6 +157,7 @@ async function completeSeededPromoCheckout(
   await expect(page.getByText('Discount')).toBeVisible();
   await expect(page.getByText('-$5.00')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pay $20.00' })).toBeVisible();
+  await page.getByRole('button', { name: /I understand — update my selection/ }).click();
   await page.getByRole('button', { name: 'Pay $20.00' }).click();
   await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
 
@@ -277,7 +276,7 @@ test.describe('admin export workflow coverage', () => {
       expect(completedExport.format).toBe('csv');
       expect(completedExport.status).toBe('completed');
       expect(completedExport.downloadUrl).toBe(`/v1/exports/${queuedExport.exportId}/download`);
-      expect(completedExport.fileUrl).toContain(`/exports/${queuedExport.exportId}.csv`);
+      expect(completedExport.fileUrl).toBeUndefined();
 
       const redirectResponse = await fetch(href!, { redirect: 'manual' });
       expect(redirectResponse.status).toBe(302);
@@ -287,7 +286,7 @@ test.describe('admin export workflow coverage', () => {
     }
 
     await attachScreenshot(page, testInfo, 'admin-export-completed-desktop');
-    await removeToastNotifications(page);
+    await waitForToastNotificationsToDismiss(page);
     await expectNoAxeViolations(page, testInfo);
   });
 

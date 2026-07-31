@@ -306,6 +306,11 @@ describe('EventTicketsView occurrences', () => {
 
     const view = render(<EventTicketsView eventId="evt_1" />);
 
+    const tablist = await view.findByRole('tablist');
+    for (const tab of within(tablist).getAllByRole('tab')) {
+      expect(tab.parentElement).toHaveAttribute('role', 'presentation');
+    }
+
     // Ticket table is on the default "Tickets" tab; occurrence labels resolve there.
     await waitFor(() => {
       expect(view.getByText('Friday GA')).toBeInTheDocument();

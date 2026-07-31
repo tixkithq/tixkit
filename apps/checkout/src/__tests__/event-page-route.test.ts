@@ -17,7 +17,7 @@ describe('event page route bundle boundaries', () => {
 
     expect(source).toContain('getServerEventPageBootstrap');
     expect(source).toContain('initialBootstrap={initialBootstrap}');
-    expect(source).toContain('export const revalidate = 60');
+    expect(source).toContain("export const dynamic = 'force-dynamic'");
   });
 
   it('server-fetches the same bootstrap payload for custom-domain slug routes', () => {

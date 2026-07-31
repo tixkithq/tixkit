@@ -18,15 +18,24 @@ async function writeExecutable(path, source) {
   await chmod(path, 0o755);
 }
 
-test('installs missing Playwright libraries without sudo and persists the runtime paths', async () => {
+test('installs missing WebKit libraries without sudo and persists the runtime paths', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tixkit-playwright-runtime-'));
   temporaryDirectories.push(root);
   const binDirectory = join(root, 'bin');
   const runnerTemp = join(root, 'runner-temp');
+  const homeDirectory = join(root, 'home');
   const githubEnv = join(root, 'github-env');
   const callLog = join(root, 'calls');
   await mkdir(binDirectory);
   await mkdir(runnerTemp);
+  await mkdir(homeDirectory);
+  await mkdir(join(homeDirectory, '.cache/ms-playwright/webkit-stale/minibrowser-wpe/bin'), {
+    recursive: true,
+  });
+  await writeExecutable(
+    join(homeDirectory, '.cache/ms-playwright/webkit-stale/minibrowser-wpe/bin/MiniBrowser'),
+    '#!/usr/bin/env bash\nexit 99\n',
+  );
 
   await writeExecutable(
     join(binDirectory, 'uname'),
@@ -38,13 +47,24 @@ echo Linux
     join(binDirectory, 'bunx'),
     `#!/usr/bin/env bash
 if [[ "$*" == 'playwright --version' ]]; then
-  echo 'Version 1.61.1'
-elif [[ "$*" == 'playwright install-deps --dry-run chromium' ]]; then
+  echo 'Version 1.62.0'
+elif [[ "$*" == 'playwright install-deps --dry-run webkit' ]]; then
   [[ -f "${'${APT_CONFIG:-}'}" ]] || exit 3
   echo dry-run >> "${callLog}"
   printf 'Missing system dependencies (1):\n  libnspr4\n'
   exit 1
-elif [[ "$*" == 'playwright install chromium' ]]; then
+elif [[ "$*" == 'playwright install webkit' ]]; then
+  mkdir -p "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin"
+  cat > "${homeDirectory}/.cache/ms-playwright/webkit-2336/pw_run.sh" <<'EOF'
+#!/usr/bin/env bash
+exec "$(dirname "$0")/minibrowser-wpe/bin/MiniBrowser" "$@"
+EOF
+  chmod 0755 "${homeDirectory}/.cache/ms-playwright/webkit-2336/pw_run.sh"
+  cat > "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser" <<'EOF'
+#!/usr/bin/env bash
+[[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]
+EOF
+  chmod 0755 "${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser"
   echo install >> "${callLog}"
 else
   exit 2
@@ -60,10 +80,11 @@ if [[ "$1" == 'update' ]]; then
   grep -q "Dir::State::lists \"${runnerTemp}/playwright-runtime/apt/state/lists\"" "${'${APT_CONFIG}'}"
   grep -q "Dir::Cache::archives \"${runnerTemp}/playwright-runtime/apt/cache/archives\"" "${'${APT_CONFIG}'}"
   echo update >> "${callLog}"
-elif [[ "$1" == 'download' && "$2" == 'libnspr4' ]]; then
+elif [[ "$1" == 'download' && "$2" == 'libnspr4' && "$3" == 'gstreamer1.0-libav' ]]; then
   [[ -f "${'${APT_CONFIG:-}'}" ]] || exit 3
   echo download >> "${callLog}"
   touch libnspr4_1.deb
+  touch gstreamer1.0-libav_1.deb
 else
   exit 2
 fi
@@ -80,30 +101,42 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
   await writeExecutable(
     join(binDirectory, 'bun'),
     `#!/usr/bin/env bash
+if [[ "$*" == *'webkit.executablePath()'* ]]; then
+  echo "${homeDirectory}/.cache/ms-playwright/webkit-2336/pw_run.sh"
+  exit 0
+fi
 [[ "${'${LD_LIBRARY_PATH:-}'}" == *'/playwright-runtime/root/usr/lib/x86_64-linux-gnu'* ]]
+[[ "${'${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-}'}" == '1' ]]
+"${homeDirectory}/.cache/ms-playwright/webkit-2336/minibrowser-wpe/bin/MiniBrowser"
 `,
   );
 
-  const result = spawnSync('bash', [installerPath], {
+  const result = spawnSync('bash', [installerPath, 'webkit'], {
     cwd: repositoryRoot,
     encoding: 'utf8',
     env: {
       ...process.env,
       GITHUB_ENV: githubEnv,
+      HOME: homeDirectory,
       PATH: `${binDirectory}:${process.env.PATH}`,
       RUNNER_TEMP: runnerTemp,
     },
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Extracted 1 missing Playwright dependency packages/);
-  assert.match(result.stdout, /Playwright 1\.61\.1 Chromium runtime is ready/);
+  assert.match(result.stdout, /Extracted 2 missing Playwright dependency packages/);
+  assert.match(result.stdout, /Playwright 1\.62\.0 webkit runtime is ready/);
   const persistedEnvironment = await readFile(githubEnv, 'utf8');
   assert.match(persistedEnvironment, /^LD_LIBRARY_PATH=.*playwright-runtime\/root\/usr\/lib/m);
   assert.match(
     persistedEnvironment,
+    /^TIXKIT_PLAYWRIGHT_LD_LIBRARY_PATH=.*playwright-runtime\/root\/usr\/lib/m,
+  );
+  assert.match(
+    persistedEnvironment,
     /^XDG_DATA_DIRS=.*playwright-runtime\/root\/usr\/share:\/usr\/local\/share:\/usr\/share/m,
   );
+  assert.match(persistedEnvironment, /^PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1$/m);
   assert.doesNotMatch(result.stdout + result.stderr, /sudo/);
   assert.equal(await readFile(callLog, 'utf8'), 'update\ndry-run\ndownload\ninstall\n');
 });
@@ -142,7 +175,7 @@ test('fails closed before browser installation when the isolated apt index updat
   await writeExecutable(
     join(binDirectory, 'bunx'),
     `#!/usr/bin/env bash
-if [[ "$*" == 'playwright --version' ]]; then echo 'Version 1.61.1'; else echo unexpected >> "${callLog}"; exit 2; fi
+if [[ "$*" == 'playwright --version' ]]; then echo 'Version 1.62.0'; else echo unexpected >> "${callLog}"; exit 2; fi
 `,
   );
   await writeExecutable(
@@ -173,4 +206,14 @@ test('rejects an unsafe relative runner temporary path before filesystem mutatio
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /must be an absolute path/);
+});
+
+test('rejects an unsupported browser before filesystem mutation', () => {
+  const result = spawnSync('bash', [installerPath, 'edge'], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unsupported Playwright browser: edge/);
 });

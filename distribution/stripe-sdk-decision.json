@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "decision": "retain-contained-sdk",
   "bindings": {
-    "providerRegistrySha256": "a9c8717c713ce5944f02ac3aa65d4f54da8cbfa617f7b3d7d40a2ad28ef49665",
-    "lockfileSha256": "56f62337d5fe09489b938c2f6053b52e63580b0f65e19248863fef50e84daeb9",
+    "providerRegistrySha256": "a07cafa1511e8f68239eb9d8a03ff5878c673e04c0ca7fd0811844f942731017",
+    "lockfileSha256": "a0540ced008dd16723d3b9402b74bcf7235c70ebd3da77bd065ebf94325ddb05",
     "stripeGatewaySourceSha256": "5dfa94799c2641c936cc614d17fdfb504cc3390939692c502bfe75780f70814e",
-    "providerManifestSha256": "925fb7a001276aae145d3337b9280e8d9028d3482f0c334dd06d175d9d9bf74d",
+    "providerManifestSha256": "8caf42de3cb490ed9e98245f4378f1d88c51e5dc3b2d0fedda2327253cd3e0e6",
     "evaluationImplementationSha256": "c40dce75e3238892b77dbe358e3f66945fc54ab6921803644d7a29c79785b959",
     "localEvidenceSha256": "8f5fde9618b48811e119a1b523417cf1b4d0e3317cc4ff470b5c120f500a5cde",
-    "decisionInputsSha256": "2ec7dfe3a97883a7163a03f9c3538c94fac3b8a617148017ae812ea49f0bf7f0"
+    "decisionInputsSha256": "dcf09d7155fac01ec9cd83577978372dace59db605272839dd226d9600d90746"
   },
   "containedSdk": {
     "package": "stripe",

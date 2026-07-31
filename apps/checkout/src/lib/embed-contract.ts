@@ -15,7 +15,7 @@ type EmbedContext = {
 
 const STORAGE_KEY_PREFIX = 'tixkit.embed.v1.context.';
 const WINDOW_NAME_PREFIX = 'tixkit-embed:';
-let initialized = false;
+let activeCleanup: (() => void) | null = null;
 let activeContext: EmbedContext | null = null;
 
 function isExactHttpOrigin(value: string): boolean {
@@ -87,8 +87,8 @@ function persistContext(context: EmbedContext): void {
 }
 
 export function initializeEmbedHandshake(): () => void {
-  if (typeof window === 'undefined' || initialized) return () => {};
-  initialized = true;
+  if (typeof window === 'undefined') return () => {};
+  if (activeCleanup) return activeCleanup;
   activeContext = contextFromSearch() ? null : storedContext();
 
   const handler = (event: MessageEvent) => {
@@ -136,11 +136,13 @@ export function initializeEmbedHandshake(): () => void {
 
   window.addEventListener('message', handler);
   window.addEventListener('keydown', keydownHandler);
-  return () => {
+  const cleanup = () => {
     window.removeEventListener('message', handler);
     window.removeEventListener('keydown', keydownHandler);
-    initialized = false;
+    if (activeCleanup === cleanup) activeCleanup = null;
   };
+  activeCleanup = cleanup;
+  return cleanup;
 }
 
 export function emitEmbedLifecycle(

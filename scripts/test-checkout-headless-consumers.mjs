@@ -46,7 +46,7 @@ try {
     const installed = JSON.parse(
       readFileSync(join(directory, 'node_modules/@tixkit/checkout-headless/package.json'), 'utf8'),
     );
-    if (installed.version !== '0.1.0') {
+    if (installed.version !== '1.0.0') {
       throw new Error(`${consumer} resolved unexpected headless version ${installed.version}.`);
     }
   }

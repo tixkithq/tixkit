@@ -65,10 +65,10 @@ async function getBootstrap(path: string): Promise<PublicEventPageBootstrap> {
   const response = await fetch(
     issueCheckoutServerApiUrl(runtime.internalApiBaseUrl, `/v1${path}`),
     {
+      cache: 'no-store',
       credentials: 'omit',
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
-      next: { revalidate: 60 },
     },
   );
   if (!response.ok) throw new Error(`Checkout API returned ${response.status}`);

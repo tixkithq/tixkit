@@ -818,6 +818,9 @@ export function runBoundedTrustEvidenceCommand(command, root, options = {}) {
     let settled = false;
     let killTimer;
     let deadline;
+    let stdoutTail = '';
+    let stderrTail = '';
+    const appendTail = (tail, chunk) => `${tail}${chunk}`.slice(-4_096);
     const finish = () => {
       if (settled) return;
       settled = true;
@@ -826,7 +829,14 @@ export function runBoundedTrustEvidenceCommand(command, root, options = {}) {
       if (terminationReason) {
         rejectPromise(new Error(`local trust evidence command ${terminationReason}`));
       } else if (closeSignal || closeCode !== 0) {
-        rejectPromise(new Error('local trust evidence command failed'));
+        const diagnostic = [stderrTail.trim(), stdoutTail.trim()].filter(Boolean).join('\n');
+        rejectPromise(
+          new Error(
+            `local trust evidence command failed (exit ${closeCode ?? `signal ${closeSignal}`})${
+              diagnostic ? `:\n${diagnostic}` : ''
+            }`,
+          ),
+        );
       } else {
         resolvePromise();
       }
@@ -844,8 +854,14 @@ export function runBoundedTrustEvidenceCommand(command, root, options = {}) {
       outputBytes += Buffer.byteLength(chunk);
       if (outputBytes > MAX_EVIDENCE_OUTPUT_BYTES) terminate('exceeded output bounds');
     };
-    child.stdout?.on('data', consume);
-    child.stderr?.on('data', consume);
+    child.stdout?.on('data', (chunk) => {
+      stdoutTail = appendTail(stdoutTail, chunk);
+      consume(chunk);
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderrTail = appendTail(stderrTail, chunk);
+      consume(chunk);
+    });
     child.once('error', () => {
       if (terminationReason) return;
       terminationReason = 'failed';

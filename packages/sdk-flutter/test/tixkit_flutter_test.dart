@@ -224,7 +224,7 @@ void main() {
     expect(settlement.tenantId, 'ten_1');
     expect(settlement.entries.single.kind, 'payable_accrued');
 
-    expect(methods, ['GET', 'POST', 'POST', 'POST', 'POST']);
+    expect(methods, ['GET', 'POST', 'POST', 'POST', 'GET']);
     expect(urls.first, 'https://api.test/v1/events/evt_1/resale-listings?cursor=lst_0&limit=25');
     expect(headers.every((item) => item['Authorization'] == 'Bearer tk_test_123'), isTrue);
   });

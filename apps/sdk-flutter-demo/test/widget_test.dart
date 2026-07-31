@@ -2,9 +2,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tixkit_flutter_demo/main.dart';
 
+const credentials = {
+  'deviceId': 'device_test',
+  'deviceSecret': 'device_secret_test',
+  'manifestSigningKey': 'manifest_signing_key_test',
+};
+
 void main() {
   testWidgets('Demo app renders bottom navigation with four tabs', (tester) async {
-    await tester.pumpWidget(const TixkitFlutterDemo());
+    await tester.pumpWidget(const TixkitFlutterDemo(credentials: credentials));
 
     expect(find.text('Checkout'), findsOneWidget);
     expect(find.text('Tickets'), findsOneWidget);
@@ -13,7 +19,7 @@ void main() {
   });
 
   testWidgets('Checkout tab shows checkout handoff URL', (tester) async {
-    await tester.pumpWidget(const TixkitFlutterDemo());
+    await tester.pumpWidget(const TixkitFlutterDemo(credentials: credentials));
     await tester.pump();
 
     expect(find.text('Checkout handoff'), findsOneWidget);
@@ -21,7 +27,7 @@ void main() {
   });
 
   testWidgets('Tickets tab shows ticket cards', (tester) async {
-    await tester.pumpWidget(const TixkitFlutterDemo());
+    await tester.pumpWidget(const TixkitFlutterDemo(credentials: credentials));
 
     // Navigate to Tickets tab
     await tester.tap(find.text('Tickets'));

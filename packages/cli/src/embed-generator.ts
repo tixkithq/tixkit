@@ -39,7 +39,7 @@ export const EMBED_MODES: EmbedMode[] = [...CORE_EMBED_MODES];
 export const EMBED_THEMES: EmbedTheme[] = [...CORE_EMBED_THEMES];
 export const EMBED_PLATFORMS: EmbedPlatform[] = ['webflow', 'framer', 'plain'];
 
-const DEFAULT_WIDGET_SCRIPT = 'https://cdn.tixkit.com/widget/v0.1.0/tixkit-widget-0.1.0.js';
+const DEFAULT_WIDGET_SCRIPT = 'https://cdn.tixkit.com/widget/v1.0.0/tixkit-widget-1.0.0.js';
 const DEFAULT_WIDGET_INTEGRITY =
   'sha384-dekV7a3DQg8bDdculs4uy24zS9CiyMfb4QpROp1Pb878LK63cHRC212CsRjzESAB';
 

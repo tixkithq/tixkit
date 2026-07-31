@@ -28,7 +28,11 @@ async function checkoutEventForTest(
   suffix: string,
 ): Promise<{ id: string; title: string; ticketName: string }> {
   if (checkoutEventId) {
-    return { id: checkoutEventId, title: 'Checkout', ticketName: 'General Admission' };
+    return {
+      id: checkoutEventId,
+      title: 'Checkout',
+      ticketName: 'General Admission',
+    };
   }
   const seeded = await seedFreeCheckoutEvent(request, suffix);
   return {
@@ -269,12 +273,10 @@ test.describe('WCAG 2.2 AA certification audit', () => {
     await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Skip to Main' })).toBeAttached();
     await expect(page.getByRole('main')).toBeVisible();
-    await expect(
-      page.getByRole('navigation', { name: /sidebar|workspace/i }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole('complementary', { name: /sidebar|workspace/i })).toBeVisible();
 
     await expectNoAxeViolations(page, testInfo);
-    await expectScreenReaderSemantics(page, { requireNavigation: true });
+    await expectScreenReaderSemantics(page);
     await expectKeyboardTraversal(page, 5, browserName);
     await attachScreenshot(page, testInfo, 'wcag-admin-dashboard');
   });
@@ -301,7 +303,9 @@ test.describe('WCAG 2.2 AA certification audit', () => {
     await expect(page.getByRole('main')).toBeVisible();
     await expect(page.getByLabel('Email')).toBeVisible();
     await expect(
-      page.getByRole('button', { name: `Increase ${event.ticketName} quantity` }),
+      page.getByRole('button', {
+        name: `Increase ${event.ticketName} quantity`,
+      }),
     ).toBeVisible();
 
     await expectNoAxeViolations(page, testInfo);

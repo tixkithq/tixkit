@@ -32,7 +32,12 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
 
 async function createFreeTicketOrder(
   request: APIRequestContext,
-  input: { eventId: string; ticketTypeId: string; quantity: number; suffix: string },
+  input: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    suffix: string;
+  },
 ) {
   const session = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/checkout/sessions`, {
@@ -63,7 +68,10 @@ async function createFreeTicketOrder(
     200,
   )) as { status: string; order: { id: string; status: string } };
 
-  expect(confirmation).toMatchObject({ status: 'completed', order: { status: 'paid' } });
+  expect(confirmation).toMatchObject({
+    status: 'completed',
+    order: { status: 'paid' },
+  });
   return confirmation.order.id;
 }
 
@@ -82,7 +90,11 @@ test.describe('admin check-in workflows', () => {
       quantity: 2,
       suffix,
     });
-    const checkInList = await seedCheckInListForOrder({ eventId: event.id, orderId, suffix });
+    const checkInList = await seedCheckInListForOrder({
+      eventId: event.id,
+      orderId,
+      suffix,
+    });
     expect(checkInList.tickets).toHaveLength(2);
 
     const manifest = (await expectJsonResponse(
@@ -94,7 +106,12 @@ test.describe('admin check-in workflows', () => {
       eventId: string;
       checkInListId: string;
       signature: string;
-      tickets: Array<{ ticketId: string; qrHash: string; attendeeName: string; status: string }>;
+      tickets: Array<{
+        ticketId: string;
+        qrHash: string;
+        attendeeName: string;
+        status: string;
+      }>;
     };
 
     expect(manifest).toMatchObject({
@@ -114,7 +131,13 @@ test.describe('admin check-in workflows', () => {
         `${apiBaseUrl}/v1/events/${event.id}/check-in-lists/${checkInList.id}/manifest?version=2`,
       ),
       200,
-    )) as { version: number; algorithm: string; issuer: string; keyId: string; signature: string };
+    )) as {
+      version: number;
+      algorithm: string;
+      issuer: string;
+      keyId: string;
+      signature: string;
+    };
     expect(manifestV2).toMatchObject({
       version: 2,
       algorithm: 'ES256',
@@ -215,7 +238,12 @@ test.describe('admin check-in workflows', () => {
         checkedInByDeviceId: expect.any(String),
       },
     ]);
-    expect(state.scanLogs.map((log) => ({ outcome: log.outcome, offline: log.offline }))).toEqual([
+    expect(
+      state.scanLogs.map((log) => ({
+        outcome: log.outcome,
+        offline: log.offline,
+      })),
+    ).toEqual([
       { outcome: 'accepted', offline: false },
       { outcome: 'accepted', offline: true },
       { outcome: 'duplicate', offline: false },
@@ -239,12 +267,19 @@ test.describe('admin check-in workflows', () => {
       quantity: 2,
       suffix,
     });
-    const checkInList = await seedCheckInListForOrder({ eventId: event.id, orderId, suffix });
+    const checkInList = await seedCheckInListForOrder({
+      eventId: event.id,
+      orderId,
+      suffix,
+    });
     const [onlineTicket, untouchedTicket] = checkInList.tickets;
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/check-in`);
-    await expect(page.getByRole('heading', { name: 'Check-in' })).toBeVisible();
-    await expect(page.getByText(checkInList.name)).toBeVisible();
+    await expect(page.getByRole('heading', { name: event.title })).toBeVisible();
+    await expect(
+      page.getByRole('main').getByText('Check-in', { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByLabel('Check-in list', { exact: true })).toContainText(checkInList.name);
     // Camera mode is the default when the browser supports it; switch to
     // Manual so the scanner input is visible for the e2e test.
     await page.getByRole('tab', { name: 'Manual' }).click();
@@ -286,7 +321,12 @@ test.describe('admin check-in workflows', () => {
         checkedInByDeviceId: null,
       },
     ]);
-    expect(state.scanLogs.map((log) => ({ outcome: log.outcome, offline: log.offline }))).toEqual([
+    expect(
+      state.scanLogs.map((log) => ({
+        outcome: log.outcome,
+        offline: log.offline,
+      })),
+    ).toEqual([
       { outcome: 'accepted', offline: false },
       { outcome: 'duplicate', offline: false },
       { outcome: 'invalid', offline: false },
@@ -309,7 +349,11 @@ test.describe('admin check-in workflows', () => {
       quantity: 1,
       suffix,
     });
-    const checkInList = await seedCheckInListForOrder({ eventId: event.id, orderId, suffix });
+    const checkInList = await seedCheckInListForOrder({
+      eventId: event.id,
+      orderId,
+      suffix,
+    });
     const [ticket] = checkInList.tickets;
 
     await page.goto(`${adminBaseUrl}/events/${event.id}/check-in`);
@@ -335,7 +379,10 @@ test.describe('admin check-in workflows', () => {
         status: 503,
         contentType: 'application/json',
         body: JSON.stringify({
-          error: { code: 'SERVICE_UNAVAILABLE', message: 'Simulated event-day outage' },
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Simulated event-day outage',
+          },
         }),
       });
     });
@@ -378,16 +425,24 @@ test.describe('admin check-in workflows', () => {
     const durableState = await page.evaluate(async () => {
       const request = indexedDB.open('tixkit-offline-checkin-v1', 1);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        request.addEventListener('success', () => resolve(request.result), { once: true });
-        request.addEventListener('error', () => reject(request.error), { once: true });
+        request.addEventListener('success', () => resolve(request.result), {
+          once: true,
+        });
+        request.addEventListener('error', () => reject(request.error), {
+          once: true,
+        });
       });
       const transaction = database.transaction('contexts', 'readonly');
       const getAll = transaction.objectStore('contexts').getAll();
       const states = await new Promise<
         Array<{ pending: unknown[]; manifest: { version: number } }>
       >((resolve, reject) => {
-        getAll.addEventListener('success', () => resolve(getAll.result), { once: true });
-        getAll.addEventListener('error', () => reject(getAll.error), { once: true });
+        getAll.addEventListener('success', () => resolve(getAll.result), {
+          once: true,
+        });
+        getAll.addEventListener('error', () => reject(getAll.error), {
+          once: true,
+        });
       });
       database.close();
       return states.map((state) => ({
@@ -444,10 +499,17 @@ test.describe('admin check-in workflows', () => {
       ticketIds: [ticket.id],
     });
     expect(state.tickets).toEqual([
-      { id: ticket.id, status: 'checked_in', checkedInByDeviceId: expect.any(String) },
+      {
+        id: ticket.id,
+        status: 'checked_in',
+        checkedInByDeviceId: expect.any(String),
+      },
     ]);
-    expect(state.scanLogs.map((log) => ({ outcome: log.outcome, offline: log.offline }))).toEqual([
-      { outcome: 'accepted', offline: true },
-    ]);
+    expect(
+      state.scanLogs.map((log) => ({
+        outcome: log.outcome,
+        offline: log.offline,
+      })),
+    ).toEqual([{ outcome: 'accepted', offline: true }]);
   });
 });

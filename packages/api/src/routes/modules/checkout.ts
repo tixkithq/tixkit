@@ -631,7 +631,7 @@ async function reserveCheckoutDiscount(input: {
 }): Promise<void> {
   if (!input.discountCode || input.discountCents <= 0) return;
 
-  const reservation = await new DiscountCodeRepository(input.db).reserveForCheckout({
+  const reservation = await new DiscountCodeRepository(input.db).reserveForCheckoutInTransaction({
     eventId: input.eventId,
     tenantId: input.tenantId,
     checkoutSessionId: input.checkoutSessionId,

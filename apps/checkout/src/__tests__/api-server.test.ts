@@ -7,7 +7,7 @@ afterEach(() => {
 });
 
 describe('checkout server API transport', () => {
-  it('uses the internal origin while exposing public media URLs and bounded cache controls', async () => {
+  it('uses the internal origin while exposing public media URLs without caching live inventory', async () => {
     vi.stubEnv('TIXKIT_DEPLOYMENT_PROFILE', 'compact');
     vi.stubEnv('API_BASE_URL', 'http://localhost:4000');
     vi.stubEnv('INTERNAL_API_BASE_URL', 'http://api:4000');
@@ -40,9 +40,9 @@ describe('checkout server API transport', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       'http://api:4000/v1/public/events/evt_1/page-bootstrap?locale=en',
       expect.objectContaining({
+        cache: 'no-store',
         credentials: 'omit',
         redirect: 'error',
-        next: { revalidate: 60 },
         signal: expect.any(AbortSignal),
       }),
     );

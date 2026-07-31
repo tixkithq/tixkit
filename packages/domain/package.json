@@ -1,6 +1,6 @@
 {
   "name": "@tixkit/domain",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Shared Tixkit event-commerce domain contracts and business rules",
   "license": "MIT",
   "repository": {

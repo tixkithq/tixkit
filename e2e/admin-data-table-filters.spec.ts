@@ -261,7 +261,7 @@ test.describe('Admin data table filters', () => {
       await filterButton.click();
 
       // Select "paid" from the filter options
-      const paidOption = page.getByRole('dialog').getByRole('button', { name: /^paid$/i });
+      const paidOption = page.getByRole('option', { name: /^paid/i });
       await expect(paidOption).toBeVisible({ timeout: 5_000 });
       await paidOption.click();
 
@@ -274,7 +274,9 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/paid/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/paid/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }
@@ -339,7 +341,9 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/paid/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/paid/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }
@@ -440,10 +444,8 @@ test.describe('Admin data table filters', () => {
 
       expect(requestUrl.search).toContain('sort=');
       expect(requestUrl.search).toContain('limit=5');
-      expect(payload).toMatchObject({
-        items: expect.any(Array),
-        hasMore: expect.any(Boolean),
-      });
+      expect(payload.items).toEqual(expect.any(Array));
+      expect(payload.nextCursor == null || typeof payload.nextCursor === 'string').toBe(true);
       expect(itemIds.length).toBeLessThanOrEqual(5);
 
       await attachJsonEvidence(testInfo, 'orders-table-api-contract', {
@@ -451,7 +453,7 @@ test.describe('Admin data table filters', () => {
         status: response.status(),
         itemCount: itemIds.length,
         itemIds,
-        hasMore: payload.hasMore,
+        hasMore: typeof payload.nextCursor === 'string',
         nextCursor: payload.nextCursor ?? null,
       });
       await attachScreenshot(page, testInfo, 'orders-table-filter-sort-pagination-evidence');
@@ -515,8 +517,8 @@ test.describe('Admin data table filters', () => {
       await page.goto(`${adminBaseUrl}/attendees`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
-      // Apply status filter via URL
-      await page.goto(`${adminBaseUrl}/attendees?status=active`);
+      // Apply a real attendee lifecycle status via URL.
+      await page.goto(`${adminBaseUrl}/attendees?status=confirmed`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
 
       // Verify visible rows match the filter
@@ -525,12 +527,14 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/active/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/active/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }
 
-      await expect(page).toHaveURL(/status=active/);
+      await expect(page).toHaveURL(/status=confirmed/);
     });
 
     test('attendee row sheet displays attendee details', async ({ page, request }, testInfo) => {
@@ -585,20 +589,20 @@ test.describe('Admin data table filters', () => {
       await seedAdminAttendeeTableRow(request, uniqueE2eSuffix(testInfo, 'att-url'));
 
       await page.setViewportSize(desktopViewport);
-      await page.goto(`${adminBaseUrl}/attendees?status=active`);
+      await page.goto(`${adminBaseUrl}/attendees?status=confirmed`);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
-      await expect(page).toHaveURL(/status=active/);
+      await expect(page).toHaveURL(/status=confirmed/);
       await page.waitForLoadState('networkidle');
 
       // Navigate away within the same route
       await page.goto(`${adminBaseUrl}/attendees`);
-      await expect(page).not.toHaveURL(/status=active/);
+      await expect(page).not.toHaveURL(/status=confirmed/);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await page.waitForLoadState('networkidle');
 
       // Navigate back through browser history so URL state is restored by the app router
       await page.goBack();
-      await expect(page).toHaveURL(/status=active/);
+      await expect(page).toHaveURL(/status=confirmed/);
       await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 });
       await page.waitForLoadState('networkidle');
 
@@ -608,7 +612,9 @@ test.describe('Admin data table filters', () => {
       if (count > 0) {
         await Promise.all(
           Array.from({ length: count }, (_, i) =>
-            expect(dataRows.nth(i)).toContainText(/active/i, { ignoreCase: true }),
+            expect(dataRows.nth(i)).toContainText(/active/i, {
+              ignoreCase: true,
+            }),
           ),
         );
       }

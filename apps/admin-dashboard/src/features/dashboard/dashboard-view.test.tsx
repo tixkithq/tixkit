@@ -429,6 +429,9 @@ describe('DashboardView error states', () => {
     expect(screen.queryByRole('list', { name: 'Prioritized workspace actions' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Prioritized workspace actions' }),
+    ).toBeVisible();
     expect(screen.getByRole('list', { name: 'Workspace readiness details' })).toBeVisible();
     expect(screen.getByText('Confirm workspace context')).toBeVisible();
     expect(screen.getByText('Workspace context is selected.')).toBeVisible();

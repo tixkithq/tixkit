@@ -877,7 +877,7 @@ const execute = async (request) => {
 
 const contractInput = {
   conformanceTarget,
-  apiVersion: '2026-09-03',
+  apiVersion: '2026-09-04',
   sponsorAccessToken: 'sponsor_token',
   agentClientId: `tk_agent_${'e'.repeat(48)}`,
   agentClientSecret: 'secret_value',
